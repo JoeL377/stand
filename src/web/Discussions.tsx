@@ -43,8 +43,10 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
   return (
     <details className="disc" open={props.open}>
       <summary>
-        <span className={`disc-outcome ${d.outcome}`}>{OUTCOME[d.outcome]}</span>
-        <span className="disc-topic">{d.topic}</span>
+        <span className="disc-head">
+          <span className="disc-topic">{d.topic}</span>
+          <span className={`disc-outcome ${d.outcome}`}>{OUTCOME[d.outcome]}</span>
+        </span>
         {d.positions.length > 0 && <span className="disc-people">{d.positions.map((p) => p.speaker).join(", ")}</span>}
       </summary>
       <div className="disc-body">
