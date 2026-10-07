@@ -26,7 +26,7 @@ With no keys it runs in **mock mode**:
 |---|---|---|
 | Sign-in | Name and email, not verified | Google |
 | Voice and screen share between people | Off. Each person's screen is visible only to them. | LiveKit |
-| Transcription | Each browser transcribes its own mic (Chrome, Edge, Safari) | Deepgram, through a hidden agent in the LiveKit room |
+| Transcription | Each browser transcribes its own mic (Chrome, Edge, Safari) | A hidden agent in the LiveKit room, using Deepgram through LiveKit Inference (no Deepgram account needed) |
 | Reading the shared screen | Notices a change and guesses the next item | Claude matches the screenshot against the agenda |
 | Notes per item | Keyword heuristics | Claude |
 | Agenda from Linear | "Load a sample sprint" only | Project, cycle, view or issue links |
@@ -38,7 +38,7 @@ With no keys it runs in **mock mode**:
 Copy `.env.example` to `.env` and fill in what you have. Each one switches on independently.
 
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` from [LiveKit Cloud](https://cloud.livekit.io) (the free tier is enough).
-- `DEEPGRAM_API_KEY` from [Deepgram](https://console.deepgram.com). Needs LiveKit too, since the agent hears people through the LiveKit room.
+- Transcription needs nothing extra: it runs through [LiveKit Inference](https://docs.livekit.io/agents/models/stt/deepgram.md) on your LiveKit keys and is billed by LiveKit (about $0.005/min; the free plan includes some credit). `STT_MODEL` picks the model (default `deepgram/nova-3`). If you'd rather pay Deepgram directly, set `DEEPGRAM_API_KEY` and the agent talks to Deepgram instead.
 - `ANTHROPIC_API_KEY` for notes and screen reading. `ANTHROPIC_MODEL` overrides the model (default `claude-opus-5-5`).
 - `LINEAR_API_KEY`, a personal API key from Linear settings.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` from an OAuth client ID ("Web application") in Google Cloud. Add `<origin>/api/auth/google/callback` as an authorized redirect URI. `ALLOWED_EMAIL_DOMAINS` limits who can sign in; `PUBLIC_URL` sets the origin when behind a proxy.
@@ -58,11 +58,11 @@ browser ──WebSocket /ws/rooms/:id──▶ RoomSession (src/server/room.ts)
    │                                   ├─ focus log: which item was in focus when
    │  mic + screen                     ├─ segments: speech + chat, each pinned to an item
    ▼                                   ├─ suggestions from screen snapshots
-LiveKit room ◀── hidden agent ──▶ Deepgram (one stream per speaker)
+LiveKit room ◀── hidden agent ──▶ speech-to-text (one stream per speaker)
                                        └─ notes per item ──▶ Claude
 ```
 
-- **Per-speaker transcription.** Every person's mic is its own LiveKit track, so the agent never has to guess who spoke. Deepgram's word timings are mapped back to wall-clock time, and each utterance lands on the item that was in focus *when it was said*, even if the transcript arrives after someone switched items.
+- **Per-speaker transcription.** Every person's mic is its own LiveKit track, so the agent never has to guess who spoke. Speech-to-text word timings are mapped back to wall-clock time, and each utterance lands on the item that was in focus *when it was said*, even if the transcript arrives after someone switched items.
 - **Screen reading.** The presenter's browser takes a snapshot when the screen changes and settles (`src/web/room/useFrameSampler.ts`), at most one every few seconds. The agent compares it to the agenda and only suggests above a confidence threshold. A dismissed nudge stays quiet for 90 seconds; pinning turns nudges off.
 - **Notes.** Each item's notes are regenerated a few seconds after the talk about it pauses, and again when the meeting ends. Items belong to the room rather than one meeting, so a recurring standup builds history per ticket.
 

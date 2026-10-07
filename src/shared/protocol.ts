@@ -62,9 +62,10 @@ export interface Suggestion {
 export interface Capabilities {
   /** Shared audio and screen share between people. */
   livekit: boolean;
-  /** "deepgram" = server-side per-speaker transcription through the agent;
-   *  "browser" = each browser transcribes its own mic (Chrome/Edge). */
-  transcription: "deepgram" | "browser";
+  /** Server-side per-speaker transcription by the agent in the LiveKit room,
+   *  through LiveKit Inference or a direct Deepgram key; or "browser", where
+   *  each browser transcribes its own mic (Chrome, Edge, Safari). */
+  transcription: "livekit" | "deepgram" | "browser";
   /** Real LLM for notes and screen reading; otherwise heuristics. */
   llm: boolean;
   linear: boolean;

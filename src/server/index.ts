@@ -28,7 +28,7 @@ function session(roomId: string): RoomSession | null {
     (closed) => {
       if (sessions.get(roomId) === closed) sessions.delete(roomId);
     },
-    capabilities().transcription === "deepgram" ? (r) => startLiveKitTranscriber(roomId, r) : undefined,
+    capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r) : undefined,
   );
   sessions.set(roomId, s);
   return s;

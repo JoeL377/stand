@@ -123,7 +123,7 @@ export function RoomPage() {
 export function ModeNote({ caps }: { caps: Capabilities }) {
   const missing: string[] = [];
   if (!caps.livekit) missing.push("shared audio (LiveKit)");
-  if (caps.transcription !== "deepgram") missing.push("server transcription (Deepgram)");
+  if (caps.transcription === "browser") missing.push("server transcription");
   if (!caps.llm) missing.push("AI notes (Anthropic)");
   if (!missing.length) return null;
   return (

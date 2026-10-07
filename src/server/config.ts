@@ -12,7 +12,10 @@ export const config = {
     apiKey: env("LIVEKIT_API_KEY"),
     apiSecret: env("LIVEKIT_API_SECRET"),
   },
+  /** Optional: talk to Deepgram directly instead of through LiveKit Inference. */
   deepgramKey: env("DEEPGRAM_API_KEY"),
+  /** LiveKit Inference speech-to-text model. */
+  sttModel: env("STT_MODEL") ?? "deepgram/nova-3",
   anthropicKey: env("ANTHROPIC_API_KEY"),
   anthropicModel: env("ANTHROPIC_MODEL") ?? "claude-opus-5-5",
   linearKey: env("LINEAR_API_KEY"),
@@ -38,7 +41,8 @@ export function capabilities(): Capabilities {
   return {
     livekit,
     // Server-side transcription needs the agent in the LiveKit room to hear people.
-    transcription: livekit && config.deepgramKey ? "deepgram" : "browser",
+    // LiveKit Inference bills speech-to-text to the LiveKit account, so no extra key.
+    transcription: !livekit ? "browser" : config.deepgramKey ? "deepgram" : "livekit",
     llm: Boolean(config.anthropicKey),
     linear: Boolean(config.linearKey),
     googleSignIn: googleEnabled(),
