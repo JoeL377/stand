@@ -4,6 +4,8 @@ Voice rooms where an AI agent pins every remark to the ticket or doc section it'
 
 People talk (voice only, no cameras) and share their screen. The room has an agenda: typed items or Linear issues. An agent listens to each person separately, watches the shared screen, and when it sees the presenter has moved on it asks "Moved on to ENG-142?". One click confirms, and anything said since the screen changed moves with it. Anyone can click an item to switch to it, or pin it so the agent stops suggesting. Chat in the room is pinned the same way.
 
+Everyone signs in with Google, so names in the transcript and owners of action items are real accounts.
+
 Afterwards, every item has its own history: transcript, decisions, action items with owners, and open questions, across every meeting where it came up.
 
 ## Run it
@@ -18,6 +20,7 @@ With no keys it runs in **mock mode**:
 
 | Piece | Mock mode | With keys |
 |---|---|---|
+| Sign-in | Name and email, not verified | Google |
 | Voice and screen share between people | Off. Each person's screen is visible only to them. | LiveKit |
 | Transcription | Each browser transcribes its own mic (Chrome, Edge, Safari) | Deepgram, through a hidden agent in the LiveKit room |
 | Reading the shared screen | Notices a change and guesses the next item | Claude matches the screenshot against the agenda |
@@ -34,6 +37,7 @@ Copy `.env.example` to `.env` and fill in what you have. Each one switches on in
 - `DEEPGRAM_API_KEY` from [Deepgram](https://console.deepgram.com). Needs LiveKit too, since the agent hears people through the LiveKit room.
 - `ANTHROPIC_API_KEY` for notes and screen reading. `ANTHROPIC_MODEL` overrides the model (default `claude-opus-5-5`).
 - `LINEAR_API_KEY`, a personal API key from Linear settings.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` from an OAuth client ID ("Web application") in Google Cloud. Add `<origin>/api/auth/google/callback` as an authorized redirect URI. `ALLOWED_EMAIL_DOMAINS` limits who can sign in; `PUBLIC_URL` sets the origin when behind a proxy.
 
 ## Production
 
@@ -62,7 +66,7 @@ Code map: `src/server` (Express + ws + SQLite), `src/web` (React + Vite), `src/s
 
 ## Not built yet
 
-- Accounts and permissions (anyone with the link can join).
+- Per-room permissions (anyone signed in who has the link can join).
 - Writing decisions back to Linear as comments.
 - Google Docs / Notion outlines as agenda sources.
 - Asking the agent things mid-meeting ("what did we decide about this last week?").

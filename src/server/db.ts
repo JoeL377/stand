@@ -1,12 +1,32 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Item, ItemSource, Note, NoteKind, Segment, SegmentKind } from "../shared/protocol.ts";
+import type { Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
 
 export type DB = ReturnType<typeof openDb>;
 
 const schema = `
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  google_sub TEXT UNIQUE,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  picture TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS room_members (
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  last_joined_at INTEGER NOT NULL,
+  PRIMARY KEY (room_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS rooms (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -68,6 +88,15 @@ CREATE INDEX IF NOT EXISTS notes_item ON notes(item_id);
 
 type Row = Record<string, unknown>;
 
+const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
+
+const toUser = (r: Row): User => ({
+  id: r.id as string,
+  email: r.email as string,
+  name: r.name as string,
+  picture: (r.picture as string) ?? null,
+});
+
 const toItem = (r: Row): Item => ({
   id: r.id as string,
   roomId: r.room_id as string,
@@ -108,6 +137,66 @@ export function openDb(file?: string) {
 
   return {
     raw: db,
+
+    /** Finds the user by Google subject (or email, for accounts created by the
+     *  stand-in sign-in) and refreshes their profile. */
+    upsertUser(u: { googleSub: string | null; email: string; name: string; picture: string | null }): User {
+      const email = u.email.toLowerCase();
+      const existing = (
+        u.googleSub ? db.prepare("SELECT * FROM users WHERE google_sub = ?").get(u.googleSub) : undefined
+      ) as Row | undefined ?? (db.prepare("SELECT * FROM users WHERE email = ?").get(email) as Row | undefined);
+      if (existing) {
+        db.prepare("UPDATE users SET google_sub = COALESCE(?, google_sub), email = ?, name = ?, picture = COALESCE(?, picture) WHERE id = ?").run(
+          u.googleSub,
+          email,
+          u.name,
+          u.picture,
+          existing.id as string,
+        );
+        return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(existing.id as string) as Row);
+      }
+      const id = "u" + newId(11);
+      db.prepare("INSERT INTO users (id, google_sub, email, name, picture, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+        id,
+        u.googleSub,
+        email,
+        u.name,
+        u.picture,
+        Date.now(),
+      );
+      return { id, email, name: u.name, picture: u.picture };
+    },
+    createSession(userId: string) {
+      const id = randomBytes(32).toString("base64url");
+      db.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)").run(id, userId, Date.now() + SESSION_TTL_MS);
+      return { id, maxAgeMs: SESSION_TTL_MS };
+    },
+    sessionUser(sessionId: string): User | null {
+      const r = db
+        .prepare("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?")
+        .get(sessionId, Date.now()) as Row | undefined;
+      return r ? toUser(r) : null;
+    },
+    deleteSession(sessionId: string) {
+      db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+    },
+
+    touchMembership(roomId: string, userId: string) {
+      db.prepare(
+        `INSERT INTO room_members (room_id, user_id, last_joined_at) VALUES (?, ?, ?)
+         ON CONFLICT (room_id, user_id) DO UPDATE SET last_joined_at = excluded.last_joined_at`,
+      ).run(roomId, userId, Date.now());
+    },
+    userRooms(userId: string) {
+      return (
+        db
+          .prepare(
+            `SELECT r.id, r.name, m.last_joined_at FROM room_members m JOIN rooms r ON r.id = m.room_id
+             WHERE m.user_id = ? ORDER BY m.last_joined_at DESC LIMIT 30`,
+          )
+          .all(userId) as Row[]
+      ).map((r) => ({ id: r.id as string, name: r.name as string, lastJoinedAt: r.last_joined_at as number }));
+    },
 
     createRoom(name: string) {
       const id = newId(8);

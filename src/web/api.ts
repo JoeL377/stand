@@ -1,4 +1,4 @@
-import type { Capabilities, Item, ItemHistory, MeetingRecap } from "../shared/protocol.ts";
+import type { Capabilities, Item, ItemHistory, MeetingRecap, User } from "../shared/protocol.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -7,6 +7,10 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !url.startsWith("/api/auth/")) {
+    // Session expired: send them through sign-in and back here.
+    location.reload();
+  }
   if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
   return data as T;
 }
@@ -21,6 +25,10 @@ export interface RoomInfo {
 
 export const api = {
   config: () => call<Capabilities>("GET", "/api/config"),
+  me: () => call<User>("GET", "/api/auth/me"),
+  devSignIn: (name: string, email: string) => call<User>("POST", "/api/auth/dev", { name, email }),
+  signOut: () => call<{ ok: true }>("POST", "/api/auth/logout"),
+  myRooms: () => call<Array<{ id: string; name: string; lastJoinedAt: number }>>("GET", "/api/my/rooms"),
   createRoom: (name: string) => call<{ id: string; name: string }>("POST", "/api/rooms", { name }),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   addAgenda: (roomId: string, titles: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items`, { titles }),
@@ -33,6 +41,5 @@ export const api = {
   itemHistory: (itemId: string) =>
     call<ItemHistory & { room: { id: string; name: string } }>("GET", `/api/items/${itemId}/history`),
   meeting: (id: string) => call<MeetingRecap>("GET", `/api/meetings/${id}`),
-  token: (roomId: string, participantId: string, name: string) =>
-    call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`, { participantId, name }),
+  token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };

@@ -23,33 +23,3 @@ export const initials = (name: string) =>
     .slice(0, 2)
     .map((w) => w[0]!.toUpperCase())
     .join("");
-
-/** A stable per-browser id, reused as the LiveKit identity. */
-export function participantId(): string {
-  const key = "standup.participantId";
-  try {
-    let id = localStorage.getItem(key);
-    if (!id) {
-      id = "p" + Math.random().toString(36).slice(2, 12);
-      localStorage.setItem(key, id);
-    }
-    return id;
-  } catch {
-    return "p" + Math.random().toString(36).slice(2, 12);
-  }
-}
-
-export function savedName(): string {
-  try {
-    return localStorage.getItem("standup.name") ?? "";
-  } catch {
-    return "";
-  }
-}
-export function saveName(name: string) {
-  try {
-    localStorage.setItem("standup.name", name);
-  } catch {
-    /* ignore */
-  }
-}

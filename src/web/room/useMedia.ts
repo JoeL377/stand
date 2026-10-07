@@ -12,8 +12,8 @@ export interface RemoteScreen {
   track: RemoteTrack;
 }
 
-export function useMedia(opts: { roomId: string; participantId: string; name: string; livekit: boolean; enabled: boolean }) {
-  const { roomId, participantId, name, livekit, enabled } = opts;
+export function useMedia(opts: { roomId: string; livekit: boolean; enabled: boolean }) {
+  const { roomId, livekit, enabled } = opts;
   const roomRef = useRef<Room | null>(null);
   const [micOn, setMicOn] = useState(false);
   const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
@@ -70,7 +70,7 @@ export function useMedia(opts: { roomId: string; participantId: string; name: st
 
     (async () => {
       try {
-        const { url, token } = await api.token(roomId, participantId, name);
+        const { url, token } = await api.token(roomId);
         if (!url || !token || cancelled) return;
         await room.connect(url, token);
         if (cancelled) return room.disconnect();
@@ -89,7 +89,7 @@ export function useMedia(opts: { roomId: string; participantId: string; name: st
       audioEls.forEach((el) => el.remove());
       roomRef.current = null;
     };
-  }, [livekit, enabled, roomId, participantId, name]);
+  }, [livekit, enabled, roomId]);
 
   // ---- mic ----------------------------------------------------------------
   const mockMicStream = useRef<MediaStream | null>(null);

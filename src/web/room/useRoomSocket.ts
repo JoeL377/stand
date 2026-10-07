@@ -7,7 +7,7 @@ export interface Interim {
   text: string;
 }
 
-export function useRoomSocket(roomId: string, name: string, participantId: string, enabled: boolean) {
+export function useRoomSocket(roomId: string, enabled: boolean) {
   const [state, setState] = useState<RoomState | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -30,7 +30,7 @@ export function useRoomSocket(roomId: string, name: string, participantId: strin
       ws.onopen = () => {
         attempts = 0;
         setConnected(true);
-        ws.send(JSON.stringify({ type: "hello", name, participantId } satisfies ClientMessage));
+        ws.send(JSON.stringify({ type: "hello" } satisfies ClientMessage));
       };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data) as ServerMessage;
@@ -81,7 +81,7 @@ export function useRoomSocket(roomId: string, name: string, participantId: strin
       clearTimeout(retry);
       wsRef.current?.close();
     };
-  }, [roomId, name, participantId, enabled]);
+  }, [roomId, enabled]);
 
   const send = useCallback((msg: ClientMessage) => {
     const ws = wsRef.current;

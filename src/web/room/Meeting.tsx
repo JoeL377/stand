@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Capabilities } from "../../shared/protocol.ts";
+import type { Capabilities, User } from "../../shared/protocol.ts";
 import { useRoomSocket } from "./useRoomSocket.ts";
 import { useMedia } from "./useMedia.ts";
 import { browserSpeechSupported, useBrowserSpeech } from "./useBrowserSpeech.ts";
@@ -11,15 +11,15 @@ import { fmtDuration } from "../util.ts";
 
 export function Meeting(props: {
   roomId: string;
-  name: string;
-  participantId: string;
+  user: User;
   caps: Capabilities;
   onEnded: (meetingId: string) => void;
   onLeave: () => void;
 }) {
-  const { roomId, name, participantId, caps } = props;
-  const room = useRoomSocket(roomId, name, participantId, true);
-  const media = useMedia({ roomId, participantId, name, livekit: caps.livekit, enabled: true });
+  const { roomId, caps } = props;
+  const participantId = props.user.id;
+  const room = useRoomSocket(roomId, true);
+  const media = useMedia({ roomId, livekit: caps.livekit, enabled: true });
   const [now, setNow] = useState(Date.now());
   const [ending, setEnding] = useState(false);
   const { send, state } = room;

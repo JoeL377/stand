@@ -2,32 +2,27 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { Capabilities } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
-import { fmtDate, fmtTime, participantId, savedName, saveName } from "../util.ts";
-import { rememberRoom } from "./Home.tsx";
+import { useAuth, UserMenu } from "../auth.tsx";
+import { fmtDate, fmtTime } from "../util.ts";
 import { Meeting } from "../room/Meeting.tsx";
 
 export function RoomPage() {
   const { roomId = "" } = useParams();
+  const { user, caps } = useAuth();
   const [room, setRoom] = useState<RoomInfo | null>(null);
-  const [caps, setCaps] = useState<Capabilities | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState(savedName());
   const [joined, setJoined] = useState(false);
   const nav = useNavigate();
 
   const load = useCallback(() => {
     api
       .room(roomId)
-      .then((r) => {
-        setRoom(r);
-        rememberRoom({ id: r.id, name: r.name });
-      })
+      .then(setRoom)
       .catch((e) => setError(e.message));
   }, [roomId]);
 
   useEffect(() => {
     load();
-    api.config().then(setCaps).catch(() => {});
   }, [load]);
 
   if (error) {
@@ -40,14 +35,13 @@ export function RoomPage() {
       </div>
     );
   }
-  if (!room || !caps) return <div className="loading">Loading…</div>;
+  if (!room) return <div className="loading">Loading…</div>;
 
   if (joined) {
     return (
       <Meeting
         roomId={room.id}
-        name={name}
-        participantId={participantId()}
+        user={user}
         caps={caps}
         onEnded={(meetingId) => nav(`/meetings/${meetingId}`)}
         onLeave={() => {
@@ -58,12 +52,6 @@ export function RoomPage() {
     );
   }
 
-  const join = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    saveName(name.trim());
-    setJoined(true);
-  };
 
   const past = room.meetings.filter((m) => m.endedAt && m.segmentCount > 0);
 
@@ -77,18 +65,19 @@ export function RoomPage() {
             </span>
             Standup
           </Link>
+          <span className="spacer" />
+          <UserMenu />
         </div>
         <h1>{room.name}</h1>
         <p className="muted">
           {room.liveMeetingId ? "A meeting is in progress." : "No one is here yet."} {room.items.length} item
           {room.items.length === 1 ? "" : "s"} on the agenda.
         </p>
-        <form onSubmit={join} className="row">
-          <input autoFocus placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} />
-          <button className="primary" disabled={!name.trim()}>
-            Join room
+        <div className="row">
+          <button className="primary" autoFocus onClick={() => setJoined(true)}>
+            Join as {user.name}
           </button>
-        </form>
+        </div>
         <ModeNote caps={caps} />
         <button
           className="link"

@@ -44,6 +44,7 @@ export interface Note {
 export interface Participant {
   id: string;
   name: string;
+  picture: string | null;
   isPresenter: boolean;
   isSharing: boolean;
 }
@@ -66,6 +67,15 @@ export interface Capabilities {
   /** Real LLM for notes and screen reading; otherwise heuristics. */
   llm: boolean;
   linear: boolean;
+  /** false = stand-in sign-in with name and email, no verification. */
+  googleSignIn: boolean;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  picture: string | null;
 }
 
 export interface RoomState {
@@ -83,7 +93,7 @@ export interface RoomState {
 }
 
 export type ClientMessage =
-  | { type: "hello"; name: string; participantId: string }
+  | { type: "hello" }
   | { type: "focus"; itemId: string | null }
   | { type: "pin"; itemId: string }
   | { type: "unpin" }

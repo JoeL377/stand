@@ -3,6 +3,7 @@
 
 import type { WebSocket } from "ws";
 import type {
+  User,
   ClientMessage,
   Item,
   Note,
@@ -51,6 +52,7 @@ export class RoomSession implements SpeechSink {
   readonly meetingStartedAt: number;
 
   private conns = new Map<WebSocket, Conn | null>();
+  private pendingUser = new Map<WebSocket, User>();
   private participants = new Map<string, Participant & { conns: number }>();
   private focusItemId: string | null = null;
   private pinnedBy: string | null = null;
@@ -87,8 +89,11 @@ export class RoomSession implements SpeechSink {
 
   // ---- connections ---------------------------------------------------------
 
-  attach(ws: WebSocket) {
+  /** The user comes from the session cookie checked at upgrade time; they
+   *  appear in the room once their client says hello. */
+  attach(ws: WebSocket, user: User) {
     this.conns.set(ws, null);
+    this.pendingUser.set(ws, user);
     ws.on("message", (raw) => {
       let msg: ClientMessage;
       try {
@@ -107,6 +112,7 @@ export class RoomSession implements SpeechSink {
   private detach(ws: WebSocket) {
     const conn = this.conns.get(ws);
     this.conns.delete(ws);
+    this.pendingUser.delete(ws);
     if (conn) {
       const p = this.participants.get(conn.participantId);
       if (p && --p.conns <= 0) this.participants.delete(conn.participantId);
@@ -165,15 +171,16 @@ export class RoomSession implements SpeechSink {
 
   private async handle(ws: WebSocket, msg: ClientMessage) {
     if (msg.type === "hello") {
-      const name = String(msg.name || "Guest").slice(0, 40);
-      const id = String(msg.participantId).slice(0, 40);
+      const user = this.pendingUser.get(ws);
+      if (!user || this.conns.get(ws)) return;
+      const { id, name } = user;
       this.conns.set(ws, { participantId: id, name });
       const existing = this.participants.get(id);
       if (existing) {
         existing.conns++;
         existing.name = name;
       } else {
-        this.participants.set(id, { id, name, isPresenter: false, isSharing: false, conns: 1 });
+        this.participants.set(id, { id, name, picture: user.picture, isPresenter: false, isSharing: false, conns: 1 });
       }
       if (this.emptyTimer) {
         clearTimeout(this.emptyTimer);

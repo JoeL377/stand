@@ -16,7 +16,22 @@ export const config = {
   anthropicKey: env("ANTHROPIC_API_KEY"),
   anthropicModel: env("ANTHROPIC_MODEL") ?? "claude-opus-5-5",
   linearKey: env("LINEAR_API_KEY"),
+  google: {
+    clientId: env("GOOGLE_CLIENT_ID"),
+    clientSecret: env("GOOGLE_CLIENT_SECRET"),
+  },
+  /** Public origin, e.g. https://standup.example.com. Defaults to the request's own origin. */
+  publicUrl: env("PUBLIC_URL"),
+  /** Comma-separated email domains allowed to sign in, e.g. "acme.com". Empty = anyone. */
+  allowedDomains: (env("ALLOWED_EMAIL_DOMAINS") ?? "")
+    .split(",")
+    .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
+    .filter(Boolean),
 };
+
+/** Without Google credentials, people sign in with just a name and email
+ *  (no verification) so the app can be tried before OAuth is set up. */
+export const googleEnabled = () => Boolean(config.google.clientId && config.google.clientSecret);
 
 export function capabilities(): Capabilities {
   const livekit = Boolean(config.livekit.url && config.livekit.apiKey && config.livekit.apiSecret);
@@ -26,5 +41,6 @@ export function capabilities(): Capabilities {
     transcription: livekit && config.deepgramKey ? "deepgram" : "browser",
     llm: Boolean(config.anthropicKey),
     linear: Boolean(config.linearKey),
+    googleSignIn: googleEnabled(),
   };
 }

@@ -96,7 +96,7 @@ export function Stage(props: {
 
       <div className="people">
         {state.participants.map((p) => (
-          <Person key={p.id} id={p.id} name={p.name} talking={talkingIds.has(p.id)} tag={p.isSharing ? "Sharing" : p.isPresenter ? "Presenter" : undefined} />
+          <Person key={p.id} id={p.id} name={p.name} picture={p.picture} talking={talkingIds.has(p.id)} tag={p.isSharing ? "Sharing" : p.isPresenter ? "Presenter" : undefined} />
         ))}
         {ghosts.map((g) => (
           <Person key={g.speakerId} id={g.speakerId} name={g.speakerName} talking tag="Demo" />
@@ -106,14 +106,22 @@ export function Stage(props: {
   );
 }
 
-function Person({ id, name, talking, tag }: { id: string; name: string; talking: boolean; tag?: string }) {
+function Person({ id, name, picture, talking, tag }: { id: string; name: string; picture?: string | null; talking: boolean; tag?: string }) {
   return (
     <div className={talking ? "person talking" : "person"}>
-      <div className="avatar" style={{ background: colorFor(id) }}>
-        {initials(name)}
-      </div>
+      <Avatar id={id} name={name} picture={picture} />
       <div className="person-name">{name}</div>
       {tag && <div className="person-tag">{tag}</div>}
+    </div>
+  );
+}
+
+export function Avatar({ id, name, picture, size = 44 }: { id: string; name: string; picture?: string | null; size?: number }) {
+  return picture ? (
+    <img className="avatar" src={picture} alt="" width={size} height={size} referrerPolicy="no-referrer" />
+  ) : (
+    <div className="avatar" style={{ background: colorFor(id), width: size, height: size, fontSize: size * 0.36 }}>
+      {initials(name)}
     </div>
   );
 }

@@ -1,32 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api.ts";
-
-const RECENT = "standup.recentRooms";
-type Recent = { id: string; name: string };
-
-export function recentRooms(): Recent[] {
-  try {
-    return JSON.parse(localStorage.getItem(RECENT) ?? "[]");
-  } catch {
-    return [];
-  }
-}
-export function rememberRoom(r: Recent) {
-  try {
-    const list = [r, ...recentRooms().filter((x) => x.id !== r.id)].slice(0, 8);
-    localStorage.setItem(RECENT, JSON.stringify(list));
-  } catch {
-    /* ignore */
-  }
-}
+import { UserMenu } from "../auth.tsx";
 
 export function Home() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nav = useNavigate();
-  const recent = recentRooms();
+  const [recent, setRecent] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    api.myRooms().then(setRecent).catch(() => {});
+  }, []);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +19,6 @@ export function Home() {
     setError(null);
     try {
       const room = await api.createRoom(name.trim() || "Team standup");
-      rememberRoom(room);
       nav(`/r/${room.id}`);
     } catch (err) {
       setError((err as Error).message);
@@ -50,6 +34,8 @@ export function Home() {
             ▍▌▋
           </span>
           Standup
+          <span className="spacer" />
+          <UserMenu />
         </div>
         <h1>Meetings that remember what each ticket was about.</h1>
         <p className="muted">

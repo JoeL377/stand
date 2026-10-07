@@ -61,3 +61,15 @@ test("parses Linear links and keys", () => {
   assert.deepEqual(parseLinearInput("ENG-1, ENG-2 and ENG-1"), { kind: "issues", keys: ["ENG-1", "ENG-2"] });
   assert.equal(parseLinearInput("https://example.com/x"), null);
 });
+
+test("sessions resolve to users, and Google sign-in links to an existing email", () => {
+  const db = openDb(":memory:");
+  const dev = db.upsertUser({ googleSub: null, email: "Joe@Example.com", name: "Joe", picture: null });
+  const google = db.upsertUser({ googleSub: "g-123", email: "joe@example.com", name: "Joe Liang", picture: "https://x/p.png" });
+  assert.equal(google.id, dev.id);
+  assert.equal(google.name, "Joe Liang");
+  const s = db.createSession(google.id);
+  assert.equal(db.sessionUser(s.id)?.email, "joe@example.com");
+  db.deleteSession(s.id);
+  assert.equal(db.sessionUser(s.id), null);
+});

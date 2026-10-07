@@ -4,6 +4,7 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer } from "ws";
 import type { ItemHistory, MeetingRecap } from "../shared/protocol.ts";
+import { authRoutes, requireUser, userFromRequest } from "./auth.ts";
 import { capabilities, config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { importFromLinear, sampleSprint } from "./linear.ts";
@@ -46,12 +47,24 @@ const notFound = (res: Response, what = "Not found") => res.status(404).json({ e
 app.get("/api/config", (_req, res) => {
   res.json(capabilities());
 });
+app.use("/api/auth", authRoutes(db));
+// Everything else needs a signed-in user.
+app.use("/api", requireUser(db));
+
+app.get(
+  "/api/my/rooms",
+  route((req, res) => {
+    res.json(db.userRooms(req.user!.id));
+  }),
+);
 
 app.post(
   "/api/rooms",
   route((req, res) => {
     const name = String(req.body?.name ?? "").trim().slice(0, 80) || "Standup";
-    res.json(db.createRoom(name));
+    const room = db.createRoom(name);
+    db.touchMembership(room.id, req.user!.id);
+    res.json(room);
   }),
 );
 
@@ -192,10 +205,8 @@ app.post(
     if (!capabilities().livekit) return res.json({ url: null, token: null });
     const room = db.getRoom(req.params.id);
     if (!room) return notFound(res);
-    const participantId = String(req.body?.participantId ?? "").slice(0, 40);
-    const name = String(req.body?.name ?? "Guest").slice(0, 40);
-    if (!participantId || participantId === "agent") return res.status(400).json({ error: "Bad participant id" });
-    res.json({ url: config.livekit.url, token: await participantToken(room.id, participantId, name) });
+    const user = req.user!;
+    res.json({ url: config.livekit.url, token: await participantToken(room.id, user.id, user.name) });
   }),
 );
 
@@ -215,12 +226,15 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 server.on("upgrade", (req, socket, head) => {
   const m = req.url?.match(/^\/ws\/rooms\/([a-z0-9]+)$/);
-  const s = m ? session(m[1]) : null;
-  if (!s) {
+  const user = userFromRequest(db, req);
+  const s = m && user ? session(m[1]) : null;
+  if (!s || !user) {
+    socket.write(user ? "HTTP/1.1 404 Not Found\r\n\r\n" : "HTTP/1.1 401 Unauthorized\r\n\r\n");
     socket.destroy();
     return;
   }
-  wss.handleUpgrade(req, socket, head, (ws) => s.attach(ws));
+  db.touchMembership(s.roomId, user.id);
+  wss.handleUpgrade(req, socket, head, (ws) => s.attach(ws, user));
 });
 
 server.listen(config.port, () => {

@@ -6,16 +6,19 @@ import { Home } from "./pages/Home.tsx";
 import { RoomPage } from "./pages/RoomPage.tsx";
 import { ItemHistoryPage } from "./pages/ItemHistoryPage.tsx";
 import { RecapPage } from "./pages/RecapPage.tsx";
+import { AuthGate } from "./auth.tsx";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/r/:roomId" element={<RoomPage />} />
-        <Route path="/items/:itemId" element={<ItemHistoryPage />} />
-        <Route path="/meetings/:meetingId" element={<RecapPage />} />
-      </Routes>
+      <AuthGate>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/r/:roomId" element={<RoomPage />} />
+          <Route path="/items/:itemId" element={<ItemHistoryPage />} />
+          <Route path="/meetings/:meetingId" element={<RecapPage />} />
+        </Routes>
+      </AuthGate>
     </BrowserRouter>
   </StrictMode>,
 );
