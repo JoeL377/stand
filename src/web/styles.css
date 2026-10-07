@@ -732,3 +732,26 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   font-size: 13px;
   pointer-events: none;
 }
+
+/* ---- side panel: one column, notes card over the discussion ---- */
+.side .panel-head { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.view-btn { font-weight: 500; }
+.add-menu button.on span:first-child { color: var(--accent); }
+.focus-notes { margin: 10px 12px 2px; background: var(--panel-2); border-radius: 10px; flex: none; }
+.focus-notes-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  text-align: left;
+}
+.focus-notes-head .chev { margin-left: auto; color: var(--muted); }
+.focus-notes-body { max-height: 32vh; overflow-y: auto; padding: 0 12px 10px; font-size: 13px; }
+.focus-notes-body .note-summary { margin: 0 0 6px; }

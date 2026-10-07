@@ -11,43 +11,92 @@ export function SidePanel(props: {
   send: (m: ClientMessage) => void;
   participantId: string;
 }) {
-  const [tab, setTab] = useState<"talk" | "notes">("talk");
-  const [scope, setScope] = useState<"item" | "all">("item");
+  const [view, setView] = useState<View>("item");
+  const [menu, setMenu] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(true);
+  const menuRef = useRef<HTMLDivElement>(null);
   const { state, segments, notes, interims, send } = props;
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenu(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [menu]);
 
-  const shown = scope === "item" ? segments.filter((s) => s.itemId === state.focusItemId) : segments;
-  const focusNotes = notes.filter((n) => n.itemId === state.focusItemId).length;
+  const shown = view === "item" ? segments.filter((s) => s.itemId === state.focusItemId) : segments;
+  const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
+  const views: { view: View; label: string; hint: string }[] = [
+    { view: "item", label: "This item", hint: "Notes and discussion for what's in focus" },
+    { view: "all", label: "Whole meeting", hint: "Everything said, across items" },
+    { view: "notes", label: "All notes", hint: "The agent's notes for every item" },
+  ];
 
   return (
     <aside className="panel side">
-      <div className="tabs">
-        <button className={tab === "talk" ? "tab on" : "tab"} onClick={() => setTab("talk")}>
-          Discussion
-        </button>
-        <button className={tab === "notes" ? "tab on" : "tab"} onClick={() => setTab("notes")}>
-          Agent notes{focusNotes ? ` · ${focusNotes}` : ""}
-        </button>
+      <div className="panel-head">
+        <h2>{view === "notes" ? "Agent notes" : "Discussion"}</h2>
+        <div className="add-menu-wrap" ref={menuRef}>
+          <button className="ghost small view-btn" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
+            {views.find((v) => v.view === view)!.label} ▾
+          </button>
+          {menu && (
+            <div className="add-menu" role="menu">
+              {views.map((v) => (
+                <button
+                  key={v.view}
+                  role="menuitemradio"
+                  aria-checked={v.view === view}
+                  className={v.view === view ? "on" : ""}
+                  onClick={() => {
+                    setView(v.view);
+                    setMenu(false);
+                  }}
+                >
+                  <span>{v.label}</span>
+                  <span className="muted">{v.hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {tab === "talk" ? (
+      {view === "notes" ? (
+        <NotesView notes={notes} items={state.items} focusItemId={state.focusItemId} />
+      ) : (
         <>
-          <div className="scope">
-            <button className={scope === "item" ? "chip on" : "chip"} onClick={() => setScope("item")}>
-              This item
-            </button>
-            <button className={scope === "all" ? "chip on" : "chip"} onClick={() => setScope("all")}>
-              Whole meeting
-            </button>
-          </div>
-          <Transcript segments={shown} items={state.items} interims={interims} showDividers={scope === "all"} send={send} />
+          {view === "item" && focusNotes.length > 0 && (
+            <section className={notesOpen ? "focus-notes open" : "focus-notes"}>
+              <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
+                <span>Agent notes</span>
+                <span className="muted">{focusNotes.length}</span>
+                <span className="chev" aria-hidden>
+                  {notesOpen ? "▾" : "▸"}
+                </span>
+              </button>
+              {notesOpen && (
+                <div className="focus-notes-body">
+                  <NoteList notes={focusNotes} />
+                </div>
+              )}
+            </section>
+          )}
+          <Transcript segments={shown} items={state.items} interims={interims} showDividers={view === "all"} send={send} />
           <ChatBox send={send} />
         </>
-      ) : (
-        <NotesView notes={notes} items={state.items} focusItemId={state.focusItemId} llm={state.capabilities.llm} />
       )}
     </aside>
   );
 }
+
+type View = "item" | "all" | "notes";
 
 function Transcript(props: {
   segments: Segment[];
@@ -152,7 +201,7 @@ function ChatBox({ send }: { send: (m: ClientMessage) => void }) {
         setText("");
       }}
     >
-      <input placeholder="Message the room (pinned to this item)" value={text} onChange={(e) => setText(e.target.value)} />
+      <input placeholder="Message the room" title="Goes into the discussion for the item in focus" value={text} onChange={(e) => setText(e.target.value)} />
       <button className="primary" disabled={!text.trim()}>
         Send
       </button>
@@ -164,12 +213,10 @@ export function NotesView({
   notes,
   items,
   focusItemId,
-  llm,
 }: {
   notes: Note[];
   items: Item[];
   focusItemId: string | null;
-  llm: boolean;
 }) {
   const groups = useMemo(() => {
     const ids = [...new Set(notes.map((n) => n.itemId))];
@@ -183,7 +230,6 @@ export function NotesView({
 
   return (
     <div className="notes">
-      {!llm && <p className="muted small">Heuristic notes. Add an Anthropic key on the server for real summaries.</p>}
       {groups.length === 0 && <p className="muted empty">The agent writes notes per item as people talk.</p>}
       {groups.map((g) => (
         <section key={g.id ?? "general"} className={g.id === focusItemId ? "note-group active" : "note-group"}>
