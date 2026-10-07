@@ -1,0 +1,192 @@
+// The agent's "thinking" parts: turning an item's discussion into notes, and
+// reading the shared screen to guess which item is on it. Each has a real
+// implementation on Claude and a heuristic stand-in used when no key is set.
+
+import Anthropic from "@anthropic-ai/sdk";
+import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { z } from "zod";
+import type { Item, Note, Segment } from "../shared/protocol.ts";
+import { config } from "./config.ts";
+
+export type DraftNote = Pick<Note, "kind" | "text" | "owner">;
+
+export interface ScreenMatch {
+  itemId: string | null;
+  confidence: number;
+  reason: string;
+}
+
+export interface Agent {
+  notesFor(item: Item | null, segments: Segment[]): Promise<DraftNote[]>;
+  matchScreen(jpegDataUrl: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch>;
+  summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
+}
+
+export function createAgent(): Agent {
+  return config.anthropicKey ? new ClaudeAgent(config.anthropicKey) : new HeuristicAgent();
+}
+
+const transcriptText = (segments: Segment[]) =>
+  segments.map((s) => `${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`).join("\n");
+
+const itemLabel = (item: Item | null) =>
+  item ? `${item.externalId ? `${item.externalId} · ` : ""}${item.title}` : "General discussion (no item in focus)";
+
+// ---------------------------------------------------------------------------
+
+const NotesSchema = z.object({
+  summary: z.string().describe("One or two sentences on where this item stands after the discussion. Empty if nothing substantive was said."),
+  decisions: z.array(z.string()),
+  action_items: z.array(z.object({ text: z.string(), owner: z.string().nullable() })),
+  open_questions: z.array(z.string()),
+});
+
+const ScreenSchema = z.object({
+  item_id: z.string().nullable().describe("id of the agenda item shown on screen, or null if none clearly matches"),
+  confidence: z.number().describe("0 to 1"),
+  reason: z.string().describe("Short, user-facing: what on screen gave it away"),
+});
+
+class ClaudeAgent implements Agent {
+  private client: Anthropic;
+  constructor(apiKey: string) {
+    this.client = new Anthropic({ apiKey });
+  }
+
+  private async parse<T>(
+    schema: z.ZodType<T>,
+    content: Anthropic.Beta.BetaContentBlockParam[] | string,
+    system: string,
+    effort: "low" | "medium",
+  ): Promise<T | null> {
+    const res = await this.client.beta.messages.parse({
+      model: config.anthropicModel,
+      max_tokens: 4000,
+      system,
+      messages: [{ role: "user", content }],
+      output_config: { effort, format: betaZodOutputFormat(schema) },
+      // If a safety classifier declines, let the API retry on its recommended fallback model.
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+    });
+    if (res.stop_reason === "refusal") return null;
+    return (res.parsed_output as T | null) ?? null;
+  }
+
+  async notesFor(item: Item | null, segments: Segment[]): Promise<DraftNote[]> {
+    if (!segments.length) return [];
+    const out = await this.parse(
+      NotesSchema,
+      `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}
+
+Discussion of this item (speech transcript and in-room chat, in order):
+${transcriptText(segments)}`,
+      `You take notes in a team meeting. You are given what was said while one agenda item (a ticket or doc section) was in focus. Write notes only about that item, the way a sharp teammate would: decisions that were actually made, action items with the person who owns them (use the speaker's name; null if nobody took it), and questions left open. Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
+      "low",
+    );
+    if (!out) return [];
+    return [
+      ...(out.summary.trim() ? [{ kind: "summary" as const, text: out.summary.trim(), owner: null }] : []),
+      ...out.decisions.map((t) => ({ kind: "decision" as const, text: t, owner: null })),
+      ...out.action_items.map((a) => ({ kind: "action" as const, text: a.text, owner: a.owner })),
+      ...out.open_questions.map((t) => ({ kind: "question" as const, text: t, owner: null })),
+    ];
+  }
+
+  async matchScreen(jpegDataUrl: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch> {
+    if (!items.length) return { itemId: null, confidence: 0, reason: "" };
+    const data = jpegDataUrl.replace(/^data:image\/jpeg;base64,/, "");
+    const list = items
+      .map((it) => `- id=${it.id}${it.externalId ? ` key=${it.externalId}` : ""} title="${it.title}"${it.id === currentItemId ? " (currently in focus)" : ""}`)
+      .join("\n");
+    const out = await this.parse(
+      ScreenSchema,
+      [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data } },
+        {
+          type: "text",
+          text: `This is the screen someone is sharing in a meeting. Which of these agenda items is it showing right now?\n${list}\n\nLook for ticket keys, titles, headings, slide titles, selected rows or open detail panes. If the screen shows a list with no single item selected or open, or nothing matches, return null.`,
+        },
+      ],
+      "You match a shared screen to a meeting agenda. Be conservative: a wrong guess interrupts the presenter.",
+      "low",
+    );
+    if (!out || !out.item_id || !items.some((i) => i.id === out.item_id)) {
+      return { itemId: null, confidence: 0, reason: out?.reason ?? "" };
+    }
+    return { itemId: out.item_id, confidence: out.confidence, reason: out.reason };
+  }
+
+  async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {
+    const body = perItem
+      .filter((p) => p.notes.length)
+      .map((p) => `## ${itemLabel(p.item)}\n${p.notes.map((n) => `- ${n.kind}: ${n.text}${n.owner ? ` (${n.owner})` : ""}`).join("\n")}`)
+      .join("\n\n");
+    if (!body) return "";
+    const res = await this.client.beta.messages.create({
+      model: config.anthropicModel,
+      max_tokens: 2000,
+      system: "Write a 2-4 sentence recap of a team meeting from its per-item notes. Plain prose, no headings, lead with what matters most.",
+      messages: [{ role: "user", content: body }],
+      output_config: { effort: "low" },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+    });
+    if (res.stop_reason === "refusal") return "";
+    return res.content
+      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stand-in used without an API key. Good enough to demo the flow, and labelled
+// in the UI as heuristic notes.
+
+const DECISION = /\b(let'?s go with|we('| wi)ll go with|decided|decision|agreed|we('| a)re going (to|with)|ship it|final answer)\b/i;
+const ACTION = /\b(i'?ll|i will|can you|could you|will you|action item|todo|to-do|follow up|take that|on it|by (monday|tuesday|wednesday|thursday|friday|tomorrow|eod|end of day))\b/i;
+
+export class HeuristicAgent implements Agent {
+  async notesFor(_item: Item | null, segments: Segment[]): Promise<DraftNote[]> {
+    const notes: DraftNote[] = [];
+    for (const s of segments) {
+      const sentences = s.text.split(/(?<=[.!?])\s+/).filter(Boolean);
+      for (const t of sentences) {
+        if (DECISION.test(t)) notes.push({ kind: "decision", text: t, owner: null });
+        else if (ACTION.test(t)) {
+          const asks = /\b(can|could|will) you\b/i.test(t);
+          const named = t.match(/^([A-Z][a-z]+),/)?.[1];
+          notes.push({ kind: "action", text: t, owner: asks ? (named ?? null) : s.speakerName });
+        } else if (t.trim().endsWith("?") && t.split(" ").length > 3) notes.push({ kind: "question", text: t, owner: null });
+      }
+    }
+    const speakers = [...new Set(segments.filter((s) => s.kind === "speech").map((s) => s.speakerName))];
+    if (segments.length) {
+      notes.unshift({
+        kind: "summary",
+        text: `${speakers.length ? speakers.join(", ") : "The team"} discussed this (${segments.length} remark${segments.length === 1 ? "" : "s"}).`,
+        owner: null,
+      });
+    }
+    return notes;
+  }
+
+  async matchScreen(_jpeg: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch> {
+    // Without vision we can only notice that the screen changed. Suggest the
+    // next item so the confirm flow can be exercised.
+    if (!items.length) return { itemId: null, confidence: 0, reason: "" };
+    const idx = items.findIndex((i) => i.id === currentItemId);
+    const next = items[(idx + 1) % items.length];
+    return { itemId: next.id, confidence: 0.6, reason: "The screen changed (mock agent guesses the next item)" };
+  }
+
+  async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {
+    const discussed = perItem.filter((p) => p.notes.length);
+    const decisions = discussed.flatMap((p) => p.notes.filter((n) => n.kind === "decision")).length;
+    const actions = discussed.flatMap((p) => p.notes.filter((n) => n.kind === "action")).length;
+    if (!discussed.length) return "";
+    return `Covered ${discussed.length} item${discussed.length === 1 ? "" : "s"} with ${decisions} decision${decisions === 1 ? "" : "s"} and ${actions} action item${actions === 1 ? "" : "s"}.`;
+  }
+}
