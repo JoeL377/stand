@@ -10,6 +10,7 @@ export function RecapPage() {
   const [data, setData] = useState<MeetingRecap | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     api.meeting(meetingId).then(setData).catch((e) => setError(e.message));
@@ -18,6 +19,14 @@ export function RecapPage() {
   if (error) return <div className="loading error">{error}</div>;
   if (!data) return <div className="loading">Loading…</div>;
   const people = [...new Set(data.items.flatMap((g) => g.segments.map((s) => s.speakerName)))];
+  const actions = data.items.flatMap((g) => g.notes.filter((n) => n.kind === "action").map((n) => ({ n, item: g.item })));
+  const briefUrl = (fmt: "json" | "md") => `/api/meetings/${data.meetingId}/brief.${fmt}`;
+  const copyBrief = async () => {
+    const md = await fetch(briefUrl("md")).then((r) => r.text());
+    await navigator.clipboard?.writeText(md);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
 
   return (
     <div className="doc">
@@ -34,7 +43,36 @@ export function RecapPage() {
           {people.length > 0 && ` · ${people.join(", ")}`}
         </p>
         {data.summary && <p className="lede">{data.summary}</p>}
+        <div className="brief-bar">
+          <span className="muted small">Follow-up brief for people and agents</span>
+          <button className="brief-btn" onClick={() => void copyBrief()}>
+            {copied ? "Copied" : "Copy as Markdown"}
+          </button>
+          <a className="brief-btn" href={briefUrl("json")} target="_blank" rel="noreferrer">
+            JSON
+          </a>
+        </div>
       </header>
+      {actions.length > 0 && (
+        <section className="doc-section brief-actions">
+          <h2>Action items</h2>
+          <ul>
+            {actions.map(({ n, item }) => (
+              <li key={n.id}>
+                <span className="box" aria-hidden />
+                <span>
+                  {n.text}
+                  <span className="muted small">
+                    {" "}
+                    · {n.owner ?? "Unassigned"}
+                    {item ? ` · ${keyOf(item) ?? item.title}` : ""}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {data.items.length === 0 && <p className="muted">Nothing was recorded in this meeting.</p>}
       {data.items.map((g) => {
         const key = g.item?.id ?? "general";

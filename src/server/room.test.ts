@@ -2,6 +2,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
+import { briefToMarkdown, buildBrief } from "./brief.ts";
 import { looksLikePdf, parseDeck } from "./decks.ts";
 import { HeuristicAgent } from "./llm.ts";
 import { parseLinearInput } from "./linear.ts";
@@ -145,4 +146,40 @@ test("outlines turn into slides", () => {
   assert.deepEqual(slides.map((s) => s.layout), ["title", "bullets", "section", "quote"]);
   assert.equal(slides[1].body, "Shipped\n  fast");
   assert.equal(slides[1].notes, "thanks");
+});
+
+test("the meeting brief lists every action with its owner and a link back to the item", () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Platform");
+  const [ticket, task] = db.addItems(room.id, [
+    { source: "linear" as const, externalId: "ENG-7", title: "Search latency", url: "https://linear.app/acme/issue/ENG-7", description: null },
+    { source: "agenda" as const, externalId: null, title: "Hiring", url: null, description: null },
+  ]);
+  const meeting = { id: "m1", roomId: room.id, startedAt: Date.UTC(2026, 9, 7, 9), endedAt: Date.UTC(2026, 9, 7, 9, 15), summary: "Short one." };
+  const note = (id: string, itemId: string | null, kind: "summary" | "decision" | "action" | "question", text: string, owner: string | null = null) =>
+    ({ id, meetingId: "m1", itemId, kind, text, owner, ts: 0 });
+  const seg = (itemId: string | null, speakerName: string, text: string) =>
+    ({ id: text, meetingId: "m1", itemId, speakerId: speakerName, speakerName, kind: "speech" as const, text, ts: meeting.startedAt });
+  const brief = buildBrief({
+    meeting,
+    roomName: room.name,
+    decks: [],
+    baseUrl: "http://stand.test",
+    withTranscript: true,
+    groups: [
+      { item: ticket, segments: [seg(ticket.id, "Priya", "p95 is 900ms")], notes: [note("n1", ticket.id, "decision", "Ship the cache"), note("n2", ticket.id, "action", "Add a dashboard", "Priya")] },
+      { item: task, segments: [seg(task.id, "Joe", "Two offers out")], notes: [note("n3", task.id, "action", "Follow up with candidates")] },
+    ],
+  });
+  assert.equal(brief.schema, "stand.meeting-brief/v1");
+  assert.equal(brief.meeting.durationMinutes, 15);
+  assert.deepEqual(brief.meeting.attendees, ["Priya", "Joe"]);
+  assert.deepEqual(brief.actions.map((a) => [a.text, a.owner, a.item.key ?? a.item.title]), [["Add a dashboard", "Priya", "ENG-7"], ["Follow up with candidates", null, "Hiring"]]);
+  assert.equal(brief.actions[0].item.url, "https://linear.app/acme/issue/ENG-7");
+  assert.equal(brief.actions[1].item.url, `http://stand.test/items/${task.id}`);
+  assert.equal(brief.items[0].transcript?.[0].text, "p95 is 900ms");
+  const md = briefToMarkdown(brief);
+  assert.match(md, /^---\nschema: stand.meeting-brief\/v1/);
+  assert.match(md, /- \[ \] Add a dashboard \(owner: Priya\) · \[ENG-7 · Search latency\]\(https:\/\/linear.app\/acme\/issue\/ENG-7\)/);
+  assert.match(md, /- \[ \] Follow up with candidates \(owner: unassigned\)/);
 });

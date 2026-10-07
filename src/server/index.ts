@@ -7,6 +7,7 @@ import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, MeetingRecap, Slid
 import { authRoutes, requireUser, userFromRequest } from "./auth.ts";
 import { capabilities, config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { briefToMarkdown, buildBrief } from "./brief.ts";
 import {
   MAX_DECK_BYTES,
   MAX_IMAGE_BYTES,
@@ -391,17 +392,26 @@ app.get(
   }),
 );
 
+/** A meeting's segments and notes grouped by agenda item, in agenda order. */
+function meetingGroups(m: { id: string; roomId: string }) {
+  const segments = db.meetingSegments(m.id);
+  const notes = db.meetingNotes(m.id);
+  const ids = [...new Set([...segments.map((s) => s.itemId), ...notes.map((n) => n.itemId)])];
+  const items = db.listItems(m.roomId);
+  ids.sort((a, b) => (items.find((i) => i.id === a)?.position ?? 1e9) - (items.find((i) => i.id === b)?.position ?? 1e9));
+  return ids.map((id) => ({
+    item: id ? db.getItem(id) : null,
+    segments: segments.filter((s) => s.itemId === id),
+    notes: notes.filter((n) => n.itemId === id),
+  }));
+}
+
 app.get(
   "/api/meetings/:id",
   route((req, res) => {
     const m = db.getMeeting(req.params.id);
     if (!m) return notFound(res);
     const room = db.getRoom(m.roomId)!;
-    const segments = db.meetingSegments(m.id);
-    const notes = db.meetingNotes(m.id);
-    const ids = [...new Set([...segments.map((s) => s.itemId), ...notes.map((n) => n.itemId)])];
-    const items = db.listItems(m.roomId);
-    ids.sort((a, b) => (items.find((i) => i.id === a)?.position ?? 1e9) - (items.find((i) => i.id === b)?.position ?? 1e9));
     const body: MeetingRecap = {
       meetingId: m.id,
       roomId: m.roomId,
@@ -409,13 +419,29 @@ app.get(
       startedAt: m.startedAt,
       endedAt: m.endedAt,
       summary: m.summary,
-      items: ids.map((id) => ({
-        item: id ? db.getItem(id) : null,
-        segments: segments.filter((s) => s.itemId === id),
-        notes: notes.filter((n) => n.itemId === id),
-      })),
+      items: meetingGroups(m),
     };
     res.json(body);
+  }),
+);
+
+// The meeting brief for follow-up: /brief.json for agents and tools,
+// /brief.md for pasting. Add ?transcript=1 to include what was said.
+app.get(
+  "/api/meetings/:id/brief.:format",
+  route((req, res) => {
+    const m = db.getMeeting(req.params.id);
+    if (!m || !["json", "md"].includes(req.params.format)) return notFound(res);
+    const brief = buildBrief({
+      meeting: m,
+      roomName: db.getRoom(m.roomId)!.name,
+      groups: meetingGroups(m),
+      decks: db.listDecks(m.roomId),
+      baseUrl: `${req.protocol}://${req.get("host")}`,
+      withTranscript: req.query.transcript === "1",
+    });
+    if (req.params.format === "json") return void res.json(brief);
+    res.type("text/markdown; charset=utf-8").send(briefToMarkdown(brief));
   }),
 );
 

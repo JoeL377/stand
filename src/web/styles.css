@@ -848,3 +848,13 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .lobby-list .meta { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .lobby-list .meta.summary { margin-left: 8px; flex: 1; text-align: left; }
 @media (max-width: 480px) { .lobby-card { padding: 20px; } .lobby-main { padding-top: 24px; } }
+
+/* Recap: the follow-up brief and the all-items action list. */
+.brief-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.brief-bar .muted { margin-right: auto; }
+.brief-btn { display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 13px; text-decoration: none; }
+.brief-btn:hover { background: var(--hover); text-decoration: none; }
+.brief-actions ul { list-style: none; margin: 0; padding: 0; }
+.brief-actions li { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.brief-actions li:last-child { border-bottom: 0; }
+.brief-actions .box { flex: none; width: 13px; height: 13px; border: 1.5px solid var(--muted); border-radius: 4px; transform: translateY(2px); }

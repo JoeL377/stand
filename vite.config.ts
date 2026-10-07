@@ -35,7 +35,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "^/api/": `http://localhost:${API_PORT}`,
+      // Keep the browser's Host so links the server builds (the meeting brief) point here.
+      "^/api/": { target: `http://localhost:${API_PORT}`, changeOrigin: false },
       "^/ws/": { target: `ws://localhost:${API_PORT}`, ws: true },
     },
   },
