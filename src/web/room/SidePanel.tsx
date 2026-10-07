@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
-import { colorFor, fmtTime } from "../util.ts";
+import { colorFor, fmtTime, keyOf } from "../util.ts";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -68,7 +68,7 @@ function Transcript(props: {
 
   const itemName = (id: string | null) => {
     const it = items.find((i) => i.id === id);
-    return it ? `${it.externalId ? it.externalId + " · " : ""}${it.title}` : "General / off-agenda";
+    return it ? `${keyOf(it) ? keyOf(it) + " · " : ""}${it.title}` : "General / off-agenda";
   };
 
   return (
@@ -129,7 +129,7 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
         >
           {items.map((it) => (
             <option key={it.id} value={it.id}>
-              {it.externalId ? `${it.externalId} · ` : ""}
+              {keyOf(it) ? `${keyOf(it)} · ` : ""}
               {it.title}
             </option>
           ))}
@@ -188,7 +188,7 @@ export function NotesView({
       {groups.map((g) => (
         <section key={g.id ?? "general"} className={g.id === focusItemId ? "note-group active" : "note-group"}>
           <h3>
-            {g.item?.externalId && <span className="key">{g.item.externalId}</span>}
+            {keyOf(g.item) && <span className="key">{keyOf(g.item)}</span>}
             {g.item ? g.item.title : "General / off-agenda"}
           </h3>
           <NoteList notes={g.notes} />

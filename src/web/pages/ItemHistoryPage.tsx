@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api.ts";
 import { NoteList } from "../room/SidePanel.tsx";
-import { colorFor, fmtDate, fmtTime } from "../util.ts";
+import { SlideView } from "../slides.tsx";
+import { colorFor, fmtDate, fmtTime, keyOf } from "../util.ts";
 
 type Data = Awaited<ReturnType<typeof api.itemHistory>>;
 
@@ -28,8 +29,14 @@ export function ItemHistoryPage() {
         <Link to={`/r/${room.id}`}>← {room.name}</Link>
       </nav>
       <header className="doc-head">
-        {item.externalId && <span className="key big">{item.externalId}</span>}
+        {keyOf(item) && <span className="key big">{keyOf(item)}</span>}
         <h1>{item.title}</h1>
+        {item.deckId && item.slideNo && (
+          <>
+            <SlideView deckId={item.deckId} page={item.slideNo} width={480} />
+            <Link to={`/decks/${item.deckId}`}>Whole deck →</Link>
+          </>
+        )}
         {item.url && (
           <a href={item.url} target="_blank" rel="noreferrer">
             Open in {item.source === "linear" ? "Linear" : "new tab"} ↗

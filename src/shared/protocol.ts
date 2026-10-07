@@ -1,7 +1,7 @@
 // Types shared by the server and the browser. The WebSocket at /ws/rooms/:id
 // carries ClientMessage up and ServerMessage down as JSON.
 
-export type ItemSource = "agenda" | "linear";
+export type ItemSource = "agenda" | "linear" | "slide";
 
 export interface Item {
   id: string;
@@ -13,6 +13,17 @@ export interface Item {
   url: string | null;
   description: string | null;
   position: number;
+  /** Slides: the deck this page belongs to and its 1-based page number. */
+  deckId: string | null;
+  slideNo: number | null;
+}
+
+/** An uploaded PDF. Each page is an Item, so discussion pins per slide. */
+export interface Deck {
+  id: string;
+  roomId: string;
+  title: string;
+  pageCount: number;
 }
 
 export type SegmentKind = "speech" | "chat";
@@ -91,6 +102,7 @@ export interface RoomState {
   pinnedBy: string | null;
   suggestion: Suggestion | null;
   items: Item[];
+  decks: Deck[];
   capabilities: Capabilities;
 }
 
@@ -134,6 +146,12 @@ export interface ItemHistory {
     segments: Segment[];
     notes: Note[];
   }>;
+}
+
+export interface DeckHistory {
+  deck: Deck;
+  room: { id: string; name: string } | null;
+  slides: Array<{ item: Item; segments: Segment[]; notes: Note[] }>;
 }
 
 export interface MeetingRecap {

@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import type { ClientMessage, Item, Participant, RoomState } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
-import { colorFor, initials } from "../util.ts";
+import { colorFor, initials, keyOf } from "../util.ts";
+import { SlideView } from "../slides.tsx";
 
 export function Stage(props: {
   state: RoomState;
@@ -22,6 +23,37 @@ export function Stage(props: {
   const sharer = state.participants.find((p) => p.isSharing);
   const host = state.participants.find((p) => p.isHost);
 
+  // Slides of the deck in focus, in order, so the host can flip with arrows.
+  const deckSlides = focusItem?.deckId ? state.items.filter((i) => i.deckId === focusItem.deckId) : [];
+  const deck = focusItem?.deckId ? state.decks.find((d) => d.id === focusItem.deckId) : undefined;
+  const slideIdx = deckSlides.findIndex((i) => i.id === focusItem?.id);
+  // Several quick presses should move several slides, even before the server
+  // has echoed the first one back, so count from the slide last asked for.
+  const asked = useRef<{ id: string; at: number } | null>(null);
+  const flip = (delta: number) => {
+    const from = asked.current && Date.now() - asked.current.at < 1500 ? asked.current.id : focusItem?.id;
+    const next = deckSlides[deckSlides.findIndex((i) => i.id === from) + delta];
+    if (!next) return;
+    asked.current = { id: next.id, at: Date.now() };
+    send({ type: "focus", itemId: next.id });
+  };
+  const flipRef = useRef(flip);
+  flipRef.current = flip;
+  const presenting = canSteer && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
+  useEffect(() => {
+    if (!presenting) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("input, textarea, [contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(e.key)) flipRef.current(1);
+      else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) flipRef.current(-1);
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [presenting]);
+
   // Demo speakers and remote talkers who aren't connected still show while talking.
   const talkingIds = new Set([...speaking, ...Object.keys(interims)]);
   const ghosts = Object.values(interims).filter((i) => !state.participants.some((p) => p.id === i.speakerId));
@@ -31,7 +63,7 @@ export function Stage(props: {
       <div className="now">
         <span className="now-label">Now discussing</span>
         <span className="now-title">
-          {focusItem?.externalId && <span className="key">{focusItem.externalId}</span>}
+          {keyOf(focusItem) && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}
         </span>
         {state.pinnedBy && <span className="badge">📌 Pinned</span>}
@@ -49,7 +81,7 @@ export function Stage(props: {
           <span className="nudge-text">
             Your screen shows{" "}
             <strong>
-              {suggested.externalId ? `${suggested.externalId} · ` : ""}
+              {keyOf(suggested) ? `${keyOf(suggested)} · ` : ""}
               {suggested.title}
             </strong>
           </span>
@@ -75,9 +107,34 @@ export function Stage(props: {
           </div>
         ) : (
           <div className="screen-empty">
-            {focusItem ? (
+            {focusItem?.deckId && focusItem.slideNo ? (
+              <div className="slide-stage">
+                <SlideView deckId={focusItem.deckId} page={focusItem.slideNo} className="slide-main" />
+                <div className="slide-bar">
+                  {canSteer && (
+                    <button className="ghost" onClick={() => flip(-1)} disabled={slideIdx <= 0} aria-label="Previous slide">
+                      ←
+                    </button>
+                  )}
+                  <span className="muted small">
+                    {deck?.title ?? "Slides"} · {focusItem.slideNo} of {deck?.pageCount ?? deckSlides.length}
+                  </span>
+                  {canSteer && (
+                    <button
+                      className="ghost"
+                      onClick={() => flip(1)}
+                      disabled={slideIdx < 0 || slideIdx >= deckSlides.length - 1}
+                      aria-label="Next slide"
+                    >
+                      →
+                    </button>
+                  )}
+                  {canSteer && <span className="muted small slide-hint">Arrow keys flip slides</span>}
+                </div>
+              </div>
+            ) : focusItem ? (
               <div className="focus-card">
-                {focusItem.externalId && <div className="key big">{focusItem.externalId}</div>}
+                {keyOf(focusItem) && <div className="key big">{keyOf(focusItem)}</div>}
                 <h2>{focusItem.title}</h2>
                 {focusItem.description && <p className="muted pre focus-desc">{focusItem.description}</p>}
                 {focusItem.url && (

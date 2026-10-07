@@ -155,6 +155,7 @@ export class RoomSession implements SpeechSink {
       pinnedBy: this.pinnedBy,
       suggestion: this.suggestion,
       items: this.items(),
+      decks: this.db.listDecks(this.roomId),
       capabilities: capabilities(),
     };
   }

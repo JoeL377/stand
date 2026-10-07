@@ -1,4 +1,4 @@
-import type { Capabilities, Item, ItemHistory, MeetingRecap, User } from "../shared/protocol.ts";
+import type { Capabilities, DeckHistory, Item, ItemHistory, MeetingRecap, User } from "../shared/protocol.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -38,6 +38,8 @@ export const api = {
     call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { title }),
   removeItem: (roomId: string, itemId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/items/${itemId}`),
   reorder: (roomId: string, ids: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items/reorder`, { ids }),
+  removeDeck: (roomId: string, deckId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/decks/${deckId}`),
+  deckHistory: (deckId: string) => call<DeckHistory>("GET", `/api/decks/${deckId}/history`),
   itemHistory: (itemId: string) =>
     call<ItemHistory & { room: { id: string; name: string } }>("GET", `/api/items/${itemId}/history`),
   meeting: (id: string) => call<MeetingRecap>("GET", `/api/meetings/${id}`),

@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import type { MeetingRecap } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { NoteList } from "../room/SidePanel.tsx";
-import { colorFor, fmtDate, fmtDuration, fmtTime } from "../util.ts";
+import { colorFor, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
 export function RecapPage() {
   const { meetingId = "" } = useParams();
@@ -42,7 +42,7 @@ export function RecapPage() {
           <section key={key} className="doc-section meeting-block">
             <div className="meeting-block-head">
               <h2>
-                {g.item?.externalId && <span className="key">{g.item.externalId}</span>}
+                {keyOf(g.item) && <span className="key">{keyOf(g.item)}</span>}
                 {g.item ? <Link to={`/items/${g.item.id}`}>{g.item.title}</Link> : "General / off-agenda"}
               </h2>
               <span className="muted small">{[...new Set(g.segments.map((s) => s.speakerName))].join(", ")}</span>

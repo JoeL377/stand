@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
+import type { Deck, Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -47,6 +47,13 @@ CREATE TABLE IF NOT EXISTS items (
   created_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS items_external ON items(room_id, source, external_id) WHERE external_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS decks (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  title TEXT NOT NULL,
+  page_count INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meetings (
   id TEXT PRIMARY KEY,
   room_id TEXT NOT NULL REFERENCES rooms(id),
@@ -106,7 +113,18 @@ const toItem = (r: Row): Item => ({
   url: (r.url as string) ?? null,
   description: (r.description as string) ?? null,
   position: r.position as number,
+  deckId: (r.deck_id as string) ?? null,
+  slideNo: (r.slide_no as number) ?? null,
 });
+
+const toDeck = (r: Row): Deck => ({
+  id: r.id as string,
+  roomId: r.room_id as string,
+  title: r.title as string,
+  pageCount: r.page_count as number,
+});
+
+type NewItem = Pick<Item, "source" | "externalId" | "title" | "url" | "description"> & { deckId?: string; slideNo?: number };
 
 const toSegment = (r: Row): Segment => ({
   id: r.id as string,
@@ -137,6 +155,8 @@ export function openDb(file?: string) {
   // Added after the first version; older databases lack it.
   const roomCols = (db.prepare("PRAGMA table_info(rooms)").all() as Row[]).map((c) => c.name);
   if (!roomCols.includes("created_by")) db.exec("ALTER TABLE rooms ADD COLUMN created_by TEXT");
+  const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
+  if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
 
   return {
     raw: db,
@@ -221,13 +241,13 @@ export function openDb(file?: string) {
     /** Adds items to the end of the room's list. Linear issues already in the
      *  room are un-archived and refreshed rather than duplicated, so their
      *  history carries over. */
-    addItems(roomId: string, items: Array<Pick<Item, "source" | "externalId" | "title" | "url" | "description">>): Item[] {
+    addItems(roomId: string, items: NewItem[]): Item[] {
       const maxPos = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM items WHERE room_id = ? AND archived = 0").get(roomId) as Row).p as number;
       let pos = maxPos + 1;
       const findExisting = db.prepare("SELECT * FROM items WHERE room_id = ? AND source = ? AND external_id = ?");
       const revive = db.prepare("UPDATE items SET archived = 0, title = ?, url = ?, description = ?, position = ? WHERE id = ?");
       const insert = db.prepare(
-        "INSERT INTO items (id, room_id, source, external_id, title, url, description, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO items (id, room_id, source, external_id, title, url, description, position, deck_id, slide_no, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       for (const it of items) {
         const existing = it.externalId ? (findExisting.get(roomId, it.source, it.externalId) as Row | undefined) : undefined;
@@ -235,7 +255,7 @@ export function openDb(file?: string) {
           const keepPos = existing.archived ? pos++ : (existing.position as number);
           revive.run(it.title, it.url, it.description, keepPos, existing.id as string);
         } else {
-          insert.run(newId(), roomId, it.source, it.externalId, it.title, it.url, it.description, pos++, Date.now());
+          insert.run(newId(), roomId, it.source, it.externalId, it.title, it.url, it.description, pos++, it.deckId ?? null, it.slideNo ?? null, Date.now());
         }
       }
       return this.listItems(roomId);
@@ -251,6 +271,40 @@ export function openDb(file?: string) {
     /** Hides an item from the list; its history stays reachable. */
     archiveItem(id: string) {
       db.prepare("UPDATE items SET archived = 1 WHERE id = ?").run(id);
+    },
+
+    createDeck(roomId: string, title: string, pageCount: number): Deck {
+      const id = newId(10);
+      db.prepare("INSERT INTO decks (id, room_id, title, page_count, created_at) VALUES (?, ?, ?, ?, ?)").run(id, roomId, title, pageCount, Date.now());
+      return { id, roomId, title, pageCount };
+    },
+    getDeck(id: string): Deck | null {
+      const r = db.prepare("SELECT * FROM decks WHERE id = ?").get(id) as Row | undefined;
+      return r ? toDeck(r) : null;
+    },
+    /** Decks with at least one slide still on the agenda. */
+    listDecks(roomId: string): Deck[] {
+      return (
+        db
+          .prepare("SELECT * FROM decks d WHERE room_id = ? AND EXISTS (SELECT 1 FROM items i WHERE i.deck_id = d.id AND i.archived = 0) ORDER BY created_at")
+          .all(roomId) as Row[]
+      ).map(toDeck);
+    },
+    deckSlides(deckId: string): Item[] {
+      return (db.prepare("SELECT * FROM items WHERE deck_id = ? ORDER BY slide_no").all(deckId) as Row[]).map(toItem);
+    },
+    archiveDeck(deckId: string) {
+      db.prepare("UPDATE items SET archived = 1 WHERE deck_id = ?").run(deckId);
+    },
+    /** Everything said and noted on any slide of the deck, across meetings. */
+    deckActivity(deckId: string) {
+      const segments = (
+        db.prepare("SELECT s.* FROM segments s JOIN items i ON i.id = s.item_id WHERE i.deck_id = ? ORDER BY s.ts").all(deckId) as Row[]
+      ).map(toSegment);
+      const notes = (
+        db.prepare("SELECT n.* FROM notes n JOIN items i ON i.id = n.item_id WHERE i.deck_id = ? ORDER BY n.ts, n.rowid").all(deckId) as Row[]
+      ).map(toNote);
+      return { segments, notes };
     },
 
     startMeeting(roomId: string) {

@@ -23,3 +23,9 @@ export const initials = (name: string) =>
     .slice(0, 2)
     .map((w) => w[0]!.toUpperCase())
     .join("");
+
+/** Short label shown before an item's title: the Linear key, or "Slide 3". */
+export function keyOf(item: Pick<Item, "externalId" | "slideNo"> | null | undefined): string | null {
+  if (!item) return null;
+  return item.externalId ?? (item.slideNo ? `Slide ${item.slideNo}` : null);
+}

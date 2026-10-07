@@ -3,10 +3,11 @@ import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer } from "ws";
-import type { ItemHistory, MeetingRecap } from "../shared/protocol.ts";
+import type { DeckHistory, ItemHistory, MeetingRecap } from "../shared/protocol.ts";
 import { authRoutes, requireUser, userFromRequest } from "./auth.ts";
 import { capabilities, config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { MAX_DECK_BYTES, deckFile, deckTitle, looksLikePdf, parseDeck, saveDeckFile } from "./decks.ts";
 import { importFromLinear, sampleSprint } from "./linear.ts";
 import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
@@ -128,6 +129,79 @@ app.post(
     if (!room) return notFound(res);
     db.addItems(room.id, sampleSprint());
     res.json(afterItemsChange(room.id));
+  }),
+);
+
+// A deck is uploaded as the raw PDF body; its name comes in ?name=.
+app.post(
+  "/api/rooms/:id/decks",
+  express.raw({ type: () => true, limit: MAX_DECK_BYTES }),
+  route(async (req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room) return notFound(res);
+    const pdf = new Uint8Array(req.body as Buffer);
+    if (!looksLikePdf(pdf)) return res.status(400).json({ error: "That isn't a PDF. Export the deck as PDF and try again." });
+    let slides;
+    try {
+      slides = await parseDeck(pdf);
+    } catch (err) {
+      return res.status(400).json({ error: (err as Error).message || "Couldn't read that PDF." });
+    }
+    if (!slides.length) return res.status(400).json({ error: "That PDF has no pages." });
+    const deck = db.createDeck(room.id, deckTitle(req.query.name as string | undefined, "Slides"), slides.length);
+    saveDeckFile(deck.id, pdf);
+    db.addItems(
+      room.id,
+      slides.map((s, i) => ({
+        source: "slide",
+        externalId: null,
+        title: s.title,
+        url: null,
+        description: s.text || null,
+        deckId: deck.id,
+        slideNo: i + 1,
+      })),
+    );
+    res.json({ deck, items: afterItemsChange(room.id) });
+  }),
+);
+
+app.delete(
+  "/api/rooms/:id/decks/:deckId",
+  route((req, res) => {
+    const deck = db.getDeck(req.params.deckId);
+    if (!deck || deck.roomId !== req.params.id) return notFound(res);
+    db.archiveDeck(deck.id);
+    res.json(afterItemsChange(deck.roomId));
+  }),
+);
+
+app.get(
+  "/api/decks/:deckId/file",
+  route((req, res) => {
+    const file = db.getDeck(req.params.deckId) && deckFile(req.params.deckId);
+    if (!file) return notFound(res);
+    res.setHeader("Cache-Control", "private, max-age=86400, immutable");
+    res.type("application/pdf").sendFile(file);
+  }),
+);
+
+app.get(
+  "/api/decks/:deckId/history",
+  route((req, res) => {
+    const deck = db.getDeck(req.params.deckId);
+    if (!deck) return notFound(res);
+    const { segments, notes } = db.deckActivity(deck.id);
+    const body: DeckHistory = {
+      deck,
+      room: db.getRoom(deck.roomId),
+      slides: db.deckSlides(deck.id).map((item) => ({
+        item,
+        segments: segments.filter((s) => s.itemId === item.id),
+        notes: notes.filter((n) => n.itemId === item.id),
+      })),
+    };
+    res.json(body);
   }),
 );
 

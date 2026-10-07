@@ -1,6 +1,8 @@
+import fs from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
+import { looksLikePdf, parseDeck } from "./decks.ts";
 import { HeuristicAgent } from "./llm.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession } from "./room.ts";
@@ -72,4 +74,25 @@ test("sessions resolve to users, and Google sign-in links to an existing email",
   assert.equal(db.sessionUser(s.id)?.email, "joe@example.com");
   db.deleteSession(s.id);
   assert.equal(db.sessionUser(s.id), null);
+});
+
+test("a PDF deck becomes one item per slide, titled by its biggest text", async () => {
+  const pdf = new Uint8Array(fs.readFileSync(new URL("./fixtures/deck.pdf", import.meta.url)));
+  assert.ok(looksLikePdf(pdf));
+  const slides = await parseDeck(pdf);
+  assert.deepEqual(
+    slides.map((s) => s.title),
+    ["Q4 Roadmap", "Search latency", "Mobile onboarding", "Hiring plan"],
+  );
+  assert.match(slides[2].text, /Signup completion is 41%/);
+
+  const db = openDb();
+  const room = db.createRoom("R");
+  const deck = db.createDeck(room.id, "Q4", slides.length);
+  db.addItems(room.id, slides.map((s, i) => ({ source: "slide" as const, externalId: null, title: s.title, url: null, description: s.text, deckId: deck.id, slideNo: i + 1 })));
+  assert.deepEqual(db.listDecks(room.id).map((d) => d.id), [deck.id]);
+  assert.deepEqual(db.deckSlides(deck.id).map((i) => i.slideNo), [1, 2, 3, 4]);
+  db.archiveDeck(deck.id);
+  assert.equal(db.listItems(room.id).length, 0);
+  assert.equal(db.listDecks(room.id).length, 0);
 });

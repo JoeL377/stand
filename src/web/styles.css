@@ -195,6 +195,15 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); }
   background: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
+.deck { margin: 4px 0; }
+.deck-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 2px 8px; }
+.deck-toggle { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 4px 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; display: flex; gap: 6px; align-items: baseline; }
+.deck-toggle .muted { font-weight: 400; font-size: 11px; }
+.deck-items { padding-left: 10px; }
+.deck-items .item-main { padding-top: 5px; padding-bottom: 5px; }
+.slide-no { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.6em; display: inline-block; font-size: 12px; }
+.drop { border: 1.5px dashed var(--line); border-radius: 8px; padding: 16px 10px; text-align: center; color: var(--muted); font-size: 13px; cursor: pointer; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); color: inherit; }
 .add-items { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 16px; border-top: 1px solid var(--line); }
 .add-items .link { align-self: flex-start; font-size: 12px; }
 
@@ -233,6 +242,17 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); }
 .focus-card h2 { font-size: 22px; }
 .focus-card .key { align-self: center; margin: 0; }
 .focus-card .muted { color: #a5a5b3; }
+/* Slides: the page fills the stage, letterboxed, with a slim control bar. */
+.screen-empty:has(.slide-stage) { padding: 12px; place-items: stretch; }
+.slide-stage { display: flex; flex-direction: column; gap: 8px; min-height: 0; height: 100%; }
+.slide-view { display: grid; place-items: center; min-height: 0; }
+.slide-view canvas { display: block; border-radius: 4px; box-shadow: 0 2px 16px rgb(0 0 0 / 0.35); background: #fff; }
+.slide-main { flex: 1; }
+.slide-bar { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.slide-bar .ghost { color: #e7e7ee; border-color: rgb(255 255 255 / 0.2); min-width: 40px; }
+.slide-bar .ghost:disabled { opacity: 0.35; }
+.slide-hint { position: absolute; right: 24px; opacity: 0.7; }
+.slide-bar { position: relative; }
 .video { margin: 0; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .video video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; }
 .video figcaption { font-size: 12px; padding: 6px 10px; color: #a5a5b3; }
@@ -386,3 +406,11 @@ img.avatar { object-fit: cover; }
 }
 .nudge .agent-mark { font-size: 14px; }
 .nudge-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Deck history: each slide beside what was said about it. */
+.deck-slide { display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start; }
+.deck-slide .slide-view canvas { box-shadow: 0 1px 6px rgb(0 0 0 / 0.15); }
+@media (max-width: 720px) { .deck-slide { grid-template-columns: 1fr; } }
+.slide-thumb-link { display: block; }
+.check { display: inline-flex; align-items: center; gap: 6px; }
+.check input { width: auto; margin: 0; }

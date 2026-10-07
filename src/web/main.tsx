@@ -6,6 +6,7 @@ import { Home } from "./pages/Home.tsx";
 import { RoomPage } from "./pages/RoomPage.tsx";
 import { ItemHistoryPage } from "./pages/ItemHistoryPage.tsx";
 import { RecapPage } from "./pages/RecapPage.tsx";
+import { DeckHistoryPage } from "./pages/DeckHistoryPage.tsx";
 import { AuthGate } from "./auth.tsx";
 
 createRoot(document.getElementById("root")!).render(
@@ -17,6 +18,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/r/:roomId" element={<RoomPage />} />
           <Route path="/items/:itemId" element={<ItemHistoryPage />} />
           <Route path="/meetings/:meetingId" element={<RecapPage />} />
+          <Route path="/decks/:deckId" element={<DeckHistoryPage />} />
         </Routes>
       </AuthGate>
     </BrowserRouter>

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { Capabilities } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth, UserMenu } from "../auth.tsx";
-import { fmtDate, fmtTime } from "../util.ts";
+import { fmtDate, fmtTime, keyOf } from "../util.ts";
 import { Meeting } from "../room/Meeting.tsx";
 
 export function RoomPage() {
@@ -94,7 +94,7 @@ export function RoomPage() {
             {room.items.map((it) => (
               <Link key={it.id} to={`/items/${it.id}`} className="recent-row">
                 <span>
-                  {it.externalId && <span className="key">{it.externalId}</span>} {it.title}
+                  {keyOf(it) && <span className="key">{keyOf(it)}</span>} {it.title}
                 </span>
                 <span className="muted">History →</span>
               </Link>

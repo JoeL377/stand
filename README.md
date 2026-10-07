@@ -2,11 +2,13 @@
 
 Voice rooms where an AI agent pins every remark to the ticket or doc section it's about.
 
-People talk (voice only, no cameras) and share their screen. The room has an agenda: typed items or Linear issues. A **host** clicks through it, and whatever item the host has open is what everything said is recorded against. An agent listens to each person separately and writes notes per item.
+People talk (voice only, no cameras) and share their screen. The room has an agenda: typed items, Linear issues, or the slides of a deck. A **host** clicks through it, and whatever item the host has open is what everything said is recorded against. An agent listens to each person separately and writes notes per item.
 
 The room's creator hosts whenever they're there; otherwise the first person in does. The host can hand it to anyone, and it passes on if they leave. Only the host switches items, pins one, or ends the meeting. Anyone can chat, and anyone can move a remark to the right item afterwards.
 
 If the host shares their screen and it shows a different item than the one open, the agent gives the host a quiet nudge ("Your screen shows ENG-142 · Switch to it"). Switching also moves anything said since the screen changed. Nobody else sees the nudge.
+
+**Slides.** Upload a deck as a PDF (Keynote, PowerPoint and Google Slides all export one). Each slide becomes an agenda item under the deck's name, titled by its biggest line of text. When the host opens a slide, everyone sees that page drawn in their own browser, sharp at any size, and the host flips with the arrow keys or the ← → buttons. Whatever is said lands on the slide that was showing, and the deck page (↗ next to the deck) shows every slide beside its discussion, decisions and action items.
 
 Everyone signs in with Google, so names in the transcript and owners of action items are real accounts.
 
@@ -49,7 +51,7 @@ Copy `.env.example` to `.env` and fill in what you have. Each one switches on in
 npm run build && npm start   # serves the built app and API on $PORT
 ```
 
-Data is a SQLite file in `DATA_DIR` (default `./data`). Node 22.13 or newer.
+Data is a SQLite file in `DATA_DIR` (default `./data`), with uploaded decks in `DATA_DIR/decks`. Node 22.13 or newer.
 
 ## How it works
 
@@ -73,4 +75,5 @@ Code map: `src/server` (Express + ws + SQLite), `src/web` (React + Vite), `src/s
 - Per-room permissions (anyone signed in who has the link can join).
 - Writing decisions back to Linear as comments.
 - Google Docs / Notion outlines as agenda sources.
+- Google Slides links that stay in sync, and .pptx upload (export to PDF for now).
 - Asking the agent things mid-meeting ("what did we decide about this last week?").
