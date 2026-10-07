@@ -20,6 +20,8 @@ export interface RoomInfo {
   id: string;
   name: string;
   items: Item[];
+  decks: Deck[];
+  people: Array<{ name: string; picture: string | null }>;
   meetings: Array<{ id: string; startedAt: number; endedAt: number | null; summary: string | null; segmentCount: number }>;
   liveMeetingId: string | null;
 }
