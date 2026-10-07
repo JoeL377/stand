@@ -60,3 +60,39 @@ export function Logo({ size = 22 }: { size?: number }) {
     </svg>
   );
 }
+
+// Agenda entry kinds: a typed task, a Linear ticket, a deck made in Stand,
+// an uploaded PDF deck, and the general / off-agenda line.
+export const TaskIcon = ({ size = 15 }: { size?: number }) => (
+  <Svg size={size}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="m8.5 12.2 2.4 2.3 4.6-4.8" />
+  </Svg>
+);
+
+export const TicketIcon = ({ size = 15 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2.5a2.5 2.5 0 0 0 0 5V17a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.5a2.5 2.5 0 0 0 0-5Z" />
+    <path d="M14 5v2M14 11v2M14 17v2" />
+  </Svg>
+);
+
+export const DeckIcon = ({ size = 15 }: { size?: number }) => (
+  <Svg size={size}>
+    <rect x="3" y="4" width="18" height="12" rx="1.5" />
+    <path d="M12 16v4M8.5 20h7M7.5 12.5l3-3 2 2 4-4" />
+  </Svg>
+);
+
+export const PdfIcon = ({ size = 15 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+    <path d="M14 3v5h5M9 13h6M9 17h4" />
+  </Svg>
+);
+
+export const ChatIcon = ({ size = 15 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.6A7.5 7.5 0 1 1 20 12Z" />
+  </Svg>
+);

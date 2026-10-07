@@ -790,3 +790,12 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .agenda .deck-items .item-title { font-size: 13px; }
 .agenda .deck-toggle .chev { margin-left: auto; }
 .agenda .deck-items { margin-left: 12px; }
+
+/* Agenda kind icons: what each entry is (task, Linear ticket, deck, PDF).
+   The icon turns accent blue on the entry in focus, standing in for the dot. */
+.agenda .kind { flex: none; display: inline-flex; width: 16px; height: 1.45em; align-items: center; justify-content: center; color: var(--muted); }
+.agenda .kind svg { display: block; }
+.agenda .kind.live { color: var(--accent); }
+.agenda .deck-toggle .kind { height: auto; }
+.agenda .item-main .kind { margin-top: 1px; }
+.agenda .deck-toggle .kind { margin-left: 2px; margin-right: 2px; }

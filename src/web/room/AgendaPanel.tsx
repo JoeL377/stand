@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Deck, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
+import { ChatIcon, DeckIcon, PdfIcon, TaskIcon, TicketIcon } from "../icons.tsx";
 import { uploadDeck } from "../slides.tsx";
 
 export function AgendaPanel(props: {
@@ -53,7 +54,12 @@ export function AgendaPanel(props: {
           onClick={() => send({ type: "focus", itemId: it.id })}
           title={steerTitle}
         >
-          {active && <span className="live-dot" aria-label="In focus" />}
+          {active && it.source === "slide" && <span className="live-dot" aria-label="In focus" />}
+          {it.source !== "slide" && (
+            <span className={active ? "kind live" : "kind"} title={it.source === "linear" ? "Linear ticket" : "Agenda task"}>
+              {it.source === "linear" ? <TicketIcon /> : <TaskIcon />}
+            </span>
+          )}
           <span className="item-text">
             {it.externalId && <span className="key">{it.externalId}</span>}
             <span className="item-title">
@@ -136,6 +142,9 @@ export function AgendaPanel(props: {
       <li key={b.deck.id} className={pop === key ? "deck popped" : "deck"}>
         <div className="deck-head">
           <button className="deck-toggle" onClick={() => setOpenDecks((o) => ({ ...o, [b.deck.id]: !open }))} aria-expanded={open}>
+            <span className={b.items.some((i) => i.id === state.focusItemId) ? "kind live" : "kind"} title={b.deck.kind === "native" ? "Slides made in Stand" : "PDF deck"}>
+              {b.deck.kind === "native" ? <DeckIcon /> : <PdfIcon />}
+            </span>
             <span className="item-title">{b.deck.title}</span>
             <span className="deck-count">{b.items.length} slides</span>
             <span className="chev" aria-hidden>
@@ -257,7 +266,9 @@ export function AgendaPanel(props: {
           {blocks.map((b) => (b.kind === "item" ? row(b.item) : deckRow(b.block)))}
           <li className={state.focusItemId === null ? "item active" : "item"}>
             <button className="item-main" disabled={!canSteer} title={steerTitle} onClick={() => send({ type: "focus", itemId: null })}>
-              {state.focusItemId === null && <span className="live-dot" />}
+              <span className={state.focusItemId === null ? "kind live" : "kind"} title="Anything not on the agenda">
+                <ChatIcon />
+              </span>
               <span className="item-text">
                 <span className="item-title muted">General / off-agenda</span>
                 {(counts.get(null) ?? 0) > 0 && <span className="item-meta">{counts.get(null)} remarks</span>}
