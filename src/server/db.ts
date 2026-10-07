@@ -243,11 +243,13 @@ export function openDb(file?: string) {
       db.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)").run(id, userId, Date.now() + SESSION_TTL_MS);
       return { id, maxAgeMs: SESSION_TTL_MS };
     },
-    sessionUser(sessionId: string): User | null {
+    /** The signed-in user, and whether Google verified their email
+     *  (false for the stand-in name-and-email sign-in). */
+    sessionUser(sessionId: string): { user: User; verified: boolean } | null {
       const r = db
         .prepare("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?")
         .get(sessionId, Date.now()) as Row | undefined;
-      return r ? toUser(r) : null;
+      return r ? { user: toUser(r), verified: Boolean(r.google_sub) } : null;
     },
     deleteSession(sessionId: string) {
       db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);

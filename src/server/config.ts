@@ -25,7 +25,12 @@ export const config = {
   },
   /** Public origin, e.g. https://standup.example.com. Defaults to the request's own origin. */
   publicUrl: env("PUBLIC_URL"),
-  /** Comma-separated email domains allowed to sign in, e.g. "acme.com". Empty = anyone. */
+  /** Comma-separated email addresses allowed in, e.g. "ann@gmail.com,bo@acme.com". */
+  allowedEmails: (env("ALLOWED_EMAILS") ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
+  /** Comma-separated email domains allowed in, e.g. "acme.com". With neither list set, anyone can sign in. */
   allowedDomains: (env("ALLOWED_EMAIL_DOMAINS") ?? "")
     .split(",")
     .map((d) => d.trim().toLowerCase().replace(/^@/, ""))

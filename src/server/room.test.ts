@@ -95,7 +95,7 @@ test("sessions resolve to users, and Google sign-in links to an existing email",
   assert.equal(google.id, dev.id);
   assert.equal(google.name, "Joe Liang");
   const s = db.createSession(google.id);
-  assert.equal(db.sessionUser(s.id)?.email, "joe@example.com");
+  assert.equal(db.sessionUser(s.id)?.user.email, "joe@example.com");
   db.deleteSession(s.id);
   assert.equal(db.sessionUser(s.id), null);
 });
@@ -291,4 +291,31 @@ test("the agent groups an item's talk into discussions, and notes point at the o
   assert.equal(brief.actions[0].discussion?.topic, d.topic);
   assert.deepEqual(brief.items[0].discussions[0].actionIds, [action.id]);
   assert.match(briefToMarkdown(brief), /#### One · action taken\n\n- Sam: The annual plan/);
+});
+
+test("allowlist: only listed emails or domains get in, checked on every request", async () => {
+  const { userFromRequest } = await import("./auth.ts");
+  const { config } = await import("./config.ts");
+  const db = openDb(":memory:");
+  const cookie = (email: string, googleSub: string | null) => {
+    const u = db.upsertUser({ googleSub, email, name: email, picture: null });
+    return { headers: { cookie: `standup_session=${db.createSession(u.id).id}` } } as never;
+  };
+  const ann = cookie("ann@gmail.com", "g-ann");
+  const bo = cookie("bo@acme.com", "g-bo");
+  const eve = cookie("eve@gmail.com", "g-eve");
+  const standIn = cookie("ann2@gmail.com", null);
+  try {
+    // Open to anyone: everyone, including a stand-in sign-in, gets in.
+    assert.ok(userFromRequest(db, eve) && userFromRequest(db, standIn));
+    config.allowedEmails = ["ann@gmail.com", "ann2@gmail.com"];
+    config.allowedDomains = ["acme.com"];
+    assert.equal(userFromRequest(db, ann)?.email, "ann@gmail.com");
+    assert.equal(userFromRequest(db, bo)?.email, "bo@acme.com");
+    assert.equal(userFromRequest(db, eve), null, "existing session of someone not listed is cut off");
+    assert.equal(userFromRequest(db, standIn), null, "unverified sign-in never counts once access is limited");
+  } finally {
+    config.allowedEmails = [];
+    config.allowedDomains = [];
+  }
 });

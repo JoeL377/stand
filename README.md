@@ -45,7 +45,7 @@ Copy `.env.example` to `.env` and fill in what you have. Each one switches on in
 - Transcription needs nothing extra: it runs through [LiveKit Inference](https://docs.livekit.io/agents/models/stt/deepgram.md) on your LiveKit keys and is billed by LiveKit (about $0.005/min; the free plan includes some credit). `STT_MODEL` picks the model (default `deepgram/nova-3`). If you'd rather pay Deepgram directly, set `DEEPGRAM_API_KEY` and the agent talks to Deepgram instead.
 - `ANTHROPIC_API_KEY` for notes and screen reading. `ANTHROPIC_MODEL` overrides the model (default `claude-opus-5-5`).
 - `LINEAR_API_KEY`, a personal API key from Linear settings.
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` from an OAuth client ID ("Web application") in Google Cloud. Add `<origin>/api/auth/google/callback` as an authorized redirect URI. `ALLOWED_EMAIL_DOMAINS` limits who can sign in; `PUBLIC_URL` sets the origin when behind a proxy.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` from an OAuth client ID ("Web application") in Google Cloud. Add `<origin>/api/auth/google/callback` as an authorized redirect URI. `ALLOWED_EMAILS` (exact addresses) and `ALLOWED_EMAIL_DOMAINS` limit who can get in, checked on every request, so removing someone takes effect at once; once either is set, only Google sign-in works; `PUBLIC_URL` sets the origin when behind a proxy.
 
 ## Production
 

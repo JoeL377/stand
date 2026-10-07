@@ -33,10 +33,27 @@ function setCookie(res: Response, name: string, value: string, maxAgeMs: number)
   });
 }
 
-/** The user behind a request's session cookie (HTTP or WebSocket upgrade). */
+/** True when ALLOWED_EMAILS or ALLOWED_EMAIL_DOMAINS limits who can get in. */
+export const accessRestricted = () => config.allowedEmails.length > 0 || config.allowedDomains.length > 0;
+
+/** Whether this email may use the app: on the email allowlist or in an allowed domain. */
+export function emailAllowed(email: string) {
+  if (!accessRestricted()) return true;
+  const e = email.trim().toLowerCase();
+  return config.allowedEmails.includes(e) || config.allowedDomains.includes(e.split("@")[1] ?? "");
+}
+
+/** The user behind a request's session cookie (HTTP or WebSocket upgrade).
+ *  Access is checked on every request, not just at sign-in, so taking someone
+ *  off the allowlist or turning on Google locks out existing sessions too. */
 export function userFromRequest(db: DB, req: IncomingMessage): User | null {
   const sid = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-  return sid ? db.sessionUser(sid) : null;
+  const s = sid ? db.sessionUser(sid) : null;
+  if (!s || !emailAllowed(s.user.email)) return null;
+  // A stand-in sign-in proves nothing about the email, so it only counts while
+  // the app is open to anyone and Google isn't set up.
+  if (!s.verified && (googleEnabled() || accessRestricted())) return null;
+  return s.user;
 }
 
 declare global {
@@ -65,11 +82,6 @@ function origin(req: Request) {
 
 /** Only same-site paths, so the sign-in flow can't be used as an open redirect. */
 const safeNext = (next: unknown) => (typeof next === "string" && /^\/(?!\/)/.test(next) ? next : "/");
-
-function domainAllowed(email: string) {
-  if (!config.allowedDomains.length) return true;
-  return config.allowedDomains.includes(email.split("@")[1]?.toLowerCase() ?? "");
-}
 
 function signIn(db: DB, res: Response, user: User) {
   const s = db.createSession(user.id);
@@ -141,7 +153,7 @@ export function authRoutes(db: DB) {
       const info = (await infoRes.json()) as { sub?: string; email?: string; email_verified?: boolean; name?: string; picture?: string };
       if (!infoRes.ok || !info.sub || !info.email) throw new Error("couldn't read your Google profile");
       if (!info.email_verified) return fail("Your Google email isn't verified.");
-      if (!domainAllowed(info.email)) return fail(`${info.email} isn't allowed here.`);
+      if (!emailAllowed(info.email)) return fail(`${info.email} doesn't have access. Ask the person who runs Stand to add you.`);
 
       const user = db.upsertUser({
         googleSub: info.sub,
@@ -160,10 +172,10 @@ export function authRoutes(db: DB) {
   // Stand-in sign-in, only while Google isn't configured.
   r.post("/dev", (req, res) => {
     if (googleEnabled()) return res.status(404).json({ error: "Use Google sign-in" });
+    if (accessRestricted()) return res.status(403).json({ error: "Sign-in needs Google here. Ask the person who runs Stand to set it up." });
     const name = String(req.body?.name ?? "").trim().slice(0, 60);
     const email = String(req.body?.email ?? "").trim().toLowerCase().slice(0, 120);
     if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: "Enter your name and email." });
-    if (!domainAllowed(email)) return res.status(403).json({ error: `${email} isn't allowed here.` });
     const user = db.upsertUser({ googleSub: null, email, name, picture: null });
     signIn(db, res, user);
     res.json(user);
