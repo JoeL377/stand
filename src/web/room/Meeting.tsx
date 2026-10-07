@@ -8,6 +8,7 @@ import { AgendaPanel } from "./AgendaPanel.tsx";
 import { Stage } from "./Stage.tsx";
 import { SidePanel } from "./SidePanel.tsx";
 import { fmtDuration } from "../util.ts";
+import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
 
 export function Meeting(props: {
   roomId: string;
@@ -72,11 +73,11 @@ export function Meeting(props: {
     <div className="meeting">
       <header className="topbar">
         <div className="topbar-left">
-          <span className="logo small" aria-hidden>
-            ▍▌▋
+          <Logo size={20} />
+          <strong className="room-name">{state.roomName}</strong>
+          <span className="timer">
+            <span className="rec-dot" aria-hidden /> {fmtDuration(now - state.meetingStartedAt)}
           </span>
-          <strong>{state.roomName}</strong>
-          <span className="muted">· {fmtDuration(now - state.meetingStartedAt)}</span>
           {!room.connected && <span className="badge warn">Reconnecting…</span>}
         </div>
         <div className="topbar-right">
@@ -87,8 +88,8 @@ export function Meeting(props: {
             </span>
           )}
           {!caps.llm && <span className="badge" title="Add an Anthropic key for AI notes and screen reading">Heuristic notes</span>}
-          <button className="ghost" onClick={() => void navigator.clipboard?.writeText(`${location.origin}/r/${roomId}`)}>
-            Copy invite link
+          <button className="ghost invite" onClick={() => void navigator.clipboard?.writeText(`${location.origin}/r/${roomId}`)}>
+            <LinkIcon /> Copy invite link
           </button>
         </div>
       </header>
@@ -130,26 +131,37 @@ export function Meeting(props: {
       </div>
 
       <footer className="controls">
-        <button className={media.micOn ? "control on" : "control off"} onClick={() => void media.toggleMic()}>
-          {media.micOn ? "🎙 Mute" : "🔇 Unmute"}
-        </button>
-        {sharing ? (
-          <button className="control on" onClick={() => void media.stopShare()}>
-            ⏹ Stop sharing
+        <div className="controls-group">
+          <button className={media.micOn ? "control" : "control off"} onClick={() => void media.toggleMic()}>
+            {media.micOn ? <MicIcon /> : <MicOffIcon />}
+            <span>{media.micOn ? "Mute" : "Unmute"}</span>
           </button>
-        ) : (
-          <button className="control" onClick={() => void media.startShare()} disabled={Boolean(otherSharer)} title={otherSharer ? `${otherSharer.name} is sharing` : undefined}>
-            🖥 Share screen
-          </button>
-        )}
-        {canSteer && (!caps.livekit || !caps.llm) ? (
-          <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this room">
-            ▶ Play demo
-          </button>
-        ) : null}
+          {sharing ? (
+            <button className="control sharing" onClick={() => void media.stopShare()}>
+              <StopShareIcon />
+              <span>Stop sharing</span>
+            </button>
+          ) : (
+            <button
+              className="control share"
+              onClick={() => void media.startShare()}
+              disabled={Boolean(otherSharer)}
+              title={otherSharer ? `${otherSharer.name} is sharing` : undefined}
+            >
+              <ShareIcon />
+              <span>Share screen</span>
+            </button>
+          )}
+          {canSteer && (!caps.livekit || !caps.llm) ? (
+            <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this room">
+              <PlayIcon />
+              <span>Play demo</span>
+            </button>
+          ) : null}
+        </div>
         <span className="spacer" />
         <button
-          className="control"
+          className="control pill"
           onClick={() => {
             media.leave();
             props.onLeave();
@@ -159,7 +171,7 @@ export function Meeting(props: {
         </button>
         {canSteer && (
         <button
-          className="control danger"
+          className="control pill danger"
           disabled={ending}
           onClick={() => {
             if (!confirm("End the meeting for everyone and write up the notes?")) return;

@@ -5,6 +5,7 @@ import { api, type RoomInfo } from "../api.ts";
 import { useAuth, UserMenu } from "../auth.tsx";
 import { fmtDate, fmtTime, keyOf } from "../util.ts";
 import { Meeting } from "../room/Meeting.tsx";
+import { Logo } from "../icons.tsx";
 
 export function RoomPage() {
   const { roomId = "" } = useParams();
@@ -60,10 +61,8 @@ export function RoomPage() {
       <div className="home-card">
         <div className="brand">
           <Link to="/">
-            <span className="logo" aria-hidden>
-              ▍▌▋
-            </span>
-            Standup
+            <Logo />
+            Stand
           </Link>
           <span className="spacer" />
           <UserMenu />

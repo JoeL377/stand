@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { Capabilities, User } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { Avatar } from "./room/Stage.tsx";
+import { Logo } from "./icons.tsx";
 
 interface Auth {
   user: User;
@@ -44,10 +45,8 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
     <div className="home">
       <div className="home-card">
         <div className="brand">
-          <span className="logo" aria-hidden>
-            ▍▌▋
-          </span>
-          Standup
+          <Logo />
+          Stand
         </div>
         <h1>Meetings that remember what each ticket was about.</h1>
         <p className="muted">Sign in to join the room. Your name shows next to what you say, and action items are assigned to you.</p>

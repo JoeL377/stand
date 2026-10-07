@@ -185,8 +185,10 @@ function Person(props: {
   return (
     <div className={talking ? "person talking" : "person"}>
       <Avatar id={id} name={name} picture={picture} />
-      <div className="person-name">{name}</div>
-      {tag && <div className="person-tag">{tag}</div>}
+      <div className="person-label">
+        <span className="person-name">{name}</span>
+        {tag && <span className="person-tag">{tag}</span>}
+      </div>
       {onMakeHost && (
         <button className="link person-action" onClick={onMakeHost} title={`Let ${name} drive the meeting`}>
           Make host

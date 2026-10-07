@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api.ts";
 import { UserMenu } from "../auth.tsx";
+import { Logo } from "../icons.tsx";
 
 export function Home() {
   const [name, setName] = useState("");
@@ -30,10 +31,8 @@ export function Home() {
     <div className="home">
       <div className="home-card">
         <div className="brand">
-          <span className="logo" aria-hidden>
-            ▍▌▋
-          </span>
-          Standup
+          <Logo />
+          Stand
           <span className="spacer" />
           <UserMenu />
         </div>
