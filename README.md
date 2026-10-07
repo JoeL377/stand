@@ -55,6 +55,10 @@ npm run build && npm start   # serves the built app and API on $PORT
 
 Data is a SQLite file in `DATA_DIR` (default `./data`), with uploaded decks in `DATA_DIR/decks`. Node 22.13 or newer.
 
+### Deploying (Railway)
+
+`Dockerfile` and `railway.json` deploy the whole app as one container. Because meetings live in SQLite, run exactly one replica and attach a Railway volume mounted at `/data`. Set the keys from `.env.example` in Railway's Variables tab, plus `PUBLIC_URL=https://<your domain>`. For Google sign-in, add `https://<your domain>/api/auth/google/callback` as an authorized redirect URI on the OAuth client. The health check is `GET /api/health`.
+
 ## How it works
 
 ```

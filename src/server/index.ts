@@ -58,6 +58,12 @@ const route = (fn: Handler) => (req: Request<Params>, res: Response, next: NextF
 
 const notFound = (res: Response, what = "Not found") => res.status(404).json({ error: what });
 
+// For the host's health check: up and able to read the database.
+app.get("/api/health", (_req, res) => {
+  db.getRoom("health");
+  res.json({ ok: true });
+});
+
 app.get("/api/config", (_req, res) => {
   res.json(capabilities());
 });
