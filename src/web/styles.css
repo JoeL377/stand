@@ -55,6 +55,15 @@
   color: var(--text);
 }
 
+/* Scrollbars: thin, no track, thumb only shows while the pointer is over the scrolling panel. */
+* { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+*:hover, *:focus-within { scrollbar-color: rgb(128 128 128 / 0.35) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+:hover::-webkit-scrollbar-thumb { background-color: rgb(128 128 128 / 0.35); }
+::-webkit-scrollbar-thumb:hover { background-color: rgb(128 128 128 / 0.6); }
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body {
