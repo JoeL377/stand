@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Deck, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { uploadDeck } from "../slides.tsx";
@@ -14,8 +14,27 @@ export function AgendaPanel(props: {
   const { roomId, state, send, canSteer, segments, notes } = props;
   const host = state.participants.find((p) => p.isHost);
   const steerTitle = canSteer ? "Open this item: everything said now is recorded against it" : `${host?.name ?? "The host"} chooses the item`;
-  const [adding, setAdding] = useState(state.items.length === 0);
+  const { linear, llm } = state.capabilities;
   const [openDecks, setOpenDecks] = useState<Record<string, boolean>>({});
+  const [menu, setMenu] = useState(false);
+  const [add, setAdd] = useState<Exclude<AddMode, "pdf"> | null>(null);
+  const [uploadNote, setUploadNote] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenu(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [menu]);
 
   const counts = new Map<string | null, number>();
   for (const s of segments) counts.set(s.itemId, (counts.get(s.itemId) ?? 0) + 1);
@@ -62,7 +81,7 @@ export function AgendaPanel(props: {
           <a className="icon" href={`/items/${it.id}`} target="_blank" rel="noreferrer" title="History of this item">
             ↗
           </a>
-          {adding && (
+          {canSteer && (
             <button className="icon" title="Remove from agenda" onClick={() => void api.removeItem(roomId, it.id)}>
               ✕
             </button>
@@ -85,13 +104,74 @@ export function AgendaPanel(props: {
   const deckOpen = (b: Extract<Block, { kind: "deck" }>) =>
     openDecks[b.deck.id] ?? b.items.some((i) => i.id === state.focusItemId);
 
+  const addMenu: { mode: AddMode; label: string; hint: string }[] = [
+    { mode: "slides", label: "New slides", hint: llm ? "Build a deck here, or let Claude draft it" : "Build a deck in Stand's editor" },
+    { mode: "type", label: "Type items", hint: "One agenda item per line" },
+    { mode: "pdf", label: "Upload PDF deck", hint: "Each page becomes a slide" },
+    ...(linear ? [{ mode: "linear" as const, label: "From Linear", hint: "Issues from a project, cycle or view" }] : []),
+  ];
+  const pick = (mode: AddMode) => {
+    setMenu(false);
+    if (mode === "pdf") fileRef.current?.click();
+    else setAdd(mode);
+  };
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setUploadNote("Reading slides…");
+    try {
+      await uploadDeck(roomId, file);
+      setUploadNote(null);
+    } catch (e) {
+      setUploadNote((e as Error).message);
+    }
+  };
+  const empty = state.items.length === 0;
+
   return (
-    <aside className="panel agenda">
+    <aside
+      className={dropping ? "panel agenda dropping" : "panel agenda"}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        setDropping(false);
+        void upload(e.dataTransfer.files[0]);
+      }}
+    >
       <div className="panel-head">
         <h2>Agenda</h2>
-        <button className="ghost small" onClick={() => setAdding((a) => !a)}>
-          {adding ? "Done" : "+ Add"}
-        </button>
+        <div className="add-menu-wrap" ref={menuRef}>
+          <button className="ghost small add-btn" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
+            + Add
+          </button>
+          {menu && (
+            <div className="add-menu" role="menu">
+              {addMenu.map((o) => (
+                <button key={o.mode} role="menuitem" onClick={() => pick(o.mode)}>
+                  <span>{o.label}</span>
+                  <span className="muted">{o.hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          hidden
+          onChange={(e) => {
+            void upload(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
       </div>
 
       {state.pinnedBy && (
@@ -104,61 +184,84 @@ export function AgendaPanel(props: {
           )}
         </div>
       )}
+      {uploadNote && (
+        <div className="upload-note">
+          {uploadNote}
+          {uploadNote !== "Reading slides…" && (
+            <button className="icon" title="Dismiss" onClick={() => setUploadNote(null)}>
+              ✕
+            </button>
+          )}
+        </div>
+      )}
 
-      <ol className="items">
-        {blocks.map((b) =>
-          b.kind === "item" ? (
-            row(b.item)
-          ) : (
-            <li key={b.deck.id} className="deck">
-              <div className="deck-head">
-                <button className="deck-toggle" onClick={() => setOpenDecks((o) => ({ ...o, [b.deck.id]: !deckOpen(b) }))} aria-expanded={deckOpen(b)}>
-                  <span aria-hidden>{deckOpen(b) ? "▾" : "▸"}</span>
-                  <span className="item-title">{b.deck.title}</span>
-                  <span className="muted">{b.items.length} slides</span>
-                </button>
-                {b.deck.kind === "native" && (
-                  <a className="icon" href={`/decks/${b.deck.id}/edit`} target="_blank" rel="noreferrer" title="Edit these slides">
-                    ✎
-                  </a>
-                )}
-                <a className="icon" href={`/decks/${b.deck.id}`} target="_blank" rel="noreferrer" title="Notes for every slide in this deck">
-                  ↗
-                </a>
-                {adding && (
-                  <button className="icon" title="Remove this deck from the agenda" onClick={() => void api.removeDeck(roomId, b.deck.id)}>
-                    ✕
-                  </button>
-                )}
-              </div>
-              {deckOpen(b) && <ol className="items deck-items">{b.items.map((it) => row(it))}</ol>}
-            </li>
-          ),
-        )}
-        <li className={state.focusItemId === null ? "item active" : "item"}>
-          <button className="item-main" disabled={!canSteer} title={steerTitle} onClick={() => send({ type: "focus", itemId: null })}>
-            {state.focusItemId === null && <span className="live-dot" />}
-            <span className="item-text">
-              <span className="item-title muted">General / off-agenda</span>
-              {(counts.get(null) ?? 0) > 0 && <span className="item-meta">{counts.get(null)} remarks</span>}
-            </span>
+      {empty && !add ? (
+        <div className="agenda-empty">
+          <p>Nothing on the agenda yet.</p>
+          {addMenu.map((o) => (
+            <button key={o.mode} className={o.mode === "slides" ? "primary" : ""} onClick={() => pick(o.mode)}>
+              {o.label}
+            </button>
+          ))}
+          <button className="link" onClick={() => void api.loadSample(roomId)}>
+            Or load a sample sprint
           </button>
-        </li>
-      </ol>
+        </div>
+      ) : (
+        <ol className="items">
+          {blocks.map((b) =>
+            b.kind === "item" ? (
+              row(b.item)
+            ) : (
+              <li key={b.deck.id} className="deck">
+                <div className="deck-head">
+                  <button className="deck-toggle" onClick={() => setOpenDecks((o) => ({ ...o, [b.deck.id]: !deckOpen(b) }))} aria-expanded={deckOpen(b)}>
+                    <span aria-hidden>{deckOpen(b) ? "▾" : "▸"}</span>
+                    <span className="item-title">{b.deck.title}</span>
+                    <span className="muted">{b.items.length} slides</span>
+                  </button>
+                  <span className="item-tools">
+                    {b.deck.kind === "native" && (
+                      <a className="icon" href={`/decks/${b.deck.id}/edit`} target="_blank" rel="noreferrer" title="Edit these slides">
+                        ✎
+                      </a>
+                    )}
+                    <a className="icon" href={`/decks/${b.deck.id}`} target="_blank" rel="noreferrer" title="Notes for every slide in this deck">
+                      ↗
+                    </a>
+                    {canSteer && (
+                      <button className="icon" title="Remove this deck from the agenda" onClick={() => void api.removeDeck(roomId, b.deck.id)}>
+                        ✕
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {deckOpen(b) && <ol className="items deck-items">{b.items.map((it) => row(it))}</ol>}
+              </li>
+            ),
+          )}
+          <li className={state.focusItemId === null ? "item active" : "item"}>
+            <button className="item-main" disabled={!canSteer} title={steerTitle} onClick={() => send({ type: "focus", itemId: null })}>
+              {state.focusItemId === null && <span className="live-dot" />}
+              <span className="item-text">
+                <span className="item-title muted">General / off-agenda</span>
+                {(counts.get(null) ?? 0) > 0 && <span className="item-meta">{counts.get(null)} remarks</span>}
+              </span>
+            </button>
+          </li>
+        </ol>
+      )}
 
-      {adding && <AddItems roomId={roomId} linear={state.capabilities.linear} llm={state.capabilities.llm} onDone={() => setAdding(false)} />}
+      {add && <AddForm mode={add} roomId={roomId} llm={llm} onClose={() => setAdd(null)} />}
+      {dropping && <div className="drop-hint">Drop a PDF to add it as slides</div>}
     </aside>
   );
 }
 
-function AddItems({ roomId, linear, llm, onDone }: { roomId: string; linear: boolean; llm: boolean; onDone: () => void }) {
-  const [tab, setTab] = useState<"agenda" | "linear" | "slides">(linear ? "linear" : "agenda");
-  const [over, setOver] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const upload = (file: File | undefined) => {
-    if (!file) return;
-    void run(() => uploadDeck(roomId, file));
-  };
+type AddMode = "slides" | "type" | "pdf" | "linear";
+
+/** The one add form that is open, shown under the agenda with a close button. */
+function AddForm({ mode, roomId, llm, onClose }: { mode: Exclude<AddMode, "pdf">; roomId: string; llm: boolean; onClose: () => void }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -168,68 +271,30 @@ function AddItems({ roomId, linear, llm, onDone }: { roomId: string; linear: boo
     setError(null);
     try {
       await fn();
-      setText("");
-      onDone();
+      onClose();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
+  const title = { slides: "New slides", type: "Type items", linear: "From Linear" }[mode];
 
   return (
     <div className="add-items">
-      <div className="tabs small">
-        <button className={tab === "linear" ? "tab on" : "tab"} onClick={() => setTab("linear")}>
-          From Linear
-        </button>
-        <button className={tab === "agenda" ? "tab on" : "tab"} onClick={() => setTab("agenda")}>
-          Type items
-        </button>
-        <button className={tab === "slides" ? "tab on" : "tab"} onClick={() => setTab("slides")}>
-          Slides
+      <div className="add-head">
+        <strong>{title}</strong>
+        <button className="icon" title="Close" onClick={onClose}>
+          ✕
         </button>
       </div>
-      {tab === "slides" ? (
-        <>
-          <div
-            className={over ? "drop over" : "drop"}
-            role="button"
-            tabIndex={0}
-            onClick={() => fileRef.current?.click()}
-            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileRef.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setOver(true);
-            }}
-            onDragLeave={() => setOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setOver(false);
-              upload(e.dataTransfer.files[0]);
-            }}
-          >
-            {busy ? "Reading slides…" : "Drop a PDF of your deck here, or click to choose one"}
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            hidden
-            onChange={(e) => {
-              upload(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-          <p className="muted small">
-            Export from Keynote, PowerPoint or Google Slides (File → Download → PDF). Each slide becomes an agenda item.
-          </p>
-          <NewDeck roomId={roomId} llm={llm} onDone={onDone} />
-        </>
-      ) : tab === "agenda" ? (
+      {mode === "slides" ? (
+        <NewDeck roomId={roomId} llm={llm} onDone={onClose} />
+      ) : mode === "type" ? (
         <>
           <textarea
             rows={4}
+            autoFocus
             placeholder={"One item per line\nDesign review: settings page\nQ4 hiring plan"}
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -240,21 +305,12 @@ function AddItems({ roomId, linear, llm, onDone }: { roomId: string; linear: boo
         </>
       ) : (
         <>
-          <input
-            placeholder="Linear project, cycle or view link, or ENG-12, ENG-14"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            disabled={!linear}
-          />
-          <button className="primary" disabled={busy || !linear || !text.trim()} onClick={() => run(() => api.importLinear(roomId, text))}>
+          <input autoFocus placeholder="Linear project, cycle or view link, or ENG-12, ENG-14" value={text} onChange={(e) => setText(e.target.value)} />
+          <button className="primary" disabled={busy || !text.trim()} onClick={() => run(() => api.importLinear(roomId, text))}>
             {busy ? "Loading…" : "Load issues"}
           </button>
-          {!linear && <p className="muted small">Linear isn't connected on the server yet.</p>}
         </>
       )}
-      <button className="link" disabled={busy} onClick={() => run(() => api.loadSample(roomId))}>
-        Load a sample sprint
-      </button>
       {error && <p className="error small">{error}</p>}
     </div>
   );
@@ -288,8 +344,7 @@ function NewDeck({ roomId, llm, onDone }: { roomId: string; llm: boolean; onDone
   };
   return (
     <div className="new-deck">
-      <strong className="small">Or make slides here</strong>
-      <input placeholder="Deck title" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input autoFocus placeholder="Deck title" value={title} onChange={(e) => setTitle(e.target.value)} />
       <textarea
         rows={3}
         placeholder={llm ? "Optional: describe the deck or paste notes, and Claude drafts it" : "Optional: paste an outline (# per slide, - for bullets)"}

@@ -676,3 +676,59 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .seg-pick button.on { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
 .field > span { font-weight: 500; }
 .dialog { border-radius: 14px; }
+
+/* ---- agenda panel: list first, one Add menu ---- */
+.agenda { position: relative; }
+.add-menu-wrap { position: relative; }
+.add-btn { font-weight: 500; }
+.add-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  width: 240px;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+  display: flex;
+  flex-direction: column;
+}
+.add-menu button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.add-menu button:hover { background: var(--hover); }
+.add-menu .muted { font-size: 11.5px; }
+.item-tools { gap: 0; }
+.item.active .item-tools { opacity: 0; }
+.item:hover .item-tools, .item:focus-within .item-tools { opacity: 1; }
+.deck-head .item-tools { opacity: 0; transition: opacity 0.1s; }
+.deck-head:hover .item-tools, .deck-head:focus-within .item-tools { opacity: 1; }
+.add-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.new-deck { margin-top: 0; padding-top: 0; border-top: 0; }
+.agenda-empty { display: flex; flex-direction: column; gap: 8px; padding: 18px 14px; }
+.agenda-empty p { margin: 0 0 4px; color: var(--muted); font-size: 13px; }
+.agenda-empty .link { align-self: flex-start; font-size: 12px; margin-top: 2px; }
+.upload-note { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 4px 10px 6px; font-size: 12px; color: var(--muted); background: var(--panel-2); border-radius: 8px; padding: 6px 8px; }
+.drop-hint {
+  position: absolute;
+  inset: 8px;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  pointer-events: none;
+}
