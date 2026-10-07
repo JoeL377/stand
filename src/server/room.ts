@@ -54,6 +54,7 @@ export class RoomSession implements SpeechSink {
   private conns = new Map<WebSocket, Conn | null>();
   private pendingUser = new Map<WebSocket, User>();
   private participants = new Map<string, Participant & { conns: number }>();
+  private hostId: string | null = null;
   private focusItemId: string | null = null;
   private pinnedBy: string | null = null;
   private suggestion: Suggestion | null = null;
@@ -115,7 +116,11 @@ export class RoomSession implements SpeechSink {
     this.pendingUser.delete(ws);
     if (conn) {
       const p = this.participants.get(conn.participantId);
-      if (p && --p.conns <= 0) this.participants.delete(conn.participantId);
+      if (p && --p.conns <= 0) {
+        this.participants.delete(conn.participantId);
+        // The host left: hand over to whoever has been here longest.
+        if (this.hostId === conn.participantId) this.hostId = this.participants.keys().next().value ?? null;
+      }
       this.broadcastState();
     }
     if (this.participants.size === 0 && !this.emptyTimer && !this.ended) {
@@ -142,7 +147,7 @@ export class RoomSession implements SpeechSink {
       roomName: this.roomName,
       meetingId: this.meetingId,
       meetingStartedAt: this.meetingStartedAt,
-      participants: [...this.participants.values()].map(({ conns: _c, ...p }) => p),
+      participants: [...this.participants.values()].map(({ conns: _c, ...p }) => ({ ...p, isHost: p.id === this.hostId })),
       focusItemId: this.focusItemId,
       pinnedBy: this.pinnedBy,
       suggestion: this.suggestion,
@@ -180,8 +185,9 @@ export class RoomSession implements SpeechSink {
         existing.conns++;
         existing.name = name;
       } else {
-        this.participants.set(id, { id, name, picture: user.picture, isPresenter: false, isSharing: false, conns: 1 });
+        this.participants.set(id, { id, name, picture: user.picture, isHost: false, isSharing: false, conns: 1 });
       }
+      if (!this.hostId || !this.participants.has(this.hostId)) this.hostId = id;
       if (this.emptyTimer) {
         clearTimeout(this.emptyTimer);
         this.emptyTimer = null;
@@ -201,46 +207,48 @@ export class RoomSession implements SpeechSink {
     if (!conn) return;
     const me = this.participants.get(conn.participantId);
 
+    const isHost = this.isHost(conn.participantId);
+
     switch (msg.type) {
+      // Only the host moves the meeting between items.
       case "focus":
+        if (!isHost) return;
         this.pinnedBy = null;
         this.setFocus(msg.itemId, conn.name, "manual");
         break;
       case "pin":
+        if (!isHost) return;
         this.setFocus(msg.itemId, conn.name, "pin");
         this.pinnedBy = conn.name;
         this.broadcastState();
         break;
       case "unpin":
+        if (!isHost) return;
         this.pinnedBy = null;
         this.broadcastState();
         break;
       case "suggestion.accept":
-        if (this.canSteer(conn.participantId)) this.acceptSuggestion(conn.name);
+        if (isHost) this.acceptSuggestion(conn.name);
         break;
       case "suggestion.dismiss":
-        if (this.suggestion && this.canSteer(conn.participantId)) {
+        if (this.suggestion && isHost) {
           this.dismissed.set(this.suggestion.itemId, Date.now());
           this.suggestion = null;
           this.broadcastState();
         }
         break;
-      case "present":
-        for (const p of this.participants.values()) {
-          if (msg.on && p.id !== conn.participantId) p.isPresenter = false;
+      case "host.give": {
+        const hostHere = this.hostId && this.participants.has(this.hostId);
+        if ((isHost || !hostHere) && this.participants.has(msg.participantId)) {
+          this.hostId = msg.participantId;
+          this.suggestion = null;
+          this.broadcastState();
         }
-        if (me) me.isPresenter = msg.on;
-        if (!msg.on && me) me.isSharing = false;
-        this.broadcastState();
         break;
+      }
       case "sharing":
-        if (me) {
-          me.isSharing = msg.on;
-          if (msg.on) {
-            for (const p of this.participants.values()) p.isPresenter = p.id === me.id;
-          }
-        }
-        if (!msg.on) this.suggestion = null;
+        if (me) me.isSharing = msg.on;
+        if (!msg.on && isHost) this.suggestion = null;
         this.broadcastState();
         break;
       case "chat": {
@@ -258,7 +266,8 @@ export class RoomSession implements SpeechSink {
         if (capabilities().transcription === "browser") this.interim(conn.participantId, conn.name, msg.text);
         break;
       case "frame":
-        if (me?.isSharing && typeof msg.dataUrl === "string" && msg.dataUrl.startsWith("data:image/jpeg;base64,")) {
+        // The agent only follows the host's screen.
+        if (isHost && me?.isSharing && typeof msg.dataUrl === "string" && msg.dataUrl.startsWith("data:image/jpeg;base64,")) {
           this.frame = { dataUrl: msg.dataUrl, at: Date.now() };
           void this.readScreen();
         }
@@ -275,18 +284,16 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "demo.play":
-        void this.playDemo();
+        if (isHost) void this.playDemo();
         break;
       case "meeting.end":
-        await this.end();
+        if (isHost) await this.end();
         break;
     }
   }
 
-  /** With a presenter, only they act on the agent's suggestions. */
-  private canSteer(participantId: string) {
-    const presenter = [...this.participants.values()].find((p) => p.isPresenter);
-    return !presenter || presenter.id === participantId;
+  private isHost(participantId: string) {
+    return this.hostId === participantId;
   }
 
   // ---- focus ---------------------------------------------------------------
@@ -445,7 +452,7 @@ export class RoomSession implements SpeechSink {
     }
   }
 
-  /** Used by the demo script to drive the room like a real presenter would. */
+  /** Used by the demo script to drive the room like a real host would. */
   demoSuggest(itemId: string, reason: string) {
     this.suggestion = { itemId, reason, confidence: 0.9, since: Date.now() };
     this.broadcastState();
@@ -454,7 +461,7 @@ export class RoomSession implements SpeechSink {
     this.addSegment(speakerId, speakerName, "chat", text, Date.now());
   }
   demoAccept() {
-    this.acceptSuggestion("Demo presenter");
+    this.acceptSuggestion("Demo host");
   }
   get isEnded() {
     return this.ended;

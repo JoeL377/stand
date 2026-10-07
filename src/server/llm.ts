@@ -108,7 +108,7 @@ ${transcriptText(segments)}`,
           text: `This is the screen someone is sharing in a meeting. Which of these agenda items is it showing right now?\n${list}\n\nLook for ticket keys, titles, headings, slide titles, selected rows or open detail panes. If the screen shows a list with no single item selected or open, or nothing matches, return null.`,
         },
       ],
-      "You match a shared screen to a meeting agenda. Be conservative: a wrong guess interrupts the presenter.",
+      "You match a shared screen to a meeting agenda. Be conservative: a wrong guess interrupts the meeting host.",
       "low",
     );
     if (!out || !out.item_id || !items.some((i) => i.id === out.item_id)) {

@@ -9,6 +9,7 @@ export function Stage(props: {
   me: Participant | undefined;
   focusItem: Item | null;
   canSteer: boolean;
+  participantId: string;
   send: (m: ClientMessage) => void;
   localScreen: MediaStream | null;
   remoteScreen: RemoteScreen | null;
@@ -19,7 +20,7 @@ export function Stage(props: {
   const { state, focusItem, canSteer, send, localScreen, remoteScreen, speaking, interims } = props;
   const suggested = state.suggestion ? state.items.find((i) => i.id === state.suggestion!.itemId) : null;
   const sharer = state.participants.find((p) => p.isSharing);
-  const presenter = state.participants.find((p) => p.isPresenter);
+  const host = state.participants.find((p) => p.isHost);
 
   // Demo speakers and remote talkers who aren't connected still show while talking.
   const talkingIds = new Set([...speaking, ...Object.keys(interims)]);
@@ -34,6 +35,9 @@ export function Stage(props: {
           {focusItem ? focusItem.title : "General / off-agenda"}
         </span>
         {state.pinnedBy && <span className="badge">📌 Pinned</span>}
+        {host && (
+          <span className="host-note muted small">{canSteer ? "You're the host" : `${host.name} is hosting`}</span>
+        )}
       </div>
 
       {suggested && state.suggestion && (
@@ -58,7 +62,7 @@ export function Stage(props: {
               </button>
             </div>
           ) : (
-            <span className="muted small">Waiting for {presenter?.name ?? "the presenter"}</span>
+            <span className="muted small">Waiting for {host?.name ?? "the host"}</span>
           )}
         </div>
       )}
@@ -80,7 +84,7 @@ export function Stage(props: {
               <div className="focus-card">
                 {focusItem.externalId && <div className="key big">{focusItem.externalId}</div>}
                 <h2>{focusItem.title}</h2>
-                {focusItem.description && <p className="muted pre">{focusItem.description.slice(0, 400)}</p>}
+                {focusItem.description && <p className="muted pre focus-desc">{focusItem.description}</p>}
                 {focusItem.url && (
                   <a href={focusItem.url} target="_blank" rel="noreferrer">
                     Open in {focusItem.source === "linear" ? "Linear" : "new tab"} ↗
@@ -88,7 +92,9 @@ export function Stage(props: {
                 )}
               </div>
             ) : (
-              <p className="muted">Share your screen, or pick an item on the left.</p>
+              <p className="muted">
+                {canSteer ? "Open an item on the left, or share your screen." : `Waiting for ${host?.name ?? "the host"} to open an item.`}
+              </p>
             )}
           </div>
         )}
@@ -96,7 +102,15 @@ export function Stage(props: {
 
       <div className="people">
         {state.participants.map((p) => (
-          <Person key={p.id} id={p.id} name={p.name} picture={p.picture} talking={talkingIds.has(p.id)} tag={p.isSharing ? "Sharing" : p.isPresenter ? "Presenter" : undefined} />
+          <Person
+            key={p.id}
+            id={p.id}
+            name={p.name}
+            picture={p.picture}
+            talking={talkingIds.has(p.id)}
+            tag={p.isHost ? (p.isSharing ? "Host · sharing" : "Host") : p.isSharing ? "Sharing" : undefined}
+            onMakeHost={canSteer && p.id !== props.participantId ? () => send({ type: "host.give", participantId: p.id }) : undefined}
+          />
         ))}
         {ghosts.map((g) => (
           <Person key={g.speakerId} id={g.speakerId} name={g.speakerName} talking tag="Demo" />
@@ -106,12 +120,25 @@ export function Stage(props: {
   );
 }
 
-function Person({ id, name, picture, talking, tag }: { id: string; name: string; picture?: string | null; talking: boolean; tag?: string }) {
+function Person(props: {
+  id: string;
+  name: string;
+  picture?: string | null;
+  talking: boolean;
+  tag?: string;
+  onMakeHost?: () => void;
+}) {
+  const { id, name, picture, talking, tag, onMakeHost } = props;
   return (
     <div className={talking ? "person talking" : "person"}>
       <Avatar id={id} name={name} picture={picture} />
       <div className="person-name">{name}</div>
       {tag && <div className="person-tag">{tag}</div>}
+      {onMakeHost && (
+        <button className="link person-action" onClick={onMakeHost} title={`Let ${name} drive the meeting`}>
+          Make host
+        </button>
+      )}
     </div>
   );
 }

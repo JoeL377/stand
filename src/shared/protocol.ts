@@ -45,7 +45,8 @@ export interface Participant {
   id: string;
   name: string;
   picture: string | null;
-  isPresenter: boolean;
+  /** The host drives the meeting: whatever item they open is what's being discussed. */
+  isHost: boolean;
   isSharing: boolean;
 }
 
@@ -99,13 +100,14 @@ export type ClientMessage =
   | { type: "unpin" }
   | { type: "suggestion.accept" }
   | { type: "suggestion.dismiss" }
-  | { type: "present"; on: boolean }
+  /** Take the host role when nobody holds it, or (as host) hand it to someone. */
+  | { type: "host.give"; participantId: string }
   | { type: "sharing"; on: boolean }
   | { type: "chat"; text: string }
   /** Browser transcription: a finished utterance from this participant's mic. */
   | { type: "speech"; text: string; startedAt: number }
   | { type: "speech.interim"; text: string }
-  /** A JPEG data URL of the shared screen, sent by the presenter when it changes. */
+  /** A JPEG data URL of the shared screen, sent by the host when it changes. */
   | { type: "frame"; dataUrl: string }
   | { type: "segment.move"; segmentId: string; itemId: string | null }
   | { type: "demo.play" }

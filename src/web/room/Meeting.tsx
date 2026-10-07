@@ -54,8 +54,9 @@ export function Meeting(props: {
   useFrameSampler(media.localScreen, (dataUrl) => send({ type: "frame", dataUrl }));
 
   const me = state?.participants.find((p) => p.id === participantId);
-  const presenter = state?.participants.find((p) => p.isPresenter);
-  const canSteer = !presenter || presenter.id === participantId;
+  const host = state?.participants.find((p) => p.isHost);
+  const canSteer = host?.id === participantId;
+  const otherSharer = state?.participants.find((p) => p.isSharing && p.id !== participantId);
   const focusItem = useMemo(
     () => state?.items.find((i) => i.id === state.focusItemId) ?? null,
     [state?.items, state?.focusItemId],
@@ -104,12 +105,13 @@ export function Meeting(props: {
       )}
 
       <div className="meeting-grid">
-        <AgendaPanel roomId={roomId} state={state} send={send} notes={room.notes} segments={room.segments} />
+        <AgendaPanel roomId={roomId} state={state} send={send} canSteer={canSteer} notes={room.notes} segments={room.segments} />
         <Stage
           state={state}
           me={me}
           focusItem={focusItem}
           canSteer={canSteer}
+          participantId={participantId}
           send={send}
           localScreen={media.localScreen}
           remoteScreen={media.remoteScreen}
@@ -136,11 +138,11 @@ export function Meeting(props: {
             ⏹ Stop sharing
           </button>
         ) : (
-          <button className="control" onClick={() => void media.startShare()} disabled={Boolean(presenter && presenter.id !== participantId && presenter.isSharing)}>
+          <button className="control" onClick={() => void media.startShare()} disabled={Boolean(otherSharer)} title={otherSharer ? `${otherSharer.name} is sharing` : undefined}>
             🖥 Share screen
           </button>
         )}
-        {!caps.livekit || !caps.llm ? (
+        {canSteer && (!caps.livekit || !caps.llm) ? (
           <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this room">
             ▶ Play demo
           </button>
@@ -155,6 +157,7 @@ export function Meeting(props: {
         >
           Leave
         </button>
+        {canSteer && (
         <button
           className="control danger"
           disabled={ending}
@@ -166,6 +169,7 @@ export function Meeting(props: {
         >
           {ending ? "Writing notes…" : "End meeting"}
         </button>
+        )}
       </footer>
     </div>
   );

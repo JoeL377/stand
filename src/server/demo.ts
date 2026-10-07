@@ -34,7 +34,7 @@ function script(items: Item[]): Step[] {
     { say: "priya", text: "Yes, let's go with an auto-generated URL and an edit link. I'll ship that by Thursday." },
     { say: "alex", text: "Do we know if that breaks the invite links that are already out?" },
     { pause: 1500 },
-    // Presenter scrolls to the next ticket; the agent notices from the screen.
+    // The host scrolls to the next ticket; the agent notices from the screen.
     { suggest: 1, reason: `${label(b)} is open in the shared screen` },
     { say: "sam", text: "Next one is mine. The annual toggle is in review, design signed off yesterday." },
     { pause: 1200 },
@@ -75,7 +75,7 @@ export async function runDemo(room: RoomSession, items: Item[]) {
       await sleep(900);
     } else if ("focus" in step) {
       const it = items[step.focus];
-      if (it) room.setFocus(it.id, "Demo presenter", "demo");
+      if (it) room.setFocus(it.id, "Demo host", "demo");
       await sleep(600);
     } else if ("suggest" in step) {
       const it = items[step.suggest];

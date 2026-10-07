@@ -368,3 +368,9 @@ img.avatar { object-fit: cover; }
   font-weight: 500;
 }
 .google-btn:hover { text-decoration: none; background: var(--panel-2); }
+
+/* ---- host ---- */
+.host-note { margin-left: auto; white-space: nowrap; }
+.item-main:disabled { opacity: 1; cursor: default; }
+.person-action { font-size: 11px; }
+.focus-desc { max-height: 40vh; overflow-y: auto; text-align: left; }

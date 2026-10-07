@@ -2,7 +2,9 @@
 
 Voice rooms where an AI agent pins every remark to the ticket or doc section it's about.
 
-People talk (voice only, no cameras) and share their screen. The room has an agenda: typed items or Linear issues. An agent listens to each person separately, watches the shared screen, and when it sees the presenter has moved on it asks "Moved on to ENG-142?". One click confirms, and anything said since the screen changed moves with it. Anyone can click an item to switch to it, or pin it so the agent stops suggesting. Chat in the room is pinned the same way.
+People talk (voice only, no cameras) and share their screen. The room has an agenda: typed items or Linear issues. An agent listens to each person separately, watches the shared screen, and when it sees the presenter has moved on it asks "Moved on to ENG-142?". One click confirms, and anything said since the screen changed moves with it.
+
+A **host** drives the meeting: whatever item the host opens is what everything said is recorded against. The first person in is host; they can hand it to anyone, and it passes on if they leave. Only the host switches items, pins one (so the agent stops suggesting), or ends the meeting. Anyone can chat, and anyone can move a remark to the right item afterwards.
 
 Everyone signs in with Google, so names in the transcript and owners of action items are real accounts.
 

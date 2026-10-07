@@ -6,10 +6,13 @@ export function AgendaPanel(props: {
   roomId: string;
   state: RoomState;
   send: (m: ClientMessage) => void;
+  canSteer: boolean;
   segments: Segment[];
   notes: Note[];
 }) {
-  const { roomId, state, send, segments, notes } = props;
+  const { roomId, state, send, canSteer, segments, notes } = props;
+  const host = state.participants.find((p) => p.isHost);
+  const steerTitle = canSteer ? "Open this item: everything said now is recorded against it" : `${host?.name ?? "The host"} chooses the item`;
   const [adding, setAdding] = useState(state.items.length === 0);
 
   const counts = new Map<string | null, number>();
@@ -28,10 +31,12 @@ export function AgendaPanel(props: {
 
       {state.pinnedBy && (
         <div className="pinned-note">
-          📌 Pinned by {state.pinnedBy}. The agent won't switch items.{" "}
-          <button className="link" onClick={() => send({ type: "unpin" })}>
-            Unpin
-          </button>
+          📌 Pinned by {state.pinnedBy}. The agent won't suggest other items.{" "}
+          {canSteer && (
+            <button className="link" onClick={() => send({ type: "unpin" })}>
+              Unpin
+            </button>
+          )}
         </div>
       )}
 
@@ -42,7 +47,12 @@ export function AgendaPanel(props: {
           const a = actions.get(it.id) ?? 0;
           return (
             <li key={it.id} className={active ? "item active" : "item"}>
-              <button className="item-main" onClick={() => send({ type: "focus", itemId: it.id })} title="Discuss this now">
+              <button
+                className="item-main"
+                disabled={!canSteer}
+                onClick={() => send({ type: "focus", itemId: it.id })}
+                title={steerTitle}
+              >
                 {active && <span className="live-dot" aria-label="In focus" />}
                 <span className="item-text">
                   {it.externalId && <span className="key">{it.externalId}</span>}
@@ -56,13 +66,15 @@ export function AgendaPanel(props: {
                 </span>
               </button>
               <span className="item-tools">
-                <button
-                  className={state.pinnedBy && active ? "icon on" : "icon"}
-                  title="Pin: keep discussion on this item"
-                  onClick={() => send({ type: "pin", itemId: it.id })}
-                >
-                  📌
-                </button>
+                {canSteer && (
+                  <button
+                    className={state.pinnedBy && active ? "icon on" : "icon"}
+                    title="Pin: stay on this item even if the screen changes"
+                    onClick={() => send({ type: "pin", itemId: it.id })}
+                  >
+                    📌
+                  </button>
+                )}
                 <a className="icon" href={`/items/${it.id}`} target="_blank" rel="noreferrer" title="History of this item">
                   ↗
                 </a>
@@ -76,7 +88,7 @@ export function AgendaPanel(props: {
           );
         })}
         <li className={state.focusItemId === null ? "item active" : "item"}>
-          <button className="item-main" onClick={() => send({ type: "focus", itemId: null })}>
+          <button className="item-main" disabled={!canSteer} title={steerTitle} onClick={() => send({ type: "focus", itemId: null })}>
             {state.focusItemId === null && <span className="live-dot" />}
             <span className="item-text">
               <span className="item-title muted">General / off-agenda</span>
