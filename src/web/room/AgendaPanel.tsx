@@ -117,6 +117,11 @@ export function AgendaPanel(props: {
                   <span className="item-title">{b.deck.title}</span>
                   <span className="muted">{b.items.length} slides</span>
                 </button>
+                {b.deck.kind === "native" && (
+                  <a className="icon" href={`/decks/${b.deck.id}/edit`} target="_blank" rel="noreferrer" title="Edit these slides">
+                    ✎
+                  </a>
+                )}
                 <a className="icon" href={`/decks/${b.deck.id}`} target="_blank" rel="noreferrer" title="Notes for every slide in this deck">
                   ↗
                 </a>
@@ -141,12 +146,12 @@ export function AgendaPanel(props: {
         </li>
       </ol>
 
-      {adding && <AddItems roomId={roomId} linear={state.capabilities.linear} onDone={() => setAdding(false)} />}
+      {adding && <AddItems roomId={roomId} linear={state.capabilities.linear} llm={state.capabilities.llm} onDone={() => setAdding(false)} />}
     </aside>
   );
 }
 
-function AddItems({ roomId, linear, onDone }: { roomId: string; linear: boolean; onDone: () => void }) {
+function AddItems({ roomId, linear, llm, onDone }: { roomId: string; linear: boolean; llm: boolean; onDone: () => void }) {
   const [tab, setTab] = useState<"agenda" | "linear" | "slides">(linear ? "linear" : "agenda");
   const [over, setOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -219,6 +224,7 @@ function AddItems({ roomId, linear, onDone }: { roomId: string; linear: boolean;
           <p className="muted small">
             Export from Keynote, PowerPoint or Google Slides (File → Download → PDF). Each slide becomes an agenda item.
           </p>
+          <NewDeck roomId={roomId} llm={llm} onDone={onDone} />
         </>
       ) : tab === "agenda" ? (
         <>
@@ -249,6 +255,55 @@ function AddItems({ roomId, linear, onDone }: { roomId: string; linear: boolean;
       <button className="link" disabled={busy} onClick={() => run(() => api.loadSample(roomId))}>
         Load a sample sprint
       </button>
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
+/** Starts a deck in Stand's own editor, optionally drafted from an outline or brief. */
+function NewDeck({ roomId, llm, onDone }: { roomId: string; llm: boolean; onDone: () => void }) {
+  const [title, setTitle] = useState("");
+  const [brief, setBrief] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [made, setMade] = useState<string | null>(null);
+  const create = async () => {
+    // Open the tab now: browsers block windows opened after a network wait.
+    const tab = window.open("about:blank", "_blank");
+    setBusy(true);
+    setError(null);
+    try {
+      const { deck } = await api.newDeck(roomId, title, brief);
+      const url = `/decks/${deck.id}/edit`;
+      if (tab) {
+        tab.location.href = url;
+        onDone();
+      } else setMade(url);
+    } catch (e) {
+      tab?.close();
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="new-deck">
+      <strong className="small">Or make slides here</strong>
+      <input placeholder="Deck title" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <textarea
+        rows={3}
+        placeholder={llm ? "Optional: describe the deck or paste notes, and Claude drafts it" : "Optional: paste an outline (# per slide, - for bullets)"}
+        value={brief}
+        onChange={(e) => setBrief(e.target.value)}
+      />
+      <button className="primary" disabled={busy} onClick={() => void create()}>
+        {busy ? (brief.trim() ? "Drafting slides…" : "Creating…") : "Create deck"}
+      </button>
+      {made && (
+        <a href={made} target="_blank" rel="noreferrer">
+          Open the editor ↗
+        </a>
+      )}
       {error && <p className="error small">{error}</p>}
     </div>
   );

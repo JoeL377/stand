@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Deck, Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
+import type { Deck, DeckDraft, DeckTheme, Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -115,6 +115,7 @@ const toItem = (r: Row): Item => ({
   position: r.position as number,
   deckId: (r.deck_id as string) ?? null,
   slideNo: (r.slide_no as number) ?? null,
+  slide: r.slide_json ? JSON.parse(r.slide_json as string) : null,
 });
 
 const toDeck = (r: Row): Deck => ({
@@ -122,6 +123,8 @@ const toDeck = (r: Row): Deck => ({
   roomId: r.room_id as string,
   title: r.title as string,
   pageCount: r.page_count as number,
+  kind: ((r.kind as string) ?? "pdf") as Deck["kind"],
+  theme: ((r.theme as string) ?? "paper") as DeckTheme,
 });
 
 type NewItem = Pick<Item, "source" | "externalId" | "title" | "url" | "description"> & { deckId?: string; slideNo?: number };
@@ -157,6 +160,9 @@ export function openDb(file?: string) {
   if (!roomCols.includes("created_by")) db.exec("ALTER TABLE rooms ADD COLUMN created_by TEXT");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
+  if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
+  const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
+  if (!deckCols.includes("kind")) db.exec("ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';");
 
   return {
     raw: db,
@@ -273,10 +279,63 @@ export function openDb(file?: string) {
       db.prepare("UPDATE items SET archived = 1 WHERE id = ?").run(id);
     },
 
-    createDeck(roomId: string, title: string, pageCount: number): Deck {
+    createDeck(roomId: string, title: string, pageCount: number, kind: Deck["kind"] = "pdf", theme: DeckTheme = "paper"): Deck {
       const id = newId(10);
-      db.prepare("INSERT INTO decks (id, room_id, title, page_count, created_at) VALUES (?, ?, ?, ?, ?)").run(id, roomId, title, pageCount, Date.now());
-      return { id, roomId, title, pageCount };
+      db.prepare("INSERT INTO decks (id, room_id, title, page_count, created_at, kind, theme) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        id,
+        roomId,
+        title,
+        pageCount,
+        Date.now(),
+        kind,
+        theme,
+      );
+      return { id, roomId, title, pageCount, kind, theme };
+    },
+    /** Slides currently in the deck (removed ones keep their history but drop out). */
+    liveSlides(deckId: string): Item[] {
+      return (db.prepare("SELECT * FROM items WHERE deck_id = ? AND archived = 0 ORDER BY slide_no").all(deckId) as Row[]).map(toItem);
+    },
+    /** Saves an edited deck: updates slides by id, adds new ones (keeping the
+     *  editor's id so later saves match), archives removed ones, and keeps the
+     *  deck together in the agenda where it was. */
+    saveDeck(deck: Deck, draft: DeckDraft) {
+      db.exec("BEGIN");
+      try {
+        db.prepare("UPDATE decks SET title = ?, theme = ?, page_count = ? WHERE id = ?").run(draft.title, draft.theme, draft.slides.length, deck.id);
+        const before = this.listItems(deck.roomId);
+        const owner = db.prepare("SELECT deck_id FROM items WHERE id = ?");
+        const update = db.prepare("UPDATE items SET title = ?, description = ?, slide_json = ?, slide_no = ?, archived = 0 WHERE id = ?");
+        const insert = db.prepare(
+          "INSERT INTO items (id, room_id, source, external_id, title, url, description, position, deck_id, slide_no, slide_json, created_at) VALUES (?, ?, 'slide', NULL, ?, NULL, ?, 0, ?, ?, ?, ?)",
+        );
+        const ids: string[] = [];
+        draft.slides.forEach((sl, i) => {
+          const { id, title, ...content } = sl;
+          const description = [content.body, content.notes].filter(Boolean).join("\n\n") || null;
+          const json = JSON.stringify(content);
+          const row = owner.get(id) as Row | undefined;
+          let useId = id;
+          if (row && row.deck_id === deck.id) update.run(title, description, json, i + 1, id);
+          else {
+            if (row) useId = newId();
+            insert.run(useId, deck.roomId, title, description, deck.id, i + 1, json, Date.now());
+          }
+          ids.push(useId);
+        });
+        const keep = new Set(ids);
+        db.prepare(`UPDATE items SET archived = 1 WHERE deck_id = ? AND id NOT IN (${ids.map(() => "?").join(",") || "''"})`).run(deck.id, ...ids);
+        // Re-lay the agenda with the deck as one block where its first slide was.
+        const others = before.filter((it) => it.deckId !== deck.id && !keep.has(it.id)).map((it) => it.id);
+        const at = before.findIndex((it) => it.deckId === deck.id);
+        const anchor = at < 0 ? others.length : before.slice(0, at).filter((it) => it.deckId !== deck.id).length;
+        this.reorderItems(deck.roomId, [...others.slice(0, anchor), ...ids, ...others.slice(anchor)]);
+        db.exec("COMMIT");
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
+      return { deck: this.getDeck(deck.id)!, slides: this.liveSlides(deck.id) };
     },
     getDeck(id: string): Deck | null {
       const r = db.prepare("SELECT * FROM decks WHERE id = ?").get(id) as Row | undefined;
@@ -290,8 +349,9 @@ export function openDb(file?: string) {
           .all(roomId) as Row[]
       ).map(toDeck);
     },
+    /** Every slide the deck has had: current ones in order, then removed ones. */
     deckSlides(deckId: string): Item[] {
-      return (db.prepare("SELECT * FROM items WHERE deck_id = ? ORDER BY slide_no").all(deckId) as Row[]).map(toItem);
+      return (db.prepare("SELECT * FROM items WHERE deck_id = ? ORDER BY archived, slide_no").all(deckId) as Row[]).map(toItem);
     },
     archiveDeck(deckId: string) {
       db.prepare("UPDATE items SET archived = 1 WHERE deck_id = ?").run(deckId);

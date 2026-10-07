@@ -3,7 +3,7 @@ import type { ClientMessage, Item, Participant, RoomState } from "../../shared/p
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
-import { SlideView } from "../slides.tsx";
+import { Slide } from "../slides.tsx";
 
 export function Stage(props: {
   state: RoomState;
@@ -107,9 +107,9 @@ export function Stage(props: {
           </div>
         ) : (
           <div className="screen-empty">
-            {focusItem?.deckId && focusItem.slideNo ? (
+            {focusItem?.deckId && (focusItem.slideNo || focusItem.slide) ? (
               <div className="slide-stage">
-                <SlideView deckId={focusItem.deckId} page={focusItem.slideNo} className="slide-main" />
+                <Slide item={focusItem} deck={deck} className="slide-main" />
                 <div className="slide-bar">
                   {canSteer && (
                     <button className="ghost" onClick={() => flip(-1)} disabled={slideIdx <= 0} aria-label="Previous slide">
@@ -131,6 +131,7 @@ export function Stage(props: {
                   )}
                   {canSteer && <span className="muted small slide-hint">Arrow keys flip slides</span>}
                 </div>
+                {canSteer && focusItem.slide?.notes && <p className="slide-notes">{focusItem.slide.notes}</p>}
               </div>
             ) : focusItem ? (
               <div className="focus-card">

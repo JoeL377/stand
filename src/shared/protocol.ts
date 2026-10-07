@@ -16,14 +16,40 @@ export interface Item {
   /** Slides: the deck this page belongs to and its 1-based page number. */
   deckId: string | null;
   slideNo: number | null;
+  /** Content of a slide made in Stand's own editor; null for PDF pages. */
+  slide: SlideContent | null;
 }
 
-/** An uploaded PDF. Each page is an Item, so discussion pins per slide. */
+export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote";
+
+export interface SlideContent {
+  layout: SlideLayout;
+  /** Subtitle, bullet lines (one per line) or quote, depending on layout. */
+  body: string;
+  /** Uploaded image id (see /api/decks/:deckId/images/:imageId). */
+  image: string | null;
+  /** Speaker notes, shown only to the host. */
+  notes: string;
+}
+
+export type DeckTheme = "paper" | "night" | "ocean" | "sunset";
+
+/** A slide deck: an uploaded PDF, or one made in Stand's editor. Each slide
+ *  is an Item, so discussion pins per slide. */
 export interface Deck {
   id: string;
   roomId: string;
   title: string;
   pageCount: number;
+  kind: "pdf" | "native";
+  theme: DeckTheme;
+}
+
+/** What the editor saves: the whole deck, in order. */
+export interface DeckDraft {
+  title: string;
+  theme: DeckTheme;
+  slides: Array<{ id: string; title: string } & SlideContent>;
 }
 
 export type SegmentKind = "speech" | "chat";
@@ -138,6 +164,7 @@ export type ServerMessage =
 
 export interface ItemHistory {
   item: Item;
+  deck: Deck | null;
   meetings: Array<{
     meetingId: string;
     startedAt: number;

@@ -1,4 +1,5 @@
-import type { Capabilities, DeckHistory, Item, ItemHistory, MeetingRecap, User } from "../shared/protocol.ts";
+import type { DraftSlide } from "../shared/outline.ts";
+import type { Capabilities, Deck, DeckDraft, DeckHistory, Item, ItemHistory, MeetingRecap, User } from "../shared/protocol.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -39,6 +40,11 @@ export const api = {
   removeItem: (roomId: string, itemId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/items/${itemId}`),
   reorder: (roomId: string, ids: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items/reorder`, { ids }),
   removeDeck: (roomId: string, deckId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/decks/${deckId}`),
+  newDeck: (roomId: string, title: string, brief: string) =>
+    call<{ deck: Deck; slides: Item[] }>("POST", `/api/rooms/${roomId}/decks/new`, { title, brief }),
+  deck: (deckId: string) => call<{ deck: Deck; room: { id: string; name: string } | null; slides: Item[] }>("GET", `/api/decks/${deckId}`),
+  saveDeck: (deckId: string, draft: DeckDraft) => call<{ deck: Deck; slides: Item[] }>("PUT", `/api/decks/${deckId}`, draft),
+  draftSlides: (deckId: string, brief: string) => call<{ slides: DraftSlide[] }>("POST", `/api/decks/${deckId}/draft`, { brief }),
   deckHistory: (deckId: string) => call<DeckHistory>("GET", `/api/decks/${deckId}/history`),
   itemHistory: (itemId: string) =>
     call<ItemHistory & { room: { id: string; name: string } }>("GET", `/api/items/${itemId}/history`),

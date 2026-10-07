@@ -10,6 +10,8 @@ If the host shares their screen and it shows a different item than the one open,
 
 **Slides.** Upload a deck as a PDF (Keynote, PowerPoint and Google Slides all export one). Each slide becomes an agenda item under the deck's name, titled by its biggest line of text. When the host opens a slide, everyone sees that page drawn in their own browser, sharp at any size, and the host flips with the arrow keys or the ← → buttons. Whatever is said lands on the slide that was showing, and the deck page (↗ next to the deck) shows every slide beside its discussion, decisions and action items.
 
+**Making slides in Stand.** Agenda → + Add → Slides → *Create deck* opens Stand's own editor in a new tab: five layouts (title, bullets, section, image, quote), four themes, images, and speaker notes that only the host sees under the slide. Paste an outline (`#` per slide, `-` bullets, `>` quote, `Notes:`) to start from notes you already have; with an Anthropic key the same box drafts a deck from a plain description. Every change saves on its own and shows up in a running meeting straight away. Removed slides keep their history on the deck page.
+
 Everyone signs in with Google, so names in the transcript and owners of action items are real accounts.
 
 Afterwards, every item has its own history: transcript, decisions, action items with owners, and open questions, across every meeting where it came up.

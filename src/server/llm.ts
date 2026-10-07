@@ -5,6 +5,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { type DraftSlide, outlineToSlides } from "../shared/outline.ts";
 import type { Item, Note, Segment } from "../shared/protocol.ts";
 import { config } from "./config.ts";
 
@@ -20,6 +21,8 @@ export interface Agent {
   notesFor(item: Item | null, segments: Segment[]): Promise<DraftNote[]>;
   matchScreen(jpegDataUrl: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch>;
   summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
+  /** Slides from a brief: an outline, rough notes or a one-line ask. */
+  draftDeck(brief: string): Promise<DraftSlide[]>;
 }
 
 export function createAgent(): Agent {
@@ -45,6 +48,19 @@ const ScreenSchema = z.object({
   item_id: z.string().nullable().describe("id of the agenda item shown on screen, or null if none clearly matches"),
   confidence: z.number().describe("0 to 1"),
   reason: z.string().describe("Short, user-facing: what on screen gave it away"),
+});
+
+const DeckSchema = z.object({
+  slides: z.array(
+    z.object({
+      layout: z.enum(["title", "bullets", "section", "quote"]),
+      title: z.string().describe("Short slide title, under 60 characters"),
+      body: z
+        .string()
+        .describe("title: a subtitle line. bullets: 2-5 short bullet lines separated by newlines, no bullet characters. section: empty or one short line. quote: the quote text."),
+      notes: z.string().describe("What the presenter says on this slide, 1-3 sentences"),
+    }),
+  ),
 });
 
 class ClaudeAgent implements Agent {
@@ -117,6 +133,17 @@ ${transcriptText(segments)}`,
     return { itemId: out.item_id, confidence: out.confidence, reason: out.reason };
   }
 
+  async draftDeck(brief: string): Promise<DraftSlide[]> {
+    const out = await this.parse(
+      DeckSchema,
+      `Make a slide deck from this brief:\n\n${brief.slice(0, 20000)}`,
+      "You write slide decks for team meetings. If the brief is already an outline, keep its structure and wording and only tidy it into slides. Otherwise write a tight deck: a title slide, then one idea per slide, few words per bullet, no filler slides. Every slide will be discussed in the meeting, so make each one something people can react to.",
+      "medium",
+    );
+    if (!out) return outlineToSlides(brief);
+    return out.slides.slice(0, 60).map((s) => ({ ...s, image: null }));
+  }
+
   async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {
     const body = perItem
       .filter((p) => p.notes.length)
@@ -180,6 +207,10 @@ export class HeuristicAgent implements Agent {
     const idx = items.findIndex((i) => i.id === currentItemId);
     const next = items[(idx + 1) % items.length];
     return { itemId: next.id, confidence: 0.6, reason: "The screen changed (mock agent guesses the next item)" };
+  }
+
+  async draftDeck(brief: string): Promise<DraftSlide[]> {
+    return outlineToSlides(brief);
   }
 
   async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {

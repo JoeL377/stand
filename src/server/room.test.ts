@@ -6,6 +6,7 @@ import { looksLikePdf, parseDeck } from "./decks.ts";
 import { HeuristicAgent } from "./llm.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession } from "./room.ts";
+import { outlineToSlides } from "../shared/outline.ts";
 
 function setup() {
   const db = openDb(":memory:");
@@ -95,4 +96,34 @@ test("a PDF deck becomes one item per slide, titled by its biggest text", async 
   db.archiveDeck(deck.id);
   assert.equal(db.listItems(room.id).length, 0);
   assert.equal(db.listDecks(room.id).length, 0);
+});
+
+test("decks made in Stand save in place, keep slide ids and stay together in the agenda", () => {
+  const { db, items } = setup();
+  const roomId = items[0].roomId;
+  const deck = db.createDeck(roomId, "Plan", 1, "native");
+  const s = (id: string, title: string) => ({ id, title, layout: "bullets" as const, body: "- a", image: null, notes: "" });
+  db.saveDeck(deck, { title: "Plan", theme: "paper", slides: [s("aaaaaaaa", "Intro"), s("bbbbbbbb", "Risks")] });
+  // Move "Three" below the deck, then edit: the deck stays where it was.
+  const ids = db.listItems(roomId).map((i) => i.id);
+  db.reorderItems(roomId, [ids[0], ids[1], ids[3], ids[4], ids[2]]);
+  const { deck: saved, slides } = db.saveDeck(deck, {
+    title: "Plan v2",
+    theme: "ocean",
+    slides: [s("bbbbbbbb", "Risks!"), s("cccccccc", "Asks")],
+  });
+  assert.equal(saved.title, "Plan v2");
+  assert.equal(saved.theme, "ocean");
+  assert.equal(saved.pageCount, 2);
+  assert.deepEqual(slides.map((i) => [i.id, i.title, i.slideNo]), [["bbbbbbbb", "Risks!", 1], ["cccccccc", "Asks", 2]]);
+  assert.deepEqual(db.listItems(roomId).map((i) => i.title), ["One", "Two", "Risks!", "Asks", "Three"]);
+  assert.equal(db.getItem("aaaaaaaa")?.title, "Intro", "removed slides keep their history");
+  assert.equal(db.listItems(roomId)[2].slide?.layout, "bullets");
+});
+
+test("outlines turn into slides", () => {
+  const slides = outlineToSlides("# Roadmap\nQ4\n\n# Where we are\n- Shipped\n  - fast\nNotes: thanks\n\n# Next\n---\n> Love it\n");
+  assert.deepEqual(slides.map((s) => s.layout), ["title", "bullets", "section", "quote"]);
+  assert.equal(slides[1].body, "Shipped\n  fast");
+  assert.equal(slides[1].notes, "thanks");
 });

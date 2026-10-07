@@ -66,3 +66,31 @@ export function deckTitle(filename: string | undefined, fallback: string) {
   const t = (filename ?? "").replace(/\.pdf$/i, "").replace(/[_]+/g, " ").trim().slice(0, 100);
   return t || fallback;
 }
+
+// Images placed on slides made in Stand's editor.
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const IMAGE_TYPES: Array<[string, (b: Buffer) => boolean]> = [
+  ["png", (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))],
+  ["jpg", (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
+  ["gif", (b) => b.subarray(0, 4).toString("latin1") === "GIF8"],
+  ["webp", (b) => b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP"],
+];
+
+/** The image's extension, or null if it isn't a PNG, JPEG, GIF or WebP. */
+export function imageType(buf: Buffer) {
+  return IMAGE_TYPES.find(([, test]) => buf.length > 12 && test(buf))?.[0] ?? null;
+}
+
+const imageDir = (deckId: string) => path.join(config.dataDir, "decks", deckId);
+
+export function saveDeckImage(deckId: string, imageId: string, ext: string, buf: Buffer) {
+  fs.mkdirSync(imageDir(deckId), { recursive: true });
+  fs.writeFileSync(path.join(imageDir(deckId), `${imageId}.${ext}`), buf);
+  return `${imageId}.${ext}`;
+}
+
+export function deckImageFile(deckId: string, image: string): string | null {
+  if (!/^[a-z0-9]+$/.test(deckId) || !/^[a-z0-9]+\.(png|jpg|gif|webp)$/.test(image)) return null;
+  const p = path.join(imageDir(deckId), image);
+  return fs.existsSync(p) ? p : null;
+}

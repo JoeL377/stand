@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import type { DeckHistory } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { NoteList } from "../room/SidePanel.tsx";
-import { SlideView } from "../slides.tsx";
+import { Slide } from "../slides.tsx";
 import { colorFor, fmtDate, fmtTime } from "../util.ts";
 
 /** Every slide of a deck next to what was said and decided about it. */
@@ -36,9 +36,13 @@ export function DeckHistoryPage() {
         <h1>{deck.title}</h1>
         <p className="muted">
           {deck.pageCount} slides · {discussed.length} discussed{" "}
-          <a href={`/api/decks/${deck.id}/file`} target="_blank" rel="noreferrer">
-            Open PDF ↗
-          </a>
+          {deck.kind === "native" ? (
+            <Link to={`/decks/${deck.id}/edit`}>Edit slides</Link>
+          ) : (
+            <a href={`/api/decks/${deck.id}/file`} target="_blank" rel="noreferrer">
+              Open PDF ↗
+            </a>
+          )}
         </p>
         <label className="small check">
           <input type="checkbox" checked={onlyDiscussed} onChange={(e) => setOnlyDiscussed(e.target.checked)} /> Only slides that were
@@ -82,7 +86,7 @@ export function DeckHistoryPage() {
       {shown.map(({ item, segments, notes }) => (
         <section key={item.id} className="doc-section deck-slide">
           <Link to={`/items/${item.id}`} className="slide-thumb-link" title="History of this slide">
-            <SlideView deckId={deck.id} page={item.slideNo ?? 1} width={280} />
+            <Slide item={item} deck={deck} width={280} />
           </Link>
           <div>
             <h2>

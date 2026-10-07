@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api.ts";
 import { NoteList } from "../room/SidePanel.tsx";
-import { SlideView } from "../slides.tsx";
+import { Slide } from "../slides.tsx";
 import { colorFor, fmtDate, fmtTime, keyOf } from "../util.ts";
 
 type Data = Awaited<ReturnType<typeof api.itemHistory>>;
@@ -33,7 +33,7 @@ export function ItemHistoryPage() {
         <h1>{item.title}</h1>
         {item.deckId && item.slideNo && (
           <>
-            <SlideView deckId={item.deckId} page={item.slideNo} width={480} />
+            <Slide item={item} deck={data.deck} width={480} />
             <Link to={`/decks/${item.deckId}`}>Whole deck →</Link>
           </>
         )}

@@ -3,11 +3,23 @@ import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer } from "ws";
-import type { DeckHistory, ItemHistory, MeetingRecap } from "../shared/protocol.ts";
+import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
 import { authRoutes, requireUser, userFromRequest } from "./auth.ts";
 import { capabilities, config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { MAX_DECK_BYTES, deckFile, deckTitle, looksLikePdf, parseDeck, saveDeckFile } from "./decks.ts";
+import {
+  MAX_DECK_BYTES,
+  MAX_IMAGE_BYTES,
+  deckFile,
+  deckImageFile,
+  deckTitle,
+  imageType,
+  looksLikePdf,
+  parseDeck,
+  saveDeckFile,
+  saveDeckImage,
+} from "./decks.ts";
+import { newId } from "./ids.ts";
 import { importFromLinear, sampleSprint } from "./linear.ts";
 import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
@@ -166,6 +178,113 @@ app.post(
   }),
 );
 
+const THEMES: DeckTheme[] = ["paper", "night", "ocean", "sunset"];
+const LAYOUTS: SlideLayout[] = ["title", "bullets", "section", "image", "quote"];
+const text = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+
+/** Checks and trims a deck sent by the editor. */
+function readDraft(body: unknown): DeckDraft | null {
+  const b = body as Partial<DeckDraft> | undefined;
+  if (!b || !Array.isArray(b.slides) || !b.slides.length) return null;
+  const seen = new Set<string>();
+  return {
+    title: text(b.title, 100).trim() || "Untitled deck",
+    theme: THEMES.includes(b.theme as DeckTheme) ? (b.theme as DeckTheme) : "paper",
+    slides: b.slides.slice(0, 200).map((sl) => {
+      let id = String(sl?.id ?? "");
+      if (!/^[a-z0-9]{6,24}$/.test(id) || seen.has(id)) id = newId();
+      seen.add(id);
+      const image = String(sl?.image ?? "");
+      const layout = LAYOUTS.includes(sl?.layout as SlideLayout) ? (sl.layout as SlideLayout) : "bullets";
+      const body = text(sl?.body, 2000);
+      // Every slide needs a name in the agenda; an unattributed quote goes by its words.
+      const firstLine = body.trim().split("\n")[0].slice(0, 60);
+      const fallback = layout === "quote" && firstLine ? `“${firstLine}”` : firstLine || "Untitled slide";
+      return {
+        id,
+        title: text(sl?.title, 140).trim() || fallback,
+        layout,
+        body,
+        image: /^[a-z0-9]+\.(png|jpg|gif|webp)$/.test(image) ? image : null,
+        notes: text(sl?.notes, 4000),
+      };
+    }),
+  };
+}
+
+// A deck made in Stand: starts as one title slide and is edited at /decks/:id/edit.
+app.post(
+  "/api/rooms/:id/decks/new",
+  route(async (req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room) return notFound(res);
+    const brief = text(req.body?.brief, 20000).trim();
+    const title = text(req.body?.title, 100).trim() || "Untitled deck";
+    const drafted = brief ? await agent.draftDeck(brief).catch(() => []) : [];
+    const deck = db.createDeck(room.id, title, 1, "native");
+    const slides = drafted.length ? drafted : [{ title, layout: "title" as const, body: "", image: null, notes: "" }];
+    const saved = db.saveDeck(deck, { title, theme: "paper", slides: slides.map((sl) => ({ ...sl, id: newId() })) });
+    afterItemsChange(room.id);
+    res.json(saved);
+  }),
+);
+
+app.get(
+  "/api/decks/:deckId",
+  route((req, res) => {
+    const deck = db.getDeck(req.params.deckId);
+    if (!deck) return notFound(res);
+    res.json({ deck, room: db.getRoom(deck.roomId), slides: db.liveSlides(deck.id) });
+  }),
+);
+
+app.put(
+  "/api/decks/:deckId",
+  route((req, res) => {
+    const deck = db.getDeck(req.params.deckId);
+    if (!deck || deck.kind !== "native") return notFound(res);
+    const draft = readDraft(req.body);
+    if (!draft) return res.status(400).json({ error: "A deck needs at least one slide." });
+    const saved = db.saveDeck(deck, draft);
+    afterItemsChange(deck.roomId);
+    res.json(saved);
+  }),
+);
+
+// Slides from an outline or a brief, for the editor to insert; nothing is saved.
+app.post(
+  "/api/decks/:deckId/draft",
+  route(async (req, res) => {
+    if (!db.getDeck(req.params.deckId)) return notFound(res);
+    const brief = text(req.body?.brief, 20000).trim();
+    if (!brief) return res.status(400).json({ error: "Write or paste something to make slides from." });
+    res.json({ slides: await agent.draftDeck(brief) });
+  }),
+);
+
+app.post(
+  "/api/decks/:deckId/images",
+  express.raw({ type: () => true, limit: MAX_IMAGE_BYTES }),
+  route((req, res) => {
+    const deck = db.getDeck(req.params.deckId);
+    if (!deck || deck.kind !== "native") return notFound(res);
+    const buf = req.body as Buffer;
+    const ext = Buffer.isBuffer(buf) ? imageType(buf) : null;
+    if (!ext) return res.status(400).json({ error: "Use a PNG, JPEG, GIF or WebP image." });
+    res.json({ image: saveDeckImage(deck.id, newId(), ext, buf) });
+  }),
+);
+
+app.get(
+  "/api/decks/:deckId/images/:image",
+  route((req, res) => {
+    const file = deckImageFile(req.params.deckId, req.params.image);
+    if (!file) return notFound(res);
+    res.setHeader("Cache-Control", "private, max-age=86400, immutable");
+    res.sendFile(file);
+  }),
+);
+
 app.delete(
   "/api/rooms/:id/decks/:deckId",
   route((req, res) => {
@@ -240,7 +359,7 @@ app.get(
   route((req, res) => {
     const item = db.getItem(req.params.itemId);
     if (!item) return notFound(res);
-    const body: ItemHistory = { item, meetings: db.itemHistory(item.id) };
+    const body: ItemHistory = { item, deck: item.deckId ? db.getDeck(item.deckId) : null, meetings: db.itemHistory(item.id) };
     res.json({ ...body, room: db.getRoom(item.roomId) });
   }),
 );
