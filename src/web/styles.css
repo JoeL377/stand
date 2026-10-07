@@ -932,3 +932,28 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .discussions.compact .disc-topic { font-size: 13px; }
 .discussions.compact .disc-body { padding: 0 10px 8px; font-size: 13px; gap: 6px; }
 .discussions.compact .disc-positions .who { min-width: 0; }
+
+/* ---- live agent notes: takeaways first, how it was discussed folded below ---- */
+.live-notes { display: flex; flex-direction: column; gap: 10px; }
+.tk-empty { margin: 0; color: var(--muted); }
+.tk-group h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.tk-group ul, .tk-done { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.tk { display: flex; gap: 8px; align-items: flex-start; line-height: 1.4; }
+.tk input { width: auto; padding: 0; margin: 3px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; box-shadow: none; }
+.tk-text { flex: 1; min-width: 0; }
+.tk .owner { flex: none; margin-top: 1px; white-space: nowrap; }
+.tk-icon { width: 13px; flex: none; text-align: center; font-weight: 700; }
+.tk.decision .tk-icon { color: var(--ok); }
+.tk.question .tk-icon { color: var(--warn); }
+.tk.action.done .tk-text { color: var(--muted); text-decoration: line-through; }
+.tk-more { display: block; margin-top: 4px; }
+.tk-done { margin-top: 5px !important; }
+.live-notes .owner { background: var(--hover); }
+.live-details { border-top: 1px solid var(--line); padding-top: 8px; }
+.live-details > summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
+.live-details > summary::-webkit-details-marker { display: none; }
+.live-details > summary::before { content: "▸ "; }
+.live-details[open] > summary::before { content: "▾ "; }
+.live-details > summary:hover { color: var(--text); }
+.live-gist { margin: 8px 0 0; color: var(--muted); }
+.live-details .discussions.compact { margin: 8px 0 0; }

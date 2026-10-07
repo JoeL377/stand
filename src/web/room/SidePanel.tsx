@@ -3,7 +3,7 @@ import type { ClientMessage, Discussion, Item, Note, RoomState, Segment } from "
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
-import { ItemNotes } from "../Discussions.tsx";
+import { LiveItemNotes, liveNotesCount } from "../Discussions.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -67,9 +67,7 @@ export function SidePanel(props: {
           <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
             <span>Agent notes</span>
             <span className="muted">
-              {focusDiscussions.length
-                ? `${focusDiscussions.length} discussion${focusDiscussions.length === 1 ? "" : "s"}`
-                : focusNotes.length}
+              {liveNotesCount(focusNotes, focusDiscussions)}
             </span>
             <span className="chev" aria-hidden>
               {notesOpen ? "▾" : "▸"}
@@ -77,7 +75,12 @@ export function SidePanel(props: {
           </button>
           {notesOpen && (
             <div className="focus-notes-body">
-              <ItemNotes compact notes={focusNotes} discussions={focusDiscussions} segments={segments} />
+              <LiveItemNotes
+                notes={focusNotes}
+                discussions={focusDiscussions}
+                segments={segments}
+                onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
+              />
             </div>
           )}
         </section>

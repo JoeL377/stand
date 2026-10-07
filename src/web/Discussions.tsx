@@ -94,3 +94,123 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
     </details>
   );
 }
+
+/** The live side-panel card, ranked by what helps during the meeting:
+ *  1. open action items (checkable), 2. decisions, 3. open questions;
+ *  then, folded away, the gist and each discussion (topic + outcome), whose
+ *  positions and raw turns fold one level further down. Done actions fold
+ *  into a single "n done" line. */
+export function LiveItemNotes(props: {
+  notes: Note[];
+  discussions: Discussion[];
+  segments: Segment[];
+  onToggle?: (n: Note, done: boolean) => void;
+}) {
+  const { notes, discussions, segments, onToggle } = props;
+  const [showDone, setShowDone] = useState(false);
+  const todo = notes.filter((n) => n.kind === "action" && !n.doneAt);
+  const done = notes.filter((n) => n.kind === "action" && n.doneAt);
+  const decided = notes.filter((n) => n.kind === "decision");
+  const open = notes.filter((n) => n.kind === "question");
+  const summary = notes.filter((n) => n.kind === "summary");
+  const empty = !todo.length && !done.length && !decided.length && !open.length;
+  const detailCount = discussions.length || summary.length;
+
+  const action = (n: Note) => (
+    <li key={n.id} className={n.doneAt ? "tk action done" : "tk action"}>
+      <input
+        type="checkbox"
+        checked={!!n.doneAt}
+        disabled={!onToggle}
+        onChange={(e) => onToggle?.(n, e.target.checked)}
+        aria-label={n.doneAt ? "Mark not done" : "Mark done"}
+      />
+      <span className="tk-text">{n.text}</span>
+      {n.owner && <span className="owner">{n.owner}</span>}
+    </li>
+  );
+
+  return (
+    <div className="live-notes">
+      {empty && <p className="tk-empty">Nothing decided or assigned yet.</p>}
+      {(todo.length > 0 || done.length > 0) && (
+        <section className="tk-group">
+          <h4>To do</h4>
+          {todo.length > 0 && <ul>{todo.map(action)}</ul>}
+          {done.length > 0 && (
+            <>
+              <button className="link small tk-more" onClick={() => setShowDone((s) => !s)}>
+                {showDone ? "Hide done" : `${done.length} done`}
+              </button>
+              {showDone && <ul className="tk-done">{done.map(action)}</ul>}
+            </>
+          )}
+        </section>
+      )}
+      {decided.length > 0 && (
+        <section className="tk-group">
+          <h4>Decided</h4>
+          <ul>
+            {decided.map((n) => (
+              <li key={n.id} className="tk decision">
+                <span className="tk-icon">✓</span>
+                <span className="tk-text">{n.text}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {open.length > 0 && (
+        <section className="tk-group">
+          <h4>Open questions</h4>
+          <ul>
+            {open.map((n) => (
+              <li key={n.id} className="tk question">
+                <span className="tk-icon">?</span>
+                <span className="tk-text">{n.text}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {detailCount > 0 && (
+        <details className="live-details" open={empty}>
+          <summary>
+            {discussions.length
+              ? `How it was discussed · ${discussions.length} thread${discussions.length === 1 ? "" : "s"}`
+              : "Summary"}
+          </summary>
+          {summary.map((n) => (
+            <p key={n.id} className="live-gist">
+              {n.text}
+            </p>
+          ))}
+          {discussions.length > 0 && (
+            <div className="discussions compact">
+              {discussions.map((d) => (
+                <DiscussionBlock
+                  key={d.id}
+                  d={d}
+                  notes={[]}
+                  turns={d.segmentIds.flatMap((id) => segments.filter((s) => s.id === id))}
+                  compact
+                  open={false}
+                />
+              ))}
+            </div>
+          )}
+        </details>
+      )}
+    </div>
+  );
+}
+
+/** Counts for the card header: what the meeting has to act on, most urgent first. */
+export function liveNotesCount(notes: Note[], discussions: Discussion[]): string {
+  const todo = notes.filter((n) => n.kind === "action" && !n.doneAt).length;
+  const decided = notes.filter((n) => n.kind === "decision").length;
+  const open = notes.filter((n) => n.kind === "question").length;
+  const parts = [todo && `${todo} to do`, decided && `${decided} decided`, open && `${open} open`].filter(Boolean);
+  if (parts.length) return parts.join(" · ");
+  return discussions.length ? `${discussions.length} thread${discussions.length === 1 ? "" : "s"}` : "";
+}

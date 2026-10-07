@@ -313,7 +313,20 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "followup.done": {
-        if (this.db.setActionDone(this.roomId, msg.noteId, msg.done ? conn.name : null)) this.broadcastState();
+        const note = this.db.setActionDone(this.roomId, msg.noteId, msg.done ? conn.name : null);
+        if (!note) break;
+        if (this.meetingId && note.meetingId === this.meetingId) {
+          // An action from this meeting: resend its item's notes so every card updates.
+          const all = this.db.meetingNotes(this.meetingId);
+          this.broadcast({
+            type: "notes",
+            meetingId: this.meetingId,
+            itemId: note.itemId,
+            notes: all.filter((n) => n.itemId === note.itemId),
+            discussions: this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === note.itemId),
+          });
+        }
+        this.broadcastState();
         break;
       }
       case "demo.play":
