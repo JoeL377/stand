@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { MeetingRecap } from "../../shared/protocol.ts";
+import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
-import { ItemNotes } from "../Discussions.tsx";
+import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
 import { colorFor, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
 export function RecapPage() {
   const { meetingId = "" } = useParams();
   const [data, setData] = useState<MeetingRecap | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [open_, setOpen] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
   const [room, setRoom] = useState<RoomInfo | null>(null);
 
@@ -40,8 +40,18 @@ export function RecapPage() {
     setTimeout(() => setCopied(false), 1600);
   };
 
+  const groups = data.items;
+  const all = groups.flatMap((g) => g.notes);
+  const decided = all.filter((n) => n.kind === "decision");
+  const questions = all.filter((n) => n.kind === "question");
+  const topicCount = groups.reduce((k, g) => k + (g.discussions?.length ?? 0), 0);
+  // Only label where something came from when there was more than one place it could be.
+  const many = groups.length > 1;
+  const src = many ? source : undefined;
+  const open = actions.filter((n) => !n.doneAt).length;
+
   return (
-    <div className="doc">
+    <div className="doc recap">
       <nav className="crumbs">
         <Link to={`/r/${data.roomId}`}>← {data.roomName}</Link>
       </nav>
@@ -55,65 +65,197 @@ export function RecapPage() {
           {people.length > 0 && ` · ${people.join(", ")}`}
         </p>
         {data.summary && <p className="lede">{data.summary}</p>}
-        <div className="brief-bar">
-          <span className="muted small">Follow-up brief for people and agents</span>
-          <button className="brief-btn" onClick={() => void copyBrief()}>
-            {copied ? "Copied" : "Copy as Markdown"}
-          </button>
-          <a className="brief-btn" href={briefUrl("json")} target="_blank" rel="noreferrer">
-            JSON
-          </a>
-        </div>
+        {(actions.length > 0 || decided.length > 0 || questions.length > 0 || topicCount > 0) && (
+          <div className="glance">
+            {actions.length > 0 && (
+              <a href="#todo" className="glance-chip todo">
+                <TodoIcon /> <b>{open}</b> to do{open < actions.length && <span className="muted"> · {actions.length - open} done</span>}
+              </a>
+            )}
+            {decided.length > 0 && (
+              <a href="#decided" className="glance-chip decided">
+                <DecidedIcon /> <b>{decided.length}</b> decided
+              </a>
+            )}
+            {questions.length > 0 && (
+              <a href="#open" className="glance-chip question">
+                <QuestionIcon /> <b>{questions.length}</b> open
+              </a>
+            )}
+            {topicCount > 0 && (
+              <a href="#topics" className="glance-chip topic">
+                <TopicIcon /> <b>{topicCount}</b> topic{topicCount === 1 ? "" : "s"}
+              </a>
+            )}
+          </div>
+        )}
       </header>
+
+      {groups.length === 0 && <p className="muted">Nothing was recorded in this meeting.</p>}
+
       {actions.length > 0 && (
-        <section className="doc-section brief-actions">
-          <h2>Action items</h2>
-          <FollowUpList notes={actions} onToggle={saveFollowUp(data.roomId)} source={source} />
+        <section id="todo" className="doc-section rc-section">
+          <h2 className="rc-h todo">
+            <TodoIcon /> To do
+          </h2>
+          <FollowUpList notes={actions} onToggle={saveFollowUp(data.roomId)} source={src} />
+        </section>
+      )}
+      {decided.length > 0 && (
+        <section id="decided" className="doc-section rc-section">
+          <h2 className="rc-h decided">
+            <DecidedIcon /> Decided
+          </h2>
+          <PointList notes={decided} kind="decided" source={src} />
+        </section>
+      )}
+      {questions.length > 0 && (
+        <section id="open" className="doc-section rc-section">
+          <h2 className="rc-h question">
+            <QuestionIcon /> Open questions
+          </h2>
+          <PointList notes={questions} kind="question" source={src} />
         </section>
       )}
       {carried.length > 0 && (
-        <section className="doc-section brief-actions">
-          <h2>
-            Still open from earlier meetings <span className="count">{carried.length}</span>
+        <section className="doc-section rc-section">
+          <h2 className="rc-h carry">
+            <CarryIcon /> Still open from earlier meetings <span className="count">{carried.length}</span>
           </h2>
           <FollowUpList notes={carried} onToggle={saveFollowUp(data.roomId)} source={source} showDate />
         </section>
       )}
-      {data.items.length === 0 && <p className="muted">Nothing was recorded in this meeting.</p>}
-      {data.items.map((g) => {
-        const key = g.item?.id ?? "general";
-        return (
-          <section key={key} className="doc-section meeting-block">
-            <div className="meeting-block-head">
-              <h2>
-                {keyOf(g.item) && <span className="key">{keyOf(g.item)}</span>}
-                {g.item ? <Link to={`/items/${g.item.id}`}>{g.item.title}</Link> : "General / off-agenda"}
-              </h2>
-              <span className="muted small">{[...new Set(g.segments.map((s) => s.speakerName))].join(", ")}</span>
-            </div>
-            <ItemNotes notes={g.notes} discussions={g.discussions ?? []} segments={g.segments} />
-            <button className="link" onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
-              {open[key] ? "Hide transcript" : `Show transcript (${g.segments.length})`}
-            </button>
-            {open[key] && (
-              <div className="transcript static">
-                {g.segments.map((s) => (
-                  <div key={s.id} className={s.kind === "chat" ? "seg chat" : "seg"}>
-                    <div className="seg-head">
-                      <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
-                        {s.speakerName}
-                      </span>
-                      {s.kind === "chat" && <span className="seg-kind">chat</span>}
-                      <span className="seg-time">{fmtTime(s.ts)}</span>
-                    </div>
-                    <div className="seg-text">{s.text}</div>
-                  </div>
+
+      {groups.length > 0 && (
+        <section id="topics" className="doc-section rc-section">
+          <h2 className="rc-h topic">
+            <TopicIcon /> What was discussed
+          </h2>
+          {groups.map((g) => {
+            const key = g.item?.id ?? "general";
+            const gist = g.notes.find((n) => n.kind === "summary");
+            return (
+              <div key={key} className="rc-group">
+                <div className="rc-group-head">
+                  <h3>
+                    {keyOf(g.item) && <span className="key">{keyOf(g.item)}</span>}
+                    {g.item ? <Link to={`/items/${g.item.id}`}>{g.item.title}</Link> : "General / off-agenda"}
+                  </h3>
+                  <button className="link small" onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
+                    {open_[key] ? "Hide transcript" : `Transcript (${g.segments.length})`}
+                  </button>
+                </div>
+                {gist && <p className="rc-gist">{gist.text}</p>}
+                {(g.discussions ?? []).map((d) => (
+                  <TopicRow key={d.id} d={d} segments={g.segments} />
                 ))}
+                {open_[key] && <Turns segments={g.segments} />}
               </div>
-            )}
-          </section>
+            );
+          })}
+        </section>
+      )}
+
+      <footer className="brief-bar rc-brief">
+        <span className="muted small">Follow-up brief for people and agents</span>
+        <button className="brief-btn" onClick={() => void copyBrief()}>
+          {copied ? "Copied" : "Copy as Markdown"}
+        </button>
+        <a className="brief-btn" href={briefUrl("json")} target="_blank" rel="noreferrer">
+          JSON
+        </a>
+      </footer>
+    </div>
+  );
+}
+
+/** Decisions or open questions, one line each with its icon. */
+function PointList(props: {
+  notes: Note[];
+  kind: "decided" | "question";
+  source?: (n: Note) => { label: string; href: string | null } | null;
+}) {
+  const Icon = props.kind === "decided" ? DecidedIcon : QuestionIcon;
+  return (
+    <ul className={`rc-points ${props.kind}`}>
+      {props.notes.map((n) => {
+        const src = props.source?.(n);
+        return (
+          <li key={n.id}>
+            <Icon />
+            <span className="rc-point-body">
+              <span>{n.text}</span>
+              {src && <span className="rc-src">{src.href ? <Link to={src.href}>{src.label}</Link> : src.label}</span>}
+            </span>
+          </li>
         );
       })}
+    </ul>
+  );
+}
+
+const OUTCOME: Record<DiscussionOutcome, { label: string; Icon: (p: { size?: number }) => React.ReactElement }> = {
+  decided: { label: "Decided", Icon: DecidedIcon },
+  action: { label: "Action", Icon: TodoIcon },
+  open: { label: "Open", Icon: QuestionIcon },
+  info: { label: "FYI", Icon: InfoIcon },
+};
+
+/** One topic: a single line with its outcome; who said what opens below it. */
+function TopicRow({ d, segments }: { d: Discussion; segments: Segment[] }) {
+  const [showTurns, setShowTurns] = useState(false);
+  const turns = d.segmentIds.flatMap((id) => segments.filter((s) => s.id === id));
+  const idOf = (name: string) => turns.find((s) => s.speakerName === name)?.speakerId ?? name;
+  const o = OUTCOME[d.outcome];
+  return (
+    <details className="rc-topic">
+      <summary>
+        <span className="rc-topic-title">{d.topic}</span>
+        <span className={`rc-outcome ${d.outcome}`}>
+          <o.Icon size={13} /> {o.label}
+        </span>
+        <span className="rc-people">{d.positions.map((p) => p.speaker).join(", ")}</span>
+      </summary>
+      <div className="rc-topic-body">
+        {d.continues && (
+          <p className="muted small">
+            Continues from <Link to={`/meetings/${d.continues.meetingId}`}>{fmtDate(d.continues.startedAt)}</Link>
+          </p>
+        )}
+        {d.positions.map((p, i) => (
+          <p key={i} className="rc-position">
+            <span className="who" style={{ color: colorFor(idOf(p.speaker)) }}>
+              {p.speaker}
+            </span>
+            {p.position}
+          </p>
+        ))}
+        {turns.length > 0 && (
+          <button className="link small" onClick={() => setShowTurns((s) => !s)}>
+            {showTurns ? "Hide what was said" : `What was said (${turns.length})`}
+          </button>
+        )}
+        {showTurns && <Turns segments={turns} />}
+      </div>
+    </details>
+  );
+}
+
+function Turns({ segments }: { segments: Segment[] }) {
+  return (
+    <div className="transcript static">
+      {segments.map((s) => (
+        <div key={s.id} className={s.kind === "chat" ? "seg chat" : "seg"}>
+          <div className="seg-head">
+            <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
+              {s.speakerName}
+            </span>
+            {s.kind === "chat" && <span className="seg-kind">chat</span>}
+            <span className="seg-time">{fmtTime(s.ts)}</span>
+          </div>
+          <div className="seg-text">{s.text}</div>
+        </div>
+      ))}
     </div>
   );
 }

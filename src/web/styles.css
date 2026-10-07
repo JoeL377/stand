@@ -960,3 +960,49 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .notes-updating { font-size: 11px; color: var(--accent); animation: notes-pulse 1.4s ease-in-out infinite; }
 @keyframes notes-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .notes-updating { animation: none; } }
+
+/* ---- meeting recap: what to act on first, then what was discussed ---- */
+.recap .glance { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.glance-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
+  font-size: 13px; color: var(--text); background: var(--panel-2); text-decoration: none;
+}
+.glance-chip:hover { box-shadow: inset 0 0 0 1px var(--line); }
+.glance-chip b { font-weight: 600; }
+.glance-chip.todo svg, .rc-h.todo svg { color: var(--accent); }
+.glance-chip.decided svg, .rc-h.decided svg, .rc-points.decided svg { color: var(--ok); }
+.glance-chip.question svg, .rc-h.question svg, .rc-points.question svg { color: var(--warn); }
+.glance-chip.topic svg, .rc-h.topic svg, .rc-h.carry svg { color: var(--muted); }
+.rc-h { display: flex; align-items: center; gap: 8px; }
+.rc-section { scroll-margin-top: 16px; }
+.rc-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rc-points li { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; line-height: 1.45; }
+.rc-points li svg { flex: none; margin-top: 2px; }
+.rc-point-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rc-src { font-size: 12px; color: var(--muted); }
+.rc-src a { color: var(--muted); }
+.rc-group + .rc-group { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.rc-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.rc-group-head h3 { font-size: 15px; font-weight: 600; margin: 0; display: flex; align-items: baseline; gap: 8px; }
+.rc-gist { margin: 4px 0 8px; color: var(--muted); line-height: 1.5; }
+.rc-topic { border-radius: 8px; }
+.rc-topic > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px;
+  padding: 8px 10px; margin: 0 -10px; border-radius: 8px;
+}
+.rc-topic > summary::-webkit-details-marker { display: none; }
+.rc-topic > summary::before { content: "▸"; color: var(--muted); font-size: 11px; width: 10px; }
+.rc-topic[open] > summary::before { content: "▾"; }
+.rc-topic > summary:hover { background: var(--panel-2); }
+.rc-topic-title { font-weight: 500; }
+.rc-people { font-size: 12px; color: var(--muted); margin-left: auto; }
+.rc-outcome { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; padding: 1px 8px 1px 6px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
+.rc-outcome.decided { color: var(--ok); background: rgb(22 163 74 / 0.12); }
+.rc-outcome.action { color: var(--accent); background: var(--accent-soft); }
+.rc-outcome.open { color: var(--warn); background: rgb(194 65 12 / 0.12); }
+.rc-topic-body { padding: 2px 0 10px 20px; display: flex; flex-direction: column; gap: 6px; }
+.rc-topic-body > .link { align-self: flex-start; }
+.rc-position { margin: 0; line-height: 1.45; }
+.rc-position .who { font-weight: 600; margin-right: 8px; }
+.rc-group > .transcript { margin-top: 8px; }
+.rc-brief { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
