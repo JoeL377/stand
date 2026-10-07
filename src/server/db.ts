@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Deck, DeckDraft, DeckTheme, FollowUp, Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
+import type { Deck, DeckDraft, DeckTheme, Discussion, DiscussionOutcome, FollowUp, Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -91,7 +91,28 @@ CREATE TABLE IF NOT EXISTS notes (
   ts INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS notes_item ON notes(item_id);
+-- The agent's grouping of an item's talk into discussions, one per question.
+CREATE TABLE IF NOT EXISTS discussions (
+  id TEXT PRIMARY KEY,
+  meeting_id TEXT NOT NULL REFERENCES meetings(id),
+  item_id TEXT,
+  topic TEXT NOT NULL,
+  positions_json TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  segment_ids_json TEXT NOT NULL,
+  continues_id TEXT,
+  position INTEGER NOT NULL,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS discussions_item ON discussions(item_id);
+CREATE INDEX IF NOT EXISTS discussions_meeting ON discussions(meeting_id);
 `;
+
+/** Reads a discussion with the earlier one it continues, if any. */
+const DISCUSSION_SELECT = `SELECT d.*, c.meeting_id AS c_meeting_id, c.topic AS c_topic, cm.started_at AS c_started_at
+  FROM discussions d LEFT JOIN discussions c ON c.id = d.continues_id LEFT JOIN meetings cm ON cm.id = c.meeting_id`;
+
+export type DraftDiscussion = Pick<Discussion, "topic" | "positions" | "outcome" | "segmentIds"> & { continuesId: string | null };
 
 type Row = Record<string, unknown>;
 
@@ -151,6 +172,21 @@ const toNote = (r: Row): Note => ({
   ts: r.ts as number,
   doneAt: (r.done_at as number) ?? null,
   doneBy: (r.done_by as string) ?? null,
+  discussionId: (r.discussion_id as string) ?? null,
+});
+
+const toDiscussion = (r: Row): Discussion => ({
+  id: r.id as string,
+  meetingId: r.meeting_id as string,
+  itemId: (r.item_id as string) ?? null,
+  topic: r.topic as string,
+  positions: JSON.parse(r.positions_json as string),
+  outcome: r.outcome as DiscussionOutcome,
+  segmentIds: JSON.parse(r.segment_ids_json as string),
+  continues: r.c_meeting_id
+    ? { id: r.continues_id as string, meetingId: r.c_meeting_id as string, startedAt: r.c_started_at as number, topic: r.c_topic as string }
+    : null,
+  ts: r.ts as number,
 });
 
 export function openDb(file?: string) {
@@ -167,6 +203,7 @@ export function openDb(file?: string) {
   const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
+  if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
   if (!deckCols.includes("kind")) db.exec("ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';");
 
@@ -483,22 +520,80 @@ export function openDb(file?: string) {
 
     /** Notes for one item in one meeting are regenerated as a whole. An action
      *  someone already checked off stays checked when its wording comes back. */
-    replaceNotes(meetingId: string, itemId: string | null, notes: Array<Pick<Note, "kind" | "text" | "owner">>): Note[] {
+    replaceNotes(
+      meetingId: string,
+      itemId: string | null,
+      notes: Array<Pick<Note, "kind" | "text" | "owner"> & { discussionId?: string | null }>,
+    ): Note[] {
       const done = new Map(
         (db.prepare("SELECT text, done_at, done_by FROM notes WHERE meeting_id = ? AND item_id IS ? AND done_at IS NOT NULL").all(meetingId, itemId) as Row[]).map(
           (r) => [r.text as string, { doneAt: r.done_at as number, doneBy: (r.done_by as string) ?? null }],
         ),
       );
       db.prepare("DELETE FROM notes WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
-      const st = db.prepare("INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const st = db.prepare(
+        "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      );
       const ts = Date.now();
       return notes.map((n) => {
         const d = n.kind === "action" ? done.get(n.text) : undefined;
-        const note: Note = { id: newId(12), meetingId, itemId, kind: n.kind, text: n.text, owner: n.owner ?? null, ts, doneAt: d?.doneAt ?? null, doneBy: d?.doneBy ?? null };
-        st.run(note.id, meetingId, itemId, note.kind, note.text, note.owner, ts, note.doneAt, note.doneBy);
+        const note: Note = {
+          id: newId(12),
+          meetingId,
+          itemId,
+          kind: n.kind,
+          text: n.text,
+          owner: n.owner ?? null,
+          ts,
+          doneAt: d?.doneAt ?? null,
+          doneBy: d?.doneBy ?? null,
+          discussionId: n.discussionId ?? null,
+        };
+        st.run(note.id, meetingId, itemId, note.kind, note.text, note.owner, ts, note.doneAt, note.doneBy, note.discussionId);
         return note;
       });
     },
+    /** Discussions for one item in one meeting are regenerated as a whole, with its notes. */
+    replaceDiscussions(meetingId: string, itemId: string | null, drafts: DraftDiscussion[]): Discussion[] {
+      db.prepare("DELETE FROM discussions WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
+      const st = db.prepare(
+        "INSERT INTO discussions (id, meeting_id, item_id, topic, positions_json, outcome, segment_ids_json, continues_id, position, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      );
+      const ts = Date.now();
+      const ids = drafts.map((d, i) => {
+        const id = newId(12);
+        st.run(id, meetingId, itemId, d.topic, JSON.stringify(d.positions), d.outcome, JSON.stringify(d.segmentIds), d.continuesId, i, ts);
+        return id;
+      });
+      const byId = new Map(
+        (db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? AND d.item_id IS ?`).all(meetingId, itemId) as Row[]).map((r) => [r.id as string, toDiscussion(r)]),
+      );
+      return ids.map((id) => byId.get(id)!);
+    },
+    getDiscussion(id: string): Discussion | null {
+      const r = db.prepare(`${DISCUSSION_SELECT} WHERE d.id = ?`).get(id) as Row | undefined;
+      return r ? toDiscussion(r) : null;
+    },
+    meetingDiscussions(meetingId: string): Discussion[] {
+      return (db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? ORDER BY d.ts, d.position`).all(meetingId) as Row[]).map(toDiscussion);
+    },
+    /** Every discussion of an item across meetings, newest meeting first. */
+    itemDiscussions(itemId: string): Array<Discussion & { meetingStartedAt: number }> {
+      return (
+        db
+          .prepare(
+            `SELECT x.*, m.started_at AS meeting_started_at FROM (${DISCUSSION_SELECT} WHERE d.item_id = ?) x
+             JOIN meetings m ON m.id = x.meeting_id ORDER BY m.started_at DESC, x.position`,
+          )
+          .all(itemId) as Row[]
+      ).map((r) => ({ ...toDiscussion(r), meetingStartedAt: r.meeting_started_at as number }));
+    },
+    deckDiscussions(deckId: string): Discussion[] {
+      return (
+        db.prepare(`${DISCUSSION_SELECT} JOIN items i ON i.id = d.item_id WHERE i.deck_id = ? ORDER BY d.ts, d.position`).all(deckId) as Row[]
+      ).map(toDiscussion);
+    },
+
     /** Checks an action item off (by someone) or reopens it (by: null). */
     setActionDone(roomId: string, noteId: string, by: string | null): Note | null {
       const res = db
@@ -547,6 +642,9 @@ export function openDb(file?: string) {
           participants: [...new Set(segments.map((s) => s.speakerName))],
           segments,
           notes,
+          discussions: (
+            db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? AND d.item_id = ? ORDER BY d.position`).all(m.id as string, itemId) as Row[]
+          ).map(toDiscussion),
         };
       });
     },

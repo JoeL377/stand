@@ -225,6 +225,7 @@ export class RoomSession implements SpeechSink {
         participantId: id,
         segments: this.db.meetingSegments(this.meetingId),
         notes: this.db.meetingNotes(this.meetingId),
+        discussions: this.db.meetingDiscussions(this.meetingId),
       });
       this.broadcastState();
       return;
@@ -482,9 +483,24 @@ export class RoomSession implements SpeechSink {
       const segments = this.db.itemSegments(this.meetingId, itemId);
       const item = itemId ? this.db.getItem(itemId) : null;
       try {
-        const drafts = await this.agent.notesFor(item, segments);
-        notes = this.db.replaceNotes(this.meetingId, itemId, drafts);
-        this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes });
+        const earlier = itemId
+          ? this.db
+              .itemDiscussions(itemId)
+              .filter((d) => d.meetingId !== this.meetingId)
+              .map((d) => ({ id: d.id, topic: d.topic, meetingStartedAt: d.meetingStartedAt }))
+          : [];
+        const draft = await this.agent.notesFor(item, segments, earlier);
+        const discussions = this.db.replaceDiscussions(
+          this.meetingId,
+          itemId,
+          draft.discussions.map(({ segmentIndexes, ...d }) => ({ ...d, segmentIds: segmentIndexes.map((i) => segments[i].id) })),
+        );
+        notes = this.db.replaceNotes(
+          this.meetingId,
+          itemId,
+          draft.notes.map(({ discussion, ...n }) => ({ ...n, discussionId: discussion === null ? null : (discussions[discussion]?.id ?? null) })),
+        );
+        this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
       } catch (err) {
         console.error("[agent] notes failed:", err);
       }

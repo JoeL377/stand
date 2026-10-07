@@ -81,6 +81,28 @@ export interface Note {
   /** Action items only: when someone checked it off, and who. */
   doneAt: number | null;
   doneBy: string | null;
+  /** The discussion this came out of, when the agent grouped the talk into discussions. */
+  discussionId: string | null;
+}
+
+export type DiscussionOutcome = "decided" | "action" | "open" | "info";
+
+/** A stretch of back-and-forth about one question, within one agenda item.
+ *  It records who argued what and how it ended; its decisions, action items
+ *  and open questions are the notes that point at it. */
+export interface Discussion {
+  id: string;
+  meetingId: string;
+  itemId: string | null;
+  topic: string;
+  /** Each participant's position, in a line, in the order they spoke. */
+  positions: Array<{ speaker: string; position: string }>;
+  outcome: DiscussionOutcome;
+  /** The speaker turns it covers, in order. */
+  segmentIds: string[];
+  /** The discussion of the same question in an earlier meeting, if it continues one. */
+  continues: { id: string; meetingId: string; startedAt: number; topic: string } | null;
+  ts: number;
 }
 
 /** An action item from an earlier meeting in the room, tracked until someone
@@ -169,11 +191,11 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "state"; state: RoomState }
-  | { type: "welcome"; participantId: string; segments: Segment[]; notes: Note[] }
+  | { type: "welcome"; participantId: string; segments: Segment[]; notes: Note[]; discussions: Discussion[] }
   | { type: "segment"; segment: Segment }
   | { type: "segment.updated"; segment: Segment }
   | { type: "interim"; speakerId: string; speakerName: string; text: string }
-  | { type: "notes"; meetingId: string; itemId: string | null; notes: Note[] }
+  | { type: "notes"; meetingId: string; itemId: string | null; notes: Note[]; discussions: Discussion[] }
   | { type: "meeting.ended"; meetingId: string }
   | { type: "error"; message: string };
 
@@ -187,13 +209,14 @@ export interface ItemHistory {
     participants: string[];
     segments: Segment[];
     notes: Note[];
+    discussions: Discussion[];
   }>;
 }
 
 export interface DeckHistory {
   deck: Deck;
   room: { id: string; name: string } | null;
-  slides: Array<{ item: Item; segments: Segment[]; notes: Note[] }>;
+  slides: Array<{ item: Item; segments: Segment[]; notes: Note[]; discussions: Discussion[] }>;
 }
 
 export interface MeetingRecap {
@@ -203,5 +226,5 @@ export interface MeetingRecap {
   startedAt: number;
   endedAt: number | null;
   summary: string | null;
-  items: Array<{ item: Item | null; segments: Segment[]; notes: Note[] }>;
+  items: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions: Discussion[] }>;
 }

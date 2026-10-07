@@ -2,7 +2,7 @@
 // follow-up. One JSON shape (versioned, stable ids, links back to the source
 // ticket or slide) and a Markdown rendering of the same thing.
 
-import type { Deck, FollowUp, Item, Note, Segment } from "../shared/protocol.ts";
+import type { Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment } from "../shared/protocol.ts";
 
 type Meeting = { id: string; roomId: string; startedAt: number; endedAt: number | null; summary: string | null };
 
@@ -35,6 +35,21 @@ export interface BriefAction {
   /** The meeting it came up in. */
   meetingId: string;
   item: BriefItemRef;
+  /** The discussion it came out of: why this needs doing, and who said what. */
+  discussion: { id: string; topic: string; positions: Discussion["positions"] } | null;
+}
+
+export interface BriefDiscussion {
+  id: string;
+  topic: string;
+  outcome: DiscussionOutcome;
+  positions: Discussion["positions"];
+  decisions: string[];
+  actionIds: string[];
+  openQuestions: string[];
+  /** The same question discussed in an earlier meeting. */
+  continues: { id: string; meetingId: string; startedAt: string; topic: string; recapUrl: string } | null;
+  transcript?: Array<{ speaker: string; kind: "speech" | "chat"; at: string; text: string }>;
 }
 
 export interface MeetingBrief {
@@ -63,6 +78,8 @@ export interface MeetingBrief {
     actionIds: string[];
     openQuestions: string[];
     speakers: string[];
+    /** The talk grouped into discussions, one per question, in order. */
+    discussions: BriefDiscussion[];
     transcript?: Array<{ speaker: string; kind: "speech" | "chat"; at: string; text: string }>;
   }>;
 }
@@ -85,7 +102,10 @@ export function itemRef(it: Item | null, decks: Deck[], baseUrl: string): BriefI
 
 const iso = (ts: number) => new Date(ts).toISOString();
 
-function toAction(n: Note, item: BriefItemRef): BriefAction {
+type DiscussionLookup = (id: string) => Pick<Discussion, "id" | "topic" | "positions"> | null | undefined;
+
+function toAction(n: Note, item: BriefItemRef, discussionById?: DiscussionLookup): BriefAction {
+  const d = n.discussionId ? discussionById?.(n.discussionId) : null;
   return {
     id: n.id,
     text: n.text,
@@ -95,18 +115,21 @@ function toAction(n: Note, item: BriefItemRef): BriefAction {
     doneBy: n.doneBy,
     meetingId: n.meetingId,
     item,
+    discussion: d ? { id: d.id, topic: d.topic, positions: d.positions } : null,
   };
 }
 
 export function buildBrief(input: {
   meeting: Meeting;
   roomName: string;
-  groups: Array<{ item: Item | null; segments: Segment[]; notes: Note[] }>;
+  groups: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions?: Discussion[] }>;
   decks: Deck[];
   baseUrl: string;
   /** The room's action items from other meetings; open ones from before this meeting carry over. */
   followUps?: FollowUp[];
   itemById?: (id: string) => Item | null;
+  /** Finds discussions from other meetings, for carried-over action items. */
+  discussionById?: DiscussionLookup;
   withTranscript?: boolean;
 }): MeetingBrief {
   const { meeting: m, baseUrl } = input;
@@ -127,16 +150,19 @@ export function buildBrief(input: {
     actions: [],
     carriedOver: (input.followUps ?? [])
       .filter((f) => f.meetingId !== m.id && f.meetingStartedAt < m.startedAt && !f.doneAt)
-      .map((f) => toAction(f, ref(f.itemId ? (input.itemById?.(f.itemId) ?? null) : null))),
+      .map((f) => toAction(f, ref(f.itemId ? (input.itemById?.(f.itemId) ?? null) : null), input.discussionById)),
     decisions: [],
     openQuestions: [],
     items: [],
   };
 
+  const turn = (s: Segment) => ({ speaker: s.speakerName, kind: s.kind, at: iso(s.ts), text: s.text });
   for (const g of input.groups) {
     const r = ref(g.item);
+    const discussions = g.discussions ?? [];
+    const here = new Map(discussions.map((d) => [d.id, d]));
     const of = (kind: Note["kind"]) => g.notes.filter((n) => n.kind === kind);
-    const actions = of("action").map((n) => toAction(n, r));
+    const actions = of("action").map((n) => toAction(n, r, (id) => here.get(id)));
     brief.actions.push(...actions);
     brief.decisions.push(...of("decision").map((n) => ({ id: n.id, text: n.text, item: r })));
     brief.openQuestions.push(...of("question").map((n) => ({ id: n.id, text: n.text, item: r })));
@@ -147,18 +173,38 @@ export function buildBrief(input: {
       actionIds: actions.map((a) => a.id),
       openQuestions: of("question").map((n) => n.text),
       speakers: [...new Set(g.segments.map((s) => s.speakerName))],
-      ...(input.withTranscript && {
-        transcript: g.segments.map((s) => ({ speaker: s.speakerName, kind: s.kind, at: iso(s.ts), text: s.text })),
+      discussions: discussions.map((d) => {
+        const mine = (kind: Note["kind"]) => g.notes.filter((n) => n.kind === kind && n.discussionId === d.id);
+        return {
+          id: d.id,
+          topic: d.topic,
+          outcome: d.outcome,
+          positions: d.positions,
+          decisions: mine("decision").map((n) => n.text),
+          actionIds: mine("action").map((n) => n.id),
+          openQuestions: mine("question").map((n) => n.text),
+          continues: d.continues
+            ? { ...d.continues, startedAt: iso(d.continues.startedAt), recapUrl: `${baseUrl}/meetings/${d.continues.meetingId}` }
+            : null,
+          ...(input.withTranscript && {
+            transcript: d.segmentIds.flatMap((id) => g.segments.filter((s) => s.id === id)).map(turn),
+          }),
+        };
       }),
+      ...(input.withTranscript && { transcript: g.segments.map(turn) }),
     });
   }
   return brief;
 }
 
+const OUTCOME_LABEL: Record<DiscussionOutcome, string> = { decided: "decided", action: "action taken", open: "still open", info: "update" };
+
 const label = (r: BriefItemRef) => [r.key, r.deck && r.kind === "slide" ? `${r.deck}: ${r.title}` : r.title].filter(Boolean).join(" · ");
 const link = (r: BriefItemRef) => (r.url ? `[${label(r)}](${r.url})` : label(r));
 const actionLine = (a: BriefAction) =>
-  `- [${a.status === "done" ? "x" : " "}] ${a.text} (owner: ${a.owner ?? "unassigned"}${a.doneBy ? `, done by ${a.doneBy}` : ""}) · ${link(a.item)}`;
+  `- [${a.status === "done" ? "x" : " "}] ${a.text} (owner: ${a.owner ?? "unassigned"}${a.doneBy ? `, done by ${a.doneBy}` : ""}) · ${link(a.item)}${
+    a.discussion ? ` · from "${a.discussion.topic}"` : ""
+  }`;
 
 /** The brief as Markdown with YAML front matter: easy to paste into an agent or a doc. */
 export function briefToMarkdown(b: MeetingBrief): string {
@@ -205,13 +251,29 @@ export function briefToMarkdown(b: MeetingBrief): string {
     out.push(`### ${link(g.item)}`, "");
     if (g.speakers.length) out.push(`Speakers: ${g.speakers.join(", ")}`, "");
     if (g.summary) out.push(g.summary, "");
-    for (const d of g.decisions) out.push(`- Decision: ${d}`);
-    for (const id of g.actionIds) {
+    const actionLine2 = (id: string) => {
       const a = actionText.get(id)!;
-      out.push(`- Action${a.status === "done" ? " (done)" : ""}: ${a.text}${a.owner ? ` (${a.owner})` : ""}`);
+      return `- Action${a.status === "done" ? " (done)" : ""}: ${a.text}${a.owner ? ` (${a.owner})` : ""}`;
+    };
+    const inDiscussion = new Set(g.discussions.flatMap((d) => d.actionIds));
+    for (const d of g.discussions) {
+      out.push(`#### ${d.topic} · ${OUTCOME_LABEL[d.outcome]}`, "");
+      if (d.continues) out.push(`Continues "${d.continues.topic}" from [${d.continues.startedAt.slice(0, 10)}](${d.continues.recapUrl}).`, "");
+      for (const p of d.positions) out.push(`- ${p.speaker}: ${p.position}`);
+      if (d.positions.length) out.push("");
+      for (const t of d.decisions) out.push(`- Decision: ${t}`);
+      for (const id of d.actionIds) out.push(actionLine2(id));
+      for (const q of d.openQuestions) out.push(`- Question: ${q}`);
+      if (d.decisions.length || d.actionIds.length || d.openQuestions.length) out.push("");
     }
-    for (const q of g.openQuestions) out.push(`- Question: ${q}`);
-    if (g.decisions.length || g.actionIds.length || g.openQuestions.length) out.push("");
+    // Notes from before discussions existed, or that belong to none.
+    const inAny = new Set(g.discussions.flatMap((d) => [...d.decisions, ...d.openQuestions]));
+    const loose = [
+      ...g.decisions.filter((d) => !inAny.has(d)).map((d) => `- Decision: ${d}`),
+      ...g.actionIds.filter((id) => !inDiscussion.has(id)).map(actionLine2),
+      ...g.openQuestions.filter((q) => !inAny.has(q)).map((q) => `- Question: ${q}`),
+    ];
+    if (loose.length) out.push(...loose, "");
     if (g.transcript?.length) {
       out.push("<details><summary>Transcript</summary>", "");
       for (const s of g.transcript) out.push(`- ${s.speaker}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`);
@@ -237,6 +299,7 @@ export function buildFollowUps(input: {
   decks: Deck[];
   baseUrl: string;
   status: FollowUpsFeed["status"];
+  discussionById?: DiscussionLookup;
 }): FollowUpsFeed {
   const { baseUrl } = input;
   return {
@@ -246,7 +309,7 @@ export function buildFollowUps(input: {
     actions: input.followUps
       .filter((f) => input.status === "all" || (input.status === "done") === Boolean(f.doneAt))
       .map((f) => ({
-        ...toAction(f, itemRef(f.itemId ? input.itemById(f.itemId) : null, input.decks, baseUrl)),
+        ...toAction(f, itemRef(f.itemId ? input.itemById(f.itemId) : null, input.decks, baseUrl), input.discussionById),
         raisedAt: iso(f.meetingStartedAt),
         meetingUrl: `${baseUrl}/meetings/${f.meetingId}`,
       })),

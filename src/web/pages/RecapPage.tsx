@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import type { MeetingRecap } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
-import { NoteList } from "../room/SidePanel.tsx";
+import { ItemNotes } from "../Discussions.tsx";
 import { colorFor, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
 export function RecapPage() {
@@ -91,7 +91,7 @@ export function RecapPage() {
               </h2>
               <span className="muted small">{[...new Set(g.segments.map((s) => s.speakerName))].join(", ")}</span>
             </div>
-            <NoteList notes={g.notes} />
+            <ItemNotes notes={g.notes} discussions={g.discussions ?? []} segments={g.segments} />
             <button className="link" onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
               {open[key] ? "Hide transcript" : `Show transcript (${g.segments.length})`}
             </button>

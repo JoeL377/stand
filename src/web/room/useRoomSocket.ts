@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientMessage, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
+import type { ClientMessage, Discussion, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
 
 export interface Interim {
   speakerId: string;
@@ -11,6 +11,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [state, setState] = useState<RoomState | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [discussions, setDiscussions] = useState<Discussion[]>([]);
   const [interims, setInterims] = useState<Record<string, Interim>>({});
   const [endedMeetingId, setEndedMeetingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +39,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
           case "welcome":
             setSegments(msg.segments);
             setNotes(msg.notes);
+            setDiscussions(msg.discussions ?? []);
             break;
           case "state":
             setState(msg.state);
@@ -58,6 +60,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
             break;
           case "notes":
             setNotes((all) => [...all.filter((n) => n.itemId !== msg.itemId), ...msg.notes]);
+            setDiscussions((all) => [...all.filter((d) => d.itemId !== msg.itemId), ...(msg.discussions ?? [])]);
             break;
           case "meeting.ended":
             closedByUs = true;
@@ -88,5 +91,5 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }, []);
 
-  return { state, segments, notes, interims, endedMeetingId, error, setError, connected, send };
+  return { state, segments, notes, discussions, interims, endedMeetingId, error, setError, connected, send };
 }

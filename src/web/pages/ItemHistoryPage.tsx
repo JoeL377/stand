@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api.ts";
-import { NoteList } from "../room/SidePanel.tsx";
+import { ItemNotes } from "../Discussions.tsx";
 import { Slide } from "../slides.tsx";
 import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
 import { colorFor, fmtDate, fmtTime, keyOf } from "../util.ts";
@@ -91,7 +91,7 @@ export function ItemHistoryPage() {
             </h2>
             <span className="muted small">{m.participants.join(", ")}</span>
           </div>
-          <NoteList notes={m.notes} />
+          <ItemNotes notes={m.notes} discussions={m.discussions ?? []} segments={m.segments} />
           <button className="link" onClick={() => setOpen((o) => ({ ...o, [m.meetingId]: !o[m.meetingId] }))}>
             {open[m.meetingId] ? "Hide transcript" : `Show transcript (${m.segments.length})`}
           </button>

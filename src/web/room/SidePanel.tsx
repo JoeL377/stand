@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import type { ClientMessage, Discussion, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
+import { ItemNotes } from "../Discussions.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
   segments: Segment[];
   notes: Note[];
+  discussions: Discussion[];
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => void;
   participantId: string;
@@ -19,6 +21,7 @@ export function SidePanel(props: {
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId);
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
+  const focusDiscussions = props.discussions.filter((d) => d.itemId === state.focusItemId);
   // Action items about this item from earlier meetings, still open (or just checked off).
   const earlier = (state.followUps ?? []).filter((f) => f.itemId === state.focusItemId);
   const earlierOpenCount = earlier.filter((f) => !f.doneAt).length;
@@ -63,14 +66,18 @@ export function SidePanel(props: {
         <section className={notesOpen ? "focus-notes open" : "focus-notes"}>
           <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
             <span>Agent notes</span>
-            <span className="muted">{focusNotes.length}</span>
+            <span className="muted">
+              {focusDiscussions.length
+                ? `${focusDiscussions.length} discussion${focusDiscussions.length === 1 ? "" : "s"}`
+                : focusNotes.length}
+            </span>
             <span className="chev" aria-hidden>
               {notesOpen ? "▾" : "▸"}
             </span>
           </button>
           {notesOpen && (
             <div className="focus-notes-body">
-              <NoteList notes={focusNotes} />
+              <ItemNotes compact notes={focusNotes} discussions={focusDiscussions} segments={segments} />
             </div>
           )}
         </section>

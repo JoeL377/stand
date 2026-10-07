@@ -179,7 +179,7 @@ test("the meeting brief lists every action with its owner and a link back to the
   ]);
   const meeting = { id: "m1", roomId: room.id, startedAt: Date.UTC(2026, 9, 7, 9), endedAt: Date.UTC(2026, 9, 7, 9, 15), summary: "Short one." };
   const note = (id: string, itemId: string | null, kind: "summary" | "decision" | "action" | "question", text: string, owner: string | null = null) =>
-    ({ id, meetingId: "m1", itemId, kind, text, owner, ts: 0, doneAt: null, doneBy: null });
+    ({ id, meetingId: "m1", itemId, kind, text, owner, ts: 0, doneAt: null, doneBy: null, discussionId: null });
   const seg = (itemId: string | null, speakerName: string, text: string) =>
     ({ id: text, meetingId: "m1", itemId, speakerId: speakerName, speakerName, kind: "speech" as const, text, ts: meeting.startedAt });
   const brief = buildBrief({
@@ -256,4 +256,39 @@ test("action items stay open on their item across meetings until someone checks 
   assert.deepEqual(feed.actions.map((a) => a.text), ["Add a dashboard"]);
   assert.equal(feed.actions[0].meetingUrl, `http://stand.test/meetings/${first.id}`);
   void dash;
+});
+
+test("the agent groups an item's talk into discussions, and notes point at the one they came from", async () => {
+  const { db, session, items, meetingId } = setup();
+  const t = Date.now();
+  session.addSpeech("p1", "Sam", "The annual plan shows 15 percent off but planning said 20.", t - 20_000);
+  session.addSpeech("p2", "Jordan", "Then billing is wrong. I'll file it today.", t - 10_000);
+  await session.end();
+  const [d] = db.meetingDiscussions(meetingId);
+  assert.equal(d.itemId, items[0].id);
+  assert.equal(d.outcome, "action");
+  assert.deepEqual(d.positions.map((p) => p.speaker), ["Sam", "Jordan"]);
+  assert.equal(d.segmentIds.length, 2);
+  const action = db.meetingNotes(meetingId).find((n) => n.kind === "action")!;
+  assert.equal(action.discussionId, d.id);
+
+  // A later meeting picks the same question up again.
+  const next = db.startMeeting(db.getMeeting(meetingId)!.roomId);
+  const [again] = db.replaceDiscussions(next.id, items[0].id, [
+    { topic: "Annual plan discount", positions: [], outcome: "decided", segmentIds: [], continuesId: d.id },
+  ]);
+  assert.equal(again.continues?.meetingId, meetingId);
+  assert.equal(again.continues?.topic, d.topic);
+  assert.deepEqual(db.itemDiscussions(items[0].id).map((x) => x.id), [again.id, d.id]);
+
+  const brief = buildBrief({
+    meeting: db.getMeeting(meetingId)!,
+    roomName: "Test",
+    groups: [{ item: items[0], segments: db.meetingSegments(meetingId), notes: db.meetingNotes(meetingId), discussions: db.meetingDiscussions(meetingId) }],
+    decks: [],
+    baseUrl: "http://stand.test",
+  });
+  assert.equal(brief.actions[0].discussion?.topic, d.topic);
+  assert.deepEqual(brief.items[0].discussions[0].actionIds, [action.id]);
+  assert.match(briefToMarkdown(brief), /#### One · action taken\n\n- Sam: The annual plan/);
 });

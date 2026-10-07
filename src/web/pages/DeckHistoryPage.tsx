@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { DeckHistory } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
-import { NoteList } from "../room/SidePanel.tsx";
+import { ItemNotes } from "../Discussions.tsx";
 import { Slide } from "../slides.tsx";
 import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
 import { colorFor, fmtDate, fmtTime } from "../util.ts";
@@ -84,7 +84,7 @@ export function DeckHistoryPage() {
         </section>
       )}
 
-      {shown.map(({ item, segments, notes }) => (
+      {shown.map(({ item, segments, notes, discussions }) => (
         <section key={item.id} className="doc-section deck-slide">
           <Link to={`/items/${item.id}`} className="slide-thumb-link" title="History of this slide">
             <Slide item={item} deck={deck} width={280} />
@@ -94,7 +94,7 @@ export function DeckHistoryPage() {
               <span className="slide-no">{item.slideNo}</span> {item.title}
             </h2>
             {segments.length === 0 && notes.length === 0 && <p className="muted small">Not discussed yet.</p>}
-            <NoteList notes={notes} />
+            <ItemNotes notes={notes} discussions={discussions ?? []} segments={segments} />
             {segments.length > 0 && (
               <div className="transcript static">
                 {segments.map((s) => (

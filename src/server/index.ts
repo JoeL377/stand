@@ -340,6 +340,7 @@ app.get(
     const deck = db.getDeck(req.params.deckId);
     if (!deck) return notFound(res);
     const { segments, notes } = db.deckActivity(deck.id);
+    const discussions = db.deckDiscussions(deck.id);
     const body: DeckHistory = {
       deck,
       room: db.getRoom(deck.roomId),
@@ -347,6 +348,7 @@ app.get(
         item,
         segments: segments.filter((s) => s.itemId === item.id),
         notes: notes.filter((n) => n.itemId === item.id),
+        discussions: discussions.filter((d) => d.itemId === item.id),
       })),
     };
     res.json(body);
@@ -397,6 +399,7 @@ app.get(
 function meetingGroups(m: { id: string; roomId: string }) {
   const segments = db.meetingSegments(m.id);
   const notes = db.meetingNotes(m.id);
+  const discussions = db.meetingDiscussions(m.id);
   const ids = [...new Set([...segments.map((s) => s.itemId), ...notes.map((n) => n.itemId)])];
   const items = db.listItems(m.roomId);
   ids.sort((a, b) => (items.find((i) => i.id === a)?.position ?? 1e9) - (items.find((i) => i.id === b)?.position ?? 1e9));
@@ -404,6 +407,7 @@ function meetingGroups(m: { id: string; roomId: string }) {
     item: id ? db.getItem(id) : null,
     segments: segments.filter((s) => s.itemId === id),
     notes: notes.filter((n) => n.itemId === id),
+    discussions: discussions.filter((d) => d.itemId === id),
   }));
 }
 
@@ -441,6 +445,7 @@ app.get(
       baseUrl: `${req.protocol}://${req.get("host")}`,
       followUps: db.roomFollowUps(m.roomId),
       itemById: (id) => db.getItem(id),
+      discussionById: (id) => db.getDiscussion(id),
       withTranscript: req.query.transcript === "1",
     });
     if (req.params.format === "json") return void res.json(brief);
@@ -463,6 +468,7 @@ app.get(
       decks: db.listDecks(room.id),
       baseUrl: `${req.protocol}://${req.get("host")}`,
       status,
+      discussionById: (id) => db.getDiscussion(id),
     });
     if (req.params.format === "json") return void res.json(feed);
     res.type("text/markdown; charset=utf-8").send(followUpsToMarkdown(feed));

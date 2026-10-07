@@ -124,6 +124,7 @@ export function Meeting(props: {
           state={state}
           segments={room.segments}
           notes={room.notes}
+          discussions={room.discussions}
           interims={room.interims}
           send={send}
           participantId={participantId}
