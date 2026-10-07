@@ -103,16 +103,20 @@ class ClaudeAgent implements Agent {
     content: Anthropic.Beta.BetaContentBlockParam[] | string,
     system: string,
     effort: "low" | "medium",
+    model = config.anthropicModel,
   ): Promise<T | null> {
+    // If a safety classifier declines, let the API retry on its recommended
+    // fallback model. Haiku has no server-side fallback.
+    const fallback = model.startsWith("claude-haiku")
+      ? {}
+      : { betas: ["server-side-fallback-2026-07-01"] as Anthropic.AnthropicBeta[], fallbacks: "default" as const };
     const res = await this.client.beta.messages.parse({
-      model: config.anthropicModel,
+      model,
       max_tokens: 4000,
       system,
       messages: [{ role: "user", content }],
       output_config: { effort, format: betaZodOutputFormat(schema) },
-      // If a safety classifier declines, let the API retry on its recommended fallback model.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      ...fallback,
     });
     if (res.stop_reason === "refusal") return null;
     return (res.parsed_output as T | null) ?? null;
@@ -143,6 +147,7 @@ For each discussion, give each participant's position in one short line, how it 
 
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
       "low",
+      config.notesModel,
     );
     if (!out) return { notes: [], discussions: [] };
     const known = new Set(earlier.map((d) => d.id));

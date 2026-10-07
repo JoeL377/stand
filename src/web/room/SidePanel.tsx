@@ -10,6 +10,7 @@ export function SidePanel(props: {
   segments: Segment[];
   notes: Note[];
   discussions: Discussion[];
+  notesBusy: string[];
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => void;
   participantId: string;
@@ -22,6 +23,7 @@ export function SidePanel(props: {
   const shown = segments.filter((s) => s.itemId === state.focusItemId);
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
   const focusDiscussions = props.discussions.filter((d) => d.itemId === state.focusItemId);
+  const notesUpdating = props.notesBusy.includes(state.focusItemId ?? "");
   // Action items about this item from earlier meetings, still open (or just checked off).
   const earlier = (state.followUps ?? []).filter((f) => f.itemId === state.focusItemId);
   const earlierOpenCount = earlier.filter((f) => !f.doneAt).length;
@@ -62,25 +64,27 @@ export function SidePanel(props: {
           )}
         </section>
       )}
-      {focusNotes.length > 0 && (
+      {(focusNotes.length > 0 || notesUpdating) && (
         <section className={notesOpen ? "focus-notes open" : "focus-notes"}>
           <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
             <span>Agent notes</span>
             <span className="muted">
               {liveNotesCount(focusNotes, focusDiscussions)}
             </span>
+            {notesUpdating && <span className="notes-updating">Updating…</span>}
             <span className="chev" aria-hidden>
               {notesOpen ? "▾" : "▸"}
             </span>
           </button>
           {notesOpen && (
             <div className="focus-notes-body">
-              <LiveItemNotes
+              {!focusNotes.length && <p className="tk-empty">Writing the first notes…</p>}
+              {focusNotes.length > 0 && <LiveItemNotes
                 notes={focusNotes}
                 discussions={focusDiscussions}
                 segments={segments}
                 onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
-              />
+              />}
             </div>
           )}
         </section>

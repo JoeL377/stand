@@ -196,6 +196,8 @@ export type ServerMessage =
   | { type: "segment.updated"; segment: Segment }
   | { type: "interim"; speakerId: string; speakerName: string; text: string }
   | { type: "notes"; meetingId: string; itemId: string | null; notes: Note[]; discussions: Discussion[] }
+  /** The agent started or finished rewriting an item's notes. */
+  | { type: "notes.busy"; itemId: string | null; busy: boolean }
   | { type: "meeting.ended"; meetingId: string }
   | { type: "error"; message: string };
 

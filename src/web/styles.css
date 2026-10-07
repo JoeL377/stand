@@ -957,3 +957,6 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .live-details > summary:hover { color: var(--text); }
 .live-gist { margin: 8px 0 0; color: var(--muted); }
 .live-details .discussions.compact { margin: 8px 0 0; }
+.notes-updating { font-size: 11px; color: var(--accent); animation: notes-pulse 1.4s ease-in-out infinite; }
+@keyframes notes-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .notes-updating { animation: none; } }

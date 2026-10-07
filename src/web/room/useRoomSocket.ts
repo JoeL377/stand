@@ -12,6 +12,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [discussions, setDiscussions] = useState<Discussion[]>([]);
+  /** Items whose notes the agent is rewriting right now ("" = off-agenda). */
+  const [notesBusy, setNotesBusy] = useState<string[]>([]);
   const [interims, setInterims] = useState<Record<string, Interim>>({});
   const [endedMeetingId, setEndedMeetingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +64,11 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
             setNotes((all) => [...all.filter((n) => n.itemId !== msg.itemId), ...msg.notes]);
             setDiscussions((all) => [...all.filter((d) => d.itemId !== msg.itemId), ...(msg.discussions ?? [])]);
             break;
+          case "notes.busy": {
+            const key = msg.itemId ?? "";
+            setNotesBusy((all) => (msg.busy ? [...all.filter((k) => k !== key), key] : all.filter((k) => k !== key)));
+            break;
+          }
           case "meeting.ended":
             closedByUs = true;
             setEndedMeetingId(msg.meetingId);
@@ -91,5 +98,5 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }, []);
 
-  return { state, segments, notes, discussions, interims, endedMeetingId, error, setError, connected, send };
+  return { state, segments, notes, discussions, notesBusy, interims, endedMeetingId, error, setError, connected, send };
 }

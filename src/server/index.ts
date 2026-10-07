@@ -534,6 +534,6 @@ server.listen(config.port, () => {
   const c = capabilities();
   console.log(`standup server on http://localhost:${config.port}`);
   console.log(
-    `  audio: ${c.livekit ? "LiveKit" : "off (mock mode)"} · transcription: ${c.transcription} · notes: ${c.llm ? config.anthropicModel : "heuristic"} · Linear: ${c.linear ? "on" : "off"}`,
+    `  audio: ${c.livekit ? "LiveKit" : "off (mock mode)"} · transcription: ${c.transcription} · notes: ${c.llm ? config.notesModel : "heuristic"} · Linear: ${c.linear ? "on" : "off"}`,
   );
 });

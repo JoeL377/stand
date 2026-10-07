@@ -26,7 +26,9 @@ const DISMISS_QUIET_MS = 90_000;
 /** Minimum gap between screen reads, to bound vision cost. */
 const FRAME_MIN_INTERVAL_MS = 4_000;
 /** Notes for the item in focus refresh this long after the last new remark. */
-const NOTES_DEBOUNCE_MS = 8_000;
+const NOTES_DEBOUNCE_MS = 3_000;
+/** While talk keeps going, refresh notes at least this often instead of waiting for a pause. */
+const NOTES_MAX_WAIT_MS = 12_000;
 /** A speaker's next words join their last entry when they pause for less than this. */
 const SPEECH_JOIN_GAP_MS = 2_000;
 /** ...as long as the entry stays a readable size. */
@@ -70,6 +72,8 @@ export class RoomSession implements SpeechSink {
   private focusLog: Array<{ ts: number; itemId: string | null }> = [];
   private dismissed = new Map<string, number>();
   private noteTimers = new Map<string | null, NodeJS.Timeout>();
+  /** When the oldest change not yet in an item's notes arrived. */
+  private notePendingSince = new Map<string | null, number>();
   /** The entry new speech from the same speaker can join (see addSpeech). */
   private lastSpeech: {
     segmentId: string;
@@ -80,6 +84,9 @@ export class RoomSession implements SpeechSink {
     length: number;
   } | null = null;
   private noteRuns = new Map<string | null, Promise<void>>();
+  /** A run waiting behind the current one. It reads the transcript when it
+   *  starts, so later requests just join it instead of queueing more runs. */
+  private noteQueued = new Map<string | null, Promise<Note[]>>();
   private frame: { dataUrl: string; at: number } | null = null;
   private frameBusy = false;
   private lastFrameRead = 0;
@@ -476,23 +483,42 @@ export class RoomSession implements SpeechSink {
 
   // ---- notes --------------------------------------------------------------
 
+  /** Debounced: waits for a short pause in the talk, but never more than
+   *  NOTES_MAX_WAIT_MS after the first change it hasn't covered yet. */
   private scheduleNotes(itemId: string | null, delay: number) {
     if (this.ended) return;
+    const since = this.notePendingSince.get(itemId) ?? Date.now();
+    this.notePendingSince.set(itemId, since);
     clearTimeout(this.noteTimers.get(itemId));
     this.noteTimers.set(
       itemId,
-      setTimeout(() => {
-        this.noteTimers.delete(itemId);
-        void this.refreshNotes(itemId);
-      }, delay),
+      setTimeout(
+        () => {
+          this.noteTimers.delete(itemId);
+          this.notePendingSince.delete(itemId);
+          void this.refreshNotes(itemId);
+        },
+        Math.max(0, Math.min(delay, since + NOTES_MAX_WAIT_MS - Date.now())),
+      ),
     );
   }
 
-  private async refreshNotes(itemId: string | null): Promise<Note[]> {
+  private refreshNotes(itemId: string | null): Promise<Note[]> {
+    const queued = this.noteQueued.get(itemId);
+    if (queued) return queued;
+    const result = this.runNotes(itemId);
+    this.noteQueued.set(itemId, result);
+    return result;
+  }
+
+  private async runNotes(itemId: string | null): Promise<Note[]> {
     // One run per item at a time; a request during a run queues behind it.
     const prev = this.noteRuns.get(itemId) ?? Promise.resolve();
     let notes: Note[] = [];
     const run = prev.then(async () => {
+      this.noteQueued.delete(itemId);
+      const startedAt = Date.now();
+      this.broadcast({ type: "notes.busy", itemId, busy: true });
       const segments = this.db.itemSegments(this.meetingId, itemId);
       const item = itemId ? this.db.getItem(itemId) : null;
       try {
@@ -514,8 +540,11 @@ export class RoomSession implements SpeechSink {
           draft.notes.map(({ discussion, ...n }) => ({ ...n, discussionId: discussion === null ? null : (discussions[discussion]?.id ?? null) })),
         );
         this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
+        console.log(`[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
       } catch (err) {
         console.error("[agent] notes failed:", err);
+      } finally {
+        if (this.noteRuns.get(itemId) === run) this.broadcast({ type: "notes.busy", itemId, busy: false });
       }
     });
     this.noteRuns.set(itemId, run);
