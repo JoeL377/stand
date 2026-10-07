@@ -799,3 +799,19 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .agenda .deck-toggle .kind { height: auto; }
 .agenda .item-main .kind { margin-top: 1px; }
 .agenda .deck-toggle .kind { margin-left: 2px; margin-right: 2px; }
+
+/* Row tools are line icons in fixed 24px slots, so every deck row reserves
+   the same width and the chevrons line up in one column. */
+.agenda .item-tools .icon { width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; filter: none; }
+.agenda .item-tools .icon:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.agenda .item-tools .icon.on { color: var(--accent); }
+.agenda .item-tools .icon.spacer { pointer-events: none; }
+.agenda .item-tools { padding-right: 4px; }
+.agenda .deck-toggle .chev { width: 12px; height: 12px; display: inline-flex; transition: transform 0.12s; }
+.agenda .deck-toggle .chev.open { transform: rotate(90deg); }
+.add-head .icon, .upload-note .icon { display: inline-flex; align-items: center; }
+.pinned-note svg { vertical-align: -2px; }
+/* The whole row carries the hover tint, not the button inside it. */
+.agenda .item-main:hover:not(:disabled), .agenda .deck-toggle:hover:not(:disabled) { background: none; }
+.agenda .item:hover { background: var(--hover); }
+.agenda .item.active, .agenda .item.active:hover { background: var(--accent-soft); }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Deck, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
-import { ChatIcon, DeckIcon, PdfIcon, TaskIcon, TicketIcon } from "../icons.tsx";
+import { ChatIcon, ChevronIcon, CloseIcon, DeckIcon, EditIcon, HistoryIcon, MoreIcon, PdfIcon, PinIcon, TaskIcon, TicketIcon } from "../icons.tsx";
 import { uploadDeck } from "../slides.tsx";
 
 export function AgendaPanel(props: {
@@ -81,15 +81,15 @@ export function AgendaPanel(props: {
               title="Pin: stay on this item even if the screen changes"
               onClick={() => send({ type: "pin", itemId: it.id })}
             >
-              📌
+              <PinIcon />
             </button>
           )}
           <a className="icon" href={`/items/${it.id}`} target="_blank" rel="noreferrer" title="History of this item">
-            ↗
+            <HistoryIcon />
           </a>
           {canSteer && (
             <button className="icon" title="Remove from agenda" onClick={() => void api.removeItem(roomId, it.id)}>
-              ✕
+              <CloseIcon />
             </button>
           )}
         </span>
@@ -147,19 +147,20 @@ export function AgendaPanel(props: {
             </span>
             <span className="item-title">{b.deck.title}</span>
             <span className="deck-count">{b.items.length} slides</span>
-            <span className="chev" aria-hidden>
-              {open ? "▾" : "▸"}
+            <span className={open ? "chev open" : "chev"} aria-hidden>
+              <ChevronIcon />
             </span>
           </button>
           <span className="item-tools">
             {b.deck.kind === "native" && (
               <a className="icon" href={`/decks/${b.deck.id}/edit`} target="_blank" rel="noreferrer" title="Edit these slides">
-                ✎
+                <EditIcon />
               </a>
             )}
+            {b.deck.kind !== "native" && <span className="icon spacer" aria-hidden />}
             <span className="pop-wrap">
               <button className="icon" title="More" onClick={() => setPop((p) => (p === key ? null : key))}>
-                ⋯
+                <MoreIcon />
               </button>
               {pop === key && (
                 <div className="add-menu row-menu" role="menu">
@@ -230,7 +231,7 @@ export function AgendaPanel(props: {
 
       {state.pinnedBy && (
         <div className="pinned-note">
-          📌 Pinned by {state.pinnedBy}. The agent won't suggest other items.{" "}
+          <PinIcon size={13} /> Pinned by {state.pinnedBy}. The agent won't suggest other items.{" "}
           {canSteer && (
             <button className="link" onClick={() => send({ type: "unpin" })}>
               Unpin
@@ -243,7 +244,7 @@ export function AgendaPanel(props: {
           {uploadNote}
           {uploadNote !== "Reading slides…" && (
             <button className="icon" title="Dismiss" onClick={() => setUploadNote(null)}>
-              ✕
+              <CloseIcon />
             </button>
           )}
         </div>
@@ -311,7 +312,7 @@ function AddForm({ mode, roomId, llm, onClose }: { mode: Exclude<AddMode, "pdf">
       <div className="add-head">
         <strong>{title}</strong>
         <button className="icon" title="Close" onClick={onClose}>
-          ✕
+          <CloseIcon />
         </button>
       </div>
       {mode === "slides" ? (

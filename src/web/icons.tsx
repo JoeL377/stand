@@ -96,3 +96,44 @@ export const ChatIcon = ({ size = 15 }: { size?: number }) => (
     <path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.6A7.5 7.5 0 1 1 20 12Z" />
   </Svg>
 );
+
+// Small row tools in the agenda (pin, history, remove, edit, more, expand).
+export const PinIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M9 4h6M10 4v5.5L7 13h10l-3-3.5V4M12 13v7" />
+  </Svg>
+);
+
+export const HistoryIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M3.5 12a8.5 8.5 0 1 0 2.5-6" />
+    <path d="M3 4v4h4M12 8v4l2.8 1.8" />
+  </Svg>
+);
+
+export const CloseIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M6 6l12 12M18 6 6 18" />
+  </Svg>
+);
+
+export const EditIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16Z" />
+    <path d="m13.5 6.5 4 4" />
+  </Svg>
+);
+
+export const MoreIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <circle cx="6" cy="12" r="1" fill="currentColor" />
+    <circle cx="12" cy="12" r="1" fill="currentColor" />
+    <circle cx="18" cy="12" r="1" fill="currentColor" />
+  </Svg>
+);
+
+export const ChevronIcon = ({ size = 12 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="m9 6 6 6-6 6" />
+  </Svg>
+);
