@@ -197,7 +197,7 @@ export function buildBrief(input: {
   return brief;
 }
 
-const OUTCOME_LABEL: Record<DiscussionOutcome, string> = { decided: "decided", action: "action taken", open: "still open", info: "update" };
+const OUTCOME_LABEL: Record<DiscussionOutcome, string> = { decided: "decided", action: "action taken", open: "still open", info: "FYI, nothing to decide" };
 
 const label = (r: BriefItemRef) => [r.key, r.deck && r.kind === "slide" ? `${r.deck}: ${r.title}` : r.title].filter(Boolean).join(" · ");
 const link = (r: BriefItemRef) => (r.url ? `[${label(r)}](${r.url})` : label(r));

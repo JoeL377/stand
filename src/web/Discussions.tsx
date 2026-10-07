@@ -4,7 +4,7 @@ import type { Discussion, DiscussionOutcome, Note, Segment } from "../shared/pro
 import { NoteList } from "./room/SidePanel.tsx";
 import { colorFor, fmtDate, fmtTime } from "./util.ts";
 
-const OUTCOME: Record<DiscussionOutcome, string> = { decided: "Decided", action: "Action", open: "Open", info: "Update" };
+const OUTCOME: Record<DiscussionOutcome, string> = { decided: "Decided", action: "Action", open: "Open", info: "FYI" };
 
 /** An item's notes as the agent grouped them: the summary, then one block per
  *  discussion with who argued what and what came of it. Notes that belong to
@@ -177,7 +177,7 @@ export function LiveItemNotes(props: {
         <details className="live-details" open={empty}>
           <summary>
             {discussions.length
-              ? `How it was discussed · ${discussions.length} thread${discussions.length === 1 ? "" : "s"}`
+              ? `Topics discussed (${discussions.length})`
               : "Summary"}
           </summary>
           {summary.map((n) => (
@@ -212,5 +212,5 @@ export function liveNotesCount(notes: Note[], discussions: Discussion[]): string
   const open = notes.filter((n) => n.kind === "question").length;
   const parts = [todo && `${todo} to do`, decided && `${decided} decided`, open && `${open} open`].filter(Boolean);
   if (parts.length) return parts.join(" · ");
-  return discussions.length ? `${discussions.length} thread${discussions.length === 1 ? "" : "s"}` : "";
+  return discussions.length ? `${discussions.length} topic${discussions.length === 1 ? "" : "s"}` : "";
 }
