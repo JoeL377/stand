@@ -777,3 +777,16 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .agenda .item, .agenda .deck { position: relative; }
 .item-tools .pop-wrap { position: static; }
 .add-menu.row-menu { left: 6px; right: 6px; width: auto; top: calc(100% + 2px); }
+
+/* ---- decks are agenda entries like tasks; slides one level down ---- */
+.agenda .deck { margin: 0; }
+.agenda .deck-head { padding: 0; gap: 0; border-radius: 8px; }
+.agenda .deck-head:hover { background: var(--hover); }
+.agenda .deck-toggle { padding: 7px 8px; font-weight: 400; gap: 6px; align-items: center; }
+.agenda .deck-toggle .chev { width: 10px; flex: none; color: var(--muted); font-size: 11px; }
+.agenda .deck-count { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.agenda .deck-items { margin: 0 0 4px 13px; padding: 0 0 0 6px; border-left: 1px solid var(--line); }
+.agenda .deck-items .item-main { padding: 5px 8px; }
+.agenda .deck-items .item-title { font-size: 13px; }
+.agenda .deck-toggle .chev { margin-left: auto; }
+.agenda .deck-items { margin-left: 12px; }
