@@ -67,6 +67,7 @@ export function startLiveKitTranscriber(roomId: string, sink: SpeechSink): Trans
       else console.log(`[agent] joined LiveKit room ${roomId}`);
     } catch (err) {
       console.error("[agent] could not join LiveKit room:", err);
+      if (!stopped) sink.transcriptionFailed("the notes agent couldn't join the call");
     }
   })();
 

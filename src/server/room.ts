@@ -46,6 +46,8 @@ export interface SpeechSink {
   addSpeech(speakerId: string, speakerName: string, text: string, startedAt: number): void;
   interim(speakerId: string, speakerName: string, text: string): void;
   nameOf(participantId: string): string | undefined;
+  /** The transcriber couldn't start; tell the room instead of failing silently. */
+  transcriptionFailed(reason: string): void;
 }
 
 export interface Transcriber {
@@ -466,6 +468,13 @@ export class RoomSession implements SpeechSink {
     }
     const seg = this.addSegment(speakerId, speakerName, "speech", t, startedAt);
     this.lastSpeech = { segmentId: seg.id, speakerId, itemId: seg.itemId, startedAt, endedAt, length: t.length };
+  }
+
+  transcriptionFailed(reason: string) {
+    console.error(`[agent] transcription unavailable in room ${this.roomId}: ${reason}`);
+    // Let the next person who joins try again.
+    this.transcriber = null;
+    this.broadcast({ type: "error", message: `Transcription isn't working right now (${reason}). Chat still works.` });
   }
 
   interim(speakerId: string, speakerName: string, text: string) {
