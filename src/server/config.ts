@@ -18,8 +18,9 @@ export const config = {
   sttModel: env("STT_MODEL") ?? "deepgram/nova-3",
   anthropicKey: env("ANTHROPIC_API_KEY"),
   anthropicModel: env("ANTHROPIC_MODEL") ?? "claude-opus-5-5",
-  /** The model for live item notes, which people wait on during the meeting. */
-  notesModel: env("NOTES_MODEL") ?? env("ANTHROPIC_MODEL") ?? "claude-opus-5-5",
+  /** The model for live item notes, which people wait on during the meeting:
+   *  a faster one than the end-of-meeting recap uses. */
+  notesModel: env("NOTES_MODEL") ?? "claude-sonnet-5-5",
   linearKey: env("LINEAR_API_KEY"),
   google: {
     clientId: env("GOOGLE_CLIENT_ID"),
