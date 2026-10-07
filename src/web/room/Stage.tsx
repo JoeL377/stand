@@ -40,30 +40,25 @@ export function Stage(props: {
         )}
       </div>
 
-      {suggested && state.suggestion && (
-        <div className="suggestion" role="status">
+      {/* A quiet nudge for the host only: their click is what moves the meeting. */}
+      {canSteer && suggested && state.suggestion && (
+        <div className="nudge" role="status" title={state.suggestion.reason}>
           <span className="agent-mark" aria-hidden>
             ✦
           </span>
-          <div className="suggestion-text">
+          <span className="nudge-text">
+            Your screen shows{" "}
             <strong>
-              Moved on to {suggested.externalId ? `${suggested.externalId} · ` : ""}
-              {suggested.title}?
+              {suggested.externalId ? `${suggested.externalId} · ` : ""}
+              {suggested.title}
             </strong>
-            <span className="muted small">{state.suggestion.reason}</span>
-          </div>
-          {canSteer ? (
-            <div className="suggestion-actions">
-              <button className="primary" onClick={() => send({ type: "suggestion.accept" })}>
-                Switch
-              </button>
-              <button className="ghost" onClick={() => send({ type: "suggestion.dismiss" })}>
-                Not now
-              </button>
-            </div>
-          ) : (
-            <span className="muted small">Waiting for {host?.name ?? "the host"}</span>
-          )}
+          </span>
+          <button className="link" onClick={() => send({ type: "suggestion.accept" })}>
+            Switch to it
+          </button>
+          <button className="link muted" onClick={() => send({ type: "suggestion.dismiss" })} aria-label="Dismiss">
+            ✕
+          </button>
         </div>
       )}
 

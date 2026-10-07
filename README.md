@@ -2,9 +2,11 @@
 
 Voice rooms where an AI agent pins every remark to the ticket or doc section it's about.
 
-People talk (voice only, no cameras) and share their screen. The room has an agenda: typed items or Linear issues. An agent listens to each person separately, watches the shared screen, and when it sees the presenter has moved on it asks "Moved on to ENG-142?". One click confirms, and anything said since the screen changed moves with it.
+People talk (voice only, no cameras) and share their screen. The room has an agenda: typed items or Linear issues. A **host** clicks through it, and whatever item the host has open is what everything said is recorded against. An agent listens to each person separately and writes notes per item.
 
-A **host** drives the meeting: whatever item the host opens is what everything said is recorded against. The first person in is host; they can hand it to anyone, and it passes on if they leave. Only the host switches items, pins one (so the agent stops suggesting), or ends the meeting. Anyone can chat, and anyone can move a remark to the right item afterwards.
+The room's creator hosts whenever they're there; otherwise the first person in does. The host can hand it to anyone, and it passes on if they leave. Only the host switches items, pins one, or ends the meeting. Anyone can chat, and anyone can move a remark to the right item afterwards.
+
+If the host shares their screen and it shows a different item than the one open, the agent gives the host a quiet nudge ("Your screen shows ENG-142 · Switch to it"). Switching also moves anything said since the screen changed. Nobody else sees the nudge.
 
 Everyone signs in with Google, so names in the transcript and owners of action items are real accounts.
 
@@ -61,7 +63,7 @@ LiveKit room ◀── hidden agent ──▶ Deepgram (one stream per speaker)
 ```
 
 - **Per-speaker transcription.** Every person's mic is its own LiveKit track, so the agent never has to guess who spoke. Deepgram's word timings are mapped back to wall-clock time, and each utterance lands on the item that was in focus *when it was said*, even if the transcript arrives after someone switched items.
-- **Screen reading.** The presenter's browser takes a snapshot when the screen changes and settles (`src/web/room/useFrameSampler.ts`), at most one every few seconds. The agent compares it to the agenda and only suggests above a confidence threshold. A dismissed suggestion stays quiet for 90 seconds; pinning turns suggestions off.
+- **Screen reading.** The presenter's browser takes a snapshot when the screen changes and settles (`src/web/room/useFrameSampler.ts`), at most one every few seconds. The agent compares it to the agenda and only suggests above a confidence threshold. A dismissed nudge stays quiet for 90 seconds; pinning turns nudges off.
 - **Notes.** Each item's notes are regenerated a few seconds after the talk about it pauses, and again when the meeting ends. Items belong to the room rather than one meeting, so a recurring standup builds history per ticket.
 
 Code map: `src/server` (Express + ws + SQLite), `src/web` (React + Vite), `src/shared/protocol.ts` (messages between them).

@@ -62,7 +62,7 @@ app.post(
   "/api/rooms",
   route((req, res) => {
     const name = String(req.body?.name ?? "").trim().slice(0, 80) || "Standup";
-    const room = db.createRoom(name);
+    const room = db.createRoom(name, req.user!.id);
     db.touchMembership(room.id, req.user!.id);
     res.json(room);
   }),

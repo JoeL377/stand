@@ -134,6 +134,9 @@ export function openDb(file?: string) {
   const db = new DatabaseSync(file ?? ":memory:");
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   db.exec(schema);
+  // Added after the first version; older databases lack it.
+  const roomCols = (db.prepare("PRAGMA table_info(rooms)").all() as Row[]).map((c) => c.name);
+  if (!roomCols.includes("created_by")) db.exec("ALTER TABLE rooms ADD COLUMN created_by TEXT");
 
   return {
     raw: db,
@@ -198,14 +201,14 @@ export function openDb(file?: string) {
       ).map((r) => ({ id: r.id as string, name: r.name as string, lastJoinedAt: r.last_joined_at as number }));
     },
 
-    createRoom(name: string) {
+    createRoom(name: string, createdBy: string | null = null) {
       const id = newId(8);
-      db.prepare("INSERT INTO rooms (id, name, created_at) VALUES (?, ?, ?)").run(id, name, Date.now());
-      return { id, name };
+      db.prepare("INSERT INTO rooms (id, name, created_at, created_by) VALUES (?, ?, ?, ?)").run(id, name, Date.now(), createdBy);
+      return { id, name, createdBy };
     },
     getRoom(id: string) {
-      const r = db.prepare("SELECT id, name FROM rooms WHERE id = ?").get(id) as Row | undefined;
-      return r ? { id: r.id as string, name: r.name as string } : null;
+      const r = db.prepare("SELECT id, name, created_by FROM rooms WHERE id = ?").get(id) as Row | undefined;
+      return r ? { id: r.id as string, name: r.name as string, createdBy: (r.created_by as string) ?? null } : null;
     },
 
     listItems(roomId: string): Item[] {

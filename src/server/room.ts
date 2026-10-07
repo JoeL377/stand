@@ -48,6 +48,8 @@ export interface Transcriber {
 export class RoomSession implements SpeechSink {
   readonly roomId: string;
   readonly roomName: string;
+  /** The room's creator hosts whenever they're in the room. */
+  private readonly createdBy: string | null;
   readonly meetingId: string;
   readonly meetingStartedAt: number;
 
@@ -75,12 +77,13 @@ export class RoomSession implements SpeechSink {
   constructor(
     private db: DB,
     private agent: Agent,
-    room: { id: string; name: string },
+    room: { id: string; name: string; createdBy: string | null },
     private onClosed: (s: RoomSession) => void,
     private startTranscriber?: (s: RoomSession) => Transcriber | null,
   ) {
     this.roomId = room.id;
     this.roomName = room.name;
+    this.createdBy = room.createdBy;
     const m = db.startMeeting(room.id);
     this.meetingId = m.id;
     this.meetingStartedAt = m.startedAt;
@@ -187,7 +190,8 @@ export class RoomSession implements SpeechSink {
       } else {
         this.participants.set(id, { id, name, picture: user.picture, isHost: false, isSharing: false, conns: 1 });
       }
-      if (!this.hostId || !this.participants.has(this.hostId)) this.hostId = id;
+      const isNew = !existing;
+      if (!this.hostId || !this.participants.has(this.hostId) || (isNew && id === this.createdBy)) this.hostId = id;
       if (this.emptyTimer) {
         clearTimeout(this.emptyTimer);
         this.emptyTimer = null;
