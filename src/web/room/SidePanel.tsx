@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
@@ -11,101 +11,57 @@ export function SidePanel(props: {
   send: (m: ClientMessage) => void;
   participantId: string;
 }) {
-  const [view, setView] = useState<View>("item");
-  const [menu, setMenu] = useState(false);
   const [notesOpen, setNotesOpen] = useState(true);
-  const menuRef = useRef<HTMLDivElement>(null);
   const { state, segments, notes, interims, send } = props;
-  useEffect(() => {
-    if (!menu) return;
-    const close = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) setMenu(false);
-    };
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [menu]);
 
-  const shown = view === "item" ? segments.filter((s) => s.itemId === state.focusItemId) : segments;
+  const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
+  const shown = segments.filter((s) => s.itemId === state.focusItemId);
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
-  const views: { view: View; label: string; hint: string }[] = [
-    { view: "item", label: "This item", hint: "Notes and discussion for what's in focus" },
-    { view: "all", label: "Whole meeting", hint: "Everything said, across items" },
-    { view: "notes", label: "All notes", hint: "The agent's notes for every item" },
-  ];
 
   return (
     <aside className="panel side">
       <div className="panel-head">
-        <h2>{view === "notes" ? "Agent notes" : "Discussion"}</h2>
-        <div className="add-menu-wrap" ref={menuRef}>
-          <button className="ghost small view-btn" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
-            {views.find((v) => v.view === view)!.label} ▾
-          </button>
-          {menu && (
-            <div className="add-menu" role="menu">
-              {views.map((v) => (
-                <button
-                  key={v.view}
-                  role="menuitemradio"
-                  aria-checked={v.view === view}
-                  className={v.view === view ? "on" : ""}
-                  onClick={() => {
-                    setView(v.view);
-                    setMenu(false);
-                  }}
-                >
-                  <span>{v.label}</span>
-                  <span className="muted">{v.hint}</span>
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="side-title">
+          <h2>Discussion</h2>
+          <span className="side-item" title={focus?.title}>
+            {keyOf(focus) && <span className="key">{keyOf(focus)}</span>}
+            {focus ? focus.title : "General / off-agenda"}
+          </span>
         </div>
+        <a className="recap-link" href={`/meetings/${state.meetingId}`} target="_blank" rel="noreferrer" title="Everything said and noted in this meeting, across items">
+          Meeting recap ↗
+        </a>
       </div>
 
-      {view === "notes" ? (
-        <NotesView notes={notes} items={state.items} focusItemId={state.focusItemId} />
-      ) : (
-        <>
-          {view === "item" && focusNotes.length > 0 && (
-            <section className={notesOpen ? "focus-notes open" : "focus-notes"}>
-              <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
-                <span>Agent notes</span>
-                <span className="muted">{focusNotes.length}</span>
-                <span className="chev" aria-hidden>
-                  {notesOpen ? "▾" : "▸"}
-                </span>
-              </button>
-              {notesOpen && (
-                <div className="focus-notes-body">
-                  <NoteList notes={focusNotes} />
-                </div>
-              )}
-            </section>
+      {focusNotes.length > 0 && (
+        <section className={notesOpen ? "focus-notes open" : "focus-notes"}>
+          <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
+            <span>Agent notes</span>
+            <span className="muted">{focusNotes.length}</span>
+            <span className="chev" aria-hidden>
+              {notesOpen ? "▾" : "▸"}
+            </span>
+          </button>
+          {notesOpen && (
+            <div className="focus-notes-body">
+              <NoteList notes={focusNotes} />
+            </div>
           )}
-          <Transcript segments={shown} items={state.items} interims={interims} showDividers={view === "all"} send={send} />
-          <ChatBox send={send} />
-        </>
+        </section>
       )}
+      <Transcript segments={shown} items={state.items} interims={interims} send={send} />
+      <ChatBox send={send} />
     </aside>
   );
 }
-
-type View = "item" | "all" | "notes";
 
 function Transcript(props: {
   segments: Segment[];
   items: Item[];
   interims: Record<string, Interim>;
-  showDividers: boolean;
   send: (m: ClientMessage) => void;
 }) {
-  const { segments, items, interims, showDividers, send } = props;
+  const { segments, items, interims, send } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const interimList = Object.values(interims);
@@ -114,11 +70,6 @@ function Transcript(props: {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [segments.length, interimList.length, interimList.map((i) => i.text).join("")]);
-
-  const itemName = (id: string | null) => {
-    const it = items.find((i) => i.id === id);
-    return it ? `${keyOf(it) ? keyOf(it) + " · " : ""}${it.title}` : "General / off-agenda";
-  };
 
   return (
     <div
@@ -132,11 +83,8 @@ function Transcript(props: {
       {segments.length === 0 && interimList.length === 0 && (
         <p className="muted empty">Nothing said about this yet. Speech and chat show up here, pinned to the item in focus.</p>
       )}
-      {segments.map((s, i) => (
-        <div key={s.id}>
-          {showDividers && (i === 0 || segments[i - 1].itemId !== s.itemId) && <div className="divider">{itemName(s.itemId)}</div>}
-          <SegmentRow segment={s} items={items} send={send} />
-        </div>
+      {segments.map((s) => (
+        <SegmentRow key={s.id} segment={s} items={items} send={send} />
       ))}
       {interimList.map((i) => (
         <div key={i.speakerId} className="seg interim">
@@ -206,41 +154,6 @@ function ChatBox({ send }: { send: (m: ClientMessage) => void }) {
         Send
       </button>
     </form>
-  );
-}
-
-export function NotesView({
-  notes,
-  items,
-  focusItemId,
-}: {
-  notes: Note[];
-  items: Item[];
-  focusItemId: string | null;
-}) {
-  const groups = useMemo(() => {
-    const ids = [...new Set(notes.map((n) => n.itemId))];
-    ids.sort((a, b) => {
-      if (a === focusItemId) return -1;
-      if (b === focusItemId) return 1;
-      return (items.find((i) => i.id === a)?.position ?? 1e9) - (items.find((i) => i.id === b)?.position ?? 1e9);
-    });
-    return ids.map((id) => ({ item: items.find((i) => i.id === id) ?? null, id, notes: notes.filter((n) => n.itemId === id) }));
-  }, [notes, items, focusItemId]);
-
-  return (
-    <div className="notes">
-      {groups.length === 0 && <p className="muted empty">The agent writes notes per item as people talk.</p>}
-      {groups.map((g) => (
-        <section key={g.id ?? "general"} className={g.id === focusItemId ? "note-group active" : "note-group"}>
-          <h3>
-            {keyOf(g.item) && <span className="key">{keyOf(g.item)}</span>}
-            {g.item ? g.item.title : "General / off-agenda"}
-          </h3>
-          <NoteList notes={g.notes} />
-        </section>
-      ))}
-    </div>
   );
 }
 
