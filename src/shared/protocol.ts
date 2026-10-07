@@ -43,6 +43,8 @@ export interface Deck {
   pageCount: number;
   kind: "pdf" | "native";
   theme: DeckTheme;
+  /** The agenda item this deck is presented under, or null when it stands on its own. */
+  parentItemId: string | null;
 }
 
 /** What the editor saves: the whole deck, in order. */

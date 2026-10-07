@@ -80,9 +80,10 @@ export function SlideView({ deckId, page, width, className }: { deckId: string; 
 }
 
 /** Uploads a PDF deck to a room. */
-export async function uploadDeck(roomId: string, file: File) {
+export async function uploadDeck(roomId: string, file: File, parentItemId: string | null = null) {
   if (file.size > 50 * 1024 * 1024) throw new Error("That file is over 50 MB.");
-  const res = await fetch(`/api/rooms/${roomId}/decks?name=${encodeURIComponent(file.name)}`, {
+  const parent = parentItemId ? `&parent=${encodeURIComponent(parentItemId)}` : "";
+  const res = await fetch(`/api/rooms/${roomId}/decks?name=${encodeURIComponent(file.name)}${parent}`, {
     method: "POST",
     headers: { "Content-Type": "application/pdf" },
     body: file,

@@ -121,6 +121,25 @@ test("decks made in Stand save in place, keep slide ids and stay together in the
   assert.equal(db.listItems(roomId)[2].slide?.layout, "bullets");
 });
 
+test("decks sit under an agenda item and fall back to standing alone when it goes", () => {
+  const { db, items } = setup();
+  const roomId = items[0].roomId;
+  const s = (id: string, title: string) => ({ id, title, layout: "bullets" as const, body: "", image: null, notes: "" });
+  const a = db.createDeck(roomId, "A", 1, "native");
+  db.saveDeck(a, { title: "A", theme: "paper", slides: [s("aaaaaaa1", "A1"), s("aaaaaaa2", "A2")] });
+  const b = db.createDeck(roomId, "B", 1, "native");
+  db.saveDeck(b, { title: "B", theme: "paper", slides: [s("bbbbbbb1", "B1")] });
+  db.setDeckParent(a.id, items[0].id);
+  db.setDeckParent(b.id, items[0].id);
+  assert.deepEqual(db.listItems(roomId).map((i) => i.title), ["One", "A1", "A2", "B1", "Two", "Three"]);
+  assert.equal(db.getDeck(a.id)?.parentItemId, items[0].id);
+  db.setDeckParent(b.id, items[2].id);
+  assert.deepEqual(db.listItems(roomId).map((i) => i.title), ["One", "A1", "A2", "Two", "Three", "B1"]);
+  db.archiveItem(items[0].id);
+  assert.equal(db.getDeck(a.id)?.parentItemId, null);
+  assert.deepEqual(db.listItems(roomId).map((i) => i.title), ["A1", "A2", "Two", "Three", "B1"]);
+});
+
 test("outlines turn into slides", () => {
   const slides = outlineToSlides("# Roadmap\nQ4\n\n# Where we are\n- Shipped\n  - fast\nNotes: thanks\n\n# Next\n---\n> Love it\n");
   assert.deepEqual(slides.map((s) => s.layout), ["title", "bullets", "section", "quote"]);

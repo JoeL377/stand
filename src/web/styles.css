@@ -760,3 +760,20 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .side-item .key { margin-right: 6px; }
 .recap-link { flex: none; font-size: 12px; color: var(--muted); align-self: flex-start; margin-top: 2px; }
 .recap-link:hover { color: var(--text); text-decoration: none; }
+
+/* ---- agenda tiers: slides nested under their agenda item ---- */
+.pop-wrap { position: relative; display: inline-flex; }
+.popped > .item-tools, .popped > .deck-head .item-tools, .item.popped .item-tools { opacity: 1; }
+.parent > .items { padding: 0; }
+.items.children { padding: 0 0 4px 14px; margin-left: 10px; border-left: 1px solid var(--line); }
+.items.children .deck { margin: 2px 0; }
+.items.children .deck-head { padding-left: 6px; }
+.items.children .deck-toggle { font-weight: 500; font-size: 13px; }
+.add-menu a { display: flex; flex-direction: column; padding: 7px 10px; border-radius: 7px; font-size: 13px; color: var(--text); }
+.add-menu a:hover { background: var(--hover); text-decoration: none; }
+.menu-label { padding: 8px 10px 3px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.add-menu .danger-text span { color: var(--danger); }
+.item-tools .icon { font-size: 13px; }
+.agenda .item, .agenda .deck { position: relative; }
+.item-tools .pop-wrap { position: static; }
+.add-menu.row-menu { left: 6px; right: 6px; width: auto; top: calc(100% + 2px); }

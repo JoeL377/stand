@@ -96,6 +96,12 @@ app.get(
   }),
 );
 
+/** An agenda item in this room that decks can sit under (not a slide itself). */
+const parentFor = (roomId: string, id: unknown): string | null => {
+  const item = id ? db.getItem(String(id)) : null;
+  return item && item.roomId === roomId && !item.deckId && db.listItems(roomId).some((i) => i.id === item.id) ? item.id : null;
+};
+
 const afterItemsChange = (roomId: string) => {
   sessions.get(roomId)?.itemsChanged();
   return db.listItems(roomId);
@@ -174,7 +180,9 @@ app.post(
         slideNo: i + 1,
       })),
     );
-    res.json({ deck, items: afterItemsChange(room.id) });
+    const parent = parentFor(room.id, req.query.parent);
+    if (parent) db.setDeckParent(deck.id, parent);
+    res.json({ deck: db.getDeck(deck.id), items: afterItemsChange(room.id) });
   }),
 );
 
@@ -224,8 +232,10 @@ app.post(
     const deck = db.createDeck(room.id, title, 1, "native");
     const slides = drafted.length ? drafted : [{ title, layout: "title" as const, body: "", image: null, notes: "" }];
     const saved = db.saveDeck(deck, { title, theme: "paper", slides: slides.map((sl) => ({ ...sl, id: newId() })) });
+    const parent = parentFor(room.id, req.body?.parentItemId);
+    if (parent) db.setDeckParent(deck.id, parent);
     afterItemsChange(room.id);
-    res.json(saved);
+    res.json({ ...saved, deck: db.getDeck(deck.id) });
   }),
 );
 
@@ -282,6 +292,20 @@ app.get(
     if (!file) return notFound(res);
     res.setHeader("Cache-Control", "private, max-age=86400, immutable");
     res.sendFile(file);
+  }),
+);
+
+// Moves a deck under an agenda item, or back on its own with parentItemId: null.
+app.patch(
+  "/api/decks/:deckId",
+  route((req, res) => {
+    const deck = db.getDeck(req.params.deckId);
+    if (!deck) return notFound(res);
+    const want = req.body?.parentItemId;
+    const parent = want == null ? null : parentFor(deck.roomId, want);
+    if (want != null && !parent) return res.status(400).json({ error: "That agenda item isn't in this room." });
+    db.setDeckParent(deck.id, parent);
+    res.json(afterItemsChange(deck.roomId));
   }),
 );
 

@@ -125,6 +125,7 @@ const toDeck = (r: Row): Deck => ({
   pageCount: r.page_count as number,
   kind: ((r.kind as string) ?? "pdf") as Deck["kind"],
   theme: ((r.theme as string) ?? "paper") as DeckTheme,
+  parentItemId: (r.parent_item_id as string) ?? null,
 });
 
 type NewItem = Pick<Item, "source" | "externalId" | "title" | "url" | "description"> & { deckId?: string; slideNo?: number };
@@ -162,6 +163,7 @@ export function openDb(file?: string) {
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
   const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
+  if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
   if (!deckCols.includes("kind")) db.exec("ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';");
 
   return {
@@ -277,6 +279,8 @@ export function openDb(file?: string) {
     /** Hides an item from the list; its history stays reachable. */
     archiveItem(id: string) {
       db.prepare("UPDATE items SET archived = 1 WHERE id = ?").run(id);
+      // Its slides stay on the agenda, now on their own.
+      db.prepare("UPDATE decks SET parent_item_id = NULL WHERE parent_item_id = ?").run(id);
     },
 
     createDeck(roomId: string, title: string, pageCount: number, kind: Deck["kind"] = "pdf", theme: DeckTheme = "paper"): Deck {
@@ -290,7 +294,26 @@ export function openDb(file?: string) {
         kind,
         theme,
       );
-      return { id, roomId, title, pageCount, kind, theme };
+      return { id, roomId, title, pageCount, kind, theme, parentItemId: null };
+    },
+    /** Puts a deck under an agenda item (or back on its own with null). Its
+     *  slides move to sit right after the item and the item's other decks. */
+    setDeckParent(deckId: string, parentItemId: string | null) {
+      const deck = this.getDeck(deckId);
+      if (!deck) return;
+      db.prepare("UPDATE decks SET parent_item_id = ? WHERE id = ?").run(parentItemId, deckId);
+      if (!parentItemId) return;
+      const items = this.listItems(deck.roomId);
+      const mine = items.filter((it) => it.deckId === deckId).map((it) => it.id);
+      const others = items.filter((it) => it.deckId !== deckId);
+      let at = others.findIndex((it) => it.id === parentItemId);
+      if (at < 0) return;
+      const siblings = new Set(
+        (db.prepare("SELECT id FROM decks WHERE parent_item_id = ? AND id != ?").all(parentItemId, deckId) as Row[]).map((r) => r.id as string),
+      );
+      while (at + 1 < others.length && others[at + 1].deckId && siblings.has(others[at + 1].deckId!)) at++;
+      const ids = others.map((it) => it.id);
+      this.reorderItems(deck.roomId, [...ids.slice(0, at + 1), ...mine, ...ids.slice(at + 1)]);
     },
     /** Slides currently in the deck (removed ones keep their history but drop out). */
     liveSlides(deckId: string): Item[] {
