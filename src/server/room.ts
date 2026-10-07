@@ -27,6 +27,11 @@ const DISMISS_QUIET_MS = 90_000;
 const FRAME_MIN_INTERVAL_MS = 4_000;
 /** Notes for the item in focus refresh this long after the last new remark. */
 const NOTES_DEBOUNCE_MS = 8_000;
+/** A speaker's next words join their last entry when they pause for less than this. */
+const SPEECH_JOIN_GAP_MS = 2_000;
+/** ...as long as the entry stays a readable size. */
+const SPEECH_MAX_ENTRY_MS = 60_000;
+const SPEECH_MAX_ENTRY_CHARS = 700;
 /** How long an empty room waits before the meeting is closed. */
 const EMPTY_ROOM_GRACE_MS = 120_000;
 
@@ -65,6 +70,15 @@ export class RoomSession implements SpeechSink {
   private focusLog: Array<{ ts: number; itemId: string | null }> = [];
   private dismissed = new Map<string, number>();
   private noteTimers = new Map<string | null, NodeJS.Timeout>();
+  /** The entry new speech from the same speaker can join (see addSpeech). */
+  private lastSpeech: {
+    segmentId: string;
+    speakerId: string;
+    itemId: string | null;
+    startedAt: number;
+    endedAt: number;
+    length: number;
+  } | null = null;
   private noteRuns = new Map<string | null, Promise<void>>();
   private frame: { dataUrl: string; at: number } | null = null;
   private frameBusy = false;
@@ -289,6 +303,7 @@ export class RoomSession implements SpeechSink {
         const before = this.db.meetingSegments(this.meetingId).find((s) => s.id === msg.segmentId);
         if (!before) return;
         const seg = this.db.moveSegment(msg.segmentId, msg.itemId);
+        if (this.lastSpeech?.segmentId === msg.segmentId) this.lastSpeech = null;
         if (seg) {
           this.broadcast({ type: "segment.updated", segment: seg });
           this.scheduleNotes(before.itemId, 500);
@@ -405,7 +420,31 @@ export class RoomSession implements SpeechSink {
   addSpeech(speakerId: string, speakerName: string, text: string, startedAt: number) {
     const t = text.trim();
     if (!t || this.ended) return;
-    this.addSegment(speakerId, speakerName, "speech", t, startedAt);
+    // Speech-to-text ends a line at every short pause, so one thought arrives
+    // in fragments. Keep adding to the speaker's last entry until they pause
+    // for a while, someone else speaks, or the focus moves on.
+    const last = this.lastSpeech;
+    // When the words stopped: transcripts carry only a start time, so estimate
+    // from a brisk speaking pace, capped at when they arrived.
+    const endedAt = Math.min(Date.now(), startedAt + t.split(/\s+/).length * 400);
+    if (
+      last &&
+      last.speakerId === speakerId &&
+      last.itemId === this.focusAt(startedAt) &&
+      startedAt - last.endedAt < SPEECH_JOIN_GAP_MS &&
+      startedAt - last.startedAt < SPEECH_MAX_ENTRY_MS &&
+      last.length + t.length < SPEECH_MAX_ENTRY_CHARS
+    ) {
+      const seg = this.db.appendSegmentText(last.segmentId, t);
+      if (seg) {
+        this.lastSpeech = { ...last, endedAt: Math.max(last.endedAt, endedAt), length: seg.text.length };
+        this.broadcast({ type: "segment.updated", segment: seg });
+        this.scheduleNotes(seg.itemId, NOTES_DEBOUNCE_MS);
+        return;
+      }
+    }
+    const seg = this.addSegment(speakerId, speakerName, "speech", t, startedAt);
+    this.lastSpeech = { segmentId: seg.id, speakerId, itemId: seg.itemId, startedAt, endedAt, length: t.length };
   }
 
   interim(speakerId: string, speakerName: string, text: string) {
@@ -415,8 +454,10 @@ export class RoomSession implements SpeechSink {
   private addSegment(speakerId: string, speakerName: string, kind: "speech" | "chat", text: string, ts: number) {
     const itemId = kind === "chat" ? this.focusItemId : this.focusAt(ts);
     const segment = this.db.addSegment({ meetingId: this.meetingId, itemId, speakerId, speakerName, kind, text, ts });
+    if (kind === "chat") this.lastSpeech = null;
     this.broadcast({ type: "segment", segment });
     this.scheduleNotes(itemId, NOTES_DEBOUNCE_MS);
+    return segment;
   }
 
   // ---- notes --------------------------------------------------------------

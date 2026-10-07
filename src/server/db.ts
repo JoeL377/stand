@@ -438,6 +438,11 @@ export function openDb(file?: string) {
       ).run(seg.id, seg.meetingId, seg.itemId, seg.speakerId, seg.speakerName, seg.kind, seg.text, seg.ts);
       return seg;
     },
+    appendSegmentText(id: string, text: string): Segment | null {
+      db.prepare("UPDATE segments SET text = text || ' ' || ? WHERE id = ?").run(text, id);
+      const r = db.prepare("SELECT * FROM segments WHERE id = ?").get(id) as Row | undefined;
+      return r ? toSegment(r) : null;
+    },
     moveSegment(id: string, itemId: string | null): Segment | null {
       db.prepare("UPDATE segments SET item_id = ? WHERE id = ?").run(itemId, id);
       const r = db.prepare("SELECT * FROM segments WHERE id = ?").get(id) as Row | undefined;

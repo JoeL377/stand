@@ -32,6 +32,28 @@ test("speech is pinned to the item in focus when it was spoken, not when it arri
   assert.equal(segs.find((s) => s.text.startsWith("Now"))?.itemId, items[1].id);
 });
 
+test("a speaker's fragments join into one entry until they pause or someone else speaks", () => {
+  const { db, session, meetingId } = setup();
+  const t = Date.now();
+  // Speech-to-text splits at short pauses, mid-sentence.
+  session.addSpeech("p1", "Joe", "And I'm basically trying to see", t - 3_000);
+  session.addSpeech("p1", "Joe", "what this initial experience looks like. I think", t - 1_500);
+  session.addSpeech("p1", "Joe", "that", t);
+  session.addSpeech("p2", "Priya", "Agreed.", t);
+  session.addSpeech("p1", "Joe", "Next point.", t);
+  const later = Date.now() + 5_000; // after a long pause
+  session.addSpeech("p1", "Joe", "Another thought", later);
+  assert.deepEqual(
+    db.meetingSegments(meetingId).map((s) => [s.speakerName, s.text]),
+    [
+      ["Joe", "And I'm basically trying to see what this initial experience looks like. I think that"],
+      ["Priya", "Agreed."],
+      ["Joe", "Next point."],
+      ["Joe", "Another thought"],
+    ],
+  );
+});
+
 test("accepting the agent's suggestion re-pins what was said since the screen changed", async () => {
   const { db, session, items, meetingId } = setup();
   session.addSpeech("p1", "Sam", "Before the screen changed", Date.now() - 5_000);
