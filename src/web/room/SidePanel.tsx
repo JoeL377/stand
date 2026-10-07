@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
+import { FollowUpList } from "../FollowUps.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -12,11 +13,15 @@ export function SidePanel(props: {
   participantId: string;
 }) {
   const [notesOpen, setNotesOpen] = useState(true);
+  const [earlierOpen, setEarlierOpen] = useState(true);
   const { state, segments, notes, interims, send } = props;
 
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId);
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
+  // Action items about this item from earlier meetings, still open (or just checked off).
+  const earlier = (state.followUps ?? []).filter((f) => f.itemId === state.focusItemId);
+  const earlierOpenCount = earlier.filter((f) => !f.doneAt).length;
 
   return (
     <aside className="panel side">
@@ -33,6 +38,27 @@ export function SidePanel(props: {
         </a>
       </div>
 
+      {earlier.length > 0 && (
+        <section className={earlierOpen ? "focus-notes earlier open" : "focus-notes earlier"}>
+          <button className="focus-notes-head" aria-expanded={earlierOpen} onClick={() => setEarlierOpen((o) => !o)}>
+            <span>From earlier meetings</span>
+            <span className="muted">{earlierOpenCount} open</span>
+            <span className="chev" aria-hidden>
+              {earlierOpen ? "▾" : "▸"}
+            </span>
+          </button>
+          {earlierOpen && (
+            <div className="focus-notes-body">
+              <FollowUpList
+                compact
+                showDate
+                notes={earlier}
+                onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
+              />
+            </div>
+          )}
+        </section>
+      )}
       {focusNotes.length > 0 && (
         <section className={notesOpen ? "focus-notes open" : "focus-notes"}>
           <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
@@ -179,8 +205,8 @@ export function NoteList({ notes }: { notes: Note[] }) {
       {by("action").length > 0 && (
         <ul className="note-list">
           {by("action").map((n) => (
-            <li key={n.id} className="note action">
-              <span className="note-icon">☐</span>
+            <li key={n.id} className={n.doneAt ? "note action done" : "note action"} title={n.doneAt ? `Done${n.doneBy ? ` by ${n.doneBy}` : ""}` : undefined}>
+              <span className="note-icon">{n.doneAt ? "☑" : "☐"}</span>
               <span className="note-text">
                 {n.text} {n.owner && <span className="owner">{n.owner}</span>}
               </span>

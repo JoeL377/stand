@@ -39,6 +39,8 @@ export function AgendaPanel(props: {
 
   const counts = new Map<string | null, number>();
   for (const s of segments) counts.set(s.itemId, (counts.get(s.itemId) ?? 0) + 1);
+  const earlier = new Map<string | null, number>();
+  for (const f of state.followUps ?? []) if (!f.doneAt) earlier.set(f.itemId, (earlier.get(f.itemId) ?? 0) + 1);
   const actions = new Map<string | null, number>();
   for (const n of notes) if (n.kind === "action") actions.set(n.itemId, (actions.get(n.itemId) ?? 0) + 1);
 
@@ -46,6 +48,7 @@ export function AgendaPanel(props: {
     const active = it.id === state.focusItemId;
     const n = counts.get(it.id) ?? 0;
     const a = actions.get(it.id) ?? 0;
+    const e = earlier.get(it.id) ?? 0;
     return (
       <li key={it.id} className={active ? "item active" : "item"}>
         <button
@@ -66,10 +69,16 @@ export function AgendaPanel(props: {
               {it.slideNo && <span className="slide-no">{it.slideNo}</span>}
               {it.title}
             </span>
-            {(n > 0 || a > 0) && (
+            {(n > 0 || a > 0 || e > 0) && (
               <span className="item-meta">
-                {n > 0 && `${n} remark${n === 1 ? "" : "s"}`}
-                {a > 0 && ` · ${a} action${a === 1 ? "" : "s"}`}
+                {[n > 0 && `${n} remark${n === 1 ? "" : "s"}`, a > 0 && `${a} action${a === 1 ? "" : "s"}`]
+                  .filter(Boolean)
+                  .join(" · ")}
+                {e > 0 && (
+                  <span className="open-count" title="Open action items from earlier meetings">
+                    {e} open
+                  </span>
+                )}
               </span>
             )}
           </span>
@@ -147,6 +156,14 @@ export function AgendaPanel(props: {
             </span>
             <span className="item-title">{b.deck.title}</span>
             <span className="deck-count">{b.items.length} slides</span>
+            {(() => {
+              const e = b.items.reduce((sum, i) => sum + (earlier.get(i.id) ?? 0), 0);
+              return e > 0 ? (
+                <span className="open-count" title="Open action items on these slides from earlier meetings">
+                  {e} open
+                </span>
+              ) : null;
+            })()}
             <span className={open ? "chev open" : "chev"} aria-hidden>
               <ChevronIcon />
             </span>

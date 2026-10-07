@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Deck, DeckDraft, DeckTheme, Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
+import type { Deck, DeckDraft, DeckTheme, FollowUp, Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -149,6 +149,8 @@ const toNote = (r: Row): Note => ({
   text: r.text as string,
   owner: (r.owner as string) ?? null,
   ts: r.ts as number,
+  doneAt: (r.done_at as number) ?? null,
+  doneBy: (r.done_by as string) ?? null,
 });
 
 export function openDb(file?: string) {
@@ -164,6 +166,8 @@ export function openDb(file?: string) {
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
   const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
+  const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
+  if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
   if (!deckCols.includes("kind")) db.exec("ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';");
 
   return {
@@ -472,16 +476,42 @@ export function openDb(file?: string) {
       );
     },
 
-    /** Notes for one item in one meeting are regenerated as a whole. */
+    /** Notes for one item in one meeting are regenerated as a whole. An action
+     *  someone already checked off stays checked when its wording comes back. */
     replaceNotes(meetingId: string, itemId: string | null, notes: Array<Pick<Note, "kind" | "text" | "owner">>): Note[] {
+      const done = new Map(
+        (db.prepare("SELECT text, done_at, done_by FROM notes WHERE meeting_id = ? AND item_id IS ? AND done_at IS NOT NULL").all(meetingId, itemId) as Row[]).map(
+          (r) => [r.text as string, { doneAt: r.done_at as number, doneBy: (r.done_by as string) ?? null }],
+        ),
+      );
       db.prepare("DELETE FROM notes WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
-      const st = db.prepare("INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      const st = db.prepare("INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const ts = Date.now();
       return notes.map((n) => {
-        const note: Note = { id: newId(12), meetingId, itemId, kind: n.kind, text: n.text, owner: n.owner ?? null, ts };
-        st.run(note.id, meetingId, itemId, note.kind, note.text, note.owner, ts);
+        const d = n.kind === "action" ? done.get(n.text) : undefined;
+        const note: Note = { id: newId(12), meetingId, itemId, kind: n.kind, text: n.text, owner: n.owner ?? null, ts, doneAt: d?.doneAt ?? null, doneBy: d?.doneBy ?? null };
+        st.run(note.id, meetingId, itemId, note.kind, note.text, note.owner, ts, note.doneAt, note.doneBy);
         return note;
       });
+    },
+    /** Checks an action item off (by someone) or reopens it (by: null). */
+    setActionDone(roomId: string, noteId: string, by: string | null): Note | null {
+      const res = db
+        .prepare("UPDATE notes SET done_at = ?, done_by = ? WHERE id = ? AND kind = 'action' AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)")
+        .run(by ? Date.now() : null, by, noteId, roomId);
+      if (!res.changes) return null;
+      return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
+    },
+    /** Every action item from the room's finished meetings, newest meeting first. */
+    roomFollowUps(roomId: string): FollowUp[] {
+      return (
+        db
+          .prepare(
+            `SELECT n.*, m.started_at AS meeting_started_at FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND n.kind = 'action' ORDER BY m.started_at DESC, n.rowid`,
+          )
+          .all(roomId) as Row[]
+      ).map((r) => ({ ...toNote(r), meetingStartedAt: r.meeting_started_at as number }));
     },
     meetingNotes(meetingId: string): Note[] {
       return (db.prepare("SELECT * FROM notes WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map(toNote);

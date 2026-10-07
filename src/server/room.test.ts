@@ -2,7 +2,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
-import { briefToMarkdown, buildBrief } from "./brief.ts";
+import { briefToMarkdown, buildBrief, buildFollowUps } from "./brief.ts";
 import { looksLikePdf, parseDeck } from "./decks.ts";
 import { HeuristicAgent } from "./llm.ts";
 import { parseLinearInput } from "./linear.ts";
@@ -157,7 +157,7 @@ test("the meeting brief lists every action with its owner and a link back to the
   ]);
   const meeting = { id: "m1", roomId: room.id, startedAt: Date.UTC(2026, 9, 7, 9), endedAt: Date.UTC(2026, 9, 7, 9, 15), summary: "Short one." };
   const note = (id: string, itemId: string | null, kind: "summary" | "decision" | "action" | "question", text: string, owner: string | null = null) =>
-    ({ id, meetingId: "m1", itemId, kind, text, owner, ts: 0 });
+    ({ id, meetingId: "m1", itemId, kind, text, owner, ts: 0, doneAt: null, doneBy: null });
   const seg = (itemId: string | null, speakerName: string, text: string) =>
     ({ id: text, meetingId: "m1", itemId, speakerId: speakerName, speakerName, kind: "speech" as const, text, ts: meeting.startedAt });
   const brief = buildBrief({
@@ -182,4 +182,56 @@ test("the meeting brief lists every action with its owner and a link back to the
   assert.match(md, /^---\nschema: stand.meeting-brief\/v1/);
   assert.match(md, /- \[ \] Add a dashboard \(owner: Priya\) · \[ENG-7 · Search latency\]\(https:\/\/linear.app\/acme\/issue\/ENG-7\)/);
   assert.match(md, /- \[ \] Follow up with candidates \(owner: unassigned\)/);
+});
+
+test("action items stay open on their item across meetings until someone checks them off", () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Platform");
+  const other = db.createRoom("Elsewhere");
+  const [ticket] = db.addItems(room.id, [
+    { source: "linear" as const, externalId: "ENG-7", title: "Search latency", url: "https://linear.app/acme/issue/ENG-7", description: null },
+  ]);
+  const first = db.startMeeting(room.id);
+  const [dash, alerts] = db.replaceNotes(first.id, ticket.id, [
+    { kind: "action", text: "Add a dashboard", owner: "Priya" },
+    { kind: "action", text: "Page on p95", owner: null },
+  ]);
+  // Notes regenerate while the meeting runs; a checked-off action stays checked.
+  assert.ok(db.setActionDone(room.id, alerts.id, "Joe"));
+  const again = db.replaceNotes(first.id, ticket.id, [
+    { kind: "action", text: "Add a dashboard", owner: "Priya" },
+    { kind: "action", text: "Page on p95", owner: null },
+  ]);
+  assert.equal(again[1].doneBy, "Joe");
+  assert.equal(db.roomFollowUps(room.id).length, 0, "only finished meetings count");
+  db.endMeeting(first.id, null);
+
+  // Someone in another room can't check it off.
+  assert.equal(db.setActionDone(other.id, again[0].id, "Mallory"), null);
+  assert.deepEqual(
+    db.roomFollowUps(room.id).map((f) => [f.text, f.itemId, f.doneBy]),
+    [["Add a dashboard", ticket.id, null], ["Page on p95", ticket.id, "Joe"]],
+  );
+
+  // The next meeting's brief carries the open one over, linked to the ticket.
+  const second = { ...db.startMeeting(room.id), roomId: room.id, summary: null, endedAt: null };
+  second.startedAt = Math.max(second.startedAt, db.getMeeting(first.id)!.startedAt + 1);
+  const brief = buildBrief({
+    meeting: second,
+    roomName: room.name,
+    groups: [],
+    decks: [],
+    baseUrl: "http://stand.test",
+    followUps: db.roomFollowUps(room.id),
+    itemById: (id) => db.getItem(id),
+  });
+  assert.deepEqual(brief.carriedOver.map((a) => [a.text, a.status, a.item.key, a.item.historyUrl]), [
+    ["Add a dashboard", "open", "ENG-7", `http://stand.test/items/${ticket.id}`],
+  ]);
+  assert.match(briefToMarkdown(brief), /## Still open from earlier meetings\n\n- \[ \] Add a dashboard \(owner: Priya\)/);
+
+  const feed = buildFollowUps({ room, followUps: db.roomFollowUps(room.id), itemById: (id) => db.getItem(id), decks: [], baseUrl: "http://stand.test", status: "open" });
+  assert.deepEqual(feed.actions.map((a) => a.text), ["Add a dashboard"]);
+  assert.equal(feed.actions[0].meetingUrl, `http://stand.test/meetings/${first.id}`);
+  void dash;
 });

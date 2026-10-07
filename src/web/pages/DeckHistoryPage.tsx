@@ -4,6 +4,7 @@ import type { DeckHistory } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { NoteList } from "../room/SidePanel.tsx";
 import { Slide } from "../slides.tsx";
+import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
 import { colorFor, fmtDate, fmtTime } from "../util.ts";
 
 /** Every slide of a deck next to what was said and decided about it. */
@@ -22,7 +23,10 @@ export function DeckHistoryPage() {
   const { deck, room, slides } = data;
   const discussed = slides.filter((s) => s.segments.length || s.notes.length);
   const shown = onlyDiscussed ? discussed : slides;
-  const actions = slides.flatMap((s) => s.notes.filter((n) => n.kind === "action").map((n) => ({ ...n, slide: s.item.slideNo })));
+  const actions = slides
+    .flatMap((s) => s.notes.filter((n) => n.kind === "action").map((n) => ({ ...n, slide: s.item.slideNo })))
+    .sort((a, b) => Number(Boolean(a.doneAt)) - Number(Boolean(b.doneAt)));
+  const openCount = actions.filter((n) => !n.doneAt).length;
   const decisions = slides.flatMap((s) => s.notes.filter((n) => n.kind === "decision").map((n) => ({ ...n, slide: s.item.slideNo })));
 
   return (
@@ -67,18 +71,15 @@ export function DeckHistoryPage() {
             </ul>
           </div>
           <div>
-            <h2>Action items</h2>
+            <h2>
+              Action items {openCount > 0 && <span className="count">{openCount} open</span>}
+            </h2>
             {actions.length === 0 && <p className="muted">None yet.</p>}
-            <ul className="note-list">
-              {actions.map((n) => (
-                <li key={n.id} className="note action">
-                  <span className="note-icon">☐</span>
-                  <span className="note-text">
-                    {n.text} {n.owner && <span className="owner">{n.owner}</span>} <span className="muted small">Slide {n.slide}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <FollowUpList
+              notes={actions}
+              onToggle={saveFollowUp(deck.roomId)}
+              source={(n) => ({ label: `Slide ${(n as (typeof actions)[number]).slide}`, href: n.itemId ? `/items/${n.itemId}` : null })}
+            />
           </div>
         </section>
       )}

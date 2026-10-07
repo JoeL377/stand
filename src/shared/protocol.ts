@@ -78,6 +78,15 @@ export interface Note {
   text: string;
   owner: string | null;
   ts: number;
+  /** Action items only: when someone checked it off, and who. */
+  doneAt: number | null;
+  doneBy: string | null;
+}
+
+/** An action item from an earlier meeting in the room, tracked until someone
+ *  checks it off. It stays linked to the task, ticket or slide it came from. */
+export interface FollowUp extends Note {
+  meetingStartedAt: number;
 }
 
 export interface Participant {
@@ -131,6 +140,9 @@ export interface RoomState {
   suggestion: Suggestion | null;
   items: Item[];
   decks: Deck[];
+  /** Action items from earlier meetings that are still open, plus any checked
+   *  off during this meeting (so they can be unchecked). */
+  followUps: FollowUp[];
   capabilities: Capabilities;
 }
 
@@ -151,6 +163,7 @@ export type ClientMessage =
   /** A JPEG data URL of the shared screen, sent by the host when it changes. */
   | { type: "frame"; dataUrl: string }
   | { type: "segment.move"; segmentId: string; itemId: string | null }
+  | { type: "followup.done"; noteId: string; done: boolean }
   | { type: "demo.play" }
   | { type: "meeting.end" };
 

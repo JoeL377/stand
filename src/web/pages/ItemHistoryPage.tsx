@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api.ts";
 import { NoteList } from "../room/SidePanel.tsx";
 import { Slide } from "../slides.tsx";
+import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
 import { colorFor, fmtDate, fmtTime, keyOf } from "../util.ts";
 
 type Data = Awaited<ReturnType<typeof api.itemHistory>>;
@@ -20,7 +21,11 @@ export function ItemHistoryPage() {
   if (error) return <div className="loading error">{error}</div>;
   if (!data) return <div className="loading">Loading…</div>;
   const { item, meetings, room } = data;
-  const allActions = meetings.flatMap((m) => m.notes.filter((n) => n.kind === "action").map((n) => ({ ...n, when: m.startedAt })));
+  // Open action items first, then done ones; newest meeting first within each.
+  const allActions = meetings
+    .flatMap((m) => m.notes.filter((n) => n.kind === "action").map((n) => ({ ...n, meetingStartedAt: m.startedAt })))
+    .sort((a, b) => Number(Boolean(a.doneAt)) - Number(Boolean(b.doneAt)));
+  const openCount = allActions.filter((n) => !n.doneAt).length;
   const allDecisions = meetings.flatMap((m) => m.notes.filter((n) => n.kind === "decision").map((n) => ({ ...n, when: m.startedAt })));
 
   return (
@@ -67,19 +72,11 @@ export function ItemHistoryPage() {
             </ul>
           </div>
           <div>
-            <h2>Action items</h2>
+            <h2>
+              Action items {openCount > 0 && <span className="count">{openCount} open</span>}
+            </h2>
             {allActions.length === 0 && <p className="muted">None yet.</p>}
-            <ul className="note-list">
-              {allActions.map((n) => (
-                <li key={n.id} className="note action">
-                  <span className="note-icon">☐</span>
-                  <span className="note-text">
-                    {n.text} {n.owner && <span className="owner">{n.owner}</span>}{" "}
-                    <span className="muted small">{fmtDate(n.when)}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <FollowUpList notes={allActions} onToggle={saveFollowUp(room.id)} showDate />
           </div>
         </section>
       )}

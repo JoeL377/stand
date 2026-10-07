@@ -156,6 +156,9 @@ export class RoomSession implements SpeechSink {
       suggestion: this.suggestion,
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
+      followUps: this.db
+        .roomFollowUps(this.roomId)
+        .filter((f) => f.meetingId !== this.meetingId && (f.doneAt === null || f.doneAt >= this.meetingStartedAt)),
       capabilities: capabilities(),
     };
   }
@@ -169,6 +172,11 @@ export class RoomSession implements SpeechSink {
     const items = this.items();
     if (this.focusItemId && !items.some((i) => i.id === this.focusItemId)) this.setFocusInternal(null, "system", "removed");
     if (!this.focusItemId && items[0]) this.setFocusInternal(items[0].id, "system", "start");
+    this.broadcastState();
+  }
+
+  /** Called by the REST API after an action item is checked off elsewhere. */
+  followUpsChanged() {
     this.broadcastState();
   }
 
@@ -286,6 +294,10 @@ export class RoomSession implements SpeechSink {
           this.scheduleNotes(before.itemId, 500);
           this.scheduleNotes(seg.itemId, 500);
         }
+        break;
+      }
+      case "followup.done": {
+        if (this.db.setActionDone(this.roomId, msg.noteId, msg.done ? conn.name : null)) this.broadcastState();
         break;
       }
       case "demo.play":

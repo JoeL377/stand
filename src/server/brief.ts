@@ -2,11 +2,12 @@
 // follow-up. One JSON shape (versioned, stable ids, links back to the source
 // ticket or slide) and a Markdown rendering of the same thing.
 
-import type { Deck, Item, Note, Segment } from "../shared/protocol.ts";
+import type { Deck, FollowUp, Item, Note, Segment } from "../shared/protocol.ts";
 
 type Meeting = { id: string; roomId: string; startedAt: number; endedAt: number | null; summary: string | null };
 
 export const BRIEF_SCHEMA = "stand.meeting-brief/v1";
+export const FOLLOW_UPS_SCHEMA = "stand.follow-ups/v1";
 
 export interface BriefItemRef {
   /** Stand's id for the agenda item; null for talk with no item in focus. */
@@ -18,13 +19,21 @@ export interface BriefItemRef {
   deck: string | null;
   /** The ticket in Linear, or the item's history page in Stand. */
   url: string | null;
+  /** Everything said and noted about this item across meetings, in Stand. */
+  historyUrl: string | null;
+  /** For slides: the deck page in Stand, with every slide's discussion. */
+  deckUrl: string | null;
 }
 
 export interface BriefAction {
   id: string;
   text: string;
   owner: string | null;
-  status: "open";
+  status: "open" | "done";
+  doneAt: string | null;
+  doneBy: string | null;
+  /** The meeting it came up in. */
+  meetingId: string;
   item: BriefItemRef;
 }
 
@@ -42,6 +51,8 @@ export interface MeetingBrief {
   summary: string | null;
   /** Every action item, across the agenda: the follow-up to-do list. */
   actions: BriefAction[];
+  /** Action items from the room's earlier meetings that are still open. */
+  carriedOver: BriefAction[];
   decisions: Array<{ id: string; text: string; item: BriefItemRef }>;
   openQuestions: Array<{ id: string; text: string; item: BriefItemRef }>;
   /** The same notes grouped by agenda item, in agenda order. */
@@ -56,28 +67,50 @@ export interface MeetingBrief {
   }>;
 }
 
+/** Links an agenda item back to its source and to its pages in Stand. */
+export function itemRef(it: Item | null, decks: Deck[], baseUrl: string): BriefItemRef {
+  if (!it) return { id: null, kind: "general", title: "General / off-agenda", key: null, deck: null, url: null, historyUrl: null, deckUrl: null };
+  const deck = it.deckId ? decks.find((d) => d.id === it.deckId) : undefined;
+  return {
+    id: it.id,
+    kind: it.source === "linear" ? "linear" : it.source === "slide" ? "slide" : "task",
+    title: it.title,
+    key: it.externalId ?? (it.slideNo ? `Slide ${it.slideNo}` : null),
+    deck: deck?.title ?? null,
+    url: it.url ?? `${baseUrl}/items/${it.id}`,
+    historyUrl: `${baseUrl}/items/${it.id}`,
+    deckUrl: it.deckId ? `${baseUrl}/decks/${it.deckId}` : null,
+  };
+}
+
+const iso = (ts: number) => new Date(ts).toISOString();
+
+function toAction(n: Note, item: BriefItemRef): BriefAction {
+  return {
+    id: n.id,
+    text: n.text,
+    owner: n.owner,
+    status: n.doneAt ? "done" : "open",
+    doneAt: n.doneAt ? iso(n.doneAt) : null,
+    doneBy: n.doneBy,
+    meetingId: n.meetingId,
+    item,
+  };
+}
+
 export function buildBrief(input: {
   meeting: Meeting;
   roomName: string;
   groups: Array<{ item: Item | null; segments: Segment[]; notes: Note[] }>;
   decks: Deck[];
   baseUrl: string;
+  /** The room's action items from other meetings; open ones from before this meeting carry over. */
+  followUps?: FollowUp[];
+  itemById?: (id: string) => Item | null;
   withTranscript?: boolean;
 }): MeetingBrief {
   const { meeting: m, baseUrl } = input;
-  const iso = (ts: number) => new Date(ts).toISOString();
-  const ref = (it: Item | null): BriefItemRef => {
-    if (!it) return { id: null, kind: "general", title: "General / off-agenda", key: null, deck: null, url: null };
-    const deck = it.deckId ? input.decks.find((d) => d.id === it.deckId) : undefined;
-    return {
-      id: it.id,
-      kind: it.source === "linear" ? "linear" : it.source === "slide" ? "slide" : "task",
-      title: it.title,
-      key: it.externalId ?? (it.slideNo ? `Slide ${it.slideNo}` : null),
-      deck: deck?.title ?? null,
-      url: it.url ?? `${baseUrl}/items/${it.id}`,
-    };
-  };
+  const ref = (it: Item | null) => itemRef(it, input.decks, baseUrl);
 
   const brief: MeetingBrief = {
     schema: BRIEF_SCHEMA,
@@ -92,6 +125,9 @@ export function buildBrief(input: {
     },
     summary: m.summary,
     actions: [],
+    carriedOver: (input.followUps ?? [])
+      .filter((f) => f.meetingId !== m.id && f.meetingStartedAt < m.startedAt && !f.doneAt)
+      .map((f) => toAction(f, ref(f.itemId ? (input.itemById?.(f.itemId) ?? null) : null))),
     decisions: [],
     openQuestions: [],
     items: [],
@@ -100,7 +136,7 @@ export function buildBrief(input: {
   for (const g of input.groups) {
     const r = ref(g.item);
     const of = (kind: Note["kind"]) => g.notes.filter((n) => n.kind === kind);
-    const actions = of("action").map((n) => ({ id: n.id, text: n.text, owner: n.owner, status: "open" as const, item: r }));
+    const actions = of("action").map((n) => toAction(n, r));
     brief.actions.push(...actions);
     brief.decisions.push(...of("decision").map((n) => ({ id: n.id, text: n.text, item: r })));
     brief.openQuestions.push(...of("question").map((n) => ({ id: n.id, text: n.text, item: r })));
@@ -119,10 +155,13 @@ export function buildBrief(input: {
   return brief;
 }
 
+const label = (r: BriefItemRef) => [r.key, r.deck && r.kind === "slide" ? `${r.deck}: ${r.title}` : r.title].filter(Boolean).join(" · ");
+const link = (r: BriefItemRef) => (r.url ? `[${label(r)}](${r.url})` : label(r));
+const actionLine = (a: BriefAction) =>
+  `- [${a.status === "done" ? "x" : " "}] ${a.text} (owner: ${a.owner ?? "unassigned"}${a.doneBy ? `, done by ${a.doneBy}` : ""}) · ${link(a.item)}`;
+
 /** The brief as Markdown with YAML front matter: easy to paste into an agent or a doc. */
 export function briefToMarkdown(b: MeetingBrief): string {
-  const label = (r: BriefItemRef) => [r.key, r.deck && r.kind === "slide" ? `${r.deck}: ${r.title}` : r.title].filter(Boolean).join(" · ");
-  const link = (r: BriefItemRef) => (r.url ? `[${label(r)}](${r.url})` : label(r));
   const date = b.meeting.startedAt.slice(0, 10);
   const out: string[] = [
     "---",
@@ -141,9 +180,14 @@ export function briefToMarkdown(b: MeetingBrief): string {
   if (b.summary) out.push(b.summary, "");
 
   out.push("## Action items", "");
-  if (b.actions.length) for (const a of b.actions) out.push(`- [ ] ${a.text}${a.owner ? ` (owner: ${a.owner})` : " (owner: unassigned)"} · ${link(a.item)}`);
+  if (b.actions.length) for (const a of b.actions) out.push(actionLine(a));
   else out.push("None.");
   out.push("");
+  if (b.carriedOver.length) {
+    out.push("## Still open from earlier meetings", "");
+    for (const a of b.carriedOver) out.push(actionLine(a));
+    out.push("");
+  }
   if (b.decisions.length) {
     out.push("## Decisions", "");
     for (const d of b.decisions) out.push(`- ${d.text} · ${link(d.item)}`);
@@ -164,7 +208,7 @@ export function briefToMarkdown(b: MeetingBrief): string {
     for (const d of g.decisions) out.push(`- Decision: ${d}`);
     for (const id of g.actionIds) {
       const a = actionText.get(id)!;
-      out.push(`- Action: ${a.text}${a.owner ? ` (${a.owner})` : ""}`);
+      out.push(`- Action${a.status === "done" ? " (done)" : ""}: ${a.text}${a.owner ? ` (${a.owner})` : ""}`);
     }
     for (const q of g.openQuestions) out.push(`- Question: ${q}`);
     if (g.decisions.length || g.actionIds.length || g.openQuestions.length) out.push("");
@@ -174,5 +218,53 @@ export function briefToMarkdown(b: MeetingBrief): string {
       out.push("", "</details>", "");
     }
   }
+  return out.join("\n").trimEnd() + "\n";
+}
+
+/** A room's follow-ups across all its meetings: the standing to-do list an
+ *  agent can pick work from, each entry linked to its task, ticket or slide. */
+export interface FollowUpsFeed {
+  schema: typeof FOLLOW_UPS_SCHEMA;
+  room: { id: string; name: string; url: string };
+  status: "open" | "done" | "all";
+  actions: Array<BriefAction & { raisedAt: string; meetingUrl: string }>;
+}
+
+export function buildFollowUps(input: {
+  room: { id: string; name: string };
+  followUps: FollowUp[];
+  itemById: (id: string) => Item | null;
+  decks: Deck[];
+  baseUrl: string;
+  status: FollowUpsFeed["status"];
+}): FollowUpsFeed {
+  const { baseUrl } = input;
+  return {
+    schema: FOLLOW_UPS_SCHEMA,
+    room: { ...input.room, url: `${baseUrl}/r/${input.room.id}` },
+    status: input.status,
+    actions: input.followUps
+      .filter((f) => input.status === "all" || (input.status === "done") === Boolean(f.doneAt))
+      .map((f) => ({
+        ...toAction(f, itemRef(f.itemId ? input.itemById(f.itemId) : null, input.decks, baseUrl)),
+        raisedAt: iso(f.meetingStartedAt),
+        meetingUrl: `${baseUrl}/meetings/${f.meetingId}`,
+      })),
+  };
+}
+
+export function followUpsToMarkdown(f: FollowUpsFeed): string {
+  const out = [
+    "---",
+    `schema: ${f.schema}`,
+    `room: ${JSON.stringify(f.room.name)}`,
+    `status: ${f.status}`,
+    "---",
+    "",
+    `# ${f.room.name} · ${f.status === "open" ? "open follow-ups" : f.status === "done" ? "done follow-ups" : "follow-ups"}`,
+    "",
+  ];
+  if (!f.actions.length) out.push("None.");
+  for (const a of f.actions) out.push(`${actionLine(a)} · raised [${a.raisedAt.slice(0, 10)}](${a.meetingUrl})`);
   return out.join("\n").trimEnd() + "\n";
 }

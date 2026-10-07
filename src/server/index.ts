@@ -7,7 +7,7 @@ import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, MeetingRecap, Slid
 import { authRoutes, requireUser, userFromRequest } from "./auth.ts";
 import { capabilities, config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { briefToMarkdown, buildBrief } from "./brief.ts";
+import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "./brief.ts";
 import {
   MAX_DECK_BYTES,
   MAX_IMAGE_BYTES,
@@ -93,6 +93,7 @@ app.get(
       items: db.listItems(room.id),
       decks: db.listDecks(room.id),
       meetings: db.listMeetings(room.id),
+      followUps: db.roomFollowUps(room.id).filter((f) => !f.doneAt),
       liveMeetingId: live && !live.ended ? live.meetingId : null,
       // Who is in the call now, for the lobby's avatars.
       people: live && !live.ended ? live.state().participants.map(({ name, picture }) => ({ name, picture })) : [],
@@ -438,10 +439,44 @@ app.get(
       groups: meetingGroups(m),
       decks: db.listDecks(m.roomId),
       baseUrl: `${req.protocol}://${req.get("host")}`,
+      followUps: db.roomFollowUps(m.roomId),
+      itemById: (id) => db.getItem(id),
       withTranscript: req.query.transcript === "1",
     });
     if (req.params.format === "json") return void res.json(brief);
     res.type("text/markdown; charset=utf-8").send(briefToMarkdown(brief));
+  }),
+);
+
+// The room's follow-ups across meetings: the standing to-do list for people
+// and agents. ?status=open (default), done or all; .json or .md.
+app.get(
+  "/api/rooms/:id/followups.:format",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !["json", "md"].includes(req.params.format)) return notFound(res);
+    const status = (["open", "done", "all"] as const).find((s) => s === req.query.status) ?? "open";
+    const feed = buildFollowUps({
+      room,
+      followUps: db.roomFollowUps(room.id),
+      itemById: (id) => db.getItem(id),
+      decks: db.listDecks(room.id),
+      baseUrl: `${req.protocol}://${req.get("host")}`,
+      status,
+    });
+    if (req.params.format === "json") return void res.json(feed);
+    res.type("text/markdown; charset=utf-8").send(followUpsToMarkdown(feed));
+  }),
+);
+
+// Check an action item off ({ done: true }) or reopen it.
+app.patch(
+  "/api/rooms/:id/followups/:noteId",
+  route((req, res) => {
+    const note = db.setActionDone(req.params.id, req.params.noteId, req.body?.done ? req.user!.name : null);
+    if (!note) return notFound(res);
+    sessions.get(req.params.id)?.followUpsChanged();
+    res.json(note);
   }),
 );
 

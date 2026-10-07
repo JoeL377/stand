@@ -1,5 +1,5 @@
 import type { DraftSlide } from "../shared/outline.ts";
-import type { Capabilities, Deck, DeckDraft, DeckHistory, Item, ItemHistory, MeetingRecap, User } from "../shared/protocol.ts";
+import type { Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, User } from "../shared/protocol.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -23,6 +23,8 @@ export interface RoomInfo {
   decks: Deck[];
   people: Array<{ name: string; picture: string | null }>;
   meetings: Array<{ id: string; startedAt: number; endedAt: number | null; summary: string | null; segmentCount: number }>;
+  /** Open action items from the room's past meetings. */
+  followUps: FollowUp[];
   liveMeetingId: string | null;
 }
 
@@ -52,5 +54,6 @@ export const api = {
   itemHistory: (itemId: string) =>
     call<ItemHistory & { room: { id: string; name: string } }>("GET", `/api/items/${itemId}/history`),
   meeting: (id: string) => call<MeetingRecap>("GET", `/api/meetings/${id}`),
+  setFollowUp: (roomId: string, noteId: string, done: boolean) => call<Note>("PATCH", `/api/rooms/${roomId}/followups/${noteId}`, { done }),
   token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };

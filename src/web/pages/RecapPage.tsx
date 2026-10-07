@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { MeetingRecap } from "../../shared/protocol.ts";
-import { api } from "../api.ts";
+import { api, type RoomInfo } from "../api.ts";
+import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { NoteList } from "../room/SidePanel.tsx";
 import { colorFor, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
@@ -11,15 +12,26 @@ export function RecapPage() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
+  const [room, setRoom] = useState<RoomInfo | null>(null);
 
   useEffect(() => {
-    api.meeting(meetingId).then(setData).catch((e) => setError(e.message));
+    api
+      .meeting(meetingId)
+      .then((m) => {
+        setData(m);
+        return api.room(m.roomId).then(setRoom);
+      })
+      .catch((e) => setError(e.message));
   }, [meetingId]);
 
   if (error) return <div className="loading error">{error}</div>;
   if (!data) return <div className="loading">Loading…</div>;
   const people = [...new Set(data.items.flatMap((g) => g.segments.map((s) => s.speakerName)))];
-  const actions = data.items.flatMap((g) => g.notes.filter((n) => n.kind === "action").map((n) => ({ n, item: g.item })));
+  const actions = data.items.flatMap((g) => g.notes.filter((n) => n.kind === "action"));
+  const items = [...(room?.items ?? []), ...data.items.flatMap((g) => (g.item ? [g.item] : []))];
+  const source = (n: { itemId: string | null }) => ({ label: sourceLabel(n.itemId, items, room?.decks), href: itemHref(n.itemId, items) });
+  // Action items from earlier meetings that were still open when this one ran.
+  const carried = (room?.followUps ?? []).filter((f) => f.meetingStartedAt < data.startedAt);
   const briefUrl = (fmt: "json" | "md") => `/api/meetings/${data.meetingId}/brief.${fmt}`;
   const copyBrief = async () => {
     const md = await fetch(briefUrl("md")).then((r) => r.text());
@@ -56,21 +68,15 @@ export function RecapPage() {
       {actions.length > 0 && (
         <section className="doc-section brief-actions">
           <h2>Action items</h2>
-          <ul>
-            {actions.map(({ n, item }) => (
-              <li key={n.id}>
-                <span className="box" aria-hidden />
-                <span>
-                  {n.text}
-                  <span className="muted small">
-                    {" "}
-                    · {n.owner ?? "Unassigned"}
-                    {item ? ` · ${keyOf(item) ?? item.title}` : ""}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
+          <FollowUpList notes={actions} onToggle={saveFollowUp(data.roomId)} source={source} />
+        </section>
+      )}
+      {carried.length > 0 && (
+        <section className="doc-section brief-actions">
+          <h2>
+            Still open from earlier meetings <span className="count">{carried.length}</span>
+          </h2>
+          <FollowUpList notes={carried} onToggle={saveFollowUp(data.roomId)} source={source} showDate />
         </section>
       )}
       {data.items.length === 0 && <p className="muted">Nothing was recorded in this meeting.</p>}

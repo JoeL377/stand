@@ -7,6 +7,7 @@ import { fmtDate, fmtTime } from "../util.ts";
 import { Meeting } from "../room/Meeting.tsx";
 import { DeckIcon, LinkIcon, Logo, PdfIcon, TaskIcon, TicketIcon } from "../icons.tsx";
 import { Avatar } from "../room/Stage.tsx";
+import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 
 export function RoomPage() {
   const { roomId = "" } = useParams();
@@ -77,6 +78,13 @@ export function RoomPage() {
     }
   }
   for (const e of entries) if (e.meta === "1 slides") e.meta = "1 slide";
+  // Open follow-ups per agenda entry (a deck counts its slides').
+  const openOn = new Map<string, number>();
+  for (const f of room.followUps) {
+    const it = room.items.find((i) => i.id === f.itemId);
+    const key = it?.deckId ?? f.itemId;
+    if (key) openOn.set(key, (openOn.get(key) ?? 0) + 1);
+  }
   const kindIcon = { task: <TaskIcon />, linear: <TicketIcon />, deck: <DeckIcon />, pdf: <PdfIcon /> };
 
   const copy = () => {
@@ -141,10 +149,35 @@ export function RoomPage() {
                     <span className="kind">{kindIcon[e.kind]}</span>
                     <span className="title">{e.title}</span>
                     {e.meta && <span className="meta">{e.meta}</span>}
+                    {openOn.get(e.key) ? <span className="open-count" title="Open action items from past meetings">{openOn.get(e.key)} open</span> : null}
                   </Link>
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+
+        {room.followUps.length > 0 && (
+          <section className="lobby-section">
+            <h2>
+              Open follow-ups <span className="count">{room.followUps.length}</span>
+              <span className="h2-links">
+                <a href={`/api/rooms/${room.id}/followups.md`} target="_blank" rel="noreferrer" title="The open follow-ups as Markdown, for people and agents">
+                  Markdown
+                </a>
+                <a href={`/api/rooms/${room.id}/followups.json`} target="_blank" rel="noreferrer" title="The open follow-ups as JSON, for agents and tools">
+                  JSON
+                </a>
+              </span>
+            </h2>
+            <div className="lobby-followups">
+              <FollowUpList
+                notes={room.followUps}
+                onToggle={saveFollowUp(room.id)}
+                source={(n) => ({ label: sourceLabel(n.itemId, room.items, room.decks), href: itemHref(n.itemId, room.items) })}
+                showDate
+              />
+            </div>
           </section>
         )}
 
