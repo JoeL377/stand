@@ -160,7 +160,7 @@ export function LiveItemNotes(props: {
     <div className="live-notes">
       {empty && <p className="tk-empty">Nothing decided or assigned yet.</p>}
       {(todo.length > 0 || done.length > 0) && (
-        <section className="tk-group">
+        <section className="tk-group tk-card">
           <h4>To do</h4>
           {todo.length > 0 && <ul>{todo.map(action)}</ul>}
           {done.length > 0 && (
@@ -174,7 +174,7 @@ export function LiveItemNotes(props: {
         </section>
       )}
       {decided.length > 0 && (
-        <section className="tk-group">
+        <section className="tk-group tk-card">
           <h4>Decided</h4>
           <ul>
             {decided.map((n) => (
@@ -187,7 +187,7 @@ export function LiveItemNotes(props: {
         </section>
       )}
       {open.length > 0 && (
-        <section className="tk-group">
+        <section className="tk-group tk-card">
           <h4>Open questions</h4>
           <ul>
             {open.map((n) => (
@@ -200,7 +200,7 @@ export function LiveItemNotes(props: {
         </section>
       )}
       {detailCount > 0 && (
-        <section className="tk-group live-topics">
+        <section className="tk-group tk-card live-topics">
           <h4>{discussions.length ? `Topics (${discussions.length})` : "Summary"}</h4>
           {summary.map((n) => (
             <p key={n.id} className="live-gist">

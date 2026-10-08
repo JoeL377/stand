@@ -1113,7 +1113,15 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .side-tab-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
 .side-notes-tab { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0 14px; }
 .side-agent-notes { padding: 10px 16px 0; font-size: 13px; }
-.live-topics { border-top: 1px solid var(--line); padding-top: 12px; }
-.live-topics .live-gist { margin: 0 0 8px; }
-.live-topics .discussions.compact { margin: 0; }
+/* To do, Decided, Open questions and Topics each sit in their own card */
+.tk-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 10px 12px 12px; }
+.tk-card h4 { margin-bottom: 8px; }
+.live-topics .live-gist { margin: 0 0 4px; }
+.live-topics .discussions.compact { margin: 0; gap: 0; }
+/* topics are rows inside the card, not cards inside a card */
+.live-topics .discussions.compact .disc { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.live-topics .discussions.compact .disc > summary { padding: 9px 0; }
+.live-topics .discussions.compact .disc-body { padding: 0 0 10px; }
+.live-topics .discussions.compact .disc:first-child { border-top: 0; }
+.live-topics .live-gist + .discussions.compact .disc:first-child { border-top: 1px solid var(--line); }
 .side-tabs .side-tab, .side-tabs .side-tab:hover, .side-tabs .side-tab:focus { background: transparent; border-radius: 0; box-shadow: none; }
