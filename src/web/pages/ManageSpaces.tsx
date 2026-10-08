@@ -2,35 +2,21 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
-import { UserMenu } from "../auth.tsx";
-import { Logo } from "../icons.tsx";
-import { spaceHref } from "./Home.tsx";
+import { SpacesShell, spaceHref } from "./SpacesShell.tsx";
 
 /** The spaces you created: rename them and keep their purpose current. */
 export function ManageSpaces() {
-  const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
+  const [all, setAll] = useState<SpaceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    api.spaces().then((all) => setSpaces(all.filter((s) => s.mine)), (e: Error) => setError(e.message));
+    api.spaces().then(setAll, (e: Error) => setError(e.message));
   }, []);
+  const spaces = all?.filter((s) => s.mine);
 
   return (
-    <div className="spaces-page">
-      <header className="sp-bar">
-        <div className="sp-bar-inner">
-          <Link to="/" className="lobby-brand">
-            <Logo />
-            Stand
-          </Link>
-          <span className="spacer" />
-          <UserMenu />
-        </div>
-      </header>
+    <SpacesShell spaces={all}>
       <main className="sp-main narrow">
         <section className="sp-find">
-          <Link to="/" className="muted small">
-            ← All spaces
-          </Link>
           <h1>Manage spaces</h1>
           <p className="muted">Spaces you created. People get in by the link you share from inside the space.</p>
         </section>
@@ -42,7 +28,7 @@ export function ManageSpaces() {
           ))}
         </div>
       </main>
-    </div>
+    </SpacesShell>
   );
 }
 
@@ -73,7 +59,12 @@ function SpaceEditor({ s }: { s: SpaceSummary }) {
       </label>
       <label>
         What is it for?
-        <input value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="One line, e.g. Ship one-page checkout by Nov 15" maxLength={200} />
+        <input
+          value={purpose}
+          onChange={(e) => setPurpose(e.target.value)}
+          placeholder="One line, e.g. Ship one-page checkout by Nov 15"
+          maxLength={200}
+        />
       </label>
       <div className="sp-manage-foot">
         <button className="primary" disabled={!dirty || state === "saving"}>
