@@ -32,7 +32,7 @@ export function ManageSpaces() {
             ← All spaces
           </Link>
           <h1>Manage spaces</h1>
-          <p className="muted">Spaces you created. Everyone in your workspace can find and enter them.</p>
+          <p className="muted">Spaces you created. People get in by the link you share from inside the space.</p>
         </section>
         {error && <p className="error">{error}</p>}
         {spaces?.length === 0 && <p className="muted">You haven't created a space yet.</p>}

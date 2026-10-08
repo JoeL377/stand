@@ -79,8 +79,8 @@ app.get(
   }),
 );
 
-// Every space in the workspace: anyone signed in (and allowed) can find and
-// enter any space; entering one makes you a follower.
+// The spaces you're in. Spaces are invite only: opening one from its link
+// adds you, and only then does it show on your home page.
 app.get(
   "/api/spaces",
   route((req, res) => {
@@ -137,6 +137,7 @@ app.get(
   route((req, res) => {
     const room = db.getRoom(req.params.id);
     if (!room) return notFound(res, "Space not found");
+    db.touchMembership(room.id, req.user!.id);
     const live = sessions.get(room.id);
     res.json({
       ...room,

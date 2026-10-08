@@ -286,7 +286,8 @@ export function openDb(file?: string) {
       if (patch.name !== undefined) db.prepare("UPDATE rooms SET name = ? WHERE id = ?").run(patch.name, id);
       if (patch.purpose !== undefined) db.prepare("UPDATE rooms SET purpose = ? WHERE id = ?").run(patch.purpose, id);
     },
-    /** Every space, with what the home page shows about it, from what's already recorded. */
+    /** The spaces this user is in (spaces are invite only: you get in by link),
+     *  with what the home page shows about each, from what's already recorded. */
     spaceRows(userId: string) {
       const rooms = db
         .prepare(
@@ -294,9 +295,10 @@ export function openDb(file?: string) {
              (SELECT MAX(COALESCE(m.ended_at, m.started_at)) FROM meetings m WHERE m.room_id = r.id) AS met_at,
              (SELECT MAX(last_joined_at) FROM room_members x WHERE x.room_id = r.id) AS joined_at,
              EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?) AS following
-           FROM rooms r`,
+           FROM rooms r
+           WHERE EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?)`,
         )
-        .all(userId) as Row[];
+        .all(userId, userId) as Row[];
       const people = db.prepare("SELECT u.name FROM room_members x JOIN users u ON u.id = x.user_id WHERE x.room_id = ? ORDER BY x.last_joined_at DESC");
       const notes = db.prepare(
         `SELECT n.kind, n.text, n.owner, n.done_at, n.ts, n.meeting_id FROM notes n JOIN meetings m ON m.id = n.meeting_id

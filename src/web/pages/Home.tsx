@@ -7,28 +7,24 @@ import { Logo } from "../icons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { fmtDuration } from "../util.ts";
 
-type Filter = "all" | "following" | "live" | "decide";
+type Filter = "all" | "live" | "decide";
 
 const FILTERS: Array<{ id: Filter; label: string; test: (s: SpaceSummary) => boolean }> = [
   { id: "all", label: "All", test: () => true },
-  { id: "following", label: "Following", test: (s) => s.following },
   { id: "live", label: "Talking now", test: (s) => s.live !== null },
   { id: "decide", label: "Needs a decision", test: (s) => s.toDecide > 0 },
 ];
 
-/** Rows shown under "More in your workspace" before "Show all". */
-const MORE_LIMIT = 8;
-
 export const spaceHref = (id: string) => `/s/${id}`;
 
-/** Home: find a space and go in. Creating and managing spaces sit in the header. */
+/** Home: find one of your spaces and go in. Spaces are invite only, so these are
+ *  the ones you created or opened from a link. Creating and managing sit in the header. */
 export function Home() {
   const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [creating, setCreating] = useState<string | null>(null);
-  const [allOthers, setAllOthers] = useState(false);
 
   useEffect(() => {
     const load = () => api.spaces().then(setSpaces, (e: Error) => setError(e.message));
@@ -42,8 +38,7 @@ export function Home() {
   const matches = useMemo(() => (spaces ?? []).filter((s) => !query || s.search.includes(query)), [spaces, query]);
   const shown = matches.filter(FILTERS.find((f) => f.id === filter)!.test);
   const live = shown.filter((s) => s.live);
-  const mine = shown.filter((s) => !s.live && s.following);
-  const others = shown.filter((s) => !s.live && !s.following);
+  const mine = shown.filter((s) => !s.live);
 
   return (
     <div className="spaces-page">
@@ -71,7 +66,7 @@ export function Home() {
 
         <section className="sp-find">
           <h1>Spaces</h1>
-          <p className="muted">Find what your team is working on, see where it stands, and jump in.</p>
+          <p className="muted">The spaces you’re in: see where each one stands, and jump in.</p>
           <label className="sp-search">
             <span className="sr-only">Search spaces</span>
             <SearchIcon />
@@ -119,25 +114,6 @@ export function Home() {
           </section>
         )}
 
-        {others.length > 0 && (
-          <section className="sp-section">
-            <div className="sp-section-head">
-              <h2>{mine.length || live.length ? "More in your workspace" : "In your workspace"}</h2>
-              <span className="muted small">Recent activity first</span>
-            </div>
-            <div className="sp-rows">
-              {(allOthers || query ? others : others.slice(0, MORE_LIMIT)).map((s) => (
-                <SpaceRow key={s.id} s={s} />
-              ))}
-            </div>
-            {!allOthers && !query && others.length > MORE_LIMIT && (
-              <button className="link small sp-showall" onClick={() => setAllOthers(true)}>
-                Show all {others.length}
-              </button>
-            )}
-          </section>
-        )}
-
         {spaces !== null && shown.length === 0 && (
           <section className="sp-empty">
             {query ? (
@@ -151,7 +127,7 @@ export function Home() {
             ) : spaces.length === 0 ? (
               <>
                 <strong>No spaces yet</strong>
-                <span className="muted">A space is where one thing your team is working on lives: its items, decisions, to-dos and conversations.</span>
+                <span className="muted">A space is where one thing your team is working on lives: its items, decisions, to-dos and conversations. Spaces someone shares with you show up here once you open their link.</span>
                 <button className="sp-new" onClick={() => setCreating("")}>
                   Create the first space
                 </button>
@@ -211,7 +187,7 @@ function NewSpace(props: { initialName: string; onClose: () => void }) {
         <button className="primary" disabled={busy}>
           Create and enter
         </button>
-        <span className="muted small">Everyone in your workspace can find and enter it.</span>
+        <span className="muted small">Only people you share its link with can find it.</span>
       </div>
       {error && <p className="error">{error}</p>}
     </form>
@@ -238,7 +214,7 @@ function LiveCard({ s }: { s: SpaceSummary }) {
             <Avatar key={i} id={p.name} name={p.name} picture={p.picture} size={24} />
           ))}
         </span>
-        <span className="sp-live-for">Talking for {fmtDuration(Date.now() - live.since)}</span>
+        <span className="sp-live-for">{Date.now() - live.since < 60_000 ? "Just started" : `Talking for ${fmtDuration(Date.now() - live.since)}`}</span>
       </div>
     </Link>
   );
@@ -262,22 +238,6 @@ function SpaceCard({ s }: { s: SpaceSummary }) {
         <span className="muted small">{ago(s.last?.ts ?? s.activeAt)}</span>
       </div>
     </Link>
-  );
-}
-
-function SpaceRow({ s }: { s: SpaceSummary }) {
-  return (
-    <div className="sp-row">
-      <Link to={spaceHref(s.id)} className="sp-row-main">
-        <span className="sp-name">{s.name}</span>
-        {s.purpose && <span className="muted small">{s.purpose}</span>}
-      </Link>
-      <StateChips s={s} />
-      <span className="muted small sp-row-when">{ago(s.activeAt)}</span>
-      <Link to={spaceHref(s.id)} className="sp-enter outline" aria-label={`Enter ${s.name}`}>
-        Enter
-      </Link>
-    </div>
   );
 }
 

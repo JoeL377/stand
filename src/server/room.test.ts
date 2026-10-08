@@ -383,7 +383,8 @@ test("spaces: every space is listed with its open to-dos, the ones for you, and 
     { kind: "question", text: "Do we need 3DS?", owner: null },
   ]);
   const rows = db.spaceRows(joe.id);
-  assert.deepEqual(rows.map((r) => r.name).sort(), ["Checkout v2", "Hiring loop"]);
+  // Invite only: Joe sees the space he's in, not Sam's.
+  assert.deepEqual(rows.map((r) => r.name), ["Checkout v2"]);
   const s = toSpaceSummary(rows.find((r) => r.id === a.id)!, joe, null);
   assert.equal(s.mine, true);
   assert.equal(s.following, true);
@@ -393,8 +394,8 @@ test("spaces: every space is listed with its open to-dos, the ones for you, and 
   assert.equal(s.toDecide, 1);
   assert.equal(s.last?.kind, "question");
   assert.ok(s.search.includes("apple pay sandbox") && s.search.includes("joe liang"));
-  const other = toSpaceSummary(rows.find((r) => r.id === b.id)!, joe, null);
+  db.touchMembership(b.id, joe.id);
+  const other = toSpaceSummary(db.spaceRows(joe.id).find((r) => r.id === b.id)!, joe, null);
   assert.equal(other.mine, false);
-  assert.equal(other.following, false);
   assert.ok(ownedBy("joe liang", "Joe Liang") && ownedBy("Joe", "Joe Liang") && !ownedBy("Joey", "Joe Liang"));
 });
