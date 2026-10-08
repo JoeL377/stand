@@ -189,6 +189,7 @@ export class RoomSession implements SpeechSink {
       followUps: this.db
         .roomFollowUps(this.roomId)
         .filter((f) => f.meetingId !== this.meetingId && (f.doneAt === null || f.doneAt >= this.meetingStartedAt)),
+      updates: this.db.roomUpdates(this.roomId, this.db.previousMeetingStart(this.roomId, this.meetingStartedAt) ?? 0),
       capabilities: capabilities(),
     };
   }
@@ -207,6 +208,11 @@ export class RoomSession implements SpeechSink {
 
   /** Called by the REST API after an action item is checked off elsewhere. */
   followUpsChanged() {
+    this.broadcastState();
+  }
+
+  /** Called when an agent reports back on an item through the Stand MCP. */
+  updatesChanged() {
     this.broadcastState();
   }
 

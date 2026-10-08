@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Discussion, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import type { ClientMessage, Discussion, Item, ItemUpdate, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
@@ -27,7 +27,9 @@ export function SidePanel(props: {
   // Action items about this item from earlier meetings, still open (or just checked off).
   const earlier = (state.followUps ?? []).filter((f) => f.itemId === state.focusItemId);
   const earlierOpenCount = earlier.filter((f) => !f.doneAt).length;
-  const hasNotes = earlier.length > 0 || focusNotes.length > 0 || notesUpdating;
+  // What agents and people reported on this item since the last meeting.
+  const since = (state.updates ?? []).filter((u) => u.itemId === state.focusItemId);
+  const hasNotes = since.length > 0 || earlier.length > 0 || focusNotes.length > 0 || notesUpdating;
   // New remarks for this item while the Transcript tab isn't open.
   const [seen, setSeen] = useState(0);
   useEffect(() => {
@@ -84,6 +86,7 @@ export function SidePanel(props: {
       {tab === "notes" ? (
         <div className="side-notes-tab">
           {!hasNotes && <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>}
+          {since.length > 0 && <SinceLastTime updates={since} />}
           {earlier.length > 0 && (
             <section className={earlierOpen ? "focus-notes earlier open" : "focus-notes earlier"}>
               <button className="focus-notes-head" aria-expanded={earlierOpen} onClick={() => setEarlierOpen((o) => !o)}>
@@ -206,6 +209,56 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
       )}
     </div>
   );
+}
+
+const STATUS: Record<ItemUpdate["status"], string> = { done: "Done", blocked: "Blocked", needs_decision: "Needs a decision", progress: "Progress" };
+
+/** Links read as "PR #12" or the site's name rather than a raw URL. */
+function linkLabel(url: string) {
+  try {
+    const u = new URL(url);
+    const pr = /\/pull\/(\d+)/.exec(u.pathname);
+    if (u.hostname === "github.com" && pr) return `PR #${pr[1]}`;
+    return u.hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/** Updates agents and people posted on the item in focus since the last meeting. */
+function SinceLastTime({ updates }: { updates: ItemUpdate[] }) {
+  return (
+    <section className="side-since tk-card">
+      <h4>Since last time</h4>
+      <ul>
+        {updates.map((u) => (
+          <li key={u.id} className={`since ${u.status}`}>
+            <span className={`since-status ${u.status}`}>{STATUS[u.status]}</span>
+            <span className="since-body">
+              <span className="since-text">{u.text}</span>
+              {u.noteText && <span className="since-on">On: {u.noteText}</span>}
+              <span className="since-meta">
+                {u.client ? `${u.userName.split(/\s+/)[0]} via ${u.client}` : u.userName} · {fmtAgo(u.ts)}
+                {u.links.map((l) => (
+                  <a key={l} href={l} target="_blank" rel="noreferrer">
+                    {linkLabel(l)}
+                  </a>
+                ))}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function fmtAgo(ts: number) {
+  const m = Math.round((Date.now() - ts) / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
 
 function ChatBox({ send }: { send: (m: ClientMessage) => void }) {

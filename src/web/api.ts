@@ -1,5 +1,5 @@
 import type { DraftSlide } from "../shared/outline.ts";
-import type { Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, SpaceSummary, User } from "../shared/protocol.ts";
+import type { AgentToken, Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, SpaceSummary, User } from "../shared/protocol.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -30,6 +30,11 @@ export interface RoomInfo {
 }
 
 export const api = {
+  tokens: () => call<AgentToken[]>("GET", "/api/tokens"),
+  createToken: (label: string, scope: AgentToken["scope"]) => call<{ token: string; info: AgentToken }>("POST", "/api/tokens", { label, scope }),
+  revokeToken: (id: string) => call<{ ok: true }>("DELETE", `/api/tokens/${id}`),
+  locateRef: (kind: string, id: string) => call<{ meetingId: string; roomId: string; itemId: string | null }>("GET", `/api/refs/${kind}/${id}`),
+  refPrompt: (kind: string, id: string) => call<{ text: string }>("GET", `/api/refs/${kind}/${id}/prompt`),
   config: () => call<Capabilities>("GET", "/api/config"),
   me: () => call<User>("GET", "/api/auth/me"),
   devSignIn: (name: string, email: string) => call<User>("POST", "/api/auth/dev", { name, email }),

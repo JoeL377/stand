@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { CopyForAgent } from "./CopyForAgent.tsx";
 import type { Deck, Item, Note } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { fmtDate, keyOf } from "./util.ts";
@@ -70,6 +71,7 @@ export function FollowUpList(props: {
                 {done && n.doneBy && <span>Done by {n.doneBy}</span>}
               </span>
             </span>
+            <CopyForAgent kind="action" id={n.id} />
           </li>
         );
       })}

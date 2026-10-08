@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { CopyForAgent } from "../CopyForAgent.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
@@ -187,6 +188,7 @@ function PointList(props: {
               <span>{n.text}</span>
               {src && <span className="rc-src">{src.href ? <Link to={src.href}>{src.label}</Link> : src.label}</span>}
             </span>
+            <CopyForAgent kind={props.kind === "decided" ? "decision" : "question"} id={n.id} />
           </li>
         );
       })}
@@ -230,11 +232,14 @@ function TopicRow({ d, segments }: { d: Discussion; segments: Segment[] }) {
             {p.position}
           </p>
         ))}
-        {turns.length > 0 && (
-          <button className="link small" onClick={() => setShowTurns((s) => !s)}>
-            {showTurns ? "Hide what was said" : `What was said (${turns.length})`}
-          </button>
-        )}
+        <div className="disc-foot">
+          {turns.length > 0 && (
+            <button className="link small" onClick={() => setShowTurns((s) => !s)}>
+              {showTurns ? "Hide what was said" : `What was said (${turns.length})`}
+            </button>
+          )}
+          <CopyForAgent kind="topic" id={d.id} label />
+        </div>
         {showTurns && <Turns segments={turns} />}
       </div>
     </details>

@@ -41,6 +41,14 @@ export function AgendaPanel(props: {
   for (const s of segments) counts.set(s.itemId, (counts.get(s.itemId) ?? 0) + 1);
   const earlier = new Map<string | null, number>();
   for (const f of state.followUps ?? []) if (!f.doneAt) earlier.set(f.itemId, (earlier.get(f.itemId) ?? 0) + 1);
+  // What agents and people reported on each item since last time.
+  const reported = new Map<string | null, { n: number; blocked: number }>();
+  for (const u of state.updates ?? []) {
+    const r = reported.get(u.itemId) ?? { n: 0, blocked: 0 };
+    r.n++;
+    if (u.status === "blocked") r.blocked++;
+    reported.set(u.itemId, r);
+  }
   const actions = new Map<string | null, number>();
   for (const n of notes) if (n.kind === "action") actions.set(n.itemId, (actions.get(n.itemId) ?? 0) + 1);
 
@@ -49,6 +57,7 @@ export function AgendaPanel(props: {
     const n = counts.get(it.id) ?? 0;
     const a = actions.get(it.id) ?? 0;
     const e = earlier.get(it.id) ?? 0;
+    const u = reported.get(it.id);
     return (
       <li key={it.id} className={active ? "item active" : "item"}>
         <button
@@ -69,7 +78,7 @@ export function AgendaPanel(props: {
               {it.slideNo && <span className="slide-no">{it.slideNo}</span>}
               {it.title}
             </span>
-            {(n > 0 || a > 0 || e > 0) && (
+            {(n > 0 || a > 0 || e > 0 || u) && (
               <span className="item-meta">
                 {[n > 0 && `${n} remark${n === 1 ? "" : "s"}`, a > 0 && `${a} action${a === 1 ? "" : "s"}`]
                   .filter(Boolean)
@@ -77,6 +86,12 @@ export function AgendaPanel(props: {
                 {e > 0 && (
                   <span className="open-count" title="Open action items from earlier meetings">
                     {e} open
+                  </span>
+                )}
+                {u && (
+                  <span className={u.blocked ? "update-count blocked" : "update-count"} title="Updates reported since last time">
+                    {u.n} update{u.n === 1 ? "" : "s"}
+                    {u.blocked > 0 && ` · ${u.blocked} blocked`}
                   </span>
                 )}
               </span>

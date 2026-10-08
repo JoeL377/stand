@@ -4,7 +4,9 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer } from "ws";
 import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
-import { authRoutes, requireUser, userFromRequest } from "./auth.ts";
+import { agentApi, AgentError, parseRef } from "./agents.ts";
+import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } from "./auth.ts";
+import { handleMcp } from "./mcp.ts";
 import { capabilities, config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "./brief.ts";
@@ -69,8 +71,103 @@ app.get("/api/config", (_req, res) => {
   res.json(capabilities());
 });
 app.use("/api/auth", authRoutes(db));
+
+// ---- agents: the Stand MCP and the Copy for agent button ---------------------
+
+const agents = agentApi({
+  db,
+  notify: (roomId, what) => {
+    const s = sessions.get(roomId);
+    if (s && !s.ended) (what === "updates" ? s.updatesChanged() : s.followUpsChanged());
+  },
+  brief: (meetingId, baseUrl, transcript) => {
+    const m = db.getMeeting(meetingId)!;
+    return buildBrief({
+      meeting: m,
+      roomName: db.getRoom(m.roomId)!.name,
+      groups: meetingGroups(m),
+      decks: db.listDecks(m.roomId),
+      baseUrl,
+      followUps: db.roomFollowUps(m.roomId),
+      itemById: (id) => db.getItem(id),
+      discussionById: (id) => db.getDiscussion(id),
+      withTranscript: transcript,
+    });
+  },
+});
+
+// Agents connect here with "Authorization: Bearer stand_pat_…" from the Connect an agent page.
+app.all(
+  "/mcp",
+  route(async (req, res) => {
+    const caller = agentFromRequest(db, req);
+    if (!caller) {
+      res.set("WWW-Authenticate", 'Bearer realm="stand"');
+      return void res.status(401).json({ error: "Stand needs an agent token. Make one on the Connect an agent page in Stand." });
+    }
+    await handleMcp(req, res, agents, caller, origin(req));
+  }),
+);
+
 // Everything else needs a signed-in user.
 app.use("/api", requireUser(db));
+
+app.get(
+  "/api/tokens",
+  route((req, res) => {
+    res.json(db.listTokens(req.user!.id));
+  }),
+);
+
+/** A new agent token. The secret is in this response only. */
+app.post(
+  "/api/tokens",
+  route((req, res) => {
+    const label = String(req.body?.label ?? "").trim().slice(0, 60) || "My agent";
+    const scope = req.body?.scope === "read" ? "read" : "write";
+    if (db.listTokens(req.user!.id).length >= 20) return void res.status(400).json({ error: "You have 20 agent tokens. Revoke one first." });
+    res.json(db.createToken(req.user!.id, label, scope));
+  }),
+);
+
+app.delete(
+  "/api/tokens/:id",
+  route((req, res) => {
+    if (!db.revokeToken(req.user!.id, req.params.id)) return notFound(res);
+    res.json({ ok: true });
+  }),
+);
+
+const asWebCaller = (req: Request) => ({ user: req.user!, token: null });
+const agentErrors = (res: Response, err: unknown) => {
+  if (err instanceof AgentError) return void res.status(404).json({ error: err.message });
+  throw err;
+};
+
+/** Where a stand:kind/id reference lives, for /ref/... links. */
+app.get(
+  "/api/refs/:kind/:id",
+  route((req, res) => {
+    if (!parseRef(`${req.params.kind}/${req.params.id}`)) return notFound(res);
+    try {
+      res.json(agents.locate(asWebCaller(req), req.params.kind, req.params.id));
+    } catch (err) {
+      agentErrors(res, err);
+    }
+  }),
+);
+
+/** The short prompt the Copy for agent button puts on the clipboard. */
+app.get(
+  "/api/refs/:kind/:id/prompt",
+  route((req, res) => {
+    try {
+      res.json({ text: agents.prompt(asWebCaller(req), `stand:${req.params.kind}/${req.params.id}`, origin(req)) });
+    } catch (err) {
+      agentErrors(res, err);
+    }
+  }),
+);
 
 app.get(
   "/api/my/rooms",

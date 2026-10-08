@@ -105,6 +105,36 @@ export interface Discussion {
   ts: number;
 }
 
+/** What an agent (or person) reported back on an item through the Stand MCP:
+ *  progress, a blocker, a question for the next meeting, or a to-do checked off. */
+export type UpdateStatus = "progress" | "blocked" | "needs_decision" | "done";
+export interface ItemUpdate {
+  id: string;
+  roomId: string;
+  itemId: string | null;
+  /** The to-do it reports on, when it reports on one. */
+  noteId: string | null;
+  noteText: string | null;
+  userName: string;
+  /** The agent token's label, e.g. "Claude Code on Joe's Mac"; null when a person posted it. */
+  client: string | null;
+  status: UpdateStatus;
+  text: string;
+  links: string[];
+  ts: number;
+}
+
+/** A personal access token an agent uses to reach the Stand MCP. The secret is only shown once. */
+export interface AgentToken {
+  id: string;
+  label: string;
+  scope: "read" | "write";
+  /** The first characters of the token, so people can tell tokens apart. */
+  hint: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+}
+
 /** An action item from an earlier meeting in the room, tracked until someone
  *  checks it off. It stays linked to the task, ticket or slide it came from. */
 export interface FollowUp extends Note {
@@ -165,6 +195,8 @@ export interface RoomState {
   /** Action items from earlier meetings that are still open, plus any checked
    *  off during this meeting (so they can be unchecked). */
   followUps: FollowUp[];
+  /** Updates agents and people reported on this space's items since the last meeting started. */
+  updates: ItemUpdate[];
   capabilities: Capabilities;
 }
 

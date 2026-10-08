@@ -74,7 +74,18 @@ export function requireUser(db: DB) {
   };
 }
 
-function origin(req: Request) {
+/** The user behind an agent's "Authorization: Bearer stand_pat_…" token, with the
+ *  same access checks as a signed-in session, so taking someone off the allowlist
+ *  also locks out their agents. */
+export function agentFromRequest(db: DB, req: IncomingMessage) {
+  const m = /^Bearer\s+(stand_pat_[A-Za-z0-9_-]{20,})\s*$/.exec(req.headers.authorization ?? "");
+  const found = m ? db.tokenUser(m[1]) : null;
+  if (!found || !emailAllowed(found.user.email)) return null;
+  if (!found.verified && (googleEnabled() || accessRestricted())) return null;
+  return { user: found.user, token: found.token };
+}
+
+export function origin(req: Request) {
   if (config.publicUrl) return config.publicUrl.replace(/\/$/, "");
   const proto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0] ?? req.protocol;
   return `${proto}://${req.headers["x-forwarded-host"] ?? req.headers.host}`;

@@ -1,8 +1,25 @@
 import fs from "node:fs";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Deck, DeckDraft, DeckTheme, Discussion, DiscussionOutcome, FollowUp, Item, ItemSource, Note, NoteKind, Segment, SegmentKind, User } from "../shared/protocol.ts";
+import { createHash, randomBytes } from "node:crypto";
+import type {
+  AgentToken,
+  Deck,
+  DeckDraft,
+  DeckTheme,
+  Discussion,
+  DiscussionOutcome,
+  FollowUp,
+  Item,
+  ItemSource,
+  ItemUpdate,
+  Note,
+  NoteKind,
+  Segment,
+  SegmentKind,
+  UpdateStatus,
+  User,
+} from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -106,6 +123,36 @@ CREATE TABLE IF NOT EXISTS discussions (
 );
 CREATE INDEX IF NOT EXISTS discussions_item ON discussions(item_id);
 CREATE INDEX IF NOT EXISTS discussions_meeting ON discussions(meeting_id);
+-- Personal access tokens for agents (the Stand MCP). Only a hash is kept.
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  label TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,
+  hint TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER,
+  revoked_at INTEGER
+);
+-- What agents and people report back on an item between meetings. Append only.
+CREATE TABLE IF NOT EXISTS updates (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  item_id TEXT,
+  note_id TEXT,
+  note_text TEXT,
+  user_id TEXT NOT NULL,
+  user_name TEXT NOT NULL,
+  client TEXT,
+  status TEXT NOT NULL,
+  text TEXT NOT NULL,
+  links_json TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS updates_room ON updates(room_id, ts);
+CREATE INDEX IF NOT EXISTS updates_item ON updates(item_id, ts);
+CREATE INDEX IF NOT EXISTS updates_note ON updates(note_id);
 `;
 
 /** Reads a discussion with the earlier one it continues, if any. */
@@ -174,6 +221,31 @@ const toNote = (r: Row): Note => ({
   doneBy: (r.done_by as string) ?? null,
   discussionId: (r.discussion_id as string) ?? null,
 });
+
+const toUpdate = (r: Row): ItemUpdate => ({
+  id: r.id as string,
+  roomId: r.room_id as string,
+  itemId: (r.item_id as string) ?? null,
+  noteId: (r.note_id as string) ?? null,
+  noteText: (r.note_text as string) ?? null,
+  userName: r.user_name as string,
+  client: (r.client as string) ?? null,
+  status: r.status as UpdateStatus,
+  text: r.text as string,
+  links: JSON.parse(r.links_json as string),
+  ts: r.ts as number,
+});
+
+const toToken = (r: Row): AgentToken => ({
+  id: r.id as string,
+  label: r.label as string,
+  scope: r.scope as AgentToken["scope"],
+  hint: r.hint as string,
+  createdAt: r.created_at as number,
+  lastUsedAt: (r.last_used_at as number) ?? null,
+});
+
+const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
 const toDiscussion = (r: Row): Discussion => ({
   id: r.id as string,
@@ -575,6 +647,14 @@ export function openDb(file?: string) {
           (r) => [r.text as string, { doneAt: r.done_at as number, doneBy: (r.done_by as string) ?? null }],
         ),
       );
+      // A note that comes back with the same wording keeps its id, so references
+      // agents hold (stand:question/<id>) survive the agent rewriting the notes.
+      const sameText = new Map(
+        (db.prepare("SELECT id, kind, text FROM notes WHERE meeting_id = ? AND item_id IS ?").all(meetingId, itemId) as Row[]).map((r) => [
+          `${r.kind}:${r.text}`,
+          r.id as string,
+        ]),
+      );
       db.prepare("DELETE FROM notes WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
       const st = db.prepare(
         "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -583,7 +663,7 @@ export function openDb(file?: string) {
       return notes.map((n) => {
         const d = n.doneAt ? { doneAt: n.doneAt, doneBy: n.doneBy ?? null } : n.kind === "action" ? done.get(n.text) : undefined;
         const note: Note = {
-          id: n.id ?? newId(12),
+          id: n.id ?? sameText.get(`${n.kind}:${n.text}`) ?? newId(12),
           meetingId,
           itemId,
           kind: n.kind,
@@ -600,13 +680,23 @@ export function openDb(file?: string) {
     },
     /** Discussions for one item in one meeting are regenerated as a whole, with its notes. */
     replaceDiscussions(meetingId: string, itemId: string | null, drafts: DraftDiscussion[]): Discussion[] {
+      // A topic that comes back under the same name keeps its id (see replaceNotes).
+      const sameTopic = new Map(
+        (db.prepare("SELECT id, topic FROM discussions WHERE meeting_id = ? AND item_id IS ?").all(meetingId, itemId) as Row[]).map((r) => [
+          (r.topic as string).trim().toLowerCase(),
+          r.id as string,
+        ]),
+      );
       db.prepare("DELETE FROM discussions WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
       const st = db.prepare(
         "INSERT INTO discussions (id, meeting_id, item_id, topic, positions_json, outcome, segment_ids_json, continues_id, position, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const ts = Date.now();
+      const used = new Set<string>();
       const ids = drafts.map((d, i) => {
-        const id = newId(12);
+        const prior = sameTopic.get(d.topic.trim().toLowerCase());
+        const id = prior && !used.has(prior) ? prior : newId(12);
+        used.add(id);
         st.run(id, meetingId, itemId, d.topic, JSON.stringify(d.positions), d.outcome, JSON.stringify(d.segmentIds), d.continuesId, i, ts);
         return id;
       });
@@ -660,6 +750,148 @@ export function openDb(file?: string) {
     },
     meetingNotes(meetingId: string): Note[] {
       return (db.prepare("SELECT * FROM notes WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map(toNote);
+    },
+
+    // ---- agent access (Stand MCP) ----------------------------------------------
+
+    /** A new token for this user's agent. The secret is returned once and only its hash is kept. */
+    createToken(userId: string, label: string, scope: AgentToken["scope"]): { token: string; info: AgentToken } {
+      const token = `stand_pat_${randomBytes(24).toString("base64url")}`;
+      const id = newId(10);
+      const now = Date.now();
+      const hint = token.slice(0, 14);
+      db.prepare("INSERT INTO api_tokens (id, user_id, label, hash, hint, scope, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        id,
+        userId,
+        label,
+        hashToken(token),
+        hint,
+        scope,
+        now,
+      );
+      return { token, info: { id, label, scope, hint, createdAt: now, lastUsedAt: null } };
+    },
+    listTokens(userId: string): AgentToken[] {
+      return (
+        db.prepare("SELECT * FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC").all(userId) as Row[]
+      ).map(toToken);
+    },
+    revokeToken(userId: string, id: string): boolean {
+      return db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL").run(Date.now(), id, userId).changes > 0;
+    },
+    /** The user and token behind a bearer token, or null if it's unknown or revoked. */
+    tokenUser(token: string): { user: User; verified: boolean; token: AgentToken } | null {
+      const r = db
+        .prepare(
+          `SELECT t.*, u.id AS u_id, u.email, u.name, u.picture, u.google_sub FROM api_tokens t JOIN users u ON u.id = t.user_id
+           WHERE t.hash = ? AND t.revoked_at IS NULL`,
+        )
+        .get(hashToken(token)) as Row | undefined;
+      if (!r) return null;
+      const now = Date.now();
+      // Last used is shown on the Connect an agent page; minute precision is plenty.
+      if (!r.last_used_at || now - (r.last_used_at as number) > 60_000) db.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").run(now, r.id as string);
+      return {
+        user: toUser({ id: r.u_id, email: r.email, name: r.name, picture: r.picture }),
+        verified: Boolean(r.google_sub),
+        token: toToken({ ...r, last_used_at: now }),
+      };
+    },
+
+    isMember(roomId: string, userId: string): boolean {
+      return Boolean(db.prepare("SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?").get(roomId, userId));
+    },
+    /** A note with the space and meeting it belongs to. */
+    getNote(id: string): (Note & { roomId: string; meetingStartedAt: number; meetingEndedAt: number | null }) | null {
+      const r = db
+        .prepare("SELECT n.*, m.room_id, m.started_at AS m_started, m.ended_at AS m_ended FROM notes n JOIN meetings m ON m.id = n.meeting_id WHERE n.id = ?")
+        .get(id) as Row | undefined;
+      return r
+        ? { ...toNote(r), roomId: r.room_id as string, meetingStartedAt: r.m_started as number, meetingEndedAt: (r.m_ended as number) ?? null }
+        : null;
+    },
+    /** Every note on an item across meetings, newest meeting first. */
+    itemNotes(itemId: string): Array<Note & { meetingStartedAt: number }> {
+      return (
+        db
+          .prepare(
+            `SELECT n.*, m.started_at AS m_started FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE n.item_id = ? ORDER BY m.started_at DESC, n.rowid`,
+          )
+          .all(itemId) as Row[]
+      ).map((r) => ({ ...toNote(r), meetingStartedAt: r.m_started as number }));
+    },
+    /** Open action items in the spaces this user is in, newest meeting first. */
+    memberActions(userId: string): Array<Note & { roomId: string; roomName: string; meetingStartedAt: number }> {
+      return (
+        db
+          .prepare(
+            `SELECT n.*, m.room_id, r.name AS room_name, m.started_at AS m_started FROM notes n
+             JOIN meetings m ON m.id = n.meeting_id JOIN rooms r ON r.id = m.room_id
+             WHERE n.kind = 'action' AND m.room_id IN (SELECT room_id FROM room_members WHERE user_id = ?)
+             ORDER BY m.started_at DESC, n.rowid LIMIT 2000`,
+          )
+          .all(userId) as Row[]
+      ).map((r) => ({ ...toNote(r), roomId: r.room_id as string, roomName: r.room_name as string, meetingStartedAt: r.m_started as number }));
+    },
+    getSegments(ids: string[]): Segment[] {
+      if (!ids.length) return [];
+      const st = db.prepare("SELECT * FROM segments WHERE id = ?");
+      return ids.map((id) => st.get(id) as Row | undefined).filter((r): r is Row => !!r).map(toSegment);
+    },
+    latestMeeting(roomId: string) {
+      const r = db.prepare("SELECT id FROM meetings WHERE room_id = ? ORDER BY started_at DESC LIMIT 1").get(roomId) as Row | undefined;
+      return r ? (r.id as string) : null;
+    },
+
+    addUpdate(u: Omit<ItemUpdate, "id" | "ts"> & { userId: string }): ItemUpdate {
+      const update: ItemUpdate = {
+        id: newId(12),
+        roomId: u.roomId,
+        itemId: u.itemId,
+        noteId: u.noteId,
+        noteText: u.noteText,
+        userName: u.userName,
+        client: u.client,
+        status: u.status,
+        text: u.text,
+        links: u.links,
+        ts: Date.now(),
+      };
+      db.prepare(
+        "INSERT INTO updates (id, room_id, item_id, note_id, note_text, user_id, user_name, client, status, text, links_json, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        update.id,
+        update.roomId,
+        update.itemId,
+        update.noteId,
+        update.noteText,
+        u.userId,
+        update.userName,
+        update.client,
+        update.status,
+        update.text,
+        JSON.stringify(update.links),
+        update.ts,
+      );
+      return update;
+    },
+    /** Updates in a space since a time, newest first. */
+    roomUpdates(roomId: string, since = 0, limit = 200): ItemUpdate[] {
+      return (
+        db.prepare("SELECT * FROM updates WHERE room_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?").all(roomId, since, limit) as Row[]
+      ).map(toUpdate);
+    },
+    itemUpdates(itemId: string, limit = 50): ItemUpdate[] {
+      return (db.prepare("SELECT * FROM updates WHERE item_id = ? ORDER BY ts DESC LIMIT ?").all(itemId, limit) as Row[]).map(toUpdate);
+    },
+    noteUpdates(noteId: string): ItemUpdate[] {
+      return (db.prepare("SELECT * FROM updates WHERE note_id = ? ORDER BY ts DESC LIMIT 50").all(noteId) as Row[]).map(toUpdate);
+    },
+    /** When the meeting before this one started: "since last time" starts there. */
+    previousMeetingStart(roomId: string, before: number): number | null {
+      const r = db.prepare("SELECT MAX(started_at) AS t FROM meetings WHERE room_id = ? AND started_at < ?").get(roomId, before) as Row | undefined;
+      return (r?.t as number) ?? null;
     },
 
     itemHistory(itemId: string) {

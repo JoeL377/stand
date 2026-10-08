@@ -37,6 +37,10 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
               <SlidersIcon />
               Manage spaces
             </NavLink>
+            <NavLink to="/agents">
+              <PlugIcon />
+              Connect an agent
+            </NavLink>
           </nav>
           {quick.length > 0 && (
             <div className="sp-side-list">
@@ -149,5 +153,10 @@ const SlidersIcon = () => (
     <circle cx="16" cy="6" r="2" />
     <circle cx="10" cy="12" r="2" />
     <circle cx="18" cy="18" r="2" />
+  </svg>
+);
+const PlugIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4" />
   </svg>
 );

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Discussion, DiscussionOutcome, Note, Segment } from "../shared/protocol.ts";
+import { CopyForAgent } from "./CopyForAgent.tsx";
 import { NoteList } from "./room/SidePanel.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { fmtDate, fmtTime } from "./util.ts";
@@ -131,11 +132,14 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
             </ul>
           </div>
         )}
-        {turns.length > 0 && (
-          <button className="link small" onClick={() => setShowTurns((s) => !s)}>
-            {showTurns ? "Hide remarks" : `Show ${turns.length} remark${turns.length === 1 ? "" : "s"}`}
-          </button>
-        )}
+        <div className="disc-foot">
+          {turns.length > 0 && (
+            <button className="link small" onClick={() => setShowTurns((s) => !s)}>
+              {showTurns ? "Hide remarks" : `Show ${turns.length} remark${turns.length === 1 ? "" : "s"}`}
+            </button>
+          )}
+          <CopyForAgent kind="topic" id={d.id} label />
+        </div>
         {showTurns && (
           <div className="disc-turns">
             {turns.map((s) => (
@@ -194,6 +198,7 @@ export function LiveItemNotes(props: {
       />
       <span className="tk-text">{n.text}</span>
       {n.owner && <span className="owner">{n.owner}</span>}
+      <CopyForAgent kind="action" id={n.id} />
     </li>
   );
 
@@ -222,6 +227,7 @@ export function LiveItemNotes(props: {
               <li key={n.id} className="tk decision">
                 <span className="tk-icon">✓</span>
                 <span className="tk-text">{n.text}</span>
+                <CopyForAgent kind="decision" id={n.id} />
               </li>
             ))}
           </ul>
@@ -235,6 +241,7 @@ export function LiveItemNotes(props: {
               <li key={n.id} className="tk question">
                 <span className="tk-icon">?</span>
                 <span className="tk-text">{n.text}</span>
+                <CopyForAgent kind="question" id={n.id} />
               </li>
             ))}
           </ul>
