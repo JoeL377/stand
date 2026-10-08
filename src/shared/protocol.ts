@@ -230,3 +230,29 @@ export interface MeetingRecap {
   summary: string | null;
   items: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions: Discussion[] }>;
 }
+
+/** One space (a room) as the home page lists it. */
+export interface SpaceSummary {
+  id: string;
+  name: string;
+  purpose: string;
+  /** You created it, so it shows on Manage spaces. */
+  mine: boolean;
+  /** You have been in it (room_members). */
+  following: boolean;
+  /** Latest thing that happened in it: created, a meeting, someone entering. */
+  activeAt: number;
+  live: { people: Array<{ name: string; picture: string | null }>; focusTitle: string | null; since: number } | null;
+  /** Open questions from its latest meeting with notes. */
+  toDecide: number;
+  /** Open to-dos from its meetings. */
+  todos: number;
+  /** Open to-dos owned by you. */
+  forYou: number;
+  /** The latest decision or open question, for the card's last line. */
+  last: { kind: "decision" | "question" | "action"; text: string; ts: number } | null;
+  /** People who have been in it. */
+  people: string[];
+  /** Lower-cased text to search: purpose, decisions, to-dos, questions, people. */
+  search: string;
+}

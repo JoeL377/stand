@@ -253,7 +253,7 @@ function ChatBox({ send }: { send: (m: ClientMessage) => void }) {
         setText("");
       }}
     >
-      <input placeholder="Message the room" title="Goes into the discussion for the item in focus" value={text} onChange={(e) => setText(e.target.value)} />
+      <input placeholder="Message the space" title="Goes into the discussion for the item in focus" value={text} onChange={(e) => setText(e.target.value)} />
       <button className="primary" disabled={!text.trim()}>
         Send
       </button>

@@ -197,6 +197,7 @@ export function openDb(file?: string) {
   // Added after the first version; older databases lack it.
   const roomCols = (db.prepare("PRAGMA table_info(rooms)").all() as Row[]).map((c) => c.name);
   if (!roomCols.includes("created_by")) db.exec("ALTER TABLE rooms ADD COLUMN created_by TEXT");
+  if (!roomCols.includes("purpose")) db.exec("ALTER TABLE rooms ADD COLUMN purpose TEXT NOT NULL DEFAULT ''");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
@@ -272,14 +273,52 @@ export function openDb(file?: string) {
       ).map((r) => ({ id: r.id as string, name: r.name as string, lastJoinedAt: r.last_joined_at as number }));
     },
 
-    createRoom(name: string, createdBy: string | null = null) {
+    createRoom(name: string, createdBy: string | null = null, purpose = "") {
       const id = newId(8);
-      db.prepare("INSERT INTO rooms (id, name, created_at, created_by) VALUES (?, ?, ?, ?)").run(id, name, Date.now(), createdBy);
-      return { id, name, createdBy };
+      db.prepare("INSERT INTO rooms (id, name, created_at, created_by, purpose) VALUES (?, ?, ?, ?, ?)").run(id, name, Date.now(), createdBy, purpose);
+      return { id, name, createdBy, purpose };
     },
     getRoom(id: string) {
-      const r = db.prepare("SELECT id, name, created_by FROM rooms WHERE id = ?").get(id) as Row | undefined;
-      return r ? { id: r.id as string, name: r.name as string, createdBy: (r.created_by as string) ?? null } : null;
+      const r = db.prepare("SELECT id, name, created_by, purpose FROM rooms WHERE id = ?").get(id) as Row | undefined;
+      return r ? { id: r.id as string, name: r.name as string, createdBy: (r.created_by as string) ?? null, purpose: (r.purpose as string) ?? "" } : null;
+    },
+    updateRoom(id: string, patch: { name?: string; purpose?: string }) {
+      if (patch.name !== undefined) db.prepare("UPDATE rooms SET name = ? WHERE id = ?").run(patch.name, id);
+      if (patch.purpose !== undefined) db.prepare("UPDATE rooms SET purpose = ? WHERE id = ?").run(patch.purpose, id);
+    },
+    /** Every space, with what the home page shows about it, from what's already recorded. */
+    spaceRows(userId: string) {
+      const rooms = db
+        .prepare(
+          `SELECT r.id, r.name, r.purpose, r.created_by, r.created_at,
+             (SELECT MAX(COALESCE(m.ended_at, m.started_at)) FROM meetings m WHERE m.room_id = r.id) AS met_at,
+             (SELECT MAX(last_joined_at) FROM room_members x WHERE x.room_id = r.id) AS joined_at,
+             EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?) AS following
+           FROM rooms r`,
+        )
+        .all(userId) as Row[];
+      const people = db.prepare("SELECT u.name FROM room_members x JOIN users u ON u.id = x.user_id WHERE x.room_id = ? ORDER BY x.last_joined_at DESC");
+      const notes = db.prepare(
+        `SELECT n.kind, n.text, n.owner, n.done_at, n.ts, n.meeting_id FROM notes n JOIN meetings m ON m.id = n.meeting_id
+         WHERE m.room_id = ? AND n.kind IN ('decision', 'question', 'action') ORDER BY n.ts DESC, n.rowid DESC LIMIT 300`,
+      );
+      return rooms.map((r) => ({
+        id: r.id as string,
+        name: r.name as string,
+        purpose: (r.purpose as string) ?? "",
+        createdBy: (r.created_by as string) ?? null,
+        activeAt: Math.max((r.created_at as number) ?? 0, (r.met_at as number) ?? 0, (r.joined_at as number) ?? 0),
+        following: Boolean(r.following),
+        people: (people.all(r.id as string) as Row[]).map((p) => p.name as string),
+        notes: (notes.all(r.id as string) as Row[]).map((n) => ({
+          kind: n.kind as "decision" | "question" | "action",
+          text: n.text as string,
+          owner: (n.owner as string) ?? null,
+          done: n.done_at != null,
+          ts: n.ts as number,
+          meetingId: n.meeting_id as string,
+        })),
+      }));
     },
 
     listItems(roomId: string): Item[] {

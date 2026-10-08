@@ -57,7 +57,7 @@ export interface Transcriber {
 
 export class RoomSession implements SpeechSink {
   readonly roomId: string;
-  readonly roomName: string;
+  roomName: string;
   /** The room's creator hosts whenever they're in the room. */
   private readonly createdBy: string | null;
   readonly meetingId: string;
@@ -165,6 +165,12 @@ export class RoomSession implements SpeechSink {
   }
 
   private broadcastState() {
+    this.broadcast({ type: "state", state: this.state() });
+  }
+
+  /** The space was renamed while people are in it. */
+  renamed(name: string) {
+    this.roomName = name;
     this.broadcast({ type: "state", state: this.state() });
   }
 

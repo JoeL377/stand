@@ -25,6 +25,7 @@ import { importFromLinear, sampleSprint } from "./linear.ts";
 import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
+import { toSpaceSummary } from "./spaces.ts";
 
 const db = openDb(path.join(config.dataDir, "standup.db"));
 const agent = createAgent();
@@ -78,11 +79,54 @@ app.get(
   }),
 );
 
+// Every space in the workspace: anyone signed in (and allowed) can find and
+// enter any space; entering one makes you a follower.
+app.get(
+  "/api/spaces",
+  route((req, res) => {
+    const user = req.user!;
+    const spaces = db.spaceRows(user.id).map((row) => {
+      const live = sessions.get(row.id);
+      const state = live && !live.ended ? live.state() : null;
+      const on = state && state.participants.length > 0;
+      return toSpaceSummary(
+        row,
+        user,
+        on
+          ? {
+              people: state.participants.map(({ name, picture }) => ({ name, picture })),
+              focusTitle: state.items.find((i) => i.id === state.focusItemId)?.title ?? null,
+              since: state.meetingStartedAt,
+            }
+          : null,
+      );
+    });
+    res.json(spaces.sort((a, b) => b.activeAt - a.activeAt));
+  }),
+);
+
+/** Rename a space or change its purpose; only whoever created it (or anyone, for older spaces with no creator). */
+app.patch(
+  "/api/rooms/:id",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room) return notFound(res, "Space not found");
+    if (room.createdBy && room.createdBy !== req.user!.id) return void res.status(403).json({ error: "Only the person who created this space can change it" });
+    const name = req.body?.name === undefined ? undefined : String(req.body.name).trim().slice(0, 80);
+    const purpose = req.body?.purpose === undefined ? undefined : String(req.body.purpose).trim().slice(0, 200);
+    if (name === "") return void res.status(400).json({ error: "A space needs a name" });
+    db.updateRoom(room.id, { name, purpose });
+    if (name) sessions.get(room.id)?.renamed(name);
+    res.json(db.getRoom(room.id));
+  }),
+);
+
 app.post(
   "/api/rooms",
   route((req, res) => {
-    const name = String(req.body?.name ?? "").trim().slice(0, 80) || "Standup";
-    const room = db.createRoom(name, req.user!.id);
+    const name = String(req.body?.name ?? "").trim().slice(0, 80) || "New space";
+    const purpose = String(req.body?.purpose ?? "").trim().slice(0, 200);
+    const room = db.createRoom(name, req.user!.id, purpose);
     db.touchMembership(room.id, req.user!.id);
     res.json(room);
   }),
@@ -92,7 +136,7 @@ app.get(
   "/api/rooms/:id",
   route((req, res) => {
     const room = db.getRoom(req.params.id);
-    if (!room) return notFound(res, "Room not found");
+    if (!room) return notFound(res, "Space not found");
     const live = sessions.get(room.id);
     res.json({
       ...room,

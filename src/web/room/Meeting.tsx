@@ -155,7 +155,7 @@ export function Meeting(props: {
             </button>
           )}
           {canSteer && (!caps.livekit || !caps.llm) ? (
-            <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this room">
+            <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this space">
               <PlayIcon />
               <span>Play demo</span>
             </button>

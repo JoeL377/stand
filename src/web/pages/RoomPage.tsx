@@ -107,9 +107,10 @@ export function RoomPage() {
         <section className="lobby-card">
           <span className={live ? "lobby-status live" : "lobby-status"}>
             <span className="dot" />
-            {live ? "Meeting in progress" : "No one here yet"}
+            {live ? "Talking now" : "Quiet right now"}
           </span>
           <h1>{room.name}</h1>
+          {room.purpose && <p className="lobby-purpose">{room.purpose}</p>}
           {live && room.people.length > 0 && (
             <div className="lobby-people">
               <span className="stack">
@@ -124,7 +125,7 @@ export function RoomPage() {
           )}
           <div className="lobby-actions">
             <button className="primary lobby-join" autoFocus onClick={() => setJoined(true)}>
-              {live ? "Join meeting" : "Start meeting"}
+              {live ? "Join them" : "Start talking"}
             </button>
             <button className="lobby-copy" onClick={copy} title="Copy a link others can join with">
               <LinkIcon />
@@ -212,7 +213,7 @@ export function ModeNote({ caps }: { caps: Capabilities }) {
   return (
     <p
       className="mode-chip"
-      title={`Not connected yet: ${missing.join(", ")}. ${!caps.livekit ? "People won't hear each other; each browser transcribes its own mic. " : ""}Use Play demo in the room to see a scripted standup.`}
+      title={`Not connected yet: ${missing.join(", ")}. ${!caps.livekit ? "People won't hear each other; each browser transcribes its own mic. " : ""}Use Play demo in the space to see a scripted standup.`}
     >
       Demo mode · {missing.length === 1 ? `${missing[0]} off` : `${missing.length} services not connected`}
     </p>

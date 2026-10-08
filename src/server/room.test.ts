@@ -365,3 +365,36 @@ test("a notes refresh never drops a to-do or decision captured earlier, and keep
   assert.equal(actions[2].doneBy, "Joe");
   assert.equal(second.filter((n) => n.kind === "decision").length, 1);
 });
+
+test("spaces: every space is listed with its open to-dos, the ones for you, and what to decide", async () => {
+  const { toSpaceSummary, ownedBy } = await import("./spaces.ts");
+  const db = openDb(":memory:");
+  const joe = db.upsertUser({ googleSub: null, email: "joe@example.com", name: "Joe Liang", picture: null });
+  const sam = db.upsertUser({ googleSub: null, email: "sam@example.com", name: "Sam", picture: null });
+  const a = db.createRoom("Checkout v2", joe.id, "Ship one-page checkout");
+  const b = db.createRoom("Hiring loop", sam.id);
+  db.touchMembership(a.id, joe.id);
+  const [item] = db.addItems(a.id, [{ source: "agenda" as const, externalId: null, title: "Apple Pay", url: null, description: null }]);
+  const m = db.startMeeting(a.id);
+  db.replaceNotes(m.id, item.id, [
+    { kind: "decision", text: "Guest checkout stays for v1", owner: null },
+    { kind: "action", text: "Set up the Apple Pay sandbox", owner: "Joe" },
+    { kind: "action", text: "Write the copy", owner: "Sam" },
+    { kind: "question", text: "Do we need 3DS?", owner: null },
+  ]);
+  const rows = db.spaceRows(joe.id);
+  assert.deepEqual(rows.map((r) => r.name).sort(), ["Checkout v2", "Hiring loop"]);
+  const s = toSpaceSummary(rows.find((r) => r.id === a.id)!, joe, null);
+  assert.equal(s.mine, true);
+  assert.equal(s.following, true);
+  assert.equal(s.purpose, "Ship one-page checkout");
+  assert.equal(s.todos, 2);
+  assert.equal(s.forYou, 1);
+  assert.equal(s.toDecide, 1);
+  assert.equal(s.last?.kind, "question");
+  assert.ok(s.search.includes("apple pay sandbox") && s.search.includes("joe liang"));
+  const other = toSpaceSummary(rows.find((r) => r.id === b.id)!, joe, null);
+  assert.equal(other.mine, false);
+  assert.equal(other.following, false);
+  assert.ok(ownedBy("joe liang", "Joe Liang") && ownedBy("Joe", "Joe Liang") && !ownedBy("Joey", "Joe Liang"));
+});

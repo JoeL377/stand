@@ -1,5 +1,5 @@
 import type { DraftSlide } from "../shared/outline.ts";
-import type { Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, User } from "../shared/protocol.ts";
+import type { Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, SpaceSummary, User } from "../shared/protocol.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -19,6 +19,7 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 export interface RoomInfo {
   id: string;
   name: string;
+  purpose: string;
   items: Item[];
   decks: Deck[];
   people: Array<{ name: string; picture: string | null }>;
@@ -34,7 +35,10 @@ export const api = {
   devSignIn: (name: string, email: string) => call<User>("POST", "/api/auth/dev", { name, email }),
   signOut: () => call<{ ok: true }>("POST", "/api/auth/logout"),
   myRooms: () => call<Array<{ id: string; name: string; lastJoinedAt: number }>>("GET", "/api/my/rooms"),
-  createRoom: (name: string) => call<{ id: string; name: string }>("POST", "/api/rooms", { name }),
+  createRoom: (name: string, purpose = "") => call<{ id: string; name: string }>("POST", "/api/rooms", { name, purpose }),
+  spaces: () => call<SpaceSummary[]>("GET", "/api/spaces"),
+  updateSpace: (id: string, patch: { name?: string; purpose?: string }) =>
+    call<{ id: string; name: string; purpose: string }>("PATCH", `/api/rooms/${id}`, patch),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   addAgenda: (roomId: string, titles: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items`, { titles }),
   importLinear: (roomId: string, input: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/linear`, { input }),
