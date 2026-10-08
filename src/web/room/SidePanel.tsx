@@ -5,6 +5,10 @@ import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
 import { LiveItemNotes, liveNotesCount } from "../Discussions.tsx";
 
+const SPLIT_KEY = "stand.sideSplit";
+const DEFAULT_SPLIT = 50;
+const clampSplit = (v: number) => Math.min(75, Math.max(15, v));
+
 export function SidePanel(props: {
   state: RoomState;
   segments: Segment[];
@@ -18,6 +22,41 @@ export function SidePanel(props: {
   const [notesOpen, setNotesOpen] = useState(true);
   const [earlierOpen, setEarlierOpen] = useState(true);
   const { state, segments, notes, interims, send } = props;
+  // Notes on top, transcript below; the share of height the notes get is
+  // remembered per browser.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [split, setSplitRaw] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem(SPLIT_KEY));
+      return v ? clampSplit(v) : DEFAULT_SPLIT;
+    } catch {
+      return DEFAULT_SPLIT;
+    }
+  });
+  const setSplit = (next: number | ((v: number) => number)) =>
+    setSplitRaw((v) => {
+      const out = typeof next === "function" ? next(v) : next;
+      try {
+        localStorage.setItem(SPLIT_KEY, String(out));
+      } catch {
+        /* private window */
+      }
+      return out;
+    });
+  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = bodyRef.current?.getBoundingClientRect();
+    if (!box) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => setSplit(clampSplit(((ev.clientY - box.top) / box.height) * 100));
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+  };
 
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId);
@@ -27,6 +66,7 @@ export function SidePanel(props: {
   // Action items about this item from earlier meetings, still open (or just checked off).
   const earlier = (state.followUps ?? []).filter((f) => f.itemId === state.focusItemId);
   const earlierOpenCount = earlier.filter((f) => !f.doneAt).length;
+  const hasNotes = earlier.length > 0 || focusNotes.length > 0 || notesUpdating;
 
   return (
     <aside className="panel side">
@@ -43,6 +83,11 @@ export function SidePanel(props: {
         </a>
       </div>
 
+      <div className="side-body" ref={bodyRef}>
+      <div className="side-notes" style={hasNotes && (notesOpen || earlierOpen) ? { height: `${split}%` } : undefined}>
+      {!hasNotes && (
+        <p className="side-notes-empty">Agent notes for this item show up here once people start talking.</p>
+      )}
       {earlier.length > 0 && (
         <section className={earlierOpen ? "focus-notes earlier open" : "focus-notes earlier"}>
           <button className="focus-notes-head" aria-expanded={earlierOpen} onClick={() => setEarlierOpen((o) => !o)}>
@@ -89,8 +134,27 @@ export function SidePanel(props: {
           )}
         </section>
       )}
-      <Transcript segments={shown} items={state.items} interims={interims} send={send} />
-      <ChatBox send={send} />
+      </div>
+      <div
+        className="side-split"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize notes and transcript"
+        aria-valuenow={Math.round(split)}
+        tabIndex={0}
+        onPointerDown={startDrag}
+        onDoubleClick={() => setSplit(DEFAULT_SPLIT)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowUp") setSplit((v) => clampSplit(v - 5));
+          if (e.key === "ArrowDown") setSplit((v) => clampSplit(v + 5));
+        }}
+      />
+      <div className="side-transcript">
+        <div className="side-pane-label">Live transcript</div>
+        <Transcript segments={shown} items={state.items} interims={interims} send={send} />
+        <ChatBox send={send} />
+      </div>
+      </div>
     </aside>
   );
 }

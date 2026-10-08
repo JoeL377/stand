@@ -762,7 +762,17 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   text-align: left;
 }
 .focus-notes-head .chev { margin-left: auto; color: var(--muted); }
-.focus-notes-body { max-height: 42vh; overflow-y: auto; padding: 0 12px 10px; font-size: 13px; }
+.focus-notes-body { padding: 0 12px 10px; font-size: 13px; }
+.side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.side-notes { flex: none; min-height: 0; overflow-y: auto; padding-bottom: 10px; }
+.side-notes-empty { margin: 14px 16px 0; font-size: 13px; color: var(--muted); }
+.side-split { flex: none; height: 9px; cursor: row-resize; position: relative; touch-action: none; }
+.side-split::before { content: ""; position: absolute; left: 0; right: 0; top: 4px; border-top: 1px solid var(--line); }
+.side-split::after { content: ""; position: absolute; left: 50%; top: 2px; width: 32px; height: 5px; margin-left: -16px; border-radius: 999px; background: var(--line); }
+.side-split:hover::after, .side-split:focus-visible::after { background: var(--accent); }
+.side-split:focus-visible { outline: none; }
+.side-transcript { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.side-pane-label { padding: 6px 14px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .focus-notes-body .note-summary { margin: 0 0 6px; }
 .side-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .side-item { font-size: 14px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
