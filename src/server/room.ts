@@ -18,6 +18,7 @@ import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
+import { capturedFor, mergeNotes } from "./notesMerge.ts";
 
 /** Below this the agent keeps its guess to itself. */
 const SUGGEST_MIN_CONFIDENCE = 0.55;
@@ -537,16 +538,23 @@ export class RoomSession implements SpeechSink {
               .filter((d) => d.meetingId !== this.meetingId)
               .map((d) => ({ id: d.id, topic: d.topic, meetingStartedAt: d.meetingStartedAt }))
           : [];
-        const draft = await this.agent.notesFor(item, segments, earlier);
+        const keys = capturedFor(this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId));
+        const draft = await this.agent.notesFor(item, segments, earlier, keys);
         const discussions = this.db.replaceDiscussions(
           this.meetingId,
           itemId,
           draft.discussions.map(({ segmentIndexes, ...d }) => ({ ...d, segmentIds: segmentIndexes.map((i) => segments[i].id) })),
         );
+        // Re-read: a to-do may have been checked off while the agent was writing.
+        const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
         notes = this.db.replaceNotes(
           this.meetingId,
           itemId,
-          draft.notes.map(({ discussion, ...n }) => ({ ...n, discussionId: discussion === null ? null : (discussions[discussion]?.id ?? null) })),
+          mergeNotes(
+            draft.notes.map(({ discussion, ...n }) => ({ ...n, discussionId: discussion === null ? null : (discussions[discussion]?.id ?? null) })),
+            current,
+            keys,
+          ),
         );
         this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
         console.log(`[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);

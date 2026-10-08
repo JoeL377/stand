@@ -14,7 +14,8 @@ export type DraftNote = Pick<Note, "kind" | "text" | "owner">;
 /** A discussion as the agent drafts it: the turns it covers are indexes into
  *  the segments it was given, and a note points at its discussion by index. */
 export interface ItemNotesDraft {
-  notes: Array<DraftNote & { discussion: number | null }>;
+  /** sameAs: the key of an already-captured note this one restates, if any. */
+  notes: Array<DraftNote & { discussion: number | null; sameAs?: string | null }>;
   discussions: Array<{
     topic: string;
     positions: Array<{ speaker: string; position: string }>;
@@ -28,6 +29,10 @@ export interface ItemNotesDraft {
 /** Discussions of the same item in earlier meetings, so a new one can link back. */
 export type EarlierDiscussion = { id: string; topic: string; meetingStartedAt: number };
 
+/** To-dos and decisions already captured for this item in this meeting, so a
+ *  rerun can say which of its notes restate them instead of starting over. */
+export type CapturedNote = { key: string; kind: "action" | "decision"; text: string; owner: string | null };
+
 export interface ScreenMatch {
   itemId: string | null;
   confidence: number;
@@ -36,7 +41,7 @@ export interface ScreenMatch {
 
 export interface Agent {
   /** Groups an item's talk into discussions and writes the notes that came out of each. */
-  notesFor(item: Item | null, segments: Segment[], earlier?: EarlierDiscussion[]): Promise<ItemNotesDraft>;
+  notesFor(item: Item | null, segments: Segment[], earlier?: EarlierDiscussion[], captured?: CapturedNote[]): Promise<ItemNotesDraft>;
   matchScreen(jpegDataUrl: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch>;
   summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
   /** Slides from a brief: an outline, rough notes or a one-line ask. */
@@ -66,8 +71,16 @@ const NotesSchema = z.object({
         .describe("One per participant who contributed, in the order they first spoke"),
       outcome: z.enum(["decided", "action", "open", "info"]).describe("decided: a decision was made. action: it ended with someone taking work. open: unresolved. info: an update with nothing to resolve."),
       continues: z.string().nullable().describe("The id of the earlier discussion this picks up again, from the list given, or null"),
-      decisions: z.array(z.string()),
-      action_items: z.array(z.object({ text: z.string().describe("Phrased as a task, e.g. 'File the annual-plan pricing bug against billing'"), owner: z.string().nullable() })),
+      decisions: z.array(
+        z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (D1, D2...) of the already-captured decision this is, or null if new") }),
+      ),
+      action_items: z.array(
+        z.object({
+          text: z.string().describe("Phrased as a task, e.g. 'File the annual-plan pricing bug against billing'"),
+          owner: z.string().nullable(),
+          same_as: z.string().nullable().describe("The key (A1, A2...) of the already-captured action item this is, or null if new"),
+        }),
+      ),
       open_questions: z.array(z.string()),
     }),
   ),
@@ -122,7 +135,7 @@ class ClaudeAgent implements Agent {
     return (res.parsed_output as T | null) ?? null;
   }
 
-  async notesFor(item: Item | null, segments: Segment[], earlier: EarlierDiscussion[] = []): Promise<ItemNotesDraft> {
+  async notesFor(item: Item | null, segments: Segment[], earlier: EarlierDiscussion[] = [], captured: CapturedNote[] = []): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
     const numbered = segments
       .map((s, i) => `[${i + 1}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
@@ -133,9 +146,14 @@ class ClaudeAgent implements Agent {
           .map((d) => `- id=${d.id} (${new Date(d.meetingStartedAt).toISOString().slice(0, 10)}): ${d.topic}`)
           .join("\n")}`
       : "";
+    const already = captured.length
+      ? `\n\nAlready captured from earlier in this meeting (keep every one; reword only if the talk since made it clearer):\n${captured
+          .map((c) => `- ${c.key} ${c.kind === "action" ? "action item" : "decision"}: ${c.text}${c.owner ? ` (owner: ${c.owner})` : ""}`)
+          .join("\n")}`
+      : "";
     const out = await this.parse(
       NotesSchema,
-      `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}
+      `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${already}
 
 What was said while this item was in focus (speech transcript and in-room chat, in order):
 ${numbered}`,
@@ -144,6 +162,8 @@ ${numbered}`,
 Group the talk into discussions: a discussion is a stretch of back-and-forth about one question or subject. Most items have one to three. A status update with no back-and-forth is one discussion with outcome "info". Every line belongs to at most one discussion; skip small talk.
 
 For each discussion, give each participant's position in one short line, how it ended, and the decisions actually made, the action items with their owner (the speaker's name; null if nobody took it), and the questions left open. Phrase action items as tasks, not quotes. If it picks up a discussion from an earlier meeting in the list, give that id.
+
+Notes are rewritten as the meeting goes on. Every already-captured action item and decision must appear again, under the discussion it belongs to, with its key in same_as. Never drop or merge two of them into one; only give same_as for a note that is the same task or decision.
 
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
       "low",
@@ -154,8 +174,8 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
     const notes: ItemNotesDraft["notes"] = out.summary.trim() ? [{ kind: "summary", text: out.summary.trim(), owner: null, discussion: null }] : [];
     out.discussions.forEach((d, i) => {
       notes.push(
-        ...d.decisions.map((t) => ({ kind: "decision" as const, text: t, owner: null, discussion: i })),
-        ...d.action_items.map((a) => ({ kind: "action" as const, text: a.text, owner: a.owner, discussion: i })),
+        ...d.decisions.map((t) => ({ kind: "decision" as const, text: t.text, owner: null, discussion: i, sameAs: t.same_as })),
+        ...d.action_items.map((a) => ({ kind: "action" as const, text: a.text, owner: a.owner, discussion: i, sameAs: a.same_as })),
         ...d.open_questions.map((t) => ({ kind: "question" as const, text: t, owner: null, discussion: i })),
       );
     });

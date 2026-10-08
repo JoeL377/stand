@@ -4,7 +4,8 @@ import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps } from "./brief.ts";
 import { looksLikePdf, parseDeck } from "./decks.ts";
-import { HeuristicAgent } from "./llm.ts";
+import { type CapturedNote, HeuristicAgent, type ItemNotesDraft } from "./llm.ts";
+import type { Note } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession } from "./room.ts";
 import { outlineToSlides } from "../shared/outline.ts";
@@ -318,4 +319,49 @@ test("allowlist: only listed emails or domains get in, checked on every request"
     config.allowedEmails = [];
     config.allowedDomains = [];
   }
+});
+
+test("a notes refresh never drops a to-do or decision captured earlier, and keeps its id and checked-off state", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const [item] = db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "One", url: null, description: null }]);
+  const drafts: ItemNotesDraft[] = [
+    {
+      notes: [
+        { kind: "action", text: "Send Joe the repo link", owner: "Huy", discussion: 0 },
+        { kind: "action", text: "Try out Connect", owner: null, discussion: 0 },
+        { kind: "action", text: "Debug why notes disappeared", owner: "Joe", discussion: 0 },
+        { kind: "decision", text: "Review the queue daily", owner: null, discussion: 0 },
+      ],
+      discussions: [{ topic: "Repo", positions: [], outcome: "action", segmentIndexes: [0], continuesId: null }],
+    },
+    // The rerun rewords one to-do, says which it was, and forgets the rest.
+    {
+      notes: [{ kind: "action", text: "Send Joe the link to the repo today", owner: null, discussion: 0, sameAs: "A1" }],
+      discussions: [{ topic: "Repo", positions: [], outcome: "action", segmentIndexes: [0], continuesId: null }],
+    },
+  ];
+  const seen: Array<CapturedNote[] | undefined> = [];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async notesFor(_i: unknown, _s: unknown, _e: unknown, captured?: CapturedNote[]) {
+      seen.push(captured);
+      return drafts.shift()!;
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  session.addSpeech("p1", "Huy", "I'll send Joe the repo link", Date.now());
+  const refresh = (session as unknown as { refreshNotes(id: string): Promise<Note[]> }).refreshNotes.bind(session);
+  const first = await refresh(item.id);
+  const debug = first.find((n) => n.text.startsWith("Debug"))!;
+  db.setActionDone(room.id, debug.id, "Joe");
+
+  const second = await refresh(item.id);
+  assert.deepEqual(seen[1]?.map((c) => `${c.key} ${c.text}`), ["A1 Send Joe the repo link", "A2 Try out Connect", "A3 Debug why notes disappeared", "D1 Review the queue daily"]);
+  const actions = second.filter((n) => n.kind === "action");
+  assert.deepEqual(actions.map((n) => n.text), ["Send Joe the link to the repo today", "Try out Connect", "Debug why notes disappeared"]);
+  assert.equal(actions[0].id, first[0].id);
+  assert.equal(actions[0].owner, "Huy");
+  assert.equal(actions[2].id, debug.id);
+  assert.equal(actions[2].doneBy, "Joe");
+  assert.equal(second.filter((n) => n.kind === "decision").length, 1);
 });

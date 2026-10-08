@@ -525,7 +525,9 @@ export function openDb(file?: string) {
     replaceNotes(
       meetingId: string,
       itemId: string | null,
-      notes: Array<Pick<Note, "kind" | "text" | "owner"> & { discussionId?: string | null }>,
+      notes: Array<
+        Pick<Note, "kind" | "text" | "owner"> & { discussionId?: string | null; id?: string; ts?: number; doneAt?: number | null; doneBy?: string | null }
+      >,
     ): Note[] {
       const done = new Map(
         (db.prepare("SELECT text, done_at, done_by FROM notes WHERE meeting_id = ? AND item_id IS ? AND done_at IS NOT NULL").all(meetingId, itemId) as Row[]).map(
@@ -538,15 +540,15 @@ export function openDb(file?: string) {
       );
       const ts = Date.now();
       return notes.map((n) => {
-        const d = n.kind === "action" ? done.get(n.text) : undefined;
+        const d = n.doneAt ? { doneAt: n.doneAt, doneBy: n.doneBy ?? null } : n.kind === "action" ? done.get(n.text) : undefined;
         const note: Note = {
-          id: newId(12),
+          id: n.id ?? newId(12),
           meetingId,
           itemId,
           kind: n.kind,
           text: n.text,
           owner: n.owner ?? null,
-          ts,
+          ts: n.ts ?? ts,
           doneAt: d?.doneAt ?? null,
           doneBy: d?.doneBy ?? null,
           discussionId: n.discussionId ?? null,
