@@ -920,27 +920,34 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .disc > summary:hover .disc-topic { color: var(--accent); }
 .disc-people { font-size: 12px; color: var(--muted); }
 .disc[open] .disc-people { display: none; }
-.disc-outcome {
-  flex: none; margin-top: 1px; font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: 999px;
-  background: var(--hover); color: var(--muted);
-}
-.disc-outcome.decided { background: rgb(22 163 74 / 0.14); color: var(--ok); }
-.disc-outcome.action { background: var(--accent-soft); color: var(--accent); }
-.disc-outcome.open { background: rgb(194 65 12 / 0.14); color: var(--warn); }
 .disc-body { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 8px; }
 .disc-continues { margin: 0; font-size: 12px; color: var(--muted); }
-.disc-positions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.disc-positions li { display: flex; gap: 8px; line-height: 1.4; }
-.disc-positions .who { flex: none; font-weight: 600; min-width: 56px; }
 .disc-body .note-list { margin: 0; }
 .disc-body > .link { align-self: flex-start; }
-.disc-turns { max-height: 260px; overflow: auto; }
+.disc-head .rc-outcome { flex: none; margin-top: 1px; }
+.disc-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.disc-points li { display: flex; gap: 10px; align-items: flex-start; padding: 4px 0; line-height: 1.45; }
+.disc-points li > svg { flex: none; margin-top: 2px; }
+.disc-points li.decision > svg { color: var(--ok); }
+.disc-points li.action > svg { color: var(--accent); }
+.disc-points li.question > svg { color: var(--warn); }
+.disc-points li.done .disc-point-text { text-decoration: line-through; color: var(--muted); }
+.disc-point-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.disc-point-meta { font-size: 12px; color: var(--muted); }
+.disc-section { display: flex; flex-direction: column; gap: 6px; }
+.disc-points + .disc-section { padding-top: 8px; border-top: 1px solid var(--line); }
+.disc-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.disc-position { margin: 0; line-height: 1.45; color: var(--muted); }
+.disc-position .who { color: var(--text); font-weight: 600; }
+.disc-turns { display: flex; flex-direction: column; gap: 10px; padding-left: 12px; border-left: 2px solid var(--line); }
+.disc-turn { line-height: 1.45; }
+.disc-turn-head { display: flex; align-items: baseline; gap: 8px; font-size: 12px; margin-bottom: 1px; }
+.disc-turn-head .who { font-weight: 600; color: var(--text); }
 .discussions.compact { gap: 6px; margin: 8px 0 2px; }
 .discussions.compact .disc { background: transparent; }
 .discussions.compact .disc > summary { padding: 8px 10px; }
 .discussions.compact .disc-topic { font-size: 13px; }
 .discussions.compact .disc-body { padding: 0 10px 8px; font-size: 13px; gap: 6px; }
-.discussions.compact .disc-positions .who { min-width: 0; }
 
 /* ---- live agent notes: takeaways first, how it was discussed folded below ---- */
 .live-notes { display: flex; flex-direction: column; gap: 10px; }

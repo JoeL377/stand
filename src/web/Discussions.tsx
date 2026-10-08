@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Discussion, DiscussionOutcome, Note, Segment } from "../shared/protocol.ts";
 import { NoteList } from "./room/SidePanel.tsx";
-import { colorFor, fmtDate, fmtTime } from "./util.ts";
+import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
+import { fmtDate, fmtTime } from "./util.ts";
 
-const OUTCOME: Record<DiscussionOutcome, string> = { decided: "Decided", action: "Action", open: "Open", info: "FYI" };
 
 /** An item's notes as the agent grouped them: the summary, then one block per
  *  discussion with who argued what and what came of it. Notes that belong to
@@ -38,14 +38,17 @@ export function ItemNotes(props: { notes: Note[]; discussions: Discussion[]; seg
 function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]; compact?: boolean; open: boolean }) {
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
-  // Same color per person as in the transcript, which keys colors by speaker id.
-  const idOf = (name: string) => turns.find((s) => s.speakerName === name)?.speakerId ?? name;
+  const o = OUTCOME_META[d.outcome];
+  const by = (k: Note["kind"]) => notes.filter((n) => n.kind === k);
+  const points = [...by("decision"), ...by("action"), ...by("question")];
   return (
     <details className="disc" open={props.open}>
       <summary>
         <span className="disc-head">
           <span className="disc-topic">{d.topic}</span>
-          <span className={`disc-outcome ${d.outcome}`}>{OUTCOME[d.outcome]}</span>
+          <span className={`rc-outcome ${d.outcome}`}>
+            <o.Icon size={13} /> {o.label}
+          </span>
         </span>
         {d.positions.length > 0 && <span className="disc-people">{d.positions.map((p) => p.speaker).join(", ")}</span>}
       </summary>
@@ -56,36 +59,52 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
             {d.continues.topic !== d.topic && <> · “{d.continues.topic}”</>}
           </p>
         )}
-        {d.positions.length > 0 && (
-          <ul className="disc-positions">
-            {d.positions.map((p, i) => (
-              <li key={i}>
-                <span className="who" style={{ color: colorFor(idOf(p.speaker)) }}>
-                  {p.speaker}
-                </span>
-                <span>{p.position}</span>
-              </li>
-            ))}
+        {points.length > 0 && (
+          <ul className="disc-points">
+            {points.map((n) => {
+              const Icon = n.kind === "decision" ? DecidedIcon : n.kind === "action" ? TodoIcon : QuestionIcon;
+              return (
+                <li key={n.id} className={`${n.kind}${n.doneAt ? " done" : ""}`}>
+                  <Icon />
+                  <span className="disc-point-body">
+                    <span className="disc-point-text">{n.text}</span>
+                    {n.kind === "action" && (n.owner || n.doneAt) && (
+                      <span className="disc-point-meta">
+                        {n.owner ?? "No owner"}
+                        {n.doneAt ? ` · done${n.doneBy ? ` by ${n.doneBy}` : ""}` : ""}
+                      </span>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         )}
-        {notes.length > 0 && <NoteList notes={notes} />}
+        {d.positions.length > 0 && (
+          <div className="disc-section">
+            <div className="disc-label">Who said what</div>
+            {d.positions.map((p, i) => (
+              <p key={i} className="disc-position">
+                <span className="who">{p.speaker}</span> {p.position}
+              </p>
+            ))}
+          </div>
+        )}
         {turns.length > 0 && (
           <button className="link small" onClick={() => setShowTurns((s) => !s)}>
             {showTurns ? "Hide what was said" : `What was said (${turns.length})`}
           </button>
         )}
         {showTurns && (
-          <div className="transcript static disc-turns">
+          <div className="disc-turns">
             {turns.map((s) => (
-              <div key={s.id} className={s.kind === "chat" ? "seg chat" : "seg"}>
-                <div className="seg-head">
-                  <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
-                    {s.speakerName}
-                  </span>
+              <div key={s.id} className="disc-turn">
+                <div className="disc-turn-head">
+                  <span className="who">{s.speakerName}</span>
                   {s.kind === "chat" && <span className="seg-kind">chat</span>}
                   <span className="seg-time">{fmtTime(s.ts)}</span>
                 </div>
-                <div className="seg-text">{s.text}</div>
+                <div>{s.text}</div>
               </div>
             ))}
           </div>
@@ -94,6 +113,13 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
     </details>
   );
 }
+
+const OUTCOME_META: Record<DiscussionOutcome, { label: string; Icon: (p: { size?: number }) => React.ReactElement }> = {
+  decided: { label: "Decided", Icon: DecidedIcon },
+  action: { label: "Action", Icon: TodoIcon },
+  open: { label: "Open", Icon: QuestionIcon },
+  info: { label: "FYI", Icon: InfoIcon },
+};
 
 /** The live side-panel card, ranked by what helps during the meeting:
  *  1. open action items (checkable), 2. decisions, 3. open questions;
