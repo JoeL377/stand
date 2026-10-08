@@ -35,12 +35,25 @@ export function ItemNotes(props: { notes: Note[]; discussions: Discussion[]; seg
   );
 }
 
-function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]; compact?: boolean; open: boolean }) {
+/** The note that says what a topic came to, matched to its outcome. */
+const HEADLINE_KIND: Record<DiscussionOutcome, Note["kind"] | null> = { decided: "decision", action: "action", open: "question", info: null };
+
+function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]; compact?: boolean; open: boolean; live?: boolean }) {
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
   const o = OUTCOME_META[d.outcome];
   const by = (k: Note["kind"]) => notes.filter((n) => n.kind === k);
-  const points = [...by("decision"), ...by("action"), ...by("question")];
+  const ranked = [...by("decision"), ...by("action"), ...by("question")];
+  const want = HEADLINE_KIND[d.outcome];
+  const headline = (want && ranked.find((n) => n.kind === want)) ?? ranked[0] ?? null;
+  const rest = ranked.filter((n) => n !== headline);
+  const people = d.positions.length ? d.positions.map((p) => p.speaker) : [...new Set(turns.map((t) => t.speakerName))];
+  const todos = by("action").filter((n) => !n.doneAt).length;
+  const meta = [
+    people.join(", "),
+    turns.length ? `${turns.length} remark${turns.length === 1 ? "" : "s"}` : null,
+    !props.live && todos ? `${todos} to-do${todos === 1 ? "" : "s"}` : null,
+  ].filter(Boolean);
   return (
     <details className="disc" open={props.open}>
       <summary>
@@ -50,7 +63,16 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
             <o.Icon size={13} /> {o.label}
           </span>
         </span>
-        {d.positions.length > 0 && <span className="disc-people">{d.positions.map((p) => p.speaker).join(", ")}</span>}
+        {headline && (
+          <span className={headline.doneAt ? "disc-outcome done" : "disc-outcome"}>
+            {headline.text}
+            {headline.kind === "action" && headline.owner && <span className="disc-owner"> · {headline.owner}</span>}
+          </span>
+        )}
+        <span className="disc-meta">
+          {meta.join(" · ")}
+          {props.live && <span className="disc-now"> · Talking now</span>}
+        </span>
       </summary>
       <div className="disc-body">
         {d.continues && (
@@ -59,30 +81,9 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
             {d.continues.topic !== d.topic && <> · “{d.continues.topic}”</>}
           </p>
         )}
-        {points.length > 0 && (
-          <ul className="disc-points">
-            {points.map((n) => {
-              const Icon = n.kind === "decision" ? DecidedIcon : n.kind === "action" ? TodoIcon : QuestionIcon;
-              return (
-                <li key={n.id} className={`${n.kind}${n.doneAt ? " done" : ""}`}>
-                  <Icon />
-                  <span className="disc-point-body">
-                    <span className="disc-point-text">{n.text}</span>
-                    {n.kind === "action" && (n.owner || n.doneAt) && (
-                      <span className="disc-point-meta">
-                        {n.owner ?? "No owner"}
-                        {n.doneAt ? ` · done${n.doneBy ? ` by ${n.doneBy}` : ""}` : ""}
-                      </span>
-                    )}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
         {d.positions.length > 0 && (
           <div className="disc-section">
-            <div className="disc-label">Who said what</div>
+            <div className="disc-label">Where people landed</div>
             {d.positions.map((p, i) => (
               <p key={i} className="disc-position">
                 <span className="who">{p.speaker}</span> {p.position}
@@ -90,9 +91,33 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
             ))}
           </div>
         )}
+        {rest.length > 0 && (
+          <div className="disc-section">
+            <div className="disc-label">Came out of it</div>
+            <ul className="disc-points">
+              {rest.map((n) => {
+                const Icon = n.kind === "decision" ? DecidedIcon : n.kind === "action" ? TodoIcon : QuestionIcon;
+                return (
+                  <li key={n.id} className={`${n.kind}${n.doneAt ? " done" : ""}`}>
+                    <Icon />
+                    <span className="disc-point-body">
+                      <span className="disc-point-text">{n.text}</span>
+                      {n.kind === "action" && (n.owner || n.doneAt) && (
+                        <span className="disc-point-meta">
+                          {n.owner ?? "No owner"}
+                          {n.doneAt ? ` · done${n.doneBy ? ` by ${n.doneBy}` : ""}` : ""}
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
         {turns.length > 0 && (
           <button className="link small" onClick={() => setShowTurns((s) => !s)}>
-            {showTurns ? "Hide what was said" : `What was said (${turns.length})`}
+            {showTurns ? "Hide remarks" : `Show ${turns.length} remark${turns.length === 1 ? "" : "s"}`}
           </button>
         )}
         {showTurns && (
@@ -116,7 +141,7 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
 
 const OUTCOME_META: Record<DiscussionOutcome, { label: string; Icon: (p: { size?: number }) => React.ReactElement }> = {
   decided: { label: "Decided", Icon: DecidedIcon },
-  action: { label: "Action", Icon: TodoIcon },
+  action: { label: "To do", Icon: TodoIcon },
   open: { label: "Open", Icon: QuestionIcon },
   info: { label: "FYI", Icon: InfoIcon },
 };
@@ -140,7 +165,7 @@ export function LiveItemNotes(props: {
   const open = notes.filter((n) => n.kind === "question");
   const summary = notes.filter((n) => n.kind === "summary");
   const empty = !todo.length && !done.length && !decided.length && !open.length;
-  const detailCount = discussions.length || summary.length;
+  const liveId = talkingNow(discussions, segments);
 
   const action = (n: Note) => (
     <li key={n.id} className={n.doneAt ? "tk action done" : "tk action"}>
@@ -199,30 +224,54 @@ export function LiveItemNotes(props: {
           </ul>
         </section>
       )}
-      {detailCount > 0 && (
+      {discussions.length > 0 ? (
         <section className="tk-group tk-card live-topics">
-          <h4>{discussions.length ? `Topics (${discussions.length})` : "Summary"}</h4>
-          {summary.map((n) => (
-            <p key={n.id} className="live-gist">
-              {n.text}
-            </p>
-          ))}
-          {discussions.length > 0 && (
-            <div className="discussions compact">
-              {discussions.map((d) => (
-                <DiscussionBlock
-                  key={d.id}
-                  d={d}
-                  notes={[]}
-                  turns={d.segmentIds.flatMap((id) => segments.filter((s) => s.id === id))}
-                  compact
-                  open={false}
-                />
-              ))}
-            </div>
-          )}
+          <h4>Topics</h4>
+          <div className="discussions compact">
+            {rankTopics(discussions, segments).map(({ d, turns }) => (
+              <DiscussionBlock
+                key={d.id}
+                d={d}
+                notes={notes.filter((n) => n.discussionId === d.id)}
+                turns={turns}
+                compact
+                open={false}
+                live={d.id === liveId}
+              />
+            ))}
+          </div>
         </section>
+      ) : (
+        summary.length > 0 && (
+          <section className="tk-group tk-card live-topics">
+            <h4>Summary</h4>
+            {summary.map((n) => (
+              <p key={n.id} className="live-gist">
+                {n.text}
+              </p>
+            ))}
+          </section>
+        )
       )}
     </div>
   );
+}
+
+const TOPIC_ORDER: Record<DiscussionOutcome, number> = { open: 0, action: 1, decided: 2, info: 3 };
+
+/** Topics that still need something first (open, then to-do, decided, FYI); newest first within each. */
+function rankTopics(discussions: Discussion[], segments: Segment[]) {
+  return discussions
+    .map((d) => {
+      const turns = d.segmentIds.flatMap((id) => segments.filter((s) => s.id === id));
+      return { d, turns, last: turns.at(-1)?.ts ?? d.ts };
+    })
+    .sort((a, b) => TOPIC_ORDER[a.d.outcome] - TOPIC_ORDER[b.d.outcome] || b.last - a.last);
+}
+
+/** The topic holding the meeting's latest remark, if that remark was in the last two minutes. */
+function talkingNow(discussions: Discussion[], segments: Segment[]): string | null {
+  const latest = segments.reduce<Segment | null>((a, s) => (!a || s.ts > a.ts ? s : a), null);
+  if (!latest || Date.now() - latest.ts > 120_000) return null;
+  return discussions.find((d) => d.segmentIds.includes(latest.id))?.id ?? null;
 }
