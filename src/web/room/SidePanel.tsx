@@ -5,10 +5,6 @@ import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
 import { LiveItemNotes } from "../Discussions.tsx";
 
-const SPLIT_KEY = "stand.sideSplit";
-const DEFAULT_SPLIT = 50;
-const clampSplit = (v: number) => Math.min(75, Math.max(15, v));
-
 export function SidePanel(props: {
   state: RoomState;
   segments: Segment[];
@@ -19,45 +15,10 @@ export function SidePanel(props: {
   send: (m: ClientMessage) => void;
   participantId: string;
 }) {
-  const [notesOpen, setNotesOpen] = useState(true);
   const [earlierOpen, setEarlierOpen] = useState(true);
   const { state, segments, notes, interims, send } = props;
-  // Notes on top, transcript below; the share of height the notes get is
-  // remembered per browser.
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [split, setSplitRaw] = useState(() => {
-    try {
-      const v = Number(localStorage.getItem(SPLIT_KEY));
-      return v ? clampSplit(v) : DEFAULT_SPLIT;
-    } catch {
-      return DEFAULT_SPLIT;
-    }
-  });
-  const setSplit = (next: number | ((v: number) => number)) =>
-    setSplitRaw((v) => {
-      const out = typeof next === "function" ? next(v) : next;
-      try {
-        localStorage.setItem(SPLIT_KEY, String(out));
-      } catch {
-        /* private window */
-      }
-      return out;
-    });
-  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    const box = bodyRef.current?.getBoundingClientRect();
-    if (!box) return;
-    e.preventDefault();
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    const move = (ev: PointerEvent) => setSplit(clampSplit(((ev.clientY - box.top) / box.height) * 100));
-    const up = () => {
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-  };
-
+  // Two tabs: the agent's notes and topics first, the raw transcript second.
+  const [tab, setTab] = useState<"notes" | "transcript">("notes");
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId);
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
@@ -67,6 +28,13 @@ export function SidePanel(props: {
   const earlier = (state.followUps ?? []).filter((f) => f.itemId === state.focusItemId);
   const earlierOpenCount = earlier.filter((f) => !f.doneAt).length;
   const hasNotes = earlier.length > 0 || focusNotes.length > 0 || notesUpdating;
+  // New remarks for this item while the Transcript tab isn't open.
+  const [seen, setSeen] = useState(0);
+  useEffect(() => {
+    if (tab === "transcript") setSeen(shown.length);
+  }, [tab, shown.length]);
+  useEffect(() => setSeen(shown.length), [state.focusItemId]);
+  const unseen = Math.max(0, shown.length - seen);
 
   return (
     <aside className="panel side">
@@ -78,90 +46,88 @@ export function SidePanel(props: {
             {focus ? focus.title : "General / off-agenda"}
           </span>
         </div>
-        <a className="recap-link" href={`/meetings/${state.meetingId}`} target="_blank" rel="noreferrer" title="Everything said and noted in this meeting, across items">
+        <a
+          className="recap-link"
+          href={`/meetings/${state.meetingId}`}
+          target="_blank"
+          rel="noreferrer"
+          title="Everything said and noted in this meeting, across items"
+        >
           Meeting recap ↗
         </a>
       </div>
 
-      <div className="side-body" ref={bodyRef}>
-      <div className="side-notes" style={hasNotes && (notesOpen || earlierOpen) ? { height: `${split}%` } : undefined}>
-      {!hasNotes && (
-        <p className="side-notes-empty">Agent notes for this item show up here once people start talking.</p>
-      )}
-      {earlier.length > 0 && (
-        <section className={earlierOpen ? "focus-notes earlier open" : "focus-notes earlier"}>
-          <button className="focus-notes-head" aria-expanded={earlierOpen} onClick={() => setEarlierOpen((o) => !o)}>
-            <span>From earlier meetings</span>
-            <span className="muted">{earlierOpenCount} open</span>
-            <span className="chev" aria-hidden>
-              {earlierOpen ? "▾" : "▸"}
+      <div className="side-tabs" role="tablist" aria-label="Discussion views">
+        <button
+          role="tab"
+          aria-selected={tab === "notes"}
+          className={tab === "notes" ? "side-tab on" : "side-tab"}
+          onClick={() => setTab("notes")}
+        >
+          Notes & topics
+          {notesUpdating && <span className="notes-updating">Updating…</span>}
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "transcript"}
+          className={tab === "transcript" ? "side-tab on" : "side-tab"}
+          onClick={() => setTab("transcript")}
+        >
+          Transcript
+          {tab !== "transcript" && unseen > 0 && (
+            <span className="side-tab-badge" aria-label={`${unseen} new`}>
+              {unseen}
             </span>
-          </button>
-          {earlierOpen && (
-            <div className="focus-notes-body">
-              <FollowUpList
-                compact
-                showDate
-                notes={earlier}
-                onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
-              />
-            </div>
           )}
-        </section>
-      )}
-      {(focusNotes.length > 0 || notesUpdating) && (
-        <section className={notesOpen ? "focus-notes open" : "focus-notes"}>
-          <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
-            <span>Agent notes</span>
-            {notesUpdating && <span className="notes-updating">Updating…</span>}
-            <span className="chev" aria-hidden>
-              {notesOpen ? "▾" : "▸"}
-            </span>
-          </button>
-          {notesOpen && (
-            <div className="focus-notes-body">
+        </button>
+      </div>
+      {tab === "notes" ? (
+        <div className="side-notes-tab">
+          {!hasNotes && <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>}
+          {earlier.length > 0 && (
+            <section className={earlierOpen ? "focus-notes earlier open" : "focus-notes earlier"}>
+              <button className="focus-notes-head" aria-expanded={earlierOpen} onClick={() => setEarlierOpen((o) => !o)}>
+                <span>From earlier meetings</span>
+                <span className="muted">{earlierOpenCount} open</span>
+                <span className="chev" aria-hidden>
+                  {earlierOpen ? "▾" : "▸"}
+                </span>
+              </button>
+              {earlierOpen && (
+                <div className="focus-notes-body">
+                  <FollowUpList
+                    compact
+                    showDate
+                    notes={earlier}
+                    onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
+                  />
+                </div>
+              )}
+            </section>
+          )}
+          {(focusNotes.length > 0 || notesUpdating) && (
+            <section className="side-agent-notes">
               {!focusNotes.length && <p className="tk-empty">Writing the first notes…</p>}
-              {focusNotes.length > 0 && <LiveItemNotes
-                notes={focusNotes}
-                discussions={focusDiscussions}
-                segments={segments}
-                onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
-              />}
-            </div>
+              {focusNotes.length > 0 && (
+                <LiveItemNotes
+                  notes={focusNotes}
+                  discussions={focusDiscussions}
+                  segments={segments}
+                  onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
+                />
+              )}
+            </section>
           )}
-        </section>
-      )}
-      </div>
-      <div
-        className="side-split"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize notes and transcript"
-        aria-valuenow={Math.round(split)}
-        tabIndex={0}
-        onPointerDown={startDrag}
-        onDoubleClick={() => setSplit(DEFAULT_SPLIT)}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowUp") setSplit((v) => clampSplit(v - 5));
-          if (e.key === "ArrowDown") setSplit((v) => clampSplit(v + 5));
-        }}
-      />
-      <div className="side-transcript">
-        <div className="side-pane-label">Live transcript</div>
+        </div>
+      ) : (
         <Transcript segments={shown} items={state.items} interims={interims} send={send} />
-        <ChatBox send={send} />
-      </div>
-      </div>
+      )}
+      <ChatBox send={send} />
     </aside>
   );
 }
 
-function Transcript(props: {
-  segments: Segment[];
-  items: Item[];
-  interims: Record<string, Interim>;
-  send: (m: ClientMessage) => void;
-}) {
+function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => void }) {
   const { segments, items, interims, send } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -220,7 +186,11 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
           autoFocus
           value={s.itemId ?? ""}
           onChange={(e) => {
-            send({ type: "segment.move", segmentId: s.id, itemId: e.target.value || null });
+            send({
+              type: "segment.move",
+              segmentId: s.id,
+              itemId: e.target.value || null,
+            });
             setMoving(false);
           }}
           onBlur={() => setMoving(false)}
@@ -250,7 +220,12 @@ function ChatBox({ send }: { send: (m: ClientMessage) => void }) {
         setText("");
       }}
     >
-      <input placeholder="Message the space" title="Goes into the discussion for the item in focus" value={text} onChange={(e) => setText(e.target.value)} />
+      <input
+        placeholder="Message the space"
+        title="Goes into the discussion for the item in focus"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
       <button className="primary" disabled={!text.trim()}>
         Send
       </button>
@@ -280,7 +255,11 @@ export function NoteList({ notes }: { notes: Note[] }) {
       {by("action").length > 0 && (
         <ul className="note-list">
           {by("action").map((n) => (
-            <li key={n.id} className={n.doneAt ? "note action done" : "note action"} title={n.doneAt ? `Done${n.doneBy ? ` by ${n.doneBy}` : ""}` : undefined}>
+            <li
+              key={n.id}
+              className={n.doneAt ? "note action done" : "note action"}
+              title={n.doneAt ? `Done${n.doneBy ? ` by ${n.doneBy}` : ""}` : undefined}
+            >
               <span className="note-icon">{n.doneAt ? "☑" : "☐"}</span>
               <span className="note-text">
                 {n.text} {n.owner && <span className="owner">{n.owner}</span>}

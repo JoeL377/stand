@@ -123,8 +123,8 @@ const OUTCOME_META: Record<DiscussionOutcome, { label: string; Icon: (p: { size?
 
 /** The live side-panel card, ranked by what helps during the meeting:
  *  1. open action items (checkable), 2. decisions, 3. open questions;
- *  then, folded away, the gist and each discussion (topic + outcome), whose
- *  positions and raw turns fold one level further down. Done actions fold
+ *  then the gist and one row per topic (name + outcome), whose positions and
+ *  raw turns open one level down. Done actions fold
  *  into a single "n done" line. */
 export function LiveItemNotes(props: {
   notes: Note[];
@@ -200,12 +200,8 @@ export function LiveItemNotes(props: {
         </section>
       )}
       {detailCount > 0 && (
-        <details className="live-details" open={empty}>
-          <summary>
-            {discussions.length
-              ? `Topics discussed (${discussions.length})`
-              : "Summary"}
-          </summary>
+        <section className="tk-group live-topics">
+          <h4>{discussions.length ? `Topics (${discussions.length})` : "Summary"}</h4>
           {summary.map((n) => (
             <p key={n.id} className="live-gist">
               {n.text}
@@ -225,7 +221,7 @@ export function LiveItemNotes(props: {
               ))}
             </div>
           )}
-        </details>
+        </section>
       )}
     </div>
   );
