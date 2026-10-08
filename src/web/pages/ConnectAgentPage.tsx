@@ -95,6 +95,20 @@ export function ConnectAgentPage() {
 
         {error && <p className="error">{error}</p>}
 
+        <section className="ag-card ag-connector">
+          <strong>Using the Claude app?</strong>
+          <span className="muted small">
+            On desktop, web or phone, open Settings → Connectors → Add custom connector, name it Stand and paste this URL. You’ll sign in
+            here and approve it; no token needed.
+          </span>
+          <div className="ag-code">
+            <pre>{url}</pre>
+            <button className="ag-copy" onClick={() => void copy("url", url)}>
+              {copied === "url" ? "Copied" : "Copy"}
+            </button>
+          </div>
+        </section>
+
         {made && snippet ? (
           <section className="ag-card ag-made" aria-live="polite">
             <div className="ag-made-head">
@@ -144,6 +158,7 @@ export function ConnectAgentPage() {
         ) : (
           <form className="ag-card ag-new" onSubmit={create}>
             <strong>New agent token</strong>
+            <span className="muted small">For Claude Code, Cursor and Codex.</span>
             <label>
               Name it after where it runs
               <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={60} placeholder="e.g. Cursor on my work laptop" />

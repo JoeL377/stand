@@ -40,6 +40,7 @@ export default defineConfig({
       "^/ws/": { target: `ws://localhost:${API_PORT}`, ws: true },
       // The Stand MCP, so agents can be pointed at the dev server too.
       "^/mcp$": { target: `http://localhost:${API_PORT}`, changeOrigin: false },
+      "^/(\\.well-known|oauth)/": { target: `http://localhost:${API_PORT}`, changeOrigin: false },
     },
   },
 });

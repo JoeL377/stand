@@ -135,6 +135,24 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   last_used_at INTEGER,
   revoked_at INTEGER
 );
+-- Apps that connect through the sign-in flow (Claude's custom connectors, for
+-- example). They register themselves; they're public clients, so no secret.
+CREATE TABLE IF NOT EXISTS oauth_clients (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  redirect_uris TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+-- One-time codes from the consent page, swapped for a token within minutes.
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  redirect_uri TEXT NOT NULL,
+  challenge TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
 -- What agents and people report back on an item between meetings. Append only.
 CREATE TABLE IF NOT EXISTS updates (
   id TEXT PRIMARY KEY,
@@ -268,6 +286,9 @@ export function openDb(file?: string) {
   db.exec(schema);
   // Added after the first version; older databases lack it.
   const roomCols = (db.prepare("PRAGMA table_info(rooms)").all() as Row[]).map((c) => c.name);
+  const tokenCols = (db.prepare("PRAGMA table_info(api_tokens)").all() as Row[]).map((c) => c.name);
+  if (!tokenCols.includes("client_id"))
+    db.exec("ALTER TABLE api_tokens ADD COLUMN client_id TEXT; ALTER TABLE api_tokens ADD COLUMN refresh_hash TEXT;");
   if (!roomCols.includes("created_by")) db.exec("ALTER TABLE rooms ADD COLUMN created_by TEXT");
   if (!roomCols.includes("purpose")) db.exec("ALTER TABLE rooms ADD COLUMN purpose TEXT NOT NULL DEFAULT ''");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
@@ -278,7 +299,10 @@ export function openDb(file?: string) {
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
-  if (!deckCols.includes("kind")) db.exec("ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';");
+  if (!deckCols.includes("kind"))
+    db.exec(
+      "ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';",
+    );
 
   return {
     raw: db,
@@ -287,17 +311,13 @@ export function openDb(file?: string) {
      *  stand-in sign-in) and refreshes their profile. */
     upsertUser(u: { googleSub: string | null; email: string; name: string; picture: string | null }): User {
       const email = u.email.toLowerCase();
-      const existing = (
-        u.googleSub ? db.prepare("SELECT * FROM users WHERE google_sub = ?").get(u.googleSub) : undefined
-      ) as Row | undefined ?? (db.prepare("SELECT * FROM users WHERE email = ?").get(email) as Row | undefined);
+      const existing =
+        ((u.googleSub ? db.prepare("SELECT * FROM users WHERE google_sub = ?").get(u.googleSub) : undefined) as Row | undefined) ??
+        (db.prepare("SELECT * FROM users WHERE email = ?").get(email) as Row | undefined);
       if (existing) {
-        db.prepare("UPDATE users SET google_sub = COALESCE(?, google_sub), email = ?, name = ?, picture = COALESCE(?, picture) WHERE id = ?").run(
-          u.googleSub,
-          email,
-          u.name,
-          u.picture,
-          existing.id as string,
-        );
+        db.prepare(
+          "UPDATE users SET google_sub = COALESCE(?, google_sub), email = ?, name = ?, picture = COALESCE(?, picture) WHERE id = ?",
+        ).run(u.googleSub, email, u.name, u.picture, existing.id as string);
         return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(existing.id as string) as Row);
       }
       const id = "u" + newId(11);
@@ -347,12 +367,20 @@ export function openDb(file?: string) {
 
     createRoom(name: string, createdBy: string | null = null, purpose = "") {
       const id = newId(8);
-      db.prepare("INSERT INTO rooms (id, name, created_at, created_by, purpose) VALUES (?, ?, ?, ?, ?)").run(id, name, Date.now(), createdBy, purpose);
+      db.prepare("INSERT INTO rooms (id, name, created_at, created_by, purpose) VALUES (?, ?, ?, ?, ?)").run(
+        id,
+        name,
+        Date.now(),
+        createdBy,
+        purpose,
+      );
       return { id, name, createdBy, purpose };
     },
     getRoom(id: string) {
       const r = db.prepare("SELECT id, name, created_by, purpose FROM rooms WHERE id = ?").get(id) as Row | undefined;
-      return r ? { id: r.id as string, name: r.name as string, createdBy: (r.created_by as string) ?? null, purpose: (r.purpose as string) ?? "" } : null;
+      return r
+        ? { id: r.id as string, name: r.name as string, createdBy: (r.created_by as string) ?? null, purpose: (r.purpose as string) ?? "" }
+        : null;
     },
     updateRoom(id: string, patch: { name?: string; purpose?: string }) {
       if (patch.name !== undefined) db.prepare("UPDATE rooms SET name = ? WHERE id = ?").run(patch.name, id);
@@ -371,7 +399,9 @@ export function openDb(file?: string) {
            WHERE EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?)`,
         )
         .all(userId, userId) as Row[];
-      const people = db.prepare("SELECT u.name FROM room_members x JOIN users u ON u.id = x.user_id WHERE x.room_id = ? ORDER BY x.last_joined_at DESC");
+      const people = db.prepare(
+        "SELECT u.name FROM room_members x JOIN users u ON u.id = x.user_id WHERE x.room_id = ? ORDER BY x.last_joined_at DESC",
+      );
       const notes = db.prepare(
         `SELECT n.kind, n.text, n.owner, n.done_at, n.ts, n.meeting_id FROM notes n JOIN meetings m ON m.id = n.meeting_id
          WHERE m.room_id = ? AND n.kind IN ('decision', 'question', 'action') ORDER BY n.ts DESC, n.rowid DESC LIMIT 300`,
@@ -406,7 +436,9 @@ export function openDb(file?: string) {
      *  room are un-archived and refreshed rather than duplicated, so their
      *  history carries over. */
     addItems(roomId: string, items: NewItem[]): Item[] {
-      const maxPos = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM items WHERE room_id = ? AND archived = 0").get(roomId) as Row).p as number;
+      const maxPos = (
+        db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM items WHERE room_id = ? AND archived = 0").get(roomId) as Row
+      ).p as number;
       let pos = maxPos + 1;
       const findExisting = db.prepare("SELECT * FROM items WHERE room_id = ? AND source = ? AND external_id = ?");
       const revive = db.prepare("UPDATE items SET archived = 0, title = ?, url = ?, description = ?, position = ? WHERE id = ?");
@@ -419,7 +451,19 @@ export function openDb(file?: string) {
           const keepPos = existing.archived ? pos++ : (existing.position as number);
           revive.run(it.title, it.url, it.description, keepPos, existing.id as string);
         } else {
-          insert.run(newId(), roomId, it.source, it.externalId, it.title, it.url, it.description, pos++, it.deckId ?? null, it.slideNo ?? null, Date.now());
+          insert.run(
+            newId(),
+            roomId,
+            it.source,
+            it.externalId,
+            it.title,
+            it.url,
+            it.description,
+            pos++,
+            it.deckId ?? null,
+            it.slideNo ?? null,
+            Date.now(),
+          );
         }
       }
       return this.listItems(roomId);
@@ -465,7 +509,9 @@ export function openDb(file?: string) {
       let at = others.findIndex((it) => it.id === parentItemId);
       if (at < 0) return;
       const siblings = new Set(
-        (db.prepare("SELECT id FROM decks WHERE parent_item_id = ? AND id != ?").all(parentItemId, deckId) as Row[]).map((r) => r.id as string),
+        (db.prepare("SELECT id FROM decks WHERE parent_item_id = ? AND id != ?").all(parentItemId, deckId) as Row[]).map(
+          (r) => r.id as string,
+        ),
       );
       while (at + 1 < others.length && others[at + 1].deckId && siblings.has(others[at + 1].deckId!)) at++;
       const ids = others.map((it) => it.id);
@@ -481,7 +527,12 @@ export function openDb(file?: string) {
     saveDeck(deck: Deck, draft: DeckDraft) {
       db.exec("BEGIN");
       try {
-        db.prepare("UPDATE decks SET title = ?, theme = ?, page_count = ? WHERE id = ?").run(draft.title, draft.theme, draft.slides.length, deck.id);
+        db.prepare("UPDATE decks SET title = ?, theme = ?, page_count = ? WHERE id = ?").run(
+          draft.title,
+          draft.theme,
+          draft.slides.length,
+          deck.id,
+        );
         const before = this.listItems(deck.roomId);
         const owner = db.prepare("SELECT deck_id FROM items WHERE id = ?");
         const update = db.prepare("UPDATE items SET title = ?, description = ?, slide_json = ?, slide_no = ?, archived = 0 WHERE id = ?");
@@ -503,7 +554,10 @@ export function openDb(file?: string) {
           ids.push(useId);
         });
         const keep = new Set(ids);
-        db.prepare(`UPDATE items SET archived = 1 WHERE deck_id = ? AND id NOT IN (${ids.map(() => "?").join(",") || "''"})`).run(deck.id, ...ids);
+        db.prepare(`UPDATE items SET archived = 1 WHERE deck_id = ? AND id NOT IN (${ids.map(() => "?").join(",") || "''"})`).run(
+          deck.id,
+          ...ids,
+        );
         // Re-lay the agenda with the deck as one block where its first slide was.
         const others = before.filter((it) => it.deckId !== deck.id && !keep.has(it.id)).map((it) => it.id);
         const at = before.findIndex((it) => it.deckId === deck.id);
@@ -524,7 +578,9 @@ export function openDb(file?: string) {
     listDecks(roomId: string): Deck[] {
       return (
         db
-          .prepare("SELECT * FROM decks d WHERE room_id = ? AND EXISTS (SELECT 1 FROM items i WHERE i.deck_id = d.id AND i.archived = 0) ORDER BY created_at")
+          .prepare(
+            "SELECT * FROM decks d WHERE room_id = ? AND EXISTS (SELECT 1 FROM items i WHERE i.deck_id = d.id AND i.archived = 0) ORDER BY created_at",
+          )
           .all(roomId) as Row[]
       ).map(toDeck);
     },
@@ -541,7 +597,9 @@ export function openDb(file?: string) {
         db.prepare("SELECT s.* FROM segments s JOIN items i ON i.id = s.item_id WHERE i.deck_id = ? ORDER BY s.ts").all(deckId) as Row[]
       ).map(toSegment);
       const notes = (
-        db.prepare("SELECT n.* FROM notes n JOIN items i ON i.id = n.item_id WHERE i.deck_id = ? ORDER BY n.ts, n.rowid").all(deckId) as Row[]
+        db
+          .prepare("SELECT n.* FROM notes n JOIN items i ON i.id = n.item_id WHERE i.deck_id = ? ORDER BY n.ts, n.rowid")
+          .all(deckId) as Row[]
       ).map(toNote);
       return { segments, notes };
     },
@@ -617,9 +675,9 @@ export function openDb(file?: string) {
       return (db.prepare("SELECT * FROM segments WHERE meeting_id = ? ORDER BY ts").all(meetingId) as Row[]).map(toSegment);
     },
     itemSegments(meetingId: string, itemId: string | null): Segment[] {
-      return (
-        db.prepare("SELECT * FROM segments WHERE meeting_id = ? AND item_id IS ? ORDER BY ts").all(meetingId, itemId) as Row[]
-      ).map(toSegment);
+      return (db.prepare("SELECT * FROM segments WHERE meeting_id = ? AND item_id IS ? ORDER BY ts").all(meetingId, itemId) as Row[]).map(
+        toSegment,
+      );
     },
 
     logFocus(meetingId: string, itemId: string | null, actor: string, reason: string) {
@@ -639,13 +697,21 @@ export function openDb(file?: string) {
       meetingId: string,
       itemId: string | null,
       notes: Array<
-        Pick<Note, "kind" | "text" | "owner"> & { discussionId?: string | null; id?: string; ts?: number; doneAt?: number | null; doneBy?: string | null }
+        Pick<Note, "kind" | "text" | "owner"> & {
+          discussionId?: string | null;
+          id?: string;
+          ts?: number;
+          doneAt?: number | null;
+          doneBy?: string | null;
+        }
       >,
     ): Note[] {
       const done = new Map(
-        (db.prepare("SELECT text, done_at, done_by FROM notes WHERE meeting_id = ? AND item_id IS ? AND done_at IS NOT NULL").all(meetingId, itemId) as Row[]).map(
-          (r) => [r.text as string, { doneAt: r.done_at as number, doneBy: (r.done_by as string) ?? null }],
-        ),
+        (
+          db
+            .prepare("SELECT text, done_at, done_by FROM notes WHERE meeting_id = ? AND item_id IS ? AND done_at IS NOT NULL")
+            .all(meetingId, itemId) as Row[]
+        ).map((r) => [r.text as string, { doneAt: r.done_at as number, doneBy: (r.done_by as string) ?? null }]),
       );
       // A note that comes back with the same wording keeps its id, so references
       // agents hold (stand:question/<id>) survive the agent rewriting the notes.
@@ -701,7 +767,10 @@ export function openDb(file?: string) {
         return id;
       });
       const byId = new Map(
-        (db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? AND d.item_id IS ?`).all(meetingId, itemId) as Row[]).map((r) => [r.id as string, toDiscussion(r)]),
+        (db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? AND d.item_id IS ?`).all(meetingId, itemId) as Row[]).map((r) => [
+          r.id as string,
+          toDiscussion(r),
+        ]),
       );
       return ids.map((id) => byId.get(id)!);
     },
@@ -710,7 +779,9 @@ export function openDb(file?: string) {
       return r ? toDiscussion(r) : null;
     },
     meetingDiscussions(meetingId: string): Discussion[] {
-      return (db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? ORDER BY d.ts, d.position`).all(meetingId) as Row[]).map(toDiscussion);
+      return (db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? ORDER BY d.ts, d.position`).all(meetingId) as Row[]).map(
+        toDiscussion,
+      );
     },
     /** Every discussion of an item across meetings, newest meeting first. */
     itemDiscussions(itemId: string): Array<Discussion & { meetingStartedAt: number }> {
@@ -725,14 +796,18 @@ export function openDb(file?: string) {
     },
     deckDiscussions(deckId: string): Discussion[] {
       return (
-        db.prepare(`${DISCUSSION_SELECT} JOIN items i ON i.id = d.item_id WHERE i.deck_id = ? ORDER BY d.ts, d.position`).all(deckId) as Row[]
+        db
+          .prepare(`${DISCUSSION_SELECT} JOIN items i ON i.id = d.item_id WHERE i.deck_id = ? ORDER BY d.ts, d.position`)
+          .all(deckId) as Row[]
       ).map(toDiscussion);
     },
 
     /** Checks an action item off (by someone) or reopens it (by: null). */
     setActionDone(roomId: string, noteId: string, by: string | null): Note | null {
       const res = db
-        .prepare("UPDATE notes SET done_at = ?, done_by = ? WHERE id = ? AND kind = 'action' AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)")
+        .prepare(
+          "UPDATE notes SET done_at = ?, done_by = ? WHERE id = ? AND kind = 'action' AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)",
+        )
         .run(by ? Date.now() : null, by, noteId, roomId);
       if (!res.changes) return null;
       return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
@@ -755,21 +830,23 @@ export function openDb(file?: string) {
     // ---- agent access (Stand MCP) ----------------------------------------------
 
     /** A new token for this user's agent. The secret is returned once and only its hash is kept. */
-    createToken(userId: string, label: string, scope: AgentToken["scope"]): { token: string; info: AgentToken } {
+    createToken(
+      userId: string,
+      label: string,
+      scope: AgentToken["scope"],
+      opts: { clientId?: string } = {},
+    ): { token: string; info: AgentToken; refresh: string | null } {
       const token = `stand_pat_${randomBytes(24).toString("base64url")}`;
+      // Tokens from the sign-in flow come with a refresh token, which the app
+      // swaps for a fresh pair; typed tokens from the Connect page don't need one.
+      const refresh = opts.clientId ? `stand_rt_${randomBytes(24).toString("base64url")}` : null;
       const id = newId(10);
       const now = Date.now();
       const hint = token.slice(0, 14);
-      db.prepare("INSERT INTO api_tokens (id, user_id, label, hash, hint, scope, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
-        id,
-        userId,
-        label,
-        hashToken(token),
-        hint,
-        scope,
-        now,
-      );
-      return { token, info: { id, label, scope, hint, createdAt: now, lastUsedAt: null } };
+      db.prepare(
+        "INSERT INTO api_tokens (id, user_id, label, hash, hint, scope, created_at, client_id, refresh_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(id, userId, label, hashToken(token), hint, scope, now, opts.clientId ?? null, refresh ? hashToken(refresh) : null);
+      return { token, info: { id, label, scope, hint, createdAt: now, lastUsedAt: null }, refresh };
     },
     listTokens(userId: string): AgentToken[] {
       return (
@@ -777,7 +854,63 @@ export function openDb(file?: string) {
       ).map(toToken);
     },
     revokeToken(userId: string, id: string): boolean {
-      return db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL").run(Date.now(), id, userId).changes > 0;
+      return (
+        db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL").run(Date.now(), id, userId)
+          .changes > 0
+      );
+    },
+    /** Swaps a refresh token for a new access and refresh token; the old pair stops working. */
+    refreshToken(refresh: string, clientId: string): { token: string; refresh: string; scope: AgentToken["scope"] } | null {
+      const r = db
+        .prepare("SELECT * FROM api_tokens WHERE refresh_hash = ? AND client_id = ? AND revoked_at IS NULL")
+        .get(hashToken(refresh), clientId) as Row | undefined;
+      if (!r) return null;
+      db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ?").run(Date.now(), r.id as string);
+      const made = this.createToken(r.user_id as string, r.label as string, r.scope as AgentToken["scope"], { clientId });
+      return { token: made.token, refresh: made.refresh!, scope: made.info.scope };
+    },
+    /** Signing in again from the same app replaces its earlier token rather than piling up. */
+    revokeClientTokens(userId: string, clientId: string) {
+      db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND client_id = ? AND revoked_at IS NULL").run(
+        Date.now(),
+        userId,
+        clientId,
+      );
+    },
+    registerClient(name: string, redirectUris: string[]): { id: string; name: string; redirectUris: string[]; createdAt: number } {
+      const id = `stand_client_${newId(16)}`;
+      const now = Date.now();
+      db.prepare("INSERT INTO oauth_clients (id, name, redirect_uris, created_at) VALUES (?, ?, ?, ?)").run(
+        id,
+        name,
+        JSON.stringify(redirectUris),
+        now,
+      );
+      return { id, name, redirectUris, createdAt: now };
+    },
+    getClient(id: string): { id: string; name: string; redirectUris: string[] } | null {
+      const r = db.prepare("SELECT * FROM oauth_clients WHERE id = ?").get(id) as Row | undefined;
+      return r ? { id: r.id as string, name: r.name as string, redirectUris: JSON.parse(r.redirect_uris as string) as string[] } : null;
+    },
+    createAuthCode(c: { clientId: string; userId: string; redirectUri: string; challenge: string; scope: AgentToken["scope"] }): string {
+      const code = randomBytes(24).toString("base64url");
+      db.prepare("DELETE FROM oauth_codes WHERE expires_at < ?").run(Date.now());
+      db.prepare(
+        "INSERT INTO oauth_codes (hash, client_id, user_id, redirect_uri, challenge, scope, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).run(hashToken(code), c.clientId, c.userId, c.redirectUri, c.challenge, c.scope, Date.now() + 5 * 60_000);
+      return code;
+    },
+    /** A code works once: it's deleted as it's read. */
+    takeAuthCode(code: string) {
+      const r = db.prepare("DELETE FROM oauth_codes WHERE hash = ? RETURNING *").get(hashToken(code)) as Row | undefined;
+      if (!r || (r.expires_at as number) < Date.now()) return null;
+      return {
+        clientId: r.client_id as string,
+        userId: r.user_id as string,
+        redirectUri: r.redirect_uri as string,
+        challenge: r.challenge as string,
+        scope: r.scope as AgentToken["scope"],
+      };
     },
     /** The user and token behind a bearer token, or null if it's unknown or revoked. */
     tokenUser(token: string): { user: User; verified: boolean; token: AgentToken } | null {
@@ -790,7 +923,8 @@ export function openDb(file?: string) {
       if (!r) return null;
       const now = Date.now();
       // Last used is shown on the Connect an agent page; minute precision is plenty.
-      if (!r.last_used_at || now - (r.last_used_at as number) > 60_000) db.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").run(now, r.id as string);
+      if (!r.last_used_at || now - (r.last_used_at as number) > 60_000)
+        db.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").run(now, r.id as string);
       return {
         user: toUser({ id: r.u_id, email: r.email, name: r.name, picture: r.picture }),
         verified: Boolean(r.google_sub),
@@ -804,10 +938,17 @@ export function openDb(file?: string) {
     /** A note with the space and meeting it belongs to. */
     getNote(id: string): (Note & { roomId: string; meetingStartedAt: number; meetingEndedAt: number | null }) | null {
       const r = db
-        .prepare("SELECT n.*, m.room_id, m.started_at AS m_started, m.ended_at AS m_ended FROM notes n JOIN meetings m ON m.id = n.meeting_id WHERE n.id = ?")
+        .prepare(
+          "SELECT n.*, m.room_id, m.started_at AS m_started, m.ended_at AS m_ended FROM notes n JOIN meetings m ON m.id = n.meeting_id WHERE n.id = ?",
+        )
         .get(id) as Row | undefined;
       return r
-        ? { ...toNote(r), roomId: r.room_id as string, meetingStartedAt: r.m_started as number, meetingEndedAt: (r.m_ended as number) ?? null }
+        ? {
+            ...toNote(r),
+            roomId: r.room_id as string,
+            meetingStartedAt: r.m_started as number,
+            meetingEndedAt: (r.m_ended as number) ?? null,
+          }
         : null;
     },
     /** Every note on an item across meetings, newest meeting first. */
@@ -832,12 +973,20 @@ export function openDb(file?: string) {
              ORDER BY m.started_at DESC, n.rowid LIMIT 2000`,
           )
           .all(userId) as Row[]
-      ).map((r) => ({ ...toNote(r), roomId: r.room_id as string, roomName: r.room_name as string, meetingStartedAt: r.m_started as number }));
+      ).map((r) => ({
+        ...toNote(r),
+        roomId: r.room_id as string,
+        roomName: r.room_name as string,
+        meetingStartedAt: r.m_started as number,
+      }));
     },
     getSegments(ids: string[]): Segment[] {
       if (!ids.length) return [];
       const st = db.prepare("SELECT * FROM segments WHERE id = ?");
-      return ids.map((id) => st.get(id) as Row | undefined).filter((r): r is Row => !!r).map(toSegment);
+      return ids
+        .map((id) => st.get(id) as Row | undefined)
+        .filter((r): r is Row => !!r)
+        .map(toSegment);
     },
     latestMeeting(roomId: string) {
       const r = db.prepare("SELECT id FROM meetings WHERE room_id = ? ORDER BY started_at DESC LIMIT 1").get(roomId) as Row | undefined;
@@ -890,7 +1039,9 @@ export function openDb(file?: string) {
     },
     /** When the meeting before this one started: "since last time" starts there. */
     previousMeetingStart(roomId: string, before: number): number | null {
-      const r = db.prepare("SELECT MAX(started_at) AS t FROM meetings WHERE room_id = ? AND started_at < ?").get(roomId, before) as Row | undefined;
+      const r = db.prepare("SELECT MAX(started_at) AS t FROM meetings WHERE room_id = ? AND started_at < ?").get(roomId, before) as
+        | Row
+        | undefined;
       return (r?.t as number) ?? null;
     },
 
@@ -920,7 +1071,9 @@ export function openDb(file?: string) {
           segments,
           notes,
           discussions: (
-            db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? AND d.item_id = ? ORDER BY d.position`).all(m.id as string, itemId) as Row[]
+            db
+              .prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? AND d.item_id = ? ORDER BY d.position`)
+              .all(m.id as string, itemId) as Row[]
           ).map(toDiscussion),
         };
       });

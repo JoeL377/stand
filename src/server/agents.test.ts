@@ -126,3 +126,21 @@ test("references survive the agent rewriting the notes and topics mid-meeting", 
   assert.equal(t2.id, t1.id);
   assert.equal(q2.id, q1.id);
 });
+
+test("sign-in flow: codes work once, refresh swaps the pair, signing in again replaces the app's token", () => {
+  const { db, joe } = setup();
+  const app = db.registerClient("Claude", ["https://claude.ai/api/mcp/auth_callback"]);
+  const code = db.createAuthCode({ clientId: app.id, userId: joe.id, redirectUri: app.redirectUris[0], challenge: "c", scope: "write" });
+  assert.equal(db.takeAuthCode(code)?.userId, joe.id);
+  assert.equal(db.takeAuthCode(code), null);
+
+  const first = db.createToken(joe.id, app.name, "write", { clientId: app.id });
+  const next = db.refreshToken(first.refresh!, app.id)!;
+  assert.equal(db.tokenUser(first.token), null);
+  assert.equal(db.tokenUser(next.token)?.user.id, joe.id);
+  assert.equal(db.refreshToken(first.refresh!, app.id), null);
+
+  db.revokeClientTokens(joe.id, app.id);
+  assert.equal(db.tokenUser(next.token), null);
+  assert.deepEqual(db.listTokens(joe.id), []);
+});

@@ -7,6 +7,7 @@ import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, MeetingRecap, Slid
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } from "./auth.ts";
 import { handleMcp } from "./mcp.ts";
+import { oauthRoutes } from "./oauth.ts";
 import { capabilities, config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "./brief.ts";
@@ -56,8 +57,7 @@ app.use(express.json({ limit: "1mb" }));
 
 type Params = Record<string, string>;
 type Handler = (req: Request<Params>, res: Response) => unknown;
-const route = (fn: Handler) => (req: Request<Params>, res: Response, next: NextFunction) =>
-  Promise.resolve(fn(req, res)).catch(next);
+const route = (fn: Handler) => (req: Request<Params>, res: Response, next: NextFunction) => Promise.resolve(fn(req, res)).catch(next);
 
 const notFound = (res: Response, what = "Not found") => res.status(404).json({ error: what });
 
@@ -71,6 +71,8 @@ app.get("/api/config", (_req, res) => {
   res.json(capabilities());
 });
 app.use("/api/auth", authRoutes(db));
+// Sign-in for agents that connect with just the /mcp URL (Claude custom connectors).
+app.use(oauthRoutes(db));
 
 // ---- agents: the Stand MCP and the Copy for agent button ---------------------
 
@@ -78,7 +80,7 @@ const agents = agentApi({
   db,
   notify: (roomId, what) => {
     const s = sessions.get(roomId);
-    if (s && !s.ended) (what === "updates" ? s.updatesChanged() : s.followUpsChanged());
+    if (s && !s.ended) what === "updates" ? s.updatesChanged() : s.followUpsChanged();
   },
   brief: (meetingId, baseUrl, transcript) => {
     const m = db.getMeeting(meetingId)!;
@@ -96,13 +98,15 @@ const agents = agentApi({
   },
 });
 
-// Agents connect here with "Authorization: Bearer stand_pat_…" from the Connect an agent page.
+// Agents connect here with "Authorization: Bearer stand_pat_…", either typed in
+// from the Connect an agent page or handed out by the sign-in flow in oauth.ts.
 app.all(
   "/mcp",
   route(async (req, res) => {
     const caller = agentFromRequest(db, req);
     if (!caller) {
-      res.set("WWW-Authenticate", 'Bearer realm="stand"');
+      // Points apps at the sign-in flow, so a connector with just this URL can sign in.
+      res.set("WWW-Authenticate", `Bearer realm="stand", resource_metadata="${origin(req)}/.well-known/oauth-protected-resource/mcp"`);
       return void res.status(401).json({ error: "Stand needs an agent token. Make one on the Connect an agent page in Stand." });
     }
     await handleMcp(req, res, agents, caller, origin(req));
@@ -123,9 +127,13 @@ app.get(
 app.post(
   "/api/tokens",
   route((req, res) => {
-    const label = String(req.body?.label ?? "").trim().slice(0, 60) || "My agent";
+    const label =
+      String(req.body?.label ?? "")
+        .trim()
+        .slice(0, 60) || "My agent";
     const scope = req.body?.scope === "read" ? "read" : "write";
-    if (db.listTokens(req.user!.id).length >= 20) return void res.status(400).json({ error: "You have 20 agent tokens. Revoke one first." });
+    if (db.listTokens(req.user!.id).length >= 20)
+      return void res.status(400).json({ error: "You have 20 agent tokens. Revoke one first." });
     res.json(db.createToken(req.user!.id, label, scope));
   }),
 );
@@ -208,7 +216,8 @@ app.patch(
   route((req, res) => {
     const room = db.getRoom(req.params.id);
     if (!room) return notFound(res, "Space not found");
-    if (room.createdBy && room.createdBy !== req.user!.id) return void res.status(403).json({ error: "Only the person who created this space can change it" });
+    if (room.createdBy && room.createdBy !== req.user!.id)
+      return void res.status(403).json({ error: "Only the person who created this space can change it" });
     const name = req.body?.name === undefined ? undefined : String(req.body.name).trim().slice(0, 80);
     const purpose = req.body?.purpose === undefined ? undefined : String(req.body.purpose).trim().slice(0, 200);
     if (name === "") return void res.status(400).json({ error: "A space needs a name" });
@@ -221,8 +230,13 @@ app.patch(
 app.post(
   "/api/rooms",
   route((req, res) => {
-    const name = String(req.body?.name ?? "").trim().slice(0, 80) || "New space";
-    const purpose = String(req.body?.purpose ?? "").trim().slice(0, 200);
+    const name =
+      String(req.body?.name ?? "")
+        .trim()
+        .slice(0, 80) || "New space";
+    const purpose = String(req.body?.purpose ?? "")
+      .trim()
+      .slice(0, 200);
     const room = db.createRoom(name, req.user!.id, purpose);
     db.touchMembership(room.id, req.user!.id);
     res.json(room);
@@ -517,7 +531,9 @@ app.patch(
   route((req, res) => {
     const item = db.getItem(req.params.itemId);
     if (!item || item.roomId !== req.params.id) return notFound(res);
-    const title = String(req.body?.title ?? "").trim().slice(0, 300);
+    const title = String(req.body?.title ?? "")
+      .trim()
+      .slice(0, 300);
     if (title) db.updateItem(item.id, { title });
     res.json(afterItemsChange(item.roomId));
   }),
