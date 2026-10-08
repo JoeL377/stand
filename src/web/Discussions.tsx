@@ -38,7 +38,7 @@ export function ItemNotes(props: { notes: Note[]; discussions: Discussion[]; seg
 /** The note that says what a topic came to, matched to its outcome. */
 const HEADLINE_KIND: Record<DiscussionOutcome, Note["kind"] | null> = { decided: "decision", action: "action", open: "question", info: null };
 
-function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]; compact?: boolean; open: boolean; live?: boolean }) {
+function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]; compact?: boolean; open: boolean; live?: boolean; titleOnly?: boolean }) {
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
   const o = OUTCOME_META[d.outcome];
@@ -54,27 +54,43 @@ function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]
     turns.length ? `${turns.length} remark${turns.length === 1 ? "" : "s"}` : null,
     !props.live && todos ? `${todos} to-do${todos === 1 ? "" : "s"}` : null,
   ].filter(Boolean);
+  const overview = (
+    <>
+      {headline && (
+        <span className={headline.doneAt ? "disc-outcome done" : "disc-outcome"}>
+          {headline.text}
+          {headline.kind === "action" && headline.owner && <span className="disc-owner"> · {headline.owner}</span>}
+        </span>
+      )}
+      <span className="disc-meta">
+        {meta.join(" · ")}
+        {props.live && <span className="disc-now"> · Talking now</span>}
+      </span>
+    </>
+  );
   return (
-    <details className="disc" open={props.open}>
+    <details className={props.titleOnly ? "disc title-only" : "disc"} open={props.open}>
       <summary>
         <span className="disc-head">
           <span className="disc-topic">{d.topic}</span>
-          <span className={`rc-outcome ${d.outcome}`}>
-            <o.Icon size={13} /> {o.label}
-          </span>
+          {!props.titleOnly && (
+            <span className={`rc-outcome ${d.outcome}`}>
+              <o.Icon size={13} /> {o.label}
+            </span>
+          )}
+          {props.titleOnly && <ChevronIcon />}
         </span>
-        {headline && (
-          <span className={headline.doneAt ? "disc-outcome done" : "disc-outcome"}>
-            {headline.text}
-            {headline.kind === "action" && headline.owner && <span className="disc-owner"> · {headline.owner}</span>}
-          </span>
-        )}
-        <span className="disc-meta">
-          {meta.join(" · ")}
-          {props.live && <span className="disc-now"> · Talking now</span>}
-        </span>
+        {!props.titleOnly && overview}
       </summary>
       <div className="disc-body">
+        {props.titleOnly && (
+          <div className="disc-overview">
+            <span className={`rc-outcome ${d.outcome}`}>
+              <o.Icon size={13} /> {o.label}
+            </span>
+            {overview}
+          </div>
+        )}
         {d.continues && (
           <p className="disc-continues">
             Continues from <Link to={`/meetings/${d.continues.meetingId}`}>{fmtDate(d.continues.startedAt)}</Link>
@@ -237,6 +253,7 @@ export function LiveItemNotes(props: {
                 compact
                 open={false}
                 live={d.id === liveId}
+                titleOnly
               />
             ))}
           </div>
@@ -275,3 +292,9 @@ function talkingNow(discussions: Discussion[], segments: Segment[]): string | nu
   if (!latest || Date.now() - latest.ts > 120_000) return null;
   return discussions.find((d) => d.segmentIds.includes(latest.id))?.id ?? null;
 }
+
+const ChevronIcon = () => (
+  <svg className="disc-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="m9 6 6 6-6 6" />
+  </svg>
+);

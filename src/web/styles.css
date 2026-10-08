@@ -927,6 +927,11 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .disc-owner { color: var(--muted); }
 .disc-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
 .disc-now { color: var(--accent); font-weight: 600; }
+.disc.title-only .disc-head { align-items: center; }
+.disc-chevron { flex: none; color: var(--muted); transition: transform 0.15s; }
+.disc[open] .disc-chevron { transform: rotate(90deg); }
+.disc-overview { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.disc-overview .rc-outcome { margin-bottom: 4px; }
 .disc-body { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 8px; }
 .disc-continues { margin: 0; font-size: 12px; color: var(--muted); }
 .disc-body .note-list { margin: 0; }
@@ -1132,3 +1137,4 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .live-topics .discussions.compact .disc-body { padding: 0 0 10px; }
 .live-topics .discussions.compact .disc:first-child { border-top: 0; }
 .side-tabs .side-tab, .side-tabs .side-tab:hover, .side-tabs .side-tab:focus { background: transparent; border-radius: 0; box-shadow: none; }
+.disc.title-only .disc-topic { font-weight: 500; }
