@@ -226,9 +226,13 @@ function ChatBox({ send }: { send: (m: ClientMessage) => void }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
-      <button className="primary" disabled={!text.trim()}>
-        Send
-      </button>
+      {text.trim() && (
+        <button className="chat-send" aria-label="Send" title="Send (Enter)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+        </button>
+      )}
     </form>
   );
 }
