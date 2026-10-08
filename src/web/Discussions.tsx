@@ -230,13 +230,3 @@ export function LiveItemNotes(props: {
     </div>
   );
 }
-
-/** Counts for the card header: what the meeting has to act on, most urgent first. */
-export function liveNotesCount(notes: Note[], discussions: Discussion[]): string {
-  const todo = notes.filter((n) => n.kind === "action" && !n.doneAt).length;
-  const decided = notes.filter((n) => n.kind === "decision").length;
-  const open = notes.filter((n) => n.kind === "question").length;
-  const parts = [todo && `${todo} to do`, decided && `${decided} decided`, open && `${open} open`].filter(Boolean);
-  if (parts.length) return parts.join(" · ");
-  return discussions.length ? `${discussions.length} topic${discussions.length === 1 ? "" : "s"}` : "";
-}

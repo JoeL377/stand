@@ -3,7 +3,7 @@ import type { ClientMessage, Discussion, Item, Note, RoomState, Segment } from "
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
-import { LiveItemNotes, liveNotesCount } from "../Discussions.tsx";
+import { LiveItemNotes } from "../Discussions.tsx";
 
 const SPLIT_KEY = "stand.sideSplit";
 const DEFAULT_SPLIT = 50;
@@ -113,9 +113,6 @@ export function SidePanel(props: {
         <section className={notesOpen ? "focus-notes open" : "focus-notes"}>
           <button className="focus-notes-head" aria-expanded={notesOpen} onClick={() => setNotesOpen((o) => !o)}>
             <span>Agent notes</span>
-            <span className="muted">
-              {liveNotesCount(focusNotes, focusDiscussions)}
-            </span>
             {notesUpdating && <span className="notes-updating">Updating…</span>}
             <span className="chev" aria-hidden>
               {notesOpen ? "▾" : "▸"}
