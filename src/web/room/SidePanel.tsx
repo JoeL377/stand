@@ -77,7 +77,6 @@ export function SidePanel(props: {
       </div>
       {tab === "notes" ? (
         <div className="side-notes-tab">
-          <LiveSliver segments={shown} interims={interims} onOpen={() => setTab("transcript")} />
           {!hasNotes && <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>}
           {since.length > 0 && <SinceLastTime updates={since} />}
           {earlier.length > 0 && (
@@ -124,6 +123,7 @@ export function SidePanel(props: {
       ) : (
         <Transcript segments={shown} items={state.items} interims={interims} send={send} />
       )}
+      {tab === "notes" && <LiveSliver segments={shown} interims={interims} onOpen={() => setTab("transcript")} />}
       <div className="side-foot">
         <a
           href={`/meetings/${state.meetingId}`}
@@ -139,20 +139,33 @@ export function SidePanel(props: {
 }
 
 /** The last thing heard about this item, so people can tell at a glance that Stand is capturing. */
+/** The last few remarks about the item in focus, newest at the bottom; the live one has a red dot. */
 function LiveSliver(props: { segments: Segment[]; interims: Record<string, Interim>; onOpen: () => void }) {
   const live = Object.values(props.interims).at(-1);
-  const last = props.segments.at(-1);
-  if (!live && !last) return null;
-  const who = live ? live.speakerName : last!.speakerName;
-  const id = live ? live.speakerId : last!.speakerId;
+  const rows = [
+    ...props.segments.map((s) => ({
+      key: s.id,
+      who: s.speakerName,
+      id: s.speakerId,
+      text: s.text,
+      ts: s.ts as number | null,
+      live: false,
+    })),
+    ...(live ? [{ key: "live", who: live.speakerName, id: live.speakerId, text: `${live.text}…`, ts: null, live: true }] : []),
+  ].slice(-3);
+  if (rows.length === 0) return null;
   return (
-    <button className={live ? "side-sliver live" : "side-sliver"} onClick={props.onOpen} title="Open the transcript">
-      <span className="side-sliver-dot" aria-hidden />
-      <span className="side-sliver-who" style={{ color: colorFor(id) }}>
-        {who}
-      </span>
-      <span className="side-sliver-text">{live ? `${live.text}…` : last!.text}</span>
-      {!live && <span className="side-sliver-time">{fmtTime(last!.ts)}</span>}
+    <button className="side-sliver" onClick={props.onOpen} title="Open the transcript">
+      {rows.map((r) => (
+        <span key={r.key} className={r.live ? "side-sliver-row live" : "side-sliver-row"}>
+          <span className="side-sliver-dot" aria-hidden />
+          <span className="side-sliver-who" style={{ color: colorFor(r.id) }}>
+            {r.who}
+          </span>
+          <span className="side-sliver-text">{r.text}</span>
+          {r.ts !== null && <span className="side-sliver-time">{fmtTime(r.ts)}</span>}
+        </span>
+      ))}
     </button>
   );
 }
