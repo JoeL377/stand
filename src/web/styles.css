@@ -1251,7 +1251,7 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .side-head { padding: 14px 16px 10px; flex: none; display: flex; align-items: flex-start; gap: 10px; }
 .side-head-title { flex: 1; min-width: 0; margin: 0; font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--text); text-transform: none; letter-spacing: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .side-head-key { flex: none; margin-top: 1px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line); font-size: 11px; font-weight: 500; line-height: 18px; color: var(--muted); white-space: nowrap; }
-.side-foot { flex: none; display: flex; justify-content: flex-end; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; }
+.side-foot { flex: none; display: flex; justify-content: flex-end; padding: 6px 16px; font-size: 12px; }
 .side-foot a { color: var(--muted); }
 .side-foot a:hover { color: var(--text); text-decoration: none; }
 .side-toggle { display: flex; gap: 2px; margin: 0 16px 8px; padding: 3px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); flex: none; }

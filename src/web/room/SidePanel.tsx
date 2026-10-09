@@ -123,7 +123,6 @@ export function SidePanel(props: {
       ) : (
         <Transcript segments={shown} items={state.items} interims={interims} send={send} />
       )}
-      {tab === "notes" && <LiveSliver segments={shown} interims={interims} onOpen={() => setTab("transcript")} />}
       <div className="side-foot">
         <a
           href={`/meetings/${state.meetingId}`}
@@ -134,6 +133,7 @@ export function SidePanel(props: {
           Meeting recap ↗
         </a>
       </div>
+      {tab === "notes" && <LiveSliver segments={shown} interims={interims} onOpen={() => setTab("transcript")} />}
     </aside>
   );
 }
