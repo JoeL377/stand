@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Discussion, DiscussionOutcome, Note, Segment } from "../shared/protocol.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
@@ -51,9 +51,12 @@ function DiscussionBlock(props: {
   open: boolean;
   live?: boolean;
   titleOnly?: boolean;
+  /** Live panel: point at this topic's to-dos in the To do card. */
+  onShowTodos?: (ids: string[]) => void;
 }) {
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
+  const [turnsPop, setTurnsPop] = useState(false);
   const o = OUTCOME_META[d.outcome];
   const by = (k: Note["kind"]) => notes.filter((n) => n.kind === k);
   const ranked = [...by("decision"), ...by("action"), ...by("question")];
@@ -62,11 +65,10 @@ function DiscussionBlock(props: {
   const rest = ranked.filter((n) => n !== headline);
   const people = d.positions.length ? d.positions.map((p) => p.speaker) : [...new Set(turns.map((t) => t.speakerName))];
   const todos = by("action").filter((n) => !n.doneAt).length;
-  const meta = [
-    people.join(", "),
-    turns.length ? `${turns.length} remark${turns.length === 1 ? "" : "s"}` : null,
-    !props.live && todos ? `${todos} to-do${todos === 1 ? "" : "s"}` : null,
-  ].filter(Boolean);
+  const remarks = turns.length ? `${turns.length} remark${turns.length === 1 ? "" : "s"}` : null;
+  const todoLabel = todos ? `${todos} to-do${todos === 1 ? "" : "s"}` : null;
+  // The live panel shows remarks and to-dos as pills below instead.
+  const meta = props.titleOnly ? [people.join(", ")] : [people.join(", "), remarks, !props.live ? todoLabel : null].filter(Boolean);
   const overview = (
     <>
       {headline && (
@@ -151,14 +153,43 @@ function DiscussionBlock(props: {
             </ul>
           </div>
         )}
-        <div className="disc-foot">
-          {turns.length > 0 && (
-            <button className="link small" onClick={() => setShowTurns((s) => !s)}>
-              {showTurns ? "Hide remarks" : `Show ${turns.length} remark${turns.length === 1 ? "" : "s"}`}
-            </button>
-          )}
-          <CopyForAgent kind="topic" id={d.id} label />
-        </div>
+        {props.titleOnly ? (
+          <div className="disc-foot">
+            <span className="disc-pills">
+              {remarks && (
+                <button className="disc-pill" onClick={() => setTurnsPop(true)}>
+                  {remarks}
+                </button>
+              )}
+              {todoLabel && props.onShowTodos && (
+                <button
+                  className="disc-pill"
+                  onClick={() =>
+                    props.onShowTodos!(
+                      by("action")
+                        .filter((n) => !n.doneAt)
+                        .map((n) => n.id),
+                    )
+                  }
+                  title="Show in To do"
+                >
+                  {todoLabel}
+                </button>
+              )}
+            </span>
+            <CopyForAgent kind="topic" id={d.id} label />
+          </div>
+        ) : (
+          <div className="disc-foot">
+            {turns.length > 0 && (
+              <button className="link small" onClick={() => setShowTurns((s) => !s)}>
+                {showTurns ? "Hide remarks" : `Show ${turns.length} remark${turns.length === 1 ? "" : "s"}`}
+              </button>
+            )}
+            <CopyForAgent kind="topic" id={d.id} label />
+          </div>
+        )}
+        {turnsPop && <RemarksPopup topic={d.topic} turns={turns} onClose={() => setTurnsPop(false)} />}
         {showTurns && (
           <div className="disc-turns">
             {turns.map((s) => (
@@ -175,6 +206,40 @@ function DiscussionBlock(props: {
         )}
       </div>
     </details>
+  );
+}
+
+/** Everything said in one topic, over the page. Esc or a click outside closes it. */
+function RemarksPopup(props: { topic: string; turns: Segment[]; onClose: () => void }) {
+  const { onClose } = props;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog remarks-pop" role="dialog" aria-modal="true" aria-label={`Remarks: ${props.topic}`}>
+        <div className="remarks-pop-head">
+          <strong>{props.topic}</strong>
+          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div className="disc-turns remarks-pop-body">
+          {props.turns.map((s) => (
+            <div key={s.id} className="disc-turn">
+              <div className="disc-turn-head">
+                <span className="who">{s.speakerName}</span>
+                {s.kind === "chat" && <span className="seg-kind">chat</span>}
+                <span className="seg-time">{fmtTime(s.ts)}</span>
+              </div>
+              <div>{s.text}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -285,6 +350,13 @@ export function LiveItemNotes(props: {
   const [adding, setAdding] = useState<EditableKind | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
+  const [flash, setFlash] = useState<string[]>([]);
+  useEffect(() => {
+    if (!flash.length) return;
+    document.querySelector(`[data-note-id="${flash[0]}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const t = setTimeout(() => setFlash([]), 2200);
+    return () => clearTimeout(t);
+  }, [flash]);
   const todo = notes.filter((n) => n.kind === "action" && !n.doneAt);
   const done = notes.filter((n) => n.kind === "action" && n.doneAt);
   const decided = notes.filter((n) => n.kind === "decision");
@@ -323,7 +395,7 @@ export function LiveItemNotes(props: {
 
   const action = (n: Note) =>
     editRow(n) ?? (
-      <li key={n.id} className={n.doneAt ? "tk action done" : "tk action"}>
+      <li key={n.id} data-note-id={n.id} className={`tk action${n.doneAt ? " done" : ""}${flash.includes(n.id) ? " flash" : ""}`}>
         <input
           type="checkbox"
           checked={!!n.doneAt}
@@ -460,6 +532,7 @@ export function LiveItemNotes(props: {
                 open={false}
                 live={d.id === liveId}
                 titleOnly
+                onShowTodos={setFlash}
               />
             ))}
           </div>
