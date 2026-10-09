@@ -1123,6 +1123,14 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .side-tab .notes-updating { font-weight: 400; }
 .side-tab-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
 .side-notes-tab { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0 14px; }
+.side-sliver { display: flex; align-items: baseline; gap: 6px; width: calc(100% - 32px); margin: 6px 16px 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; font: inherit; font-size: 12.5px; text-align: left; color: inherit; cursor: pointer; min-width: 0; }
+.side-sliver:hover { background: rgb(127 127 127 / 0.08); }
+.side-sliver-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); align-self: center; }
+.side-sliver.live .side-sliver-dot { background: #e5484d; animation: sliver-pulse 1.2s ease-in-out infinite; }
+@keyframes sliver-pulse { 50% { opacity: 0.35; } }
+.side-sliver-who { flex: none; font-weight: 600; }
+.side-sliver-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.85; }
+.side-sliver-time { flex: none; color: var(--muted); font-size: 11px; }
 .side-agent-notes { padding: 10px 16px 0; font-size: 13px; }
 /* To do, Decided, Open questions and Topics each sit in their own card */
 .tk-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 10px 12px 12px; }
@@ -1234,3 +1242,23 @@ li:hover > .cfa .cfa-btn, li:focus-within > .cfa .cfa-btn, .cfa:has(.cfa-pop) .c
 .ag-made-foot { display: flex; justify-content: flex-end; }
 .ag-row { align-items: center; }
 .ag-revoke { font-size: 12px; color: var(--danger, #dc2626); }
+
+/* Host edits to the agent's notes */
+.note-edit-btn { flex: none; display: inline-flex; align-items: center; padding: 3px; min-height: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; box-shadow: none; }
+.note-edit-btn:hover, .note-edit-btn:focus-visible { background: var(--hover); color: var(--text); opacity: 1; }
+li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
+@media (hover: none) { .note-edit-btn { opacity: 1; } }
+.note-edited { margin-left: 6px; font-size: 11px; color: var(--muted); }
+.tk.editing { display: block; }
+.note-form { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.note-form textarea { width: 100%; resize: vertical; min-height: 44px; font: inherit; font-size: 13px; line-height: 1.4; padding: 6px 8px; border-radius: 6px; box-sizing: border-box; }
+.note-form-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.note-form-row button { font-size: 12px; padding: 4px 10px; min-height: 0; }
+.note-form-owner { width: 50%; min-width: 120px; font-size: 12px; padding: 4px 8px; box-sizing: border-box; }
+.note-form-gap { flex: 1; }
+.note-form-delete { color: var(--danger); background: transparent; border-color: transparent; }
+.note-form-delete:hover { background: rgb(229 72 77 / 0.12); }
+.note-add-row { display: flex; align-items: center; gap: 4px; margin: 2px 2px 10px; font-size: 12px; }
+.note-add-row button { font-size: 12px; padding: 3px 8px; min-height: 0; border: 1px dashed var(--line); background: transparent; color: var(--muted); border-radius: 999px; cursor: pointer; }
+.note-add-row button:hover { color: var(--text); border-color: var(--muted); }
+.note-add-row .muted { margin-right: 2px; }

@@ -144,3 +144,17 @@ test("sign-in flow: codes work once, refresh swaps the pair, signing in again re
   assert.equal(db.tokenUser(next.token), null);
   assert.deepEqual(db.listTokens(joe.id), []);
 });
+
+test("list_actions returns everyone's to-dos in a space, filtered by owner or status", () => {
+  const { api, joe } = setup();
+  const caller = { user: joe, token: null };
+  const all = api.listActions(caller, { space: "checkout" }, "http://stand.test");
+  assert.equal(all.space.name, "Checkout v2");
+  assert.deepEqual(all.actions.map((a) => a.owner).sort(), ["Andy", "Joe"]);
+  assert.deepEqual(
+    api.listActions(caller, { space: "Checkout v2", owner: "Andy Li" }, "x").actions.map((a) => a.text),
+    ["Write the migration note"],
+  );
+  assert.equal(api.listActions(caller, { space: "checkout", status: "done" }, "x").count, 0);
+  assert.throws(() => api.listActions(caller, { space: "nowhere" }, "x"), /not in a space/);
+});

@@ -83,6 +83,8 @@ export interface Note {
   doneBy: string | null;
   /** The discussion this came out of, when the agent grouped the talk into discussions. */
   discussionId: string | null;
+  /** Who in the meeting last edited or added this by hand. The agent keeps edited notes as written. */
+  editedBy?: string | null;
 }
 
 export type DiscussionOutcome = "decided" | "action" | "open" | "info";
@@ -218,6 +220,10 @@ export type ClientMessage =
   | { type: "frame"; dataUrl: string }
   | { type: "segment.move"; segmentId: string; itemId: string | null }
   | { type: "followup.done"; noteId: string; done: boolean }
+  // Host only: fix what the agent wrote down for the item in focus.
+  | { type: "note.edit"; noteId: string; text: string; owner?: string | null }
+  | { type: "note.remove"; noteId: string }
+  | { type: "note.add"; itemId: string | null; kind: "action" | "decision" | "question"; text: string; owner?: string | null }
   | { type: "demo.play" }
   | { type: "meeting.end" };
 

@@ -6,7 +6,6 @@ import { NoteList } from "./room/SidePanel.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { fmtDate, fmtTime } from "./util.ts";
 
-
 /** An item's notes as the agent grouped them: the summary, then one block per
  *  discussion with who argued what and what came of it. Notes that belong to
  *  no discussion (or were written before discussions existed) follow. */
@@ -37,9 +36,22 @@ export function ItemNotes(props: { notes: Note[]; discussions: Discussion[]; seg
 }
 
 /** The note that says what a topic came to, matched to its outcome. */
-const HEADLINE_KIND: Record<DiscussionOutcome, Note["kind"] | null> = { decided: "decision", action: "action", open: "question", info: null };
+const HEADLINE_KIND: Record<DiscussionOutcome, Note["kind"] | null> = {
+  decided: "decision",
+  action: "action",
+  open: "question",
+  info: null,
+};
 
-function DiscussionBlock(props: { d: Discussion; notes: Note[]; turns: Segment[]; compact?: boolean; open: boolean; live?: boolean; titleOnly?: boolean }) {
+function DiscussionBlock(props: {
+  d: Discussion;
+  notes: Note[];
+  turns: Segment[];
+  compact?: boolean;
+  open: boolean;
+  live?: boolean;
+  titleOnly?: boolean;
+}) {
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
   const o = OUTCOME_META[d.outcome];
@@ -171,13 +183,103 @@ const OUTCOME_META: Record<DiscussionOutcome, { label: string; Icon: (p: { size?
  *  then the gist and one row per topic (name + outcome), whose positions and
  *  raw turns open one level down. Done actions fold
  *  into a single "n done" line. */
+type EditableKind = "action" | "decision" | "question";
+
+/** What the meeting's host can do to the agent's notes. Absent for everyone else. */
+export type NoteEditing = {
+  change: (n: Note, text: string, owner: string | null) => void;
+  remove: (n: Note) => void;
+  add: (kind: EditableKind, text: string, owner: string | null) => void;
+};
+
+/** Inline form for one note: its wording, plus an owner for a to-do. */
+function NoteForm(props: {
+  kind: EditableKind;
+  text?: string;
+  owner?: string | null;
+  onSave: (text: string, owner: string | null) => void;
+  onCancel: () => void;
+  onDelete?: () => void;
+}) {
+  const [text, setText] = useState(props.text ?? "");
+  const [owner, setOwner] = useState(props.owner ?? "");
+  const save = () => {
+    if (text.trim()) props.onSave(text.trim(), owner.trim() || null);
+  };
+  return (
+    <form
+      className="note-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") props.onCancel();
+      }}
+    >
+      <textarea
+        autoFocus
+        rows={2}
+        value={text}
+        maxLength={500}
+        aria-label="Note"
+        placeholder={props.kind === "action" ? "What needs doing" : props.kind === "decision" ? "What was decided" : "What's still open"}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            save();
+          }
+        }}
+      />
+      {props.kind === "action" && (
+        <input
+          className="note-form-owner"
+          value={owner}
+          maxLength={60}
+          placeholder="Owner"
+          aria-label="Owner"
+          onChange={(e) => setOwner(e.target.value)}
+        />
+      )}
+      <div className="note-form-row">
+        {props.onDelete && (
+          <button type="button" className="note-form-delete" onClick={props.onDelete}>
+            Delete
+          </button>
+        )}
+        <span className="note-form-gap" />
+        <button type="button" onClick={props.onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="primary" disabled={!text.trim()}>
+          Save
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function EditButton(props: { onClick: () => void }) {
+  return (
+    <button className="note-edit-btn" onClick={props.onClick} title="Edit or delete" aria-label="Edit or delete">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+        <path d="M11.5 2.5l2 2L5 13H3v-2l8.5-8.5z" strokeLinejoin="round" />
+      </svg>
+    </button>
+  );
+}
+
 export function LiveItemNotes(props: {
   notes: Note[];
   discussions: Discussion[];
   segments: Segment[];
   onToggle?: (n: Note, done: boolean) => void;
+  editing?: NoteEditing;
 }) {
-  const { notes, discussions, segments, onToggle } = props;
+  const { notes, discussions, segments, onToggle, editing } = props;
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [adding, setAdding] = useState<EditableKind | null>(null);
   const [showDone, setShowDone] = useState(false);
   const todo = notes.filter((n) => n.kind === "action" && !n.doneAt);
   const done = notes.filter((n) => n.kind === "action" && n.doneAt);
@@ -187,24 +289,57 @@ export function LiveItemNotes(props: {
   const empty = !todo.length && !done.length && !decided.length && !open.length;
   const liveId = talkingNow(discussions, segments);
 
-  const action = (n: Note) => (
-    <li key={n.id} className={n.doneAt ? "tk action done" : "tk action"}>
-      <input
-        type="checkbox"
-        checked={!!n.doneAt}
-        disabled={!onToggle}
-        onChange={(e) => onToggle?.(n, e.target.checked)}
-        aria-label={n.doneAt ? "Mark not done" : "Mark done"}
-      />
-      <span className="tk-text">{n.text}</span>
-      {n.owner && <span className="owner">{n.owner}</span>}
-      <CopyForAgent kind="action" id={n.id} />
-    </li>
-  );
+  /** A note being edited turns into its form; otherwise the host gets an edit button beside it. */
+  const editRow = (n: Note) =>
+    editing && editingId === n.id ? (
+      <li key={n.id} className="tk editing">
+        <NoteForm
+          kind={n.kind as EditableKind}
+          text={n.text}
+          owner={n.owner}
+          onSave={(text, owner) => {
+            editing.change(n, text, owner);
+            setEditingId(null);
+          }}
+          onDelete={() => {
+            editing.remove(n);
+            setEditingId(null);
+          }}
+          onCancel={() => setEditingId(null)}
+        />
+      </li>
+    ) : null;
+  const edited = (n: Note) =>
+    n.editedBy ? (
+      <span className="note-edited" title={`Edited by ${n.editedBy}`}>
+        edited
+      </span>
+    ) : null;
+  const editBtn = (n: Note) => (editing ? <EditButton onClick={() => setEditingId(n.id)} /> : null);
+
+  const action = (n: Note) =>
+    editRow(n) ?? (
+      <li key={n.id} className={n.doneAt ? "tk action done" : "tk action"}>
+        <input
+          type="checkbox"
+          checked={!!n.doneAt}
+          disabled={!onToggle}
+          onChange={(e) => onToggle?.(n, e.target.checked)}
+          aria-label={n.doneAt ? "Mark not done" : "Mark done"}
+        />
+        <span className="tk-text">
+          {n.text}
+          {edited(n)}
+        </span>
+        {n.owner && <span className="owner">{n.owner}</span>}
+        {editBtn(n)}
+        <CopyForAgent kind="action" id={n.id} />
+      </li>
+    );
 
   return (
     <div className="live-notes">
-      {empty && <p className="tk-empty">Nothing decided or assigned yet.</p>}
+      {empty && !adding && notes.length > 0 && <p className="tk-empty">Nothing decided or assigned yet.</p>}
       {(todo.length > 0 || done.length > 0) && (
         <section className="tk-group tk-card">
           <h4>To do</h4>
@@ -223,13 +358,20 @@ export function LiveItemNotes(props: {
         <section className="tk-group tk-card">
           <h4>Decided</h4>
           <ul>
-            {decided.map((n) => (
-              <li key={n.id} className="tk decision">
-                <span className="tk-icon">✓</span>
-                <span className="tk-text">{n.text}</span>
-                <CopyForAgent kind="decision" id={n.id} />
-              </li>
-            ))}
+            {decided.map(
+              (n) =>
+                editRow(n) ?? (
+                  <li key={n.id} className="tk decision">
+                    <span className="tk-icon">✓</span>
+                    <span className="tk-text">
+                      {n.text}
+                      {edited(n)}
+                    </span>
+                    {editBtn(n)}
+                    <CopyForAgent kind="decision" id={n.id} />
+                  </li>
+                ),
+            )}
           </ul>
         </section>
       )}
@@ -237,16 +379,45 @@ export function LiveItemNotes(props: {
         <section className="tk-group tk-card">
           <h4>Open questions</h4>
           <ul>
-            {open.map((n) => (
-              <li key={n.id} className="tk question">
-                <span className="tk-icon">?</span>
-                <span className="tk-text">{n.text}</span>
-                <CopyForAgent kind="question" id={n.id} />
-              </li>
-            ))}
+            {open.map(
+              (n) =>
+                editRow(n) ?? (
+                  <li key={n.id} className="tk question">
+                    <span className="tk-icon">?</span>
+                    <span className="tk-text">
+                      {n.text}
+                      {edited(n)}
+                    </span>
+                    {editBtn(n)}
+                    <CopyForAgent kind="question" id={n.id} />
+                  </li>
+                ),
+            )}
           </ul>
         </section>
       )}
+      {editing &&
+        (adding ? (
+          <section className="tk-group tk-card note-add">
+            <h4>{adding === "action" ? "New to-do" : adding === "decision" ? "New decision" : "New open question"}</h4>
+            <NoteForm
+              key={adding}
+              kind={adding}
+              onSave={(text, owner) => {
+                editing.add(adding, text, owner);
+                setAdding(null);
+              }}
+              onCancel={() => setAdding(null)}
+            />
+          </section>
+        ) : (
+          <div className="note-add-row">
+            <span className="muted">Add</span>
+            <button onClick={() => setAdding("action")}>To-do</button>
+            <button onClick={() => setAdding("decision")}>Decision</button>
+            <button onClick={() => setAdding("question")}>Question</button>
+          </div>
+        ))}
       {discussions.length > 0 ? (
         <section className="tk-group tk-card live-topics">
           <h4>Topics</h4>
@@ -301,7 +472,18 @@ function talkingNow(discussions: Discussion[], segments: Segment[]): string | nu
 }
 
 const ChevronIcon = () => (
-  <svg className="disc-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  <svg
+    className="disc-chevron"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
     <path d="m9 6 6 6-6 6" />
   </svg>
 );

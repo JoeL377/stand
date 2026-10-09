@@ -108,6 +108,14 @@ CREATE TABLE IF NOT EXISTS notes (
   ts INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS notes_item ON notes(item_id);
+-- Notes the meeting's host deleted or reworded, so the agent's next redraft doesn't bring the old ones back.
+CREATE TABLE IF NOT EXISTS dismissed_notes (
+  meeting_id TEXT NOT NULL,
+  item_id TEXT,
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dismissed_notes_item ON dismissed_notes(meeting_id, item_id);
 -- The agent's grouping of an item's talk into discussions, one per question.
 CREATE TABLE IF NOT EXISTS discussions (
   id TEXT PRIMARY KEY,
@@ -238,6 +246,7 @@ const toNote = (r: Row): Note => ({
   doneAt: (r.done_at as number) ?? null,
   doneBy: (r.done_by as string) ?? null,
   discussionId: (r.discussion_id as string) ?? null,
+  editedBy: (r.edited_by as string) ?? null,
 });
 
 const toUpdate = (r: Row): ItemUpdate => ({
@@ -298,6 +307,7 @@ export function openDb(file?: string) {
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
+  if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
   if (!deckCols.includes("kind"))
     db.exec(
@@ -703,6 +713,7 @@ export function openDb(file?: string) {
           ts?: number;
           doneAt?: number | null;
           doneBy?: string | null;
+          editedBy?: string | null;
         }
       >,
     ): Note[] {
@@ -723,7 +734,7 @@ export function openDb(file?: string) {
       );
       db.prepare("DELETE FROM notes WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
       const st = db.prepare(
-        "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const ts = Date.now();
       return notes.map((n) => {
@@ -739,10 +750,85 @@ export function openDb(file?: string) {
           doneAt: d?.doneAt ?? null,
           doneBy: d?.doneBy ?? null,
           discussionId: n.discussionId ?? null,
+          editedBy: n.editedBy ?? null,
         };
-        st.run(note.id, meetingId, itemId, note.kind, note.text, note.owner, ts, note.doneAt, note.doneBy, note.discussionId);
+        st.run(
+          note.id,
+          meetingId,
+          itemId,
+          note.kind,
+          note.text,
+          note.owner,
+          ts,
+          note.doneAt,
+          note.doneBy,
+          note.discussionId,
+          note.editedBy ?? null,
+        );
         return note;
       });
+    },
+    /** The host's own wording for a note. Edited notes stay as written when the agent redrafts. */
+    editNote(id: string, change: { text: string; owner: string | null }, by: string): Note | null {
+      const before = db.prepare("SELECT * FROM notes WHERE id = ?").get(id) as Row | undefined;
+      // The agent's old wording is replaced, so a redraft that writes it again doesn't add it twice.
+      if (before && before.text !== change.text)
+        db.prepare("INSERT INTO dismissed_notes (meeting_id, item_id, kind, text) VALUES (?, ?, ?, ?)").run(
+          before.meeting_id as string,
+          (before.item_id as string) ?? null,
+          before.kind as string,
+          before.text as string,
+        );
+      db.prepare("UPDATE notes SET text = ?, owner = ?, edited_by = ? WHERE id = ?").run(change.text, change.owner, by, id);
+      const r = db.prepare("SELECT * FROM notes WHERE id = ?").get(id) as Row | undefined;
+      return r ? toNote(r) : null;
+    },
+    /** Deletes a note and remembers it, so the agent doesn't write it again for this meeting. */
+    removeNote(id: string): Note | null {
+      const r = db.prepare("SELECT * FROM notes WHERE id = ?").get(id) as Row | undefined;
+      if (!r) return null;
+      db.prepare("INSERT INTO dismissed_notes (meeting_id, item_id, kind, text) VALUES (?, ?, ?, ?)").run(
+        r.meeting_id as string,
+        (r.item_id as string) ?? null,
+        r.kind as string,
+        r.text as string,
+      );
+      db.prepare("DELETE FROM notes WHERE id = ?").run(id);
+      return toNote(r);
+    },
+    addNote(meetingId: string, itemId: string | null, n: { kind: NoteKind; text: string; owner: string | null }, by: string): Note {
+      const note: Note = {
+        id: newId(12),
+        meetingId,
+        itemId,
+        kind: n.kind,
+        text: n.text,
+        owner: n.owner,
+        ts: Date.now(),
+        doneAt: null,
+        doneBy: null,
+        discussionId: null,
+        editedBy: by,
+      };
+      db.prepare("INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+        note.id,
+        meetingId,
+        itemId,
+        note.kind,
+        note.text,
+        note.owner,
+        note.ts,
+        by,
+      );
+      return note;
+    },
+    dismissedNotes(meetingId: string, itemId: string | null): Array<{ kind: NoteKind; text: string }> {
+      return (
+        db.prepare("SELECT kind, text FROM dismissed_notes WHERE meeting_id = ? AND item_id IS ?").all(meetingId, itemId) as Row[]
+      ).map((r) => ({
+        kind: r.kind as NoteKind,
+        text: r.text as string,
+      }));
     },
     /** Discussions for one item in one meeting are regenerated as a whole, with its notes. */
     replaceDiscussions(meetingId: string, itemId: string | null, drafts: DraftDiscussion[]): Discussion[] {

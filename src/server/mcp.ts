@@ -13,7 +13,7 @@ const INSTRUCTIONS = `Stand records team meetings and pins what was said to the 
 
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id> and stand:topic/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
-"What's mine?" -> list_my_work. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
+"What's mine?" -> list_my_work. Everything to do in a space -> list_actions. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 Report back when you finish or get stuck: complete_action for a to-do you finished (add a note and the PR link), post_update for progress, a blocker, or something people need to decide. Reports show up on that item in Stand.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
@@ -62,6 +62,22 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     },
     ({ space, status, include_unassigned }) =>
       run(() => api.listMyWork(caller, { space, status, includeUnassigned: include_unassigned }, baseUrl)),
+  );
+
+  server.registerTool(
+    "list_actions",
+    {
+      title: "List a space's to-dos",
+      description:
+        "Every to-do in one Stand space, whoever owns it, newest meeting first. Each has its ref, owner, status, item, the decision behind it, and the meeting date. Filter by status and owner.",
+      inputSchema: {
+        space: z.string().describe("The space's id or name (from list_spaces)"),
+        status: z.enum(["open", "done", "all"]).optional().describe("Default open"),
+        owner: z.string().optional().describe('Only this person\'s (a name, or first name), or "unassigned"'),
+      },
+      annotations: READ,
+    },
+    ({ space, status, owner }) => run(() => api.listActions(caller, { space, status, owner }, baseUrl)),
   );
 
   server.registerTool(

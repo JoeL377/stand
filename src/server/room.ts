@@ -55,6 +55,9 @@ export interface Transcriber {
   stop(): Promise<void>;
 }
 
+/** Text people typed, trimmed and capped. */
+const clean = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
+
 export class RoomSession implements SpeechSink {
   readonly roomId: string;
   roomName: string;
@@ -337,18 +340,40 @@ export class RoomSession implements SpeechSink {
       case "followup.done": {
         const note = this.db.setActionDone(this.roomId, msg.noteId, msg.done ? conn.name : null);
         if (!note) break;
-        if (this.meetingId && note.meetingId === this.meetingId) {
-          // An action from this meeting: resend its item's notes so every card updates.
-          const all = this.db.meetingNotes(this.meetingId);
-          this.broadcast({
-            type: "notes",
-            meetingId: this.meetingId,
-            itemId: note.itemId,
-            notes: all.filter((n) => n.itemId === note.itemId),
-            discussions: this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === note.itemId),
-          });
-        }
+        // An action from this meeting: resend its item's notes so every card updates.
+        if (note.meetingId === this.meetingId) this.sendItemNotes(note.itemId);
         this.broadcastState();
+        break;
+      }
+      case "note.edit": {
+        if (!isHost || !this.meetingId) return;
+        const text = clean(msg.text, 500);
+        const before = this.db.meetingNotes(this.meetingId).find((n) => n.id === msg.noteId);
+        if (!before || !text) return;
+        const owner = before.kind === "action" ? clean(msg.owner, 60) || null : null;
+        this.db.editNote(before.id, { text, owner }, conn.name);
+        this.sendItemNotes(before.itemId);
+        if (before.kind === "action") this.broadcastState();
+        break;
+      }
+      case "note.remove": {
+        if (!isHost || !this.meetingId) return;
+        const before = this.db.meetingNotes(this.meetingId).find((n) => n.id === msg.noteId);
+        if (!before) return;
+        this.db.removeNote(before.id);
+        this.sendItemNotes(before.itemId);
+        if (before.kind === "action") this.broadcastState();
+        break;
+      }
+      case "note.add": {
+        if (!isHost || !this.meetingId || !["action", "decision", "question"].includes(msg.kind)) return;
+        const text = clean(msg.text, 500);
+        if (!text) return;
+        const itemId = msg.itemId && this.items().some((i) => i.id === msg.itemId) ? msg.itemId : null;
+        const owner = msg.kind === "action" ? clean(msg.owner, 60) || null : null;
+        this.db.addNote(this.meetingId, itemId, { kind: msg.kind, text, owner }, conn.name);
+        this.sendItemNotes(itemId);
+        if (msg.kind === "action") this.broadcastState();
         break;
       }
       case "demo.play":
@@ -358,6 +383,18 @@ export class RoomSession implements SpeechSink {
         if (isHost) await this.end();
         break;
     }
+  }
+
+  /** Resends one item's notes and topics in this meeting, after a hand change. */
+  private sendItemNotes(itemId: string | null) {
+    if (!this.meetingId) return;
+    this.broadcast({
+      type: "notes",
+      meetingId: this.meetingId,
+      itemId,
+      notes: this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId),
+      discussions: this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId),
+    });
   }
 
   private isHost(participantId: string) {
@@ -563,13 +600,19 @@ export class RoomSession implements SpeechSink {
           this.meetingId,
           itemId,
           mergeNotes(
-            draft.notes.map(({ discussion, ...n }) => ({ ...n, discussionId: discussion === null ? null : (discussions[discussion]?.id ?? null) })),
+            draft.notes.map(({ discussion, ...n }) => ({
+              ...n,
+              discussionId: discussion === null ? null : (discussions[discussion]?.id ?? null),
+            })),
             current,
             keys,
+            this.db.dismissedNotes(this.meetingId, itemId),
           ),
         );
         this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
-        console.log(`[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+        console.log(
+          `[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
+        );
       } catch (err) {
         console.error("[agent] notes failed:", err);
       } finally {

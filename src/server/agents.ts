@@ -108,6 +108,26 @@ export function agentApi(deps: AgentDeps) {
   };
 
   /** Finds what a reference points to, checking the caller is in its space. */
+  /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
+  function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number }>, baseUrl: string) {
+    const items = new Map<string, Item | null>();
+    return rows.map((n) => {
+      if (n.itemId && !items.has(n.itemId)) items.set(n.itemId, db.getItem(n.itemId));
+      const item = n.itemId ? items.get(n.itemId)! : null;
+      const decision = n.discussionId
+        ? db.meetingNotes(n.meetingId).find((x) => x.discussionId === n.discussionId && x.kind === "decision")
+        : undefined;
+      return {
+        ...actionInfo(n),
+        space: n.roomName as string | undefined,
+        item: item ? { id: item.id, title: item.title, key: item.externalId ?? undefined } : undefined,
+        decided: decision?.text,
+        from_meeting: day(n.meetingStartedAt),
+        url: refUrl(baseUrl, "action", n.id),
+      };
+    });
+  }
+
   function resolve(caller: Caller, refText: string) {
     const ref = parseRef(refText);
     if (!ref) throw new AgentError(`"${clip(refText, 60)}" isn't a Stand reference. They look like stand:action/k3m9xq2p.`);
@@ -233,6 +253,36 @@ export function agentApi(deps: AgentDeps) {
       return { meetingId: r.meeting.id, roomId: r.room.id, itemId: r.itemId };
     },
 
+    listActions(caller: Caller, opts: { space: string; status?: "open" | "done" | "all"; owner?: string }, baseUrl: string) {
+      const status = opts.status ?? "open";
+      const q = opts.space.trim().toLowerCase();
+      const spaces = db.spaceRows(caller.user.id).filter((r) => r.id === opts.space || r.name.toLowerCase().includes(q));
+      if (!q || spaces.length === 0) throw new AgentError(`You're not in a space matching "${opts.space}". list_spaces shows yours.`);
+      if (spaces.length > 1 && !spaces.some((r) => r.name.toLowerCase() === q))
+        throw new AgentError(`"${opts.space}" matches ${spaces.map((r) => `${r.name} (${r.id})`).join(", ")}. Give one id.`);
+      const room = spaces.find((r) => r.id === opts.space || r.name.toLowerCase() === q) ?? spaces[0];
+      const who = opts.owner?.trim().toLowerCase();
+      const rows = db
+        .memberActions(caller.user.id)
+        .filter((n) => n.roomId === room.id)
+        .filter((n) => (status === "all" ? true : status === "done" ? !!n.doneAt : !n.doneAt))
+        .filter((n) => {
+          if (!who) return true;
+          if (who === "unassigned" || who === "none") return !n.owner;
+          if (!n.owner) return false;
+          const o = n.owner.trim().toLowerCase();
+          return o === who || o.split(/\s+/)[0] === who || who.split(/\s+/)[0] === o;
+        });
+      return {
+        space: { id: room.id, name: room.name },
+        status,
+        owner: opts.owner || undefined,
+        count: rows.length,
+        actions: workRows(rows.slice(0, 100), baseUrl).map((w) => ({ ...w, space: undefined })),
+        note: rows.length > 100 ? "Showing the newest 100. Filter by status or owner to see the rest." : undefined,
+      };
+    },
+
     listSpaces(caller: Caller) {
       return db.spaceRows(caller.user.id).map((row) => ({
         id: row.id,
@@ -257,22 +307,7 @@ export function agentApi(deps: AgentDeps) {
         .filter((n) => !q || n.roomId === opts.space || n.roomName.toLowerCase().includes(q))
         .filter((n) => (status === "all" ? true : status === "done" ? !!n.doneAt : !n.doneAt));
       const mine = all.filter((n) => ownedBy(n.owner, caller.user.name) || (opts.includeUnassigned && !n.owner));
-      const items = new Map<string, Item | null>();
-      const work = mine.slice(0, 50).map((n) => {
-        if (n.itemId && !items.has(n.itemId)) items.set(n.itemId, db.getItem(n.itemId));
-        const item = n.itemId ? items.get(n.itemId)! : null;
-        const decision = n.discussionId
-          ? db.meetingNotes(n.meetingId).find((x) => x.discussionId === n.discussionId && x.kind === "decision")
-          : undefined;
-        return {
-          ...actionInfo(n),
-          space: n.roomName,
-          item: item ? { id: item.id, title: item.title, key: item.externalId ?? undefined } : undefined,
-          decided: decision?.text,
-          from_meeting: day(n.meetingStartedAt),
-          url: refUrl(baseUrl, "action", n.id),
-        };
-      });
+      const work = workRows(mine.slice(0, 50), baseUrl);
       return {
         you: caller.user.name,
         count: mine.length,

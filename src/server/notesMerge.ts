@@ -3,6 +3,8 @@
 // before, so this carries the earlier ones forward: a redrafted note that
 // restates an earlier one keeps that note's id and checked-off state, and an
 // earlier one the redraft left out is kept as it was. Nothing captured is lost.
+// The host's hand edits win: an edited or added note keeps its wording, and a
+// note the host deleted isn't written again.
 
 import type { Note } from "../shared/protocol.ts";
 import type { CapturedNote, DraftNote } from "./llm.ts";
@@ -17,6 +19,7 @@ export type MergedNote = DraftNote & {
   ts?: number;
   doneAt?: number | null;
   doneBy?: string | null;
+  editedBy?: string | null;
 };
 
 /** Keys the model sees for the earlier notes: A1.. for to-dos, D1.. for decisions. */
@@ -28,7 +31,14 @@ export function capturedFor(existing: Note[]): Array<CapturedNote & { id: string
     .map((n) => ({ id: n.id, key: n.kind === "action" ? `A${++a}` : `D${++d}`, kind: n.kind as Kept, text: n.text, owner: n.owner }));
 }
 
-const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 2));
+const words = (t: string) =>
+  new Set(
+    t
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 2),
+  );
 
 /** Same task or decision in different words, for when the model forgot to say so. */
 function similar(a: string, b: string): boolean {
@@ -44,22 +54,39 @@ export function mergeNotes(
   draft: Array<DraftNote & { discussionId: string | null; sameAs?: string | null }>,
   existing: Note[],
   keys: Array<{ id: string; key: string }>,
+  dismissed: Array<{ kind: string; text: string }> = [],
 ): MergedNote[] {
   const byKey = new Map(keys.map((k) => [k.key, existing.find((n) => n.id === k.id)]));
   const claimed = new Set<string>();
-  const out: MergedNote[] = draft.map(({ sameAs, ...n }) => {
-    if (!KEPT.has(n.kind)) return n;
+  const kept = (e: Note) => KEPT.has(e.kind) || !!e.editedBy;
+  const out: MergedNote[] = [];
+  for (const { sameAs, ...n } of draft) {
+    if (dismissed.some((x) => x.kind === n.kind && similar(x.text, n.text))) continue;
     let prev = sameAs ? byKey.get(sameAs) : undefined;
     if (prev && (prev.kind !== n.kind || claimed.has(prev.id))) prev = undefined;
-    prev ??= existing.find((e) => e.kind === n.kind && !claimed.has(e.id) && similar(e.text, n.text));
-    if (!prev) return n;
+    prev ??= existing.find((e) => e.kind === n.kind && kept(e) && !claimed.has(e.id) && similar(e.text, n.text));
+    if (!prev) {
+      out.push(n);
+      continue;
+    }
     claimed.add(prev.id);
-    return { ...n, owner: n.owner ?? prev.owner, id: prev.id, ts: prev.ts, doneAt: prev.doneAt, doneBy: prev.doneBy };
-  });
+    const mine = prev.editedBy ? { text: prev.text, owner: prev.owner, editedBy: prev.editedBy } : { owner: n.owner ?? prev.owner };
+    out.push({ ...n, ...mine, id: prev.id, ts: prev.ts, doneAt: prev.doneAt, doneBy: prev.doneBy });
+  }
   // Whatever the redraft left out stays, as it was.
   for (const e of existing) {
-    if (!KEPT.has(e.kind) || claimed.has(e.id)) continue;
-    out.push({ kind: e.kind, text: e.text, owner: e.owner, discussionId: null, id: e.id, ts: e.ts, doneAt: e.doneAt, doneBy: e.doneBy });
+    if (!kept(e) || claimed.has(e.id)) continue;
+    out.push({
+      kind: e.kind,
+      text: e.text,
+      owner: e.owner,
+      discussionId: null,
+      id: e.id,
+      ts: e.ts,
+      doneAt: e.doneAt,
+      doneBy: e.doneBy,
+      editedBy: e.editedBy ?? null,
+    });
   }
   return out;
 }

@@ -3,7 +3,7 @@ import type { ClientMessage, Discussion, Item, ItemUpdate, Note, RoomState, Segm
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
-import { LiveItemNotes } from "../Discussions.tsx";
+import { LiveItemNotes, type NoteEditing } from "../Discussions.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -37,6 +37,15 @@ export function SidePanel(props: {
   }, [tab, shown.length]);
   useEffect(() => setSeen(shown.length), [state.focusItemId]);
   const unseen = Math.max(0, shown.length - seen);
+  // The host can fix what the agent wrote: edit, delete or add notes for the item in focus.
+  const isHost = state.participants.some((p) => p.id === props.participantId && p.isHost);
+  const editing: NoteEditing | undefined = isHost
+    ? {
+        change: (n, text, owner) => send({ type: "note.edit", noteId: n.id, text, owner }),
+        remove: (n) => send({ type: "note.remove", noteId: n.id }),
+        add: (kind, text, owner) => send({ type: "note.add", itemId: state.focusItemId, kind, text, owner }),
+      }
+    : undefined;
 
   return (
     <aside className="panel side">
@@ -85,6 +94,7 @@ export function SidePanel(props: {
       </div>
       {tab === "notes" ? (
         <div className="side-notes-tab">
+          <LiveSliver segments={shown} interims={interims} onOpen={() => setTab("transcript")} />
           {!hasNotes && <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>}
           {since.length > 0 && <SinceLastTime updates={since} />}
           {earlier.length > 0 && (
@@ -117,8 +127,14 @@ export function SidePanel(props: {
                   discussions={focusDiscussions}
                   segments={segments}
                   onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
+                  editing={editing}
                 />
               )}
+            </section>
+          )}
+          {isHost && focusNotes.length === 0 && !notesUpdating && (
+            <section className="side-agent-notes">
+              <LiveItemNotes notes={[]} discussions={[]} segments={[]} editing={editing} />
             </section>
           )}
         </div>
@@ -127,6 +143,25 @@ export function SidePanel(props: {
       )}
       <ChatBox send={send} />
     </aside>
+  );
+}
+
+/** The last thing heard about this item, so people can tell at a glance that Stand is capturing. */
+function LiveSliver(props: { segments: Segment[]; interims: Record<string, Interim>; onOpen: () => void }) {
+  const live = Object.values(props.interims).at(-1);
+  const last = props.segments.at(-1);
+  if (!live && !last) return null;
+  const who = live ? live.speakerName : last!.speakerName;
+  const id = live ? live.speakerId : last!.speakerId;
+  return (
+    <button className={live ? "side-sliver live" : "side-sliver"} onClick={props.onOpen} title="Open the transcript">
+      <span className="side-sliver-dot" aria-hidden />
+      <span className="side-sliver-who" style={{ color: colorFor(id) }}>
+        {who}
+      </span>
+      <span className="side-sliver-text">{live ? `${live.text}…` : last!.text}</span>
+      {!live && <span className="side-sliver-time">{fmtTime(last!.ts)}</span>}
+    </button>
   );
 }
 
@@ -211,7 +246,12 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
   );
 }
 
-const STATUS: Record<ItemUpdate["status"], string> = { done: "Done", blocked: "Blocked", needs_decision: "Needs a decision", progress: "Progress" };
+const STATUS: Record<ItemUpdate["status"], string> = {
+  done: "Done",
+  blocked: "Blocked",
+  needs_decision: "Needs a decision",
+  progress: "Progress",
+};
 
 /** Links read as "PR #12" or the site's name rather than a raw URL. */
 function linkLabel(url: string) {
@@ -281,7 +321,17 @@ function ChatBox({ send }: { send: (m: ClientMessage) => void }) {
       />
       {text.trim() && (
         <button className="chat-send" aria-label="Send" title="Send (Enter)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
             <path d="M12 19V5M5 12l7-7 7 7" />
           </svg>
         </button>
