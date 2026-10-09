@@ -49,39 +49,32 @@ export function SidePanel(props: {
 
   return (
     <aside className="panel side">
-      <div className="panel-head">
-        <div className="side-title">
-          <h2>Discussion</h2>
-          <span className="side-item" title={focus?.title}>
-            {keyOf(focus) && <span className="key">{keyOf(focus)}</span>}
-            {focus ? focus.title : "General / off-agenda"}
-          </span>
+      <div className="side-head">
+        <h2 className="side-head-title" title={focus?.title}>
+          {focus ? focus.title : "General / off-agenda"}
+        </h2>
+        <div className="side-head-meta">
+          {keyOf(focus) && <span>{keyOf(focus)}</span>}
+          <a
+            href={`/meetings/${state.meetingId}`}
+            target="_blank"
+            rel="noreferrer"
+            title="Everything said and noted in this meeting, across items"
+          >
+            Meeting recap ↗
+          </a>
         </div>
-        <a
-          className="recap-link"
-          href={`/meetings/${state.meetingId}`}
-          target="_blank"
-          rel="noreferrer"
-          title="Everything said and noted in this meeting, across items"
-        >
-          Meeting recap ↗
-        </a>
       </div>
 
-      <div className="side-tabs" role="tablist" aria-label="Discussion views">
-        <button
-          role="tab"
-          aria-selected={tab === "notes"}
-          className={tab === "notes" ? "side-tab on" : "side-tab"}
-          onClick={() => setTab("notes")}
-        >
+      <div className="side-toggle" role="tablist" aria-label="Discussion views">
+        <button role="tab" aria-selected={tab === "notes"} className={tab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>
           Notes & topics
-          {notesUpdating && <span className="notes-updating">Updating…</span>}
+          {notesUpdating && <span className="side-toggle-dot" title="Updating notes" aria-label="Updating" />}
         </button>
         <button
           role="tab"
           aria-selected={tab === "transcript"}
-          className={tab === "transcript" ? "side-tab on" : "side-tab"}
+          className={tab === "transcript" ? "on" : ""}
           onClick={() => setTab("transcript")}
         >
           Transcript
