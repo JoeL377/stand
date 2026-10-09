@@ -4,7 +4,7 @@ import type { Discussion, DiscussionOutcome, Note, Segment } from "../shared/pro
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { NoteList } from "./room/SidePanel.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
-import { fmtDate, fmtTime } from "./util.ts";
+import { colorFor, fmtDate, fmtTime, initials } from "./util.ts";
 
 /** An item's notes as the agent grouped them: the summary, then one block per
  *  discussion with who argued what and what came of it. Notes that belong to
@@ -68,7 +68,7 @@ function DiscussionBlock(props: {
   const remarks = turns.length ? `${turns.length} remark${turns.length === 1 ? "" : "s"}` : null;
   const todoLabel = todos ? `${todos} to-do${todos === 1 ? "" : "s"}` : null;
   // The live panel shows remarks and to-dos as pills below instead.
-  const meta = props.titleOnly ? [people.join(", ")] : [people.join(", "), remarks, !props.live ? todoLabel : null].filter(Boolean);
+  const meta = props.titleOnly ? [] : [people.join(", "), remarks, !props.live ? todoLabel : null].filter(Boolean);
   const overview = (
     <>
       {headline && (
@@ -77,10 +77,12 @@ function DiscussionBlock(props: {
           {headline.kind === "action" && headline.owner && <span className="disc-owner"> · {headline.owner}</span>}
         </span>
       )}
-      <span className="disc-meta">
-        {meta.join(" · ")}
-        {props.live && <span className="disc-now"> · Talking now</span>}
-      </span>
+      {(meta.length > 0 || props.live) && (
+        <span className="disc-meta">
+          {meta.join(" · ")}
+          {props.live && <span className="disc-now">{meta.length ? " · " : ""}Talking now</span>}
+        </span>
+      )}
     </>
   );
   return (
@@ -156,6 +158,20 @@ function DiscussionBlock(props: {
         {props.titleOnly ? (
           <div className="disc-foot">
             <span className="disc-pills">
+              {people.length > 0 && (
+                <span className="disc-people" title={people.join(", ")} aria-label={people.join(", ")}>
+                  {people.slice(0, 4).map((name) => (
+                    <span
+                      key={name}
+                      className="disc-avatar"
+                      style={{ background: colorFor(turns.find((t) => t.speakerName === name)?.speakerId ?? name) }}
+                    >
+                      {initials(name)}
+                    </span>
+                  ))}
+                  {people.length > 4 && <span className="disc-avatar more">+{people.length - 4}</span>}
+                </span>
+              )}
               {remarks && (
                 <button className="disc-pill" onClick={() => setTurnsPop(true)}>
                   {remarks}
@@ -177,7 +193,7 @@ function DiscussionBlock(props: {
                 </button>
               )}
             </span>
-            <CopyForAgent kind="topic" id={d.id} label />
+            <CopyForAgent kind="topic" id={d.id} />
           </div>
         ) : (
           <div className="disc-foot">
