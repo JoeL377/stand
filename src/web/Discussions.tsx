@@ -233,14 +233,10 @@ function NoteForm(props: {
         }}
       />
       {props.kind === "action" && (
-        <input
-          className="note-form-owner"
-          value={owner}
-          maxLength={60}
-          placeholder="Owner"
-          aria-label="Owner"
-          onChange={(e) => setOwner(e.target.value)}
-        />
+        <label className="note-form-owner">
+          <span>Owner</span>
+          <input value={owner} maxLength={60} placeholder="Anyone" onChange={(e) => setOwner(e.target.value)} />
+        </label>
       )}
       <div className="note-form-row">
         {props.onDelete && (
