@@ -86,7 +86,7 @@ export function AgendaPanel(props: {
               {it.slideNo && <span className="slide-no">{it.slideNo}</span>}
               {it.title}
             </span>
-            {(it.externalId || n > 0 || a > 0 || e > 0 || u) && (
+            {active && (it.externalId || n > 0 || a > 0 || e > 0 || u) && (
               <span className="item-meta">
                 {[it.externalId, n > 0 && `${n} remark${n === 1 ? "" : "s"}`, a > 0 && `${a} to-do${a === 1 ? "" : "s"}`]
                   .filter(Boolean)
