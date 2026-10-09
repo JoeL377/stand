@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Deck, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
-import { ChatIcon, ChevronIcon, CloseIcon, DeckIcon, EditIcon, HistoryIcon, MoreIcon, PdfIcon, PinIcon, TaskIcon, TicketIcon } from "../icons.tsx";
+import {
+  ChatIcon,
+  ChevronIcon,
+  CloseIcon,
+  DeckIcon,
+  EditIcon,
+  HistoryIcon,
+  MoreIcon,
+  PdfIcon,
+  PinIcon,
+  TaskIcon,
+  TicketIcon,
+} from "../icons.tsx";
 import { uploadDeck } from "../slides.tsx";
 
 export function AgendaPanel(props: {
@@ -14,7 +26,9 @@ export function AgendaPanel(props: {
 }) {
   const { roomId, state, send, canSteer, segments, notes } = props;
   const host = state.participants.find((p) => p.isHost);
-  const steerTitle = canSteer ? "Open this item: everything said now is recorded against it" : `${host?.name ?? "The host"} chooses the item`;
+  const steerTitle = canSteer
+    ? "Open this item: everything said now is recorded against it"
+    : `${host?.name ?? "The host"} chooses the item`;
   const { linear, llm } = state.capabilities;
   const [openDecks, setOpenDecks] = useState<Record<string, boolean>>({});
   // One open popover at a time: "head" for + Add, "item:<id>" or "deck:<id>" for a row's menu.
@@ -60,12 +74,7 @@ export function AgendaPanel(props: {
     const u = reported.get(it.id);
     return (
       <li key={it.id} className={active ? "item active" : "item"}>
-        <button
-          className="item-main"
-          disabled={!canSteer}
-          onClick={() => send({ type: "focus", itemId: it.id })}
-          title={steerTitle}
-        >
+        <button className="item-main" disabled={!canSteer} onClick={() => send({ type: "focus", itemId: it.id })} title={steerTitle}>
           {active && it.source === "slide" && <span className="live-dot" aria-label="In focus" />}
           {it.source !== "slide" && (
             <span className={active ? "kind live" : "kind"} title={it.source === "linear" ? "Linear ticket" : "Agenda task"}>
@@ -73,14 +82,13 @@ export function AgendaPanel(props: {
             </span>
           )}
           <span className="item-text">
-            {it.externalId && <span className="key">{it.externalId}</span>}
-            <span className="item-title">
+            <span className="item-title" title={it.title}>
               {it.slideNo && <span className="slide-no">{it.slideNo}</span>}
               {it.title}
             </span>
-            {(n > 0 || a > 0 || e > 0 || u) && (
+            {(it.externalId || n > 0 || a > 0 || e > 0 || u) && (
               <span className="item-meta">
-                {[n > 0 && `${n} remark${n === 1 ? "" : "s"}`, a > 0 && `${a} action${a === 1 ? "" : "s"}`]
+                {[it.externalId, n > 0 && `${n} remark${n === 1 ? "" : "s"}`, a > 0 && `${a} to-do${a === 1 ? "" : "s"}`]
                   .filter(Boolean)
                   .join(" · ")}
                 {e > 0 && (
@@ -166,7 +174,10 @@ export function AgendaPanel(props: {
       <li key={b.deck.id} className={pop === key ? "deck popped" : "deck"}>
         <div className="deck-head">
           <button className="deck-toggle" onClick={() => setOpenDecks((o) => ({ ...o, [b.deck.id]: !open }))} aria-expanded={open}>
-            <span className={b.items.some((i) => i.id === state.focusItemId) ? "kind live" : "kind"} title={b.deck.kind === "native" ? "Slides made in Stand" : "PDF deck"}>
+            <span
+              className={b.items.some((i) => i.id === state.focusItemId) ? "kind live" : "kind"}
+              title={b.deck.kind === "native" ? "Slides made in Stand" : "PDF deck"}
+            >
               {b.deck.kind === "native" ? <DeckIcon /> : <PdfIcon />}
             </span>
             <span className="item-title">{b.deck.title}</span>
@@ -235,7 +246,11 @@ export function AgendaPanel(props: {
       <div className="panel-head">
         <h2>Agenda</h2>
         <div className="add-menu-wrap pop-wrap">
-          <button className="ghost small add-btn" aria-expanded={pop === "head"} onClick={() => setPop((p) => (p === "head" ? null : "head"))}>
+          <button
+            className="ghost small add-btn"
+            aria-expanded={pop === "head"}
+            onClick={() => setPop((p) => (p === "head" ? null : "head"))}
+          >
             + Add
           </button>
           {pop === "head" && (
@@ -364,7 +379,12 @@ function AddForm({ mode, roomId, llm, onClose }: { mode: Exclude<AddMode, "pdf">
         </>
       ) : (
         <>
-          <input autoFocus placeholder="Linear project, cycle or view link, or ENG-12, ENG-14" value={text} onChange={(e) => setText(e.target.value)} />
+          <input
+            autoFocus
+            placeholder="Linear project, cycle or view link, or ENG-12, ENG-14"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
           <button className="primary" disabled={busy || !text.trim()} onClick={() => run(() => api.importLinear(roomId, text))}>
             {busy ? "Loading…" : "Load issues"}
           </button>
@@ -406,7 +426,11 @@ function NewDeck({ roomId, llm, onDone }: { roomId: string; llm: boolean; onDone
       <input autoFocus placeholder="Deck title" value={title} onChange={(e) => setTitle(e.target.value)} />
       <textarea
         rows={3}
-        placeholder={llm ? "Optional: describe the deck or paste notes, and Claude drafts it" : "Optional: paste an outline (# per slide, - for bullets)"}
+        placeholder={
+          llm
+            ? "Optional: describe the deck or paste notes, and Claude drafts it"
+            : "Optional: paste an outline (# per slide, - for bullets)"
+        }
         value={brief}
         onChange={(e) => setBrief(e.target.value)}
       />
