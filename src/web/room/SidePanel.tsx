@@ -53,17 +53,7 @@ export function SidePanel(props: {
         <h2 className="side-head-title" title={focus?.title}>
           {focus ? focus.title : "General / off-agenda"}
         </h2>
-        <div className="side-head-meta">
-          {keyOf(focus) && <span>{keyOf(focus)}</span>}
-          <a
-            href={`/meetings/${state.meetingId}`}
-            target="_blank"
-            rel="noreferrer"
-            title="Everything said and noted in this meeting, across items"
-          >
-            Meeting recap ↗
-          </a>
-        </div>
+        {keyOf(focus) && <div className="side-head-meta">{keyOf(focus)}</div>}
       </div>
 
       <div className="side-toggle" role="tablist" aria-label="Discussion views">
@@ -134,6 +124,16 @@ export function SidePanel(props: {
       ) : (
         <Transcript segments={shown} items={state.items} interims={interims} send={send} />
       )}
+      <div className="side-foot">
+        <a
+          href={`/meetings/${state.meetingId}`}
+          target="_blank"
+          rel="noreferrer"
+          title="Everything said and noted in this meeting, across items"
+        >
+          Meeting recap ↗
+        </a>
+      </div>
     </aside>
   );
 }

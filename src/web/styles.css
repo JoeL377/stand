@@ -1249,9 +1249,9 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .side-head { padding: 14px 16px 10px; flex: none; }
 .side-head-title { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--text); text-transform: none; letter-spacing: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .side-head-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--muted); }
-.side-head-meta > * + *::before { content: "·"; margin-right: 6px; color: var(--muted); }
-.side-head-meta a { color: var(--muted); }
-.side-head-meta a:hover { color: var(--text); text-decoration: none; }
+.side-foot { flex: none; display: flex; justify-content: flex-end; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; }
+.side-foot a { color: var(--muted); }
+.side-foot a:hover { color: var(--text); text-decoration: none; }
 .side-toggle { display: flex; gap: 2px; margin: 0 16px 8px; padding: 3px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); flex: none; }
 .side-toggle button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 5px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; box-shadow: none; }
 .side-toggle button:hover { color: var(--text); background: transparent; }
