@@ -19,6 +19,7 @@ import type { Agent } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes } from "./notesMerge.ts";
+import { addUpNext, computeUpNext } from "./upNext.ts";
 
 /** Below this the agent keeps its guess to itself. */
 const SUGGEST_MIN_CONFIDENCE = 0.55;
@@ -193,6 +194,7 @@ export class RoomSession implements SpeechSink {
         .roomFollowUps(this.roomId)
         .filter((f) => f.meetingId !== this.meetingId && (f.doneAt === null || f.doneAt >= this.meetingStartedAt)),
       updates: this.db.roomUpdates(this.roomId, this.db.previousMeetingStart(this.roomId, this.meetingStartedAt) ?? 0),
+      ...computeUpNext(this.db.upNextInput(this.roomId, this.meetingStartedAt)),
       capabilities: capabilities(),
     };
   }
@@ -376,6 +378,23 @@ export class RoomSession implements SpeechSink {
         if (msg.kind === "action") this.broadcastState();
         break;
       }
+      case "upnext.add":
+      case "upnext.addAll": {
+        if (!isHost) return;
+        const keys =
+          msg.type === "upnext.add"
+            ? [String(msg.key)]
+            : computeUpNext(this.db.upNextInput(this.roomId, this.meetingStartedAt)).upNext.suggestions.map((s) => s.key);
+        let added = 0;
+        for (const key of keys) if (addUpNext(this.db, this.roomId, key)) added++;
+        if (added) this.itemsChanged();
+        break;
+      }
+      case "upnext.dismiss":
+        if (!isHost) return;
+        this.db.dismissUpNext(this.roomId, String(msg.key).slice(0, 80));
+        this.broadcastState();
+        break;
       case "demo.play":
         if (isHost) void this.playDemo();
         break;

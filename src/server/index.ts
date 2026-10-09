@@ -29,6 +29,7 @@ import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { toSpaceSummary } from "./spaces.ts";
+import { computeUpNext } from "./upNext.ts";
 
 const db = openDb(path.join(config.dataDir, "standup.db"));
 const agent = createAgent();
@@ -636,6 +637,21 @@ app.get(
     });
     if (req.params.format === "json") return void res.json(feed);
     res.type("text/markdown; charset=utf-8").send(followUpsToMarkdown(feed));
+  }),
+);
+
+// The agent's suggested agenda for the space: what's open from earlier
+// meetings and what changed since, ranked, each with a reason.
+app.get(
+  "/api/rooms/:id/suggested.json",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room) return notFound(res);
+    res.json({
+      schema: "stand.suggested-agenda/v1",
+      space: { id: room.id, name: room.name },
+      ...computeUpNext(db.upNextInput(room.id, sessions.get(room.id)?.meetingStartedAt ?? null)),
+    });
   }),
 );
 

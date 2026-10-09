@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Deck, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import type { ClientMessage, Deck, Item, Note, RoomState, Segment, UpNext, UpNextSuggestion } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import {
   ChatIcon,
@@ -86,9 +86,14 @@ export function AgendaPanel(props: {
               {it.slideNo && <span className="slide-no">{it.slideNo}</span>}
               {it.title}
             </span>
-            {active && (it.externalId || n > 0 || a > 0 || e > 0 || u) && (
+            {active && (it.externalId || n > 0 || a > 0 || e > 0 || u || state.carried?.[it.id]) && (
               <span className="item-meta">
-                {[it.externalId, n > 0 && `${n} remark${n === 1 ? "" : "s"}`, a > 0 && `${a} to-do${a === 1 ? "" : "s"}`]
+                {[
+                  it.externalId,
+                  n > 0 && `${n} remark${n === 1 ? "" : "s"}`,
+                  a > 0 && `${a} to-do${a === 1 ? "" : "s"}`,
+                  (state.carried?.[it.id] ?? 0) > 0 && `↻${state.carried[it.id]}`,
+                ]
                   .filter(Boolean)
                   .join(" · ")}
                 {e > 0 && (
@@ -297,6 +302,8 @@ export function AgendaPanel(props: {
         </div>
       )}
 
+      {state.upNext && <Suggested upNext={state.upNext} canSteer={canSteer} send={send} startOpen={empty} />}
+
       {empty && !add ? (
         <div className="agenda-empty">
           <p>Nothing on the agenda yet.</p>
@@ -333,6 +340,112 @@ export function AgendaPanel(props: {
 }
 
 type AddMode = "slides" | "type" | "pdf" | "linear";
+
+/** The agent's draft of what to talk about next: one collapsed line until opened.
+ *  The ✦ marks only things the agent proposed and nobody has added yet. */
+function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientMessage) => void; startOpen: boolean }) {
+  const { upNext, canSteer, send } = props;
+  const [open, setOpen] = useState(props.startOpen);
+  const [showParked, setShowParked] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const { suggestions, parked } = upNext;
+  if (!suggestions.length && !parked.length && !upNext.total) return null;
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const provenance = `Drafted by the agent from ${plural(upNext.meetingsUsed, "meeting")} and ${plural(upNext.updatesUsed, "update")}`;
+  const row = (s: UpNextSuggestion) => (
+    <li key={s.key} className="upnext-row">
+      <span className="upnext-mark" aria-hidden>
+        ✦
+      </span>
+      <span className="upnext-title">{s.title}</span>
+      <span className="upnext-reason" role="tooltip">
+        {s.reason}
+      </span>
+      {canSteer && (
+        <span className="item-tools upnext-tools">
+          <button className="icon" title="Add to the agenda" onClick={() => send({ type: "upnext.add", key: s.key })}>
+            <CheckIcon />
+          </button>
+          <button className="icon" title="Dismiss" onClick={() => send({ type: "upnext.dismiss", key: s.key })}>
+            <CloseIcon />
+          </button>
+        </span>
+      )}
+    </li>
+  );
+  return (
+    <section className="upnext">
+      <div className="upnext-head">
+        <button className="upnext-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)} title={provenance}>
+          <span className="upnext-mark" aria-hidden>
+            ✦
+          </span>
+          <span>Suggested · {suggestions.length}</span>
+          {upNext.total > 0 && (
+            <span className="upnext-progress" title="To-dos from earlier meetings closed since the last one">
+              {upNext.closed}/{upNext.total} closed
+            </span>
+          )}
+          <span className={open ? "chev open" : "chev"} aria-hidden>
+            <ChevronIcon />
+          </span>
+        </button>
+        {canSteer && suggestions.length > 1 && (
+          <span className="pop-wrap">
+            <button className="icon upnext-more" title="More" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
+              <MoreIcon />
+            </button>
+            {menu && (
+              <div className="add-menu row-menu upnext-menu" role="menu" onMouseLeave={() => setMenu(false)}>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    send({ type: "upnext.addAll" });
+                  }}
+                >
+                  <span>Add all {suggestions.length} to the agenda</span>
+                </button>
+              </div>
+            )}
+          </span>
+        )}
+      </div>
+      {open && (
+        <ul className="upnext-list">
+          {suggestions.map(row)}
+          {parked.length > 0 && (
+            <li className="upnext-parked">
+              <button className="link small" onClick={() => setShowParked((p) => !p)}>
+                {showParked ? "Hide parked" : `Parked (${parked.length})`}
+              </button>
+            </li>
+          )}
+          {showParked && parked.map(row)}
+          {!suggestions.length && !parked.length && (
+            <li className="upnext-none">Nothing waiting. The agent adds things here as work comes in.</li>
+          )}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+const CheckIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d="M3.5 8.5l3 3 6-7" />
+  </svg>
+);
 
 /** The one add form that is open, shown under the agenda with a close button. */
 function AddForm({ mode, roomId, llm, onClose }: { mode: Exclude<AddMode, "pdf">; roomId: string; llm: boolean; onClose: () => void }) {

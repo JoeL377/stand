@@ -143,6 +143,39 @@ export interface FollowUp extends Note {
   meetingStartedAt: number;
 }
 
+/** One thing the agent proposes for the agenda, with why. Nothing joins the
+ *  agenda until someone adds it. */
+export interface UpNextSuggestion {
+  /** "note:<id>" or "item:<id>"; what add and dismiss refer to. */
+  key: string;
+  kind: "needs_people" | "question" | "todo";
+  title: string;
+  /** One line shown on hover, e.g. "Open question from Thu 9 Oct". */
+  reason: string;
+  noteId: string | null;
+  /** The agenda item it came from, if any. */
+  itemId: string | null;
+  owner: string | null;
+  /** How many meetings it has carried over so far. */
+  carried: number;
+}
+
+/** The space's next agenda as the agent drafts it, plus how much got closed since last time. */
+export interface UpNext {
+  suggestions: UpNextSuggestion[];
+  /** To-dos quiet for two meetings: folded away, still addable. */
+  parked: UpNextSuggestion[];
+  /** To-dos from earlier meetings: closed since the last meeting started, out of all open then. */
+  closed: number;
+  total: number;
+  /** When the last meeting started; null when there wasn't one. */
+  since: number | null;
+  /** What the draft was built from, for the provenance tooltip. */
+  meetingsUsed: number;
+  updatesUsed: number;
+  builtAt: number;
+}
+
 export interface Participant {
   id: string;
   name: string;
@@ -199,6 +232,10 @@ export interface RoomState {
   followUps: FollowUp[];
   /** Updates agents and people reported on this space's items since the last meeting started. */
   updates: ItemUpdate[];
+  /** The agent's suggested agenda for this space. */
+  upNext: UpNext;
+  /** Agenda item id -> how many meetings its open to-dos have carried over. */
+  carried: Record<string, number>;
   capabilities: Capabilities;
 }
 
@@ -208,6 +245,10 @@ export type ClientMessage =
   | { type: "pin"; itemId: string }
   | { type: "unpin" }
   | { type: "suggestion.accept" }
+  /** Host: put an agent suggestion on the agenda, all of them, or wave one off. */
+  | { type: "upnext.add"; key: string }
+  | { type: "upnext.addAll" }
+  | { type: "upnext.dismiss"; key: string }
   | { type: "suggestion.dismiss" }
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */
   | { type: "host.give"; participantId: string }

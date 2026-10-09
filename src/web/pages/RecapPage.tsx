@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CopyForAgent } from "../CopyForAgent.tsx";
-import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment } from "../../shared/protocol.ts";
+import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
@@ -14,12 +14,17 @@ export function RecapPage() {
   const [open_, setOpen] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
   const [room, setRoom] = useState<RoomInfo | null>(null);
+  const [upNext, setUpNext] = useState<UpNext | null>(null);
 
   useEffect(() => {
     api
       .meeting(meetingId)
       .then((m) => {
         setData(m);
+        api
+          .suggested(m.roomId)
+          .then((s) => setUpNext(s.upNext))
+          .catch(() => {});
         return api.room(m.roomId).then(setRoom);
       })
       .catch((e) => setError(e.message));
@@ -154,6 +159,30 @@ export function RecapPage() {
               </div>
             );
           })}
+        </section>
+      )}
+
+      {/* Only the latest meeting knows what carries: the draft moves on once the next one starts. */}
+      {upNext && upNext.since === data.startedAt && upNext.suggestions.length + upNext.parked.length > 0 && (
+        <section id="next" className="doc-section rc-section">
+          <h2 className="rc-h carry">
+            <span className="upnext-mark" aria-hidden>
+              ↻
+            </span>{" "}
+            Carries to next time <span className="count">{upNext.suggestions.length + upNext.parked.length}</span>
+          </h2>
+          <ul className="rc-next">
+            {[...upNext.suggestions, ...upNext.parked].map((s) => (
+              <li key={s.key}>
+                <span className="upnext-mark" aria-hidden>
+                  ✦
+                </span>
+                <span className="rc-next-title">{s.title}</span>
+                <span className="muted small">{s.reason}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="muted small">The agent suggests these for the next agenda. The host adds the ones worth talking about.</p>
         </section>
       )}
 

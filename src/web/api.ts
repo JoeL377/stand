@@ -1,5 +1,5 @@
 import type { DraftSlide } from "../shared/outline.ts";
-import type { AgentToken, Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, SpaceSummary, User } from "../shared/protocol.ts";
+import type { AgentToken, Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, SpaceSummary, UpNext, User } from "../shared/protocol.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -63,6 +63,7 @@ export const api = {
   itemHistory: (itemId: string) =>
     call<ItemHistory & { room: { id: string; name: string } }>("GET", `/api/items/${itemId}/history`),
   meeting: (id: string) => call<MeetingRecap>("GET", `/api/meetings/${id}`),
+  suggested: (roomId: string) => call<{ upNext: UpNext }>("GET", `/api/rooms/${roomId}/suggested.json`),
   setFollowUp: (roomId: string, noteId: string, done: boolean) => call<Note>("PATCH", `/api/rooms/${roomId}/followups/${noteId}`, { done }),
   token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };

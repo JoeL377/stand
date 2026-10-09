@@ -21,6 +21,7 @@ import type {
   User,
 } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
+import type { UpNextInput } from "./upNext.ts";
 
 export type DB = ReturnType<typeof openDb>;
 
@@ -116,6 +117,13 @@ CREATE TABLE IF NOT EXISTS dismissed_notes (
   text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS dismissed_notes_item ON dismissed_notes(meeting_id, item_id);
+-- Agenda suggestions the host waved off, so the agent doesn't bring them back until something changes.
+CREATE TABLE IF NOT EXISTS upnext_dismissed (
+  room_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (room_id, key)
+);
 -- The agent's grouping of an item's talk into discussions, one per question.
 CREATE TABLE IF NOT EXISTS discussions (
   id TEXT PRIMARY KEY,
@@ -908,6 +916,52 @@ export function openDb(file?: string) {
           )
           .all(roomId) as Row[]
       ).map((r) => ({ ...toNote(r), meetingStartedAt: r.meeting_started_at as number }));
+    },
+    /** What the agent drafts the next agenda from (see upNext.ts). */
+    upNextInput(roomId: string, currentStart: number | null): UpNextInput {
+      const meetings = (db.prepare("SELECT id, started_at, ended_at FROM meetings WHERE room_id = ?").all(roomId) as Row[]).map((m) => ({
+        id: m.id as string,
+        startedAt: m.started_at as number,
+        endedAt: (m.ended_at as number) ?? null,
+      }));
+      const notes = (
+        db
+          .prepare(
+            `SELECT n.* FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE m.room_id = ? AND n.kind IN ('action', 'question') ORDER BY n.ts`,
+          )
+          .all(roomId) as Row[]
+      ).map(toNote);
+      const items = new Map(
+        (db.prepare("SELECT id, title, archived, deck_id FROM items WHERE room_id = ?").all(roomId) as Row[]).map((r) => [
+          r.id as string,
+          { title: r.title as string, archived: !!r.archived, deck: !!r.deck_id },
+        ]),
+      );
+      const dismissed = new Map(
+        (db.prepare("SELECT key, at FROM upnext_dismissed WHERE room_id = ?").all(roomId) as Row[]).map((r) => [
+          r.key as string,
+          r.at as number,
+        ]),
+      );
+      return { now: Date.now(), meetings, currentStart, notes, items, updates: this.roomUpdates(roomId, 0, 500), dismissed };
+    },
+    dismissUpNext(roomId: string, key: string) {
+      db.prepare(
+        "INSERT INTO upnext_dismissed (room_id, key, at) VALUES (?, ?, ?) ON CONFLICT (room_id, key) DO UPDATE SET at = excluded.at",
+      ).run(roomId, key, Date.now());
+    },
+    /** Puts a task that came off the agenda back at the end of it. */
+    restoreItem(roomId: string, itemId: string): boolean {
+      const max = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM items WHERE room_id = ? AND archived = 0").get(roomId) as Row)
+        .p as number;
+      return (
+        db.prepare("UPDATE items SET archived = 0, position = ? WHERE id = ? AND room_id = ?").run(max + 1, itemId, roomId).changes > 0
+      );
+    },
+    /** Moves a carried to-do or question onto an agenda item, so it shows (and can be checked off) there. */
+    moveNote(noteId: string, itemId: string) {
+      db.prepare("UPDATE notes SET item_id = ? WHERE id = ?").run(itemId, noteId);
     },
     meetingNotes(meetingId: string): Note[] {
       return (db.prepare("SELECT * FROM notes WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map(toNote);
