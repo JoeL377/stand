@@ -29,11 +29,21 @@ import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { toSpaceSummary } from "./spaces.ts";
-import { computeUpNext } from "./upNext.ts";
+import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 const db = openDb(path.join(config.dataDir, "standup.db"));
 const agent = createAgent();
 const sessions = new Map<string, RoomSession>();
+const live = (roomId: string) => {
+  const s = sessions.get(roomId);
+  return s && !s.ended ? s : null;
+};
+const polisher = new UpNextPolisher(
+  db,
+  agent,
+  (roomId) => live(roomId)?.meetingStartedAt ?? null,
+  (roomId) => live(roomId)?.upNextChanged(),
+);
 
 function session(roomId: string): RoomSession | null {
   const existing = sessions.get(roomId);
@@ -48,6 +58,7 @@ function session(roomId: string): RoomSession | null {
       if (sessions.get(roomId) === closed) sessions.delete(roomId);
     },
     capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r) : undefined,
+    polisher,
   );
   sessions.set(roomId, s);
   return s;
@@ -80,9 +91,12 @@ app.use(oauthRoutes(db));
 const agents = agentApi({
   db,
   notify: (roomId, what) => {
-    const s = sessions.get(roomId);
-    if (s && !s.ended) what === "updates" ? s.updatesChanged() : s.followUpsChanged();
+    const s = live(roomId);
+    if (s) what === "updates" ? s.updatesChanged() : s.followUpsChanged();
+    // Between meetings, let reports settle, then tidy the next agenda.
+    else polisher.schedule(roomId, 60_000);
   },
+  suggested: (roomId) => upNextView(db, roomId, live(roomId)?.meetingStartedAt ?? null, polisher.busy(roomId)),
   brief: (meetingId, baseUrl, transcript) => {
     const m = db.getMeeting(meetingId)!;
     return buildBrief({
@@ -650,7 +664,7 @@ app.get(
     res.json({
       schema: "stand.suggested-agenda/v1",
       space: { id: room.id, name: room.name },
-      ...computeUpNext(db.upNextInput(room.id, sessions.get(room.id)?.meetingStartedAt ?? null)),
+      ...upNextView(db, room.id, live(room.id)?.meetingStartedAt ?? null, polisher.busy(room.id)),
     });
   }),
 );

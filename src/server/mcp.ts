@@ -13,7 +13,7 @@ const INSTRUCTIONS = `Stand records team meetings and pins what was said to the 
 
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id> and stand:topic/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
-"What's mine?" -> list_my_work. Everything to do in a space -> list_actions. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
+"What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 Report back when you finish or get stuck: complete_action for a to-do you finished (add a note and the PR link), post_update for progress, a blocker, or something people need to decide. Reports show up on that item in Stand.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
@@ -78,6 +78,18 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: READ,
     },
     ({ space, status, owner }) => run(() => api.listActions(caller, { space, status, owner }, baseUrl)),
+  );
+
+  server.registerTool(
+    "get_suggested_agenda",
+    {
+      title: "Get a Stand space's suggested agenda",
+      description:
+        "What the Stand agent suggests talking about at the space's next meeting, in order: blockers and decisions people are waiting on, open questions, then open to-dos, each with a one-line reason, its ref and how many meetings it has carried over. Also what's parked and how much got closed since last time. Use it to prepare for a meeting.",
+      inputSchema: { space: z.string().describe("The space's id or name (from list_spaces)") },
+      annotations: READ,
+    },
+    ({ space }) => run(() => api.suggestedAgenda(caller, space, baseUrl)),
   );
 
   server.registerTool(

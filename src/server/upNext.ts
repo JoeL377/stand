@@ -18,7 +18,20 @@ export interface UpNextInput {
   updates: ItemUpdate[];
   /** Suggestion key -> when someone dismissed it. */
   dismissed: Map<string, number>;
+  /** For a space with no meetings yet: other spaces its people share that still have open to-dos. */
+  otherSpaces: Array<{ id: string; name: string; open: number; lastAt: number }>;
 }
+
+/** Claude's pass over the ranked list (see upNextPolish.ts): a shorter agenda
+ *  line, a better reason and an order, per suggestion. Each row remembers what
+ *  it was written from, so a row whose facts changed since falls back to the
+ *  plain ranking instead of showing a stale reason. */
+export interface Polish {
+  at: number;
+  rows: Array<{ key: string; basis: string; title: string; reason: string; sameAs: string | null }>;
+}
+
+export const polishBasis = (s: Pick<UpNextSuggestion, "title" | "reason">) => `${s.title}\n${s.reason}`;
 
 /** Meetings with nothing happening on a to-do before it's parked. */
 const QUIET_MEETINGS = 2;
@@ -84,6 +97,7 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
         itemId: n.itemId,
         owner: null,
         carried,
+        merged: [],
         lastActivity: n.ts,
         parked: false,
         order: n.ts,
@@ -114,6 +128,7 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
       itemId: n.itemId,
       owner: n.owner,
       carried,
+      merged: [],
       lastActivity: lastAct?.ts ?? n.ts,
       parked,
       order: n.ts,
@@ -140,6 +155,7 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
       itemId,
       owner: null,
       carried: g.carried,
+      merged: [],
       lastActivity: lastAct?.ts ?? g.order,
       parked: g.parked,
       order: g.order,
@@ -160,10 +176,31 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
       itemId: u.itemId,
       owner: null,
       carried: 0,
+      merged: [],
       lastActivity: u.ts,
       parked: false,
       order: u.ts,
     });
+  }
+
+  // A new space: offer to bring over what's still open in spaces its people share.
+  if (!earlier.length) {
+    for (const o of input.otherSpaces) {
+      drafts.set(`space:${o.id}`, {
+        key: `space:${o.id}`,
+        kind: "todo",
+        title: `Open to-dos from ${o.name}`,
+        reason: `${o.open} open to-do${o.open === 1 ? "" : "s"} in ${o.name}`,
+        noteId: null,
+        itemId: null,
+        owner: null,
+        carried: 0,
+        merged: [],
+        lastActivity: o.lastAt,
+        parked: false,
+        order: o.lastAt,
+      });
+    }
   }
 
   const kept = [...drafts.values()].filter((d) => {
@@ -197,30 +234,93 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
       meetingsUsed: earlier.length,
       updatesUsed: updates.filter((u) => since === null || u.ts >= since).length,
       builtAt: input.now,
+      polishedAt: null,
+      polishing: false,
     },
     carried,
   };
 }
 
-/** Puts one suggestion on the agenda. A task that came off the agenda comes
- *  back as it was; a loose to-do or question becomes an agenda line of its own,
- *  and the note moves onto it so it can be checked off there. */
-export function addUpNext(db: DB, roomId: string, key: string): boolean {
+/** Lays Claude's last pass over the plain ranking. Rows it wrote from facts
+ *  that have since changed, and anything new, keep the plain wording; a new
+ *  blocker still goes to the top. Only to-dos and questions can be folded into
+ *  another suggestion, since adding the keeper moves them along with it. */
+export function applyPolish(upNext: UpNext, polish: Polish | null): UpNext {
+  if (!polish) return upNext;
+  const byKey = new Map(upNext.suggestions.map((s) => [s.key, s]));
+  const fresh = new Map(polish.rows.filter((r) => byKey.get(r.key) && polishBasis(byKey.get(r.key)!) === r.basis).map((r) => [r.key, r]));
+  if (!fresh.size) return upNext;
+  // A row folds into another only if that one is itself kept, and only to-dos and questions fold.
+  const keeperOf = (r: Polish["rows"][number]) => {
+    const k = r.sameAs && r.sameAs !== r.key ? fresh.get(r.sameAs) : undefined;
+    return k && !k.sameAs && r.key.startsWith("note:") ? k.key : null;
+  };
+  // One folded into a row that's no longer kept as written goes back to its plain wording.
+  for (const r of [...fresh.values()]) if (r.sameAs && !keeperOf(r)) fresh.delete(r.key);
+  const out = new Map<string, UpNextSuggestion>();
+  for (const r of fresh.values()) if (!keeperOf(r)) out.set(r.key, { ...byKey.get(r.key)!, title: r.title, reason: r.reason, merged: [] });
+  for (const r of fresh.values()) {
+    const k = keeperOf(r);
+    if (k) out.get(k)!.merged.push(r.key);
+  }
+  const rest = upNext.suggestions.filter((s) => !fresh.has(s.key));
+  return {
+    ...upNext,
+    suggestions: [...rest.filter((s) => s.kind === "needs_people"), ...out.values(), ...rest.filter((s) => s.kind !== "needs_people")],
+    polishedAt: polish.at,
+  };
+}
+
+/** Puts one suggestion on the agenda and returns the agenda item it landed on.
+ *  A task that came off the agenda comes back as it was; a loose to-do or
+ *  question becomes an agenda line of its own, and the note moves onto it so
+ *  it can be checked off there. Open to-dos from another space become one
+ *  agenda line here, copied into this meeting, and are closed over there as
+ *  carried. Suggestions folded into this one move onto the same item. */
+export function addUpNext(db: DB, roomId: string, s: Pick<UpNextSuggestion, "key" | "merged">, meeting: { id: string }): string | null {
+  const itemId = addOne(db, roomId, s.key, meeting);
+  if (!itemId) return null;
+  for (const key of s.merged) {
+    const [kind, id] = key.split(":");
+    const note = kind === "note" ? db.getNote(id) : null;
+    if (note && note.roomId === roomId) db.moveNote(note.id, itemId);
+  }
+  return itemId;
+}
+
+function addOne(db: DB, roomId: string, key: string, meeting: { id: string }): string | null {
   const [kind, id] = key.split(":");
-  if (!id) return false;
-  if (kind === "item") return db.restoreItem(roomId, id);
-  if (kind !== "note") return false;
+  if (!id) return null;
+  if (kind === "item") return db.restoreItem(roomId, id) ? id : null;
+  if (kind === "space") return carrySpace(db, roomId, id, meeting);
+  if (kind !== "note") return null;
   const note = db.getNote(id);
-  if (!note || note.roomId !== roomId) return false;
+  if (!note || note.roomId !== roomId) return null;
   const from = note.itemId ? db.getItem(note.itemId) : null;
-  if (from && from.roomId === roomId && !from.deckId && db.restoreItem(roomId, from.id)) return true;
-  const before = new Set(db.listItems(roomId).map((i) => i.id));
+  if (from && from.roomId === roomId && !from.deckId && db.restoreItem(roomId, from.id)) return from.id;
   const title = note.text.length > 140 ? `${note.text.slice(0, 139)}…` : note.text;
-  const after = db.addItems(roomId, [
-    { source: "agenda", externalId: null, title, url: null, description: from ? `Carried over from “${from.title}”` : "Carried over" },
-  ]);
-  const created = after.find((i) => !before.has(i.id));
-  if (!created) return false;
-  db.moveNote(note.id, created.id);
-  return true;
+  const created = newAgendaLine(db, roomId, title, from ? `Carried over from “${from.title}”` : "Carried over");
+  if (!created) return null;
+  db.moveNote(note.id, created);
+  return created;
+}
+
+function newAgendaLine(db: DB, roomId: string, title: string, description: string): string | null {
+  const before = new Set(db.listItems(roomId).map((i) => i.id));
+  const after = db.addItems(roomId, [{ source: "agenda", externalId: null, title, url: null, description }]);
+  return after.find((i) => !before.has(i.id))?.id ?? null;
+}
+
+function carrySpace(db: DB, roomId: string, fromId: string, meeting: { id: string }): string | null {
+  const here = db.getRoom(roomId);
+  const from = db.getRoom(fromId);
+  const open = db.openActions(fromId).slice(0, 30);
+  if (!here || !from || !open.length) return null;
+  const itemId = newAgendaLine(db, roomId, `To-dos from ${from.name}`, `Carried over from “${from.name}”`);
+  if (!itemId) return null;
+  for (const n of open) {
+    db.addNote(meeting.id, itemId, { kind: "action", text: n.text, owner: n.owner }, null);
+    db.setActionDone(fromId, n.id, `carry-over to “${here.name}”`);
+  }
+  return itemId;
 }

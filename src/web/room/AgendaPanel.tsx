@@ -343,6 +343,14 @@ type AddMode = "slides" | "type" | "pdf" | "linear";
 
 /** The agent's draft of what to talk about next: one collapsed line until opened.
  *  The ✦ marks only things the agent proposed and nobody has added yet. */
+function agoText(ts: number) {
+  const min = Math.round((Date.now() - ts) / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const h = Math.round(min / 60);
+  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+
 function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientMessage) => void; startOpen: boolean }) {
   const { upNext, canSteer, send } = props;
   const [open, setOpen] = useState(props.startOpen);
@@ -351,7 +359,9 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
   const { suggestions, parked } = upNext;
   if (!suggestions.length && !parked.length && !upNext.total) return null;
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  const provenance = `Drafted by the agent from ${plural(upNext.meetingsUsed, "meeting")} and ${plural(upNext.updatesUsed, "update")}`;
+  const provenance = `Drafted by the agent from ${plural(upNext.meetingsUsed, "meeting")} and ${plural(upNext.updatesUsed, "update")}${
+    upNext.polishing ? " · Claude is tidying it now" : upNext.polishedAt ? ` · tidied by Claude ${agoText(upNext.polishedAt)}` : ""
+  }`;
   const row = (s: UpNextSuggestion) => (
     <li key={s.key} className="upnext-row">
       <span className="upnext-mark" aria-hidden>
@@ -360,6 +370,7 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
       <span className="upnext-title">{s.title}</span>
       <span className="upnext-reason" role="tooltip">
         {s.reason}
+        {s.merged.length > 0 && ` · covers ${plural(s.merged.length, "similar note")}`}
       </span>
       {canSteer && (
         <span className="item-tools upnext-tools">
@@ -377,7 +388,7 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
     <section className="upnext">
       <div className="upnext-head">
         <button className="upnext-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)} title={provenance}>
-          <span className="upnext-mark" aria-hidden>
+          <span className={upNext.polishing ? "upnext-mark pulsing" : "upnext-mark"} aria-hidden>
             ✦
           </span>
           <span>Suggested · {suggestions.length}</span>

@@ -46,6 +46,28 @@ export interface Agent {
   summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
   /** Slides from a brief: an outline, rough notes or a one-line ask. */
   draftDeck(brief: string): Promise<DraftSlide[]>;
+  /** Tidies the space's suggested agenda: folds duplicates, writes short agenda
+   *  lines and reasons, and orders it. Null when there's no model to ask. */
+  polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null>;
+}
+
+/** A suggestion as the agent sees it when tidying the agenda, with what it came from. */
+export interface AgendaDraftRow {
+  key: string;
+  kind: "needs_people" | "question" | "todo";
+  title: string;
+  reason: string;
+  owner: string | null;
+  /** The agenda item it was raised under, if any. */
+  from: string | null;
+  /** The newest update reported on it, if any. */
+  latestUpdate: string | null;
+}
+export interface AgendaPolishRow {
+  key: string;
+  title: string;
+  reason: string;
+  sameAs: string | null;
 }
 
 export function createAgent(): Agent {
@@ -103,6 +125,21 @@ const DeckSchema = z.object({
       notes: z.string().describe("What the presenter says on this slide, 1-3 sentences"),
     }),
   ),
+});
+
+const AgendaSchema = z.object({
+  agenda: z
+    .array(
+      z.object({
+        key: z.string().describe("The suggestion's key, exactly as given"),
+        title: z.string().describe("A short agenda line, under 60 characters, in the team's own words"),
+        reason: z
+          .string()
+          .describe("Why it's worth talking about next time, under 70 characters, e.g. 'Blocked on API keys · Andy's agent'"),
+        same_as: z.string().nullable().describe("The key of another suggestion this is the same thing as, or null"),
+      }),
+    )
+    .describe("Every suggestion given, once each, in the order the meeting should take them"),
 });
 
 class ClaudeAgent implements Agent {
@@ -226,6 +263,47 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
     return out.slides.slice(0, 60).map((s) => ({ ...s, image: null }));
   }
 
+  async polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null> {
+    if (!suggestions.length) return [];
+    const list = suggestions
+      .map(
+        (s) =>
+          `- key=${s.key} kind=${s.kind}\n  text: ${s.title}\n  why: ${s.reason}${s.owner ? `\n  owner: ${s.owner}` : ""}${s.from ? `\n  raised under: ${s.from}` : ""}${
+            s.latestUpdate ? `\n  latest update: ${s.latestUpdate.slice(0, 300)}` : ""
+          }`,
+      )
+      .join("\n");
+    const out = await this.parse(
+      AgendaSchema,
+      `Space: ${space.name}${space.purpose ? `\nPurpose: ${space.purpose.slice(0, 500)}` : ""}
+
+What's still open from earlier meetings, as the plain ranking has it:
+${list}`,
+      `You draft the next agenda for a team's recurring meeting from what's still open. The host reads it before the meeting and adds what's worth talking about.
+
+For each suggestion, write a short agenda line (what to talk about, not a copy of the to-do) and a one-line reason. Use the latest update when there is one: it's usually the best reason. Keep owners' names. If two suggestions are the same thing in different words, keep the clearer one and give the other its key in same_as; never fold anything else.
+
+Order: things blocked or waiting on a decision first, then open questions, then to-dos that moved since, then the rest. Return every key exactly once. Do not invent anything.`,
+      "low",
+      config.notesModel,
+    );
+    if (!out) return null;
+    const known = new Set(suggestions.map((s) => s.key));
+    const seen = new Set<string>();
+    const rows: AgendaPolishRow[] = [];
+    for (const r of out.agenda) {
+      if (!known.has(r.key) || seen.has(r.key)) continue;
+      seen.add(r.key);
+      rows.push({
+        key: r.key,
+        title: r.title.trim().slice(0, 90) || suggestions.find((s) => s.key === r.key)!.title,
+        reason: r.reason.trim().slice(0, 100) || suggestions.find((s) => s.key === r.key)!.reason,
+        sameAs: r.same_as && known.has(r.same_as) && r.same_as !== r.key ? r.same_as : null,
+      });
+    }
+    return rows;
+  }
+
   async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {
     const body = perItem
       .filter((p) => p.notes.length)
@@ -310,6 +388,10 @@ export class HeuristicAgent implements Agent {
 
   async draftDeck(brief: string): Promise<DraftSlide[]> {
     return outlineToSlides(brief);
+  }
+
+  async polishAgenda(): Promise<AgendaPolishRow[] | null> {
+    return null;
   }
 
   async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {

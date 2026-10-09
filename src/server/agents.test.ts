@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { openDb } from "./db.ts";
+import { addUpNext } from "./upNext.ts";
+import { upNextView } from "./upNextPolish.ts";
 
 function setup() {
   const db = openDb(":memory:");
@@ -28,7 +30,12 @@ function setup() {
   ]);
   db.endMeeting(m.id, null);
   const notified: string[] = [];
-  const api = agentApi({ db, notify: (r, what) => notified.push(`${r}:${what}`), brief: (id) => ({ meeting: id }) });
+  const api = agentApi({
+    db,
+    notify: (r, what) => notified.push(`${r}:${what}`),
+    brief: (id) => ({ meeting: id }),
+    suggested: (r) => upNextView(db, r, null),
+  });
   const action = notes.find((n) => n.text.startsWith("Move"))!;
   return { db, api, joe, andy, room, item, topic, action, notes, notified };
 }
@@ -157,4 +164,35 @@ test("list_actions returns everyone's to-dos in a space, filtered by owner or st
   );
   assert.equal(api.listActions(caller, { space: "checkout", status: "done" }, "x").count, 0);
   assert.throws(() => api.listActions(caller, { space: "nowhere" }, "x"), /not in a space/);
+});
+
+test("a new space offers the open to-dos of a space everyone in it shares, and carrying them moves them over", () => {
+  const { db, api, joe, andy, room } = setup();
+  const launch = db.createRoom("Launch", joe.id, "");
+  db.touchMembership(launch.id, joe.id);
+  const m = db.startMeeting(launch.id);
+  const agenda = api.suggestedAgenda({ user: joe, token: null }, "Launch", "https://stand.test");
+  assert.deepEqual(
+    agenda.suggested.map((s) => [s.title, s.why]),
+    [["Open to-dos from Checkout v2", "2 open to-dos in Checkout v2"]],
+  );
+
+  const itemId = addUpNext(db, launch.id, { key: `space:${room.id}`, merged: [] }, { id: m.id });
+  assert.ok(itemId);
+  assert.equal(db.getItem(itemId)!.title, "To-dos from Checkout v2");
+  assert.deepEqual(
+    db.itemNotes(itemId).map((n) => [n.text, n.owner, n.doneAt]),
+    [
+      ["Move transcript capture to the server", "Joe", null],
+      ["Write the migration note", "Andy", null],
+    ],
+  );
+  assert.equal(db.openActions(room.id).length, 0);
+  assert.equal(db.roomFollowUps(room.id)[0].doneBy, "carry-over to “Launch”");
+
+  // Someone who isn't in Checkout v2 is in this space: it isn't offered, so its name doesn't leak.
+  const side = db.createRoom("Side", joe.id, "");
+  db.touchMembership(side.id, joe.id);
+  db.touchMembership(side.id, andy.id);
+  assert.deepEqual(db.sharedSpacesWithOpenWork(side.id), []);
 });

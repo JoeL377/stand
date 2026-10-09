@@ -1290,6 +1290,9 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .upnext-toggle { flex: 1; min-width: 0; white-space: nowrap; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 500; cursor: pointer; text-align: left; box-shadow: none; }
 .upnext-toggle:hover { background: var(--hover); color: var(--text); }
 .upnext-mark { color: var(--accent); font-size: 12px; line-height: 1; flex: none; }
+.upnext-mark.pulsing { animation: upnext-pulse 1.4s ease-in-out infinite; }
+@keyframes upnext-pulse { 50% { opacity: 0.35; transform: scale(0.8); } }
+@media (prefers-reduced-motion: reduce) { .upnext-mark.pulsing { animation: none; opacity: 0.5; } }
 .upnext-progress { margin-left: auto; font-weight: 400; font-size: 11.5px; white-space: nowrap; }
 .upnext-toggle .chev { display: inline-flex; width: 12px; height: 12px; transition: transform 0.12s; }
 .upnext-toggle .chev.open { transform: rotate(90deg); }

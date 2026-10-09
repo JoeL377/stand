@@ -3,7 +3,7 @@
 // and topics, the context to act on them, and the two ways to report back.
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
-import type { AgentToken, Discussion, Item, ItemUpdate, Note, UpdateStatus, User } from "../shared/protocol.ts";
+import type { AgentToken, Discussion, Item, ItemUpdate, Note, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
 
@@ -37,6 +37,8 @@ export interface AgentDeps {
   notify: (roomId: string, what: "updates" | "followups") => void;
   /** The meeting brief (stand.meeting-brief/v1) for a meeting. */
   brief: (meetingId: string, baseUrl: string, transcript: boolean) => unknown;
+  /** The space's suggested agenda as people see it in the app. */
+  suggested: (roomId: string) => { upNext: UpNext };
 }
 
 const UPDATE_STATUSES: UpdateStatus[] = ["progress", "blocked", "needs_decision", "done"];
@@ -280,6 +282,44 @@ export function agentApi(deps: AgentDeps) {
         count: rows.length,
         actions: workRows(rows.slice(0, 100), baseUrl).map((w) => ({ ...w, space: undefined })),
         note: rows.length > 100 ? "Showing the newest 100. Filter by status or owner to see the rest." : undefined,
+      };
+    },
+
+    /** The next agenda the agent drafted for a space, ranked, each with why. */
+    suggestedAgenda(caller: Caller, spaceQuery: string, baseUrl: string) {
+      const q = spaceQuery.trim().toLowerCase();
+      const spaces = db.spaceRows(caller.user.id).filter((r) => r.id === spaceQuery || r.name.toLowerCase().includes(q));
+      if (!q || spaces.length === 0) throw new AgentError(`You're not in a space matching "${spaceQuery}". list_spaces shows yours.`);
+      if (spaces.length > 1 && !spaces.some((r) => r.name.toLowerCase() === q))
+        throw new AgentError(`"${spaceQuery}" matches ${spaces.map((r) => `${r.name} (${r.id})`).join(", ")}. Give one id.`);
+      const room = space((spaces.find((r) => r.id === spaceQuery || r.name.toLowerCase() === q) ?? spaces[0]).id, caller);
+      const { upNext } = deps.suggested(room.id);
+      const refFor = (key: string) => {
+        const [kind, id] = key.split(":");
+        const note = kind === "note" ? db.getNote(id) : null;
+        return note && (note.kind === "action" || note.kind === "question") ? refOf(note.kind, note.id) : undefined;
+      };
+      const row = (s: UpNextSuggestion) => {
+        const item = s.itemId ? db.getItem(s.itemId) : null;
+        return {
+          kind: s.kind,
+          title: s.title,
+          why: s.reason,
+          ref: refFor(s.key),
+          owner: s.owner ?? undefined,
+          item: item ? { id: item.id, title: item.title, stand_url: `${baseUrl}/items/${item.id}` } : undefined,
+          carried_meetings: s.carried || undefined,
+          also_covers: s.merged.length ? s.merged.map(refFor).filter(Boolean) : undefined,
+        };
+      };
+      return {
+        schema: "stand.suggested-agenda/v1",
+        space: { id: room.id, name: room.name },
+        suggested: upNext.suggestions.map(row),
+        parked: upNext.parked.map(row),
+        progress: upNext.since ? { closed: upNext.closed, of: upNext.total, since: new Date(upNext.since).toISOString() } : undefined,
+        drafted_by: upNext.polishedAt ? "the Stand agent, tidied by Claude" : "the Stand agent (plain ranking)",
+        note: "Nothing here is on the agenda until the meeting host adds it. To push something up, post_update with status blocked or needs_decision.",
       };
     },
 

@@ -146,7 +146,7 @@ export interface FollowUp extends Note {
 /** One thing the agent proposes for the agenda, with why. Nothing joins the
  *  agenda until someone adds it. */
 export interface UpNextSuggestion {
-  /** "note:<id>" or "item:<id>"; what add and dismiss refer to. */
+  /** "note:<id>", "item:<id>" or "space:<id>" (open to-dos in another space); what add and dismiss refer to. */
   key: string;
   kind: "needs_people" | "question" | "todo";
   title: string;
@@ -158,6 +158,8 @@ export interface UpNextSuggestion {
   owner: string | null;
   /** How many meetings it has carried over so far. */
   carried: number;
+  /** Other suggestions the agent folded into this one as the same thing; adding this adds them too. */
+  merged: string[];
 }
 
 /** The space's next agenda as the agent drafts it, plus how much got closed since last time. */
@@ -174,6 +176,10 @@ export interface UpNext {
   meetingsUsed: number;
   updatesUsed: number;
   builtAt: number;
+  /** When Claude last merged, reworded and ordered the list; null when it's the plain ranking. */
+  polishedAt: number | null;
+  /** Claude is reworking the list right now (the ✦ pulses). */
+  polishing: boolean;
 }
 
 export interface Participant {

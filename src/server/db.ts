@@ -21,7 +21,7 @@ import type {
   User,
 } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
-import type { UpNextInput } from "./upNext.ts";
+import type { Polish, UpNextInput } from "./upNext.ts";
 
 export type DB = ReturnType<typeof openDb>;
 
@@ -123,6 +123,12 @@ CREATE TABLE IF NOT EXISTS upnext_dismissed (
   key TEXT NOT NULL,
   at INTEGER NOT NULL,
   PRIMARY KEY (room_id, key)
+);
+-- Claude's last pass over a space's suggested agenda (upNext.ts Polish), as JSON.
+CREATE TABLE IF NOT EXISTS upnext_polish (
+  room_id TEXT PRIMARY KEY,
+  at INTEGER NOT NULL,
+  rows_json TEXT NOT NULL
 );
 -- The agent's grouping of an item's talk into discussions, one per question.
 CREATE TABLE IF NOT EXISTS discussions (
@@ -804,7 +810,8 @@ export function openDb(file?: string) {
       db.prepare("DELETE FROM notes WHERE id = ?").run(id);
       return toNote(r);
     },
-    addNote(meetingId: string, itemId: string | null, n: { kind: NoteKind; text: string; owner: string | null }, by: string): Note {
+    /** by: who wrote it, which also keeps the agent's redrafts from rewording it; null for notes carried in as they were. */
+    addNote(meetingId: string, itemId: string | null, n: { kind: NoteKind; text: string; owner: string | null }, by: string | null): Note {
       const note: Note = {
         id: newId(12),
         meetingId,
@@ -944,7 +951,55 @@ export function openDb(file?: string) {
           r.at as number,
         ]),
       );
-      return { now: Date.now(), meetings, currentStart, notes, items, updates: this.roomUpdates(roomId, 0, 500), dismissed };
+      return {
+        now: Date.now(),
+        meetings,
+        currentStart,
+        notes,
+        items,
+        updates: this.roomUpdates(roomId, 0, 500),
+        dismissed,
+        otherSpaces: meetings.some((m) => m.endedAt !== null) ? [] : this.sharedSpacesWithOpenWork(roomId),
+      };
+    },
+    /** Other spaces with open to-dos that everyone in this space is also in,
+     *  so offering them leaks nothing. Newest activity first, at most three. */
+    sharedSpacesWithOpenWork(roomId: string): Array<{ id: string; name: string; open: number; lastAt: number }> {
+      return (
+        db
+          .prepare(
+            `SELECT r.id, r.name, COUNT(n.id) AS open, MAX(n.ts) AS last_at
+             FROM rooms r JOIN meetings m ON m.room_id = r.id AND m.ended_at IS NOT NULL
+             JOIN notes n ON n.meeting_id = m.id AND n.kind = 'action' AND n.done_at IS NULL
+             WHERE r.id != ?
+               AND EXISTS (SELECT 1 FROM room_members WHERE room_id = ?)
+               AND NOT EXISTS (
+                 SELECT 1 FROM room_members x WHERE x.room_id = ?
+                   AND NOT EXISTS (SELECT 1 FROM room_members y WHERE y.room_id = r.id AND y.user_id = x.user_id))
+             GROUP BY r.id ORDER BY last_at DESC LIMIT 3`,
+          )
+          .all(roomId, roomId, roomId) as Row[]
+      ).map((r) => ({ id: r.id as string, name: r.name as string, open: r.open as number, lastAt: r.last_at as number }));
+    },
+    /** A space's open to-dos from finished meetings, oldest first. */
+    openActions(roomId: string): Note[] {
+      return (
+        db
+          .prepare(
+            `SELECT n.* FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND n.kind = 'action' AND n.done_at IS NULL ORDER BY n.ts, n.rowid`,
+          )
+          .all(roomId) as Row[]
+      ).map(toNote);
+    },
+    getPolish(roomId: string): Polish | null {
+      const r = db.prepare("SELECT at, rows_json FROM upnext_polish WHERE room_id = ?").get(roomId) as Row | undefined;
+      return r ? { at: r.at as number, rows: JSON.parse(r.rows_json as string) } : null;
+    },
+    savePolish(roomId: string, polish: Polish) {
+      db.prepare(
+        "INSERT INTO upnext_polish (room_id, at, rows_json) VALUES (?, ?, ?) ON CONFLICT (room_id) DO UPDATE SET at = excluded.at, rows_json = excluded.rows_json",
+      ).run(roomId, polish.at, JSON.stringify(polish.rows));
     },
     dismissUpNext(roomId: string, key: string) {
       db.prepare(

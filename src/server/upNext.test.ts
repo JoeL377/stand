@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ItemUpdate, Note } from "../shared/protocol.ts";
-import { computeUpNext, type UpNextInput } from "./upNext.ts";
+import { openDb } from "./db.ts";
+import { type AgendaDraftRow, HeuristicAgent } from "./llm.ts";
+import { applyPolish, computeUpNext, polishBasis, type UpNextInput } from "./upNext.ts";
+import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 const note = (id: string, meetingId: string, kind: Note["kind"], text: string, extra: Partial<Note> = {}): Note => ({
   id,
@@ -49,6 +52,7 @@ const base = (over: Partial<UpNextInput> = {}): UpNextInput => ({
   ]),
   updates: [],
   dismissed: new Map(),
+  otherSpaces: [],
   ...over,
 });
 
@@ -130,4 +134,91 @@ test("a dismissed suggestion stays away until something new happens on it", () =
   assert.equal(computeUpNext(base({ notes, dismissed })).upNext.suggestions.length, 0);
   const later = computeUpNext(base({ notes, dismissed, updates: [update({ noteId: "a1", ts: 290 })] })).upNext;
   assert.equal(later.suggestions.length, 1);
+});
+
+test("Claude's pass rewords, reorders and folds duplicates, but only over facts it saw", () => {
+  const notes = [
+    note("a1", "m2", "action", "Write the retry doc", { ts: 210 }),
+    note("a2", "m2", "action", "Draft webhook retry docs", { ts: 211 }),
+    note("q1", "m2", "question", "Merge with Connect?", { ts: 220 }),
+  ];
+  const plain = computeUpNext(base({ notes })).upNext;
+  const at = (k: string) => plain.suggestions.find((s) => s.key === k)!;
+  const polish = {
+    at: 400,
+    rows: [
+      { key: "note:a1", basis: polishBasis(at("note:a1")), title: "Retry docs", reason: "Two asks for the same doc", sameAs: null },
+      { key: "note:q1", basis: polishBasis(at("note:q1")), title: "Stand inside Connect?", reason: "Left open Thu", sameAs: null },
+      { key: "note:a2", basis: polishBasis(at("note:a2")), title: "x", reason: "x", sameAs: "note:a1" },
+    ],
+  };
+  const out = applyPolish(plain, polish);
+  assert.deepEqual(
+    out.suggestions.map((s) => [s.key, s.title, s.merged]),
+    [
+      ["note:a1", "Retry docs", ["note:a2"]],
+      ["note:q1", "Stand inside Connect?", []],
+    ],
+  );
+  assert.equal(out.polishedAt, 400);
+
+  // After the pass: a new to-do gets blocked, and the retry doc reports progress. Both keep the
+  // plain wording (the pass never saw those facts), and the blocker goes first.
+  const more = [...notes, note("a3", "m2", "action", "Get Connect API keys", { ts: 230 })];
+  const updates = [update({ noteId: "a3", status: "blocked" }), update({ noteId: "a1", status: "progress", ts: 260 })];
+  const stale = applyPolish(computeUpNext(base({ notes: more, updates })).upNext, polish);
+  assert.deepEqual(
+    stale.suggestions.map((s) => [s.key, s.title]),
+    [
+      ["note:a3", "Get Connect API keys"],
+      ["note:q1", "Stand inside Connect?"],
+      ["note:a1", "Write the retry doc"],
+      ["note:a2", "Draft webhook retry docs"],
+    ],
+  );
+});
+
+test("a new space offers what's still open in spaces its people share", () => {
+  const fresh = base({
+    meetings: [{ id: "m1", startedAt: 300, endedAt: null }],
+    otherSpaces: [{ id: "r2", name: "Prod Test", open: 3, lastAt: 90 }],
+  });
+  assert.deepEqual(
+    computeUpNext(fresh).upNext.suggestions.map((s) => [s.key, s.title, s.reason]),
+    [["space:r2", "Open to-dos from Prod Test", "3 open to-dos in Prod Test"]],
+  );
+  // Once the space has had a meeting of its own, it stops offering.
+  assert.equal(computeUpNext(base({ otherSpaces: fresh.otherSpaces })).upNext.suggestions.length, 0);
+});
+
+test("the polisher saves Claude's pass, shows it, and skips a rerun when nothing changed", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Standup", null, "");
+  const m = db.startMeeting(room.id);
+  db.addNote(m.id, null, { kind: "action", text: "Write the retry doc", owner: "Huy" }, "Joe");
+  db.endMeeting(m.id, null);
+  let calls = 0;
+  const seen: boolean[] = [];
+  const agent = Object.assign(new HeuristicAgent(), {
+    polishAgenda: async (_space: unknown, rows: AgendaDraftRow[]) => {
+      calls++;
+      return rows.map((r) => ({ key: r.key, title: "Retry docs", reason: "Huy's, still open", sameAs: null }));
+    },
+  });
+  const polisher = new UpNextPolisher(
+    db,
+    agent,
+    () => null,
+    (id) => seen.push(polisher.busy(id)),
+  );
+  await polisher.run(room.id);
+  await polisher.run(room.id);
+  assert.equal(calls, 1);
+  assert.deepEqual(seen, [true, false]);
+  const { upNext } = upNextView(db, room.id, null);
+  assert.deepEqual(
+    upNext.suggestions.map((s) => [s.title, s.reason]),
+    [["Retry docs", "Huy's, still open"]],
+  );
+  assert.ok(upNext.polishedAt);
 });

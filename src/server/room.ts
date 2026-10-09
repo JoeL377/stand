@@ -19,7 +19,8 @@ import type { Agent } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes } from "./notesMerge.ts";
-import { addUpNext, computeUpNext } from "./upNext.ts";
+import { addUpNext } from "./upNext.ts";
+import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 /** Below this the agent keeps its guess to itself. */
 const SUGGEST_MIN_CONFIDENCE = 0.55;
@@ -108,6 +109,7 @@ export class RoomSession implements SpeechSink {
     room: { id: string; name: string; createdBy: string | null },
     private onClosed: (s: RoomSession) => void,
     private startTranscriber?: (s: RoomSession) => Transcriber | null,
+    private polisher?: UpNextPolisher,
   ) {
     this.roomId = room.id;
     this.roomName = room.name;
@@ -117,6 +119,8 @@ export class RoomSession implements SpeechSink {
     this.meetingStartedAt = m.startedAt;
     const first = db.listItems(room.id)[0];
     this.setFocusInternal(first?.id ?? null, "system", "start");
+    // Tidy the suggested agenda now, before anyone has started talking.
+    polisher?.schedule(room.id, 0);
   }
 
   // ---- connections ---------------------------------------------------------
@@ -194,9 +198,18 @@ export class RoomSession implements SpeechSink {
         .roomFollowUps(this.roomId)
         .filter((f) => f.meetingId !== this.meetingId && (f.doneAt === null || f.doneAt >= this.meetingStartedAt)),
       updates: this.db.roomUpdates(this.roomId, this.db.previousMeetingStart(this.roomId, this.meetingStartedAt) ?? 0),
-      ...computeUpNext(this.db.upNextInput(this.roomId, this.meetingStartedAt)),
+      ...this.upNext(),
       capabilities: capabilities(),
     };
+  }
+
+  private upNext() {
+    return upNextView(this.db, this.roomId, this.meetingStartedAt, this.polisher?.busy(this.roomId));
+  }
+
+  /** Claude started or finished tidying the suggested agenda. */
+  upNextChanged() {
+    this.broadcastState();
   }
 
   private items(): Item[] {
@@ -381,20 +394,25 @@ export class RoomSession implements SpeechSink {
       case "upnext.add":
       case "upnext.addAll": {
         if (!isHost) return;
-        const keys =
-          msg.type === "upnext.add"
-            ? [String(msg.key)]
-            : computeUpNext(this.db.upNextInput(this.roomId, this.meetingStartedAt)).upNext.suggestions.map((s) => s.key);
-        let added = 0;
-        for (const key of keys) if (addUpNext(this.db, this.roomId, key)) added++;
-        if (added) this.itemsChanged();
+        // Only what's on offer right now can be added; parked ones too, one at a time.
+        const { suggestions, parked } = this.upNext().upNext;
+        const picked = msg.type === "upnext.add" ? [...suggestions, ...parked].filter((s) => s.key === msg.key) : suggestions;
+        const added = picked.map((s) => addUpNext(this.db, this.roomId, s, { id: this.meetingId })).filter((id) => id !== null);
+        if (!added.length) break;
+        this.itemsChanged();
+        // To-dos carried from another space are new notes in this meeting.
+        for (const id of new Set(added)) this.sendItemNotes(id);
         break;
       }
-      case "upnext.dismiss":
+      case "upnext.dismiss": {
         if (!isHost) return;
-        this.db.dismissUpNext(this.roomId, String(msg.key).slice(0, 80));
+        const { suggestions, parked } = this.upNext().upNext;
+        const s = [...suggestions, ...parked].find((x) => x.key === msg.key);
+        if (!s) return;
+        for (const key of [s.key, ...s.merged]) this.db.dismissUpNext(this.roomId, key);
         this.broadcastState();
         break;
+      }
       case "demo.play":
         if (isHost) void this.playDemo();
         break;
@@ -697,6 +715,7 @@ export class RoomSession implements SpeechSink {
       console.error("[agent] summary failed:", err);
     }
     this.db.endMeeting(this.meetingId, summary || null);
+    this.polisher?.schedule(this.roomId, 0);
     this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
     for (const ws of this.conns.keys()) ws.close();
     this.onClosed(this);
