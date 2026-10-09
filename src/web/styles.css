@@ -1105,7 +1105,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 
 /* ---- side panel tabs: notes & topics first, transcript second ---- */
 .side-tab-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
-.side-notes-tab { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0 14px; }
+.side-notes-tab { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0 14px; scroll-padding-bottom: 14px; }
 .side-sliver { flex: none; display: flex; flex-direction: column; gap: 5px; width: calc(100% - 32px); margin: 0 16px 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; font: inherit; font-size: 12.5px; text-align: left; color: inherit; cursor: pointer; min-width: 0; }
 .side-sliver:hover { background: rgb(127 127 127 / 0.08); }
 .side-sliver-row { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -1242,10 +1242,6 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .note-form-gap { flex: 1; }
 .note-form-delete { color: var(--danger); background: transparent; border-color: transparent; }
 .note-form-delete:hover { background: rgb(229 72 77 / 0.12); }
-.note-add-row { display: flex; align-items: center; gap: 4px; margin: 2px 2px 10px; font-size: 12px; }
-.note-add-row button { font-size: 12px; padding: 3px 8px; min-height: 0; border: 1px dashed var(--line); background: transparent; color: var(--muted); border-radius: 999px; cursor: pointer; }
-.note-add-row button:hover { color: var(--text); border-color: var(--muted); }
-.note-add-row .muted { margin-right: 2px; }
 
 /* ---- side panel head: the item in focus, one quiet meta line, then a pill toggle ---- */
 .side-head { padding: 14px 16px 10px; flex: none; display: flex; align-items: flex-start; gap: 10px; }
@@ -1259,3 +1255,11 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .side-toggle button:hover { color: var(--text); background: transparent; }
 .side-toggle button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
 .side-toggle-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: notes-pulse 1.4s ease-in-out infinite; }
+
+/* ---- live notes: one "+" in the To do header opens the add menu ---- */
+.tk-card-head { display: flex; align-items: center; justify-content: space-between; }
+.note-add-btn { width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 16px; line-height: 22px; cursor: pointer; }
+.note-add-btn:hover, .note-add-btn[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+.note-add-menu { width: 160px; top: calc(100% + 4px); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.tk-none { margin: 0; font-size: 12.5px; color: var(--muted); }
+.note-add-menu button { color: var(--text); }

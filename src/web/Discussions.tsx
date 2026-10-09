@@ -82,7 +82,14 @@ function DiscussionBlock(props: {
     </>
   );
   return (
-    <details className={props.titleOnly ? "disc title-only" : "disc"} open={props.open}>
+    <details
+      className={props.titleOnly ? "disc title-only" : "disc"}
+      open={props.open}
+      onToggle={(e) => {
+        const el = e.currentTarget;
+        if (props.titleOnly && el.open) requestAnimationFrame(() => el.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+      }}
+    >
       <summary>
         <span className="disc-head">
           <span className="disc-topic">{d.topic}</span>
@@ -110,7 +117,7 @@ function DiscussionBlock(props: {
             {d.continues.topic !== d.topic && <> · “{d.continues.topic}”</>}
           </p>
         )}
-        {d.positions.length > 0 && (
+        {!props.titleOnly && d.positions.length > 0 && (
           <div className="disc-section">
             <div className="disc-label">Where people landed</div>
             {d.positions.map((p, i) => (
@@ -120,7 +127,7 @@ function DiscussionBlock(props: {
             ))}
           </div>
         )}
-        {rest.length > 0 && (
+        {!props.titleOnly && rest.length > 0 && (
           <div className="disc-section">
             <div className="disc-label">Came out of it</div>
             <ul className="disc-points">
@@ -277,6 +284,7 @@ export function LiveItemNotes(props: {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState<EditableKind | null>(null);
   const [showDone, setShowDone] = useState(false);
+  const [addMenu, setAddMenu] = useState(false);
   const todo = notes.filter((n) => n.kind === "action" && !n.doneAt);
   const done = notes.filter((n) => n.kind === "action" && n.doneAt);
   const decided = notes.filter((n) => n.kind === "decision");
@@ -336,9 +344,40 @@ export function LiveItemNotes(props: {
   return (
     <div className="live-notes">
       {empty && !adding && notes.length > 0 && <p className="tk-empty">Nothing decided or assigned yet.</p>}
-      {(todo.length > 0 || done.length > 0) && (
+      {(todo.length > 0 || done.length > 0 || (editing && !adding)) && (
         <section className="tk-group tk-card">
-          <h4>To do</h4>
+          <h4 className="tk-card-head">
+            To do
+            {editing && !adding && (
+              <span className="add-menu-wrap">
+                <button
+                  className="note-add-btn"
+                  title="Add a to-do, decision or question"
+                  aria-expanded={addMenu}
+                  onClick={() => setAddMenu((m) => !m)}
+                >
+                  +
+                </button>
+                {addMenu && (
+                  <div className="add-menu note-add-menu" role="menu" onMouseLeave={() => setAddMenu(false)}>
+                    {(["action", "decision", "question"] as const).map((k) => (
+                      <button
+                        key={k}
+                        role="menuitem"
+                        onClick={() => {
+                          setAdding(k);
+                          setAddMenu(false);
+                        }}
+                      >
+                        {k === "action" ? "To-do" : k === "decision" ? "Decision" : "Open question"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </span>
+            )}
+          </h4>
+          {todo.length === 0 && done.length === 0 && <p className="tk-none">Nothing yet</p>}
           {todo.length > 0 && <ul>{todo.map(action)}</ul>}
           {done.length > 0 && (
             <>
@@ -406,14 +445,7 @@ export function LiveItemNotes(props: {
               onCancel={() => setAdding(null)}
             />
           </section>
-        ) : (
-          <div className="note-add-row">
-            <span className="muted">Add</span>
-            <button onClick={() => setAdding("action")}>To-do</button>
-            <button onClick={() => setAdding("decision")}>Decision</button>
-            <button onClick={() => setAdding("question")}>Question</button>
-          </div>
-        ))}
+        ) : null)}
       {discussions.length > 0 ? (
         <section className="tk-group tk-card live-topics">
           <h4>Topics</h4>
