@@ -141,7 +141,6 @@ export function SidePanel(props: {
       ) : (
         <Transcript segments={shown} items={state.items} interims={interims} send={send} />
       )}
-      <ChatBox send={send} />
     </aside>
   );
 }
@@ -299,45 +298,6 @@ function fmtAgo(ts: number) {
   if (m < 60) return `${m} min ago`;
   const h = Math.round(m / 60);
   return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
-}
-
-function ChatBox({ send }: { send: (m: ClientMessage) => void }) {
-  const [text, setText] = useState("");
-  return (
-    <form
-      className="chatbox"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!text.trim()) return;
-        send({ type: "chat", text });
-        setText("");
-      }}
-    >
-      <input
-        placeholder="Message the space"
-        title="Goes into the discussion for the item in focus"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-      {text.trim() && (
-        <button className="chat-send" aria-label="Send" title="Send (Enter)">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <path d="M12 19V5M5 12l7-7 7 7" />
-          </svg>
-        </button>
-      )}
-    </form>
-  );
 }
 
 export function NoteList({ notes }: { notes: Note[] }) {
