@@ -6,99 +6,445 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
     />
+    <!--
+      The capture toolbar, like macOS's ⌘⇧5, over a still of the display: snap the
+      entire screen, one window, or a box you move and resize. Options picks where
+      the snap goes (the meeting, the clipboard) and a timer. Esc closes it.
+    -->
     <style>
       html,
       body {
         margin: 0;
         height: 100%;
         overflow: hidden;
-        cursor: crosshair;
         user-select: none;
-        background: transparent;
+        background: #000;
+        font:
+          13px -apple-system,
+          BlinkMacSystemFont,
+          system-ui,
+          sans-serif;
+        color: #fff;
+      }
+      body.screen,
+      body.window {
+        cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='24' viewBox='0 0 28 24'><path d='M9 4l1.6-2h6.8L19 4h4a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z' fill='%23fff' stroke='%23000' stroke-width='1.4'/><circle cx='14' cy='13' r='4.6' fill='none' stroke='%23000' stroke-width='1.6'/></svg>")
+            14 12,
+          pointer;
+      }
+      body.portion {
+        cursor: crosshair;
       }
       #shot {
         position: fixed;
         inset: 0;
         width: 100%;
         height: 100%;
-      }
-      #dim {
-        position: fixed;
-        inset: 0;
-        background: rgb(0 0 0 / 0.35);
+        pointer-events: none;
+        -webkit-user-drag: none;
       }
       #box {
         position: fixed;
         display: none;
-        border: 2px solid #fff;
-        box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.35);
-        background: transparent;
+        outline: 1px solid rgb(255 255 255 / 0.95);
+        box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.42);
+        cursor: move;
+      }
+      #box .h {
+        position: absolute;
+        width: 9px;
+        height: 9px;
+        margin: -5.5px 0 0 -5.5px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+      }
+      #box .h[data-h="nw"],
+      #box .h[data-h="se"] {
+        cursor: nwse-resize;
+      }
+      #box .h[data-h="ne"],
+      #box .h[data-h="sw"] {
+        cursor: nesw-resize;
+      }
+      #box .h[data-h="n"],
+      #box .h[data-h="s"] {
+        cursor: ns-resize;
+      }
+      #box .h[data-h="e"],
+      #box .h[data-h="w"] {
+        cursor: ew-resize;
       }
       #size {
         position: fixed;
         display: none;
-        padding: 2px 6px;
-        border-radius: 4px;
-        background: rgb(0 0 0 / 0.75);
-        color: #fff;
-        font:
-          12px -apple-system,
-          system-ui;
+        padding: 2px 7px;
+        border-radius: 5px;
+        background: rgb(0 0 0 / 0.72);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+      }
+      #win {
+        position: fixed;
+        display: none;
+        background: rgb(90 150 255 / 0.3);
+        outline: 2px solid rgb(90 150 255 / 0.9);
+        outline-offset: -2px;
+        pointer-events: none;
       }
       #hint {
         position: fixed;
-        top: 24px;
+        top: 28px;
         left: 50%;
         transform: translateX(-50%);
         padding: 6px 14px;
         border-radius: 999px;
-        background: rgb(20 20 22 / 0.85);
+        background: rgb(28 28 30 / 0.86);
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      #bar {
+        position: fixed;
+        left: 50%;
+        bottom: 64px;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 6px;
+        border-radius: 13px;
+        background: rgb(32 32 34 / 0.94);
+        box-shadow:
+          0 12px 32px rgb(0 0 0 / 0.45),
+          inset 0 0 0 0.5px rgb(255 255 255 / 0.18);
+        cursor: default;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        cursor: default;
+      }
+      .tb {
+        width: 42px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: none;
+        color: rgb(255 255 255 / 0.82);
+      }
+      .tb:hover {
+        background: rgb(255 255 255 / 0.1);
+      }
+      .tb.on {
+        background: rgb(255 255 255 / 0.2);
         color: #fff;
-        font:
-          13px -apple-system,
-          system-ui;
+      }
+      .tb svg {
+        width: 22px;
+        height: 22px;
+      }
+      .sep {
+        width: 1px;
+        height: 22px;
+        margin: 0 6px;
+        background: rgb(255 255 255 / 0.2);
+      }
+      #opts {
+        width: auto;
+        display: flex;
+        gap: 5px;
+        padding: 0 10px;
+      }
+      #opts svg {
+        width: 10px;
+        height: 10px;
+      }
+      #go {
+        height: 30px;
+        margin-left: 4px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 8px;
+        background: #0a84ff;
+        color: #fff;
+        font-weight: 500;
+      }
+      #go:hover {
+        background: #2a95ff;
+      }
+      #go[hidden] {
+        display: none;
+      }
+      #menu {
+        position: fixed;
+        display: none;
+        min-width: 232px;
+        padding: 5px;
+        border-radius: 10px;
+        background: rgb(44 44 46 / 0.98);
+        box-shadow:
+          0 12px 32px rgb(0 0 0 / 0.5),
+          inset 0 0 0 0.5px rgb(255 255 255 / 0.18);
+        cursor: default;
+      }
+      #menu .head {
+        padding: 7px 10px 3px;
+        color: rgb(255 255 255 / 0.5);
+        font-size: 11.5px;
+        font-weight: 600;
+      }
+      #menu .item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        padding: 4px 10px 4px 6px;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        text-align: left;
+      }
+      #menu .item:hover:not(:disabled) {
+        background: #0a84ff;
+      }
+      #menu .item:disabled {
+        color: rgb(255 255 255 / 0.4);
+      }
+      #menu .check {
+        width: 16px;
+        text-align: center;
+      }
+      #menu .note {
+        padding: 0 10px 5px 28px;
+        color: rgb(255 255 255 / 0.5);
+        font-size: 11.5px;
+      }
+      #menu hr {
+        margin: 5px 6px;
+        border: 0;
+        border-top: 1px solid rgb(255 255 255 / 0.14);
       }
     </style>
   </head>
-  <body>
-    <img id="shot" alt="" />
-    <div id="dim"></div>
-    <div id="box"></div>
+  <body class="portion">
+    <img id="shot" alt="" draggable="false" />
+    <div id="win"></div>
+    <div id="box">
+      <i class="h" data-h="nw" style="left: 0; top: 0"></i><i class="h" data-h="n" style="left: 50%; top: 0"></i
+      ><i class="h" data-h="ne" style="left: 100%; top: 0"></i><i class="h" data-h="e" style="left: 100%; top: 50%"></i
+      ><i class="h" data-h="se" style="left: 100%; top: 100%"></i><i class="h" data-h="s" style="left: 50%; top: 100%"></i
+      ><i class="h" data-h="sw" style="left: 0; top: 100%"></i><i class="h" data-h="w" style="left: 0; top: 50%"></i>
+    </div>
     <div id="size"></div>
-    <div id="hint">Drag over what to snap · click for the whole screen · Esc to cancel</div>
+    <div id="hint"></div>
+    <div id="bar">
+      <button class="tb" id="close" title="Close (Esc)">
+        <svg viewBox="0 0 22 22">
+          <circle cx="11" cy="11" r="8.5" fill="currentColor" opacity="0.22" />
+          <path d="M8 8l6 6M14 8l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+      </button>
+      <span class="sep"></span>
+      <button class="tb" data-mode="screen" title="Capture Entire Screen">
+        <svg viewBox="0 0 22 22"><rect x="2.5" y="4.5" width="17" height="13" rx="2" fill="currentColor" /></svg>
+      </button>
+      <button class="tb" data-mode="window" title="Capture Selected Window">
+        <svg viewBox="0 0 22 22">
+          <rect x="2.5" y="4.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" />
+          <rect x="5.5" y="7.5" width="11" height="7" rx="1" fill="currentColor" />
+        </svg>
+      </button>
+      <button class="tb" data-mode="portion" title="Capture Selected Portion">
+        <svg viewBox="0 0 22 22">
+          <rect x="2.5" y="4.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.4 2" />
+          <rect x="7" y="8.5" width="8" height="5" rx="0.8" fill="currentColor" />
+        </svg>
+      </button>
+      <span class="sep"></span>
+      <button class="tb" id="opts">
+        Options
+        <svg viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+      </button>
+      <button id="go">Capture</button>
+    </div>
+    <div id="menu"></div>
     <script>
-      const shot = document.getElementById("shot"),
-        dim = document.getElementById("dim"),
-        box = document.getElementById("box"),
-        size = document.getElementById("size"),
-        hint = document.getElementById("hint");
-      shot.onload = () => window.snap.ready();
-      window.snap.onImage((url) => (shot.src = url));
-      let start = null;
-      const rect = (e) => ({
-        x: Math.min(start.x, e.clientX),
-        y: Math.min(start.y, e.clientY),
-        w: Math.abs(e.clientX - start.x),
-        h: Math.abs(e.clientY - start.y),
+      const $ = (id) => document.getElementById(id);
+      const MIN = 8;
+      /** {prefs, inMeeting, windows: [{id, x, y, w, h}] front to back, in this page's pixels} */
+      let st = null;
+      let mode = "portion";
+      let box = { x: 0, y: 0, w: 0, h: 0 };
+      let hover = null;
+      let drag = null;
+
+      window.snap.onOpen((o) => {
+        st = o;
+        mode = o.prefs.mode;
+        const b = o.prefs.box;
+        box = b
+          ? { x: b.x * innerWidth, y: b.y * innerHeight, w: b.w * innerWidth, h: b.h * innerHeight }
+          : { x: innerWidth * 0.25, y: innerHeight * 0.22, w: innerWidth * 0.5, h: innerHeight * 0.5 };
+        fit();
+        $("shot").src = o.image;
+        render();
       });
-      addEventListener("keydown", (e) => e.key === "Escape" && window.snap.done(null));
+      $("shot").onload = () => window.snap.ready();
+
+      const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+      function fit() {
+        box.w = clamp(box.w, MIN, innerWidth);
+        box.h = clamp(box.h, MIN, innerHeight);
+        box.x = clamp(box.x, 0, innerWidth - box.w);
+        box.y = clamp(box.y, 0, innerHeight - box.h);
+      }
+      const prefsNow = () => ({
+        ...st.prefs,
+        mode,
+        box: { x: box.x / innerWidth, y: box.y / innerHeight, w: box.w / innerWidth, h: box.h / innerHeight },
+      });
+      function capture() {
+        if (!st || (mode === "window" && !hover)) return;
+        window.snap.done({
+          mode,
+          rect: mode === "portion" ? box : mode === "window" ? hover : null,
+          windowId: mode === "window" ? hover.id : null,
+          size: [innerWidth, innerHeight],
+          prefs: prefsNow(),
+        });
+      }
+      const cancel = () => window.snap.done({ cancel: true, prefs: st ? prefsNow() : null });
+
+      const HINTS = {
+        screen: "Click anywhere to snap the whole screen",
+        window: "Click a window to snap it",
+        portion: "Drag to move or resize · Enter to snap",
+      };
+      function render() {
+        if (!st) return;
+        document.body.className = mode;
+        for (const b of document.querySelectorAll("[data-mode]")) b.classList.toggle("on", b.dataset.mode === mode);
+        $("go").hidden = mode === "window";
+        $("hint").textContent = HINTS[mode];
+        const showBox = mode === "portion";
+        Object.assign($("box").style, { display: showBox ? "block" : "none", left: box.x + "px", top: box.y + "px", width: box.w + "px", height: box.h + "px" });
+        const s = $("size");
+        s.style.display = showBox ? "block" : "none";
+        s.textContent = `${Math.round(box.w * devicePixelRatio)} × ${Math.round(box.h * devicePixelRatio)}`;
+        const below = box.y + box.h + 38 < innerHeight;
+        Object.assign(s.style, { left: box.x + box.w / 2 - s.offsetWidth / 2 + "px", top: (below ? box.y + box.h + 8 : box.y + 8) + "px" });
+        const w = $("win");
+        w.style.display = mode === "window" && hover ? "block" : "none";
+        if (hover) Object.assign(w.style, { left: hover.x + "px", top: hover.y + "px", width: hover.w + "px", height: hover.h + "px" });
+      }
+
+      // ---- the Options menu ----
+      function renderMenu() {
+        const p = st.prefs;
+        const copyForced = !st.inMeeting;
+        const row = (label, on, act, disabled = false) =>
+          `<button class="item" data-act="${act}"${disabled ? " disabled" : ""}><span class="check">${on ? "✓" : ""}</span>${label}</button>`;
+        $("menu").innerHTML =
+          `<div class="head">Save to</div>` +
+          row("The meeting, on the item in focus", st.inMeeting && p.toMeeting, "meeting", !st.inMeeting) +
+          row("Clipboard", copyForced || p.toClipboard, "clipboard", copyForced) +
+          (copyForced ? `<div class="note">You're not in a meeting, so it's copied.</div>` : "") +
+          `<hr /><div class="head">Timer</div>` +
+          row("None", !p.timer, "t0") +
+          row("5 Seconds", p.timer === 5, "t5") +
+          row("10 Seconds", p.timer === 10, "t10");
+      }
+      function openMenu() {
+        renderMenu();
+        const m = $("menu");
+        m.style.display = "block";
+        const r = $("opts").getBoundingClientRect();
+        Object.assign(m.style, { left: r.left + "px", top: r.top - m.offsetHeight - 10 + "px" });
+      }
+      const closeMenu = () => ($("menu").style.display = "none");
+      const menuOpen = () => $("menu").style.display === "block";
+      $("opts").onclick = () => (menuOpen() ? closeMenu() : openMenu());
+      $("menu").onclick = (e) => {
+        const act = e.target.closest("[data-act]")?.dataset.act;
+        if (!act) return;
+        const p = st.prefs;
+        // One of the two places always stays on.
+        if (act === "meeting" && (p.toClipboard || !p.toMeeting)) p.toMeeting = !p.toMeeting;
+        if (act === "clipboard" && (p.toMeeting || !p.toClipboard)) p.toClipboard = !p.toClipboard;
+        if (act.startsWith("t")) {
+          p.timer = Number(act.slice(1));
+          return closeMenu();
+        }
+        renderMenu();
+      };
+
+      // ---- the toolbar ----
+      for (const b of document.querySelectorAll("[data-mode]"))
+        b.onclick = () => {
+          mode = b.dataset.mode;
+          hover = null;
+          closeMenu();
+          render();
+        };
+      $("close").onclick = cancel;
+      $("go").onclick = capture;
+      addEventListener("keydown", (e) => {
+        if (e.key === "Escape") menuOpen() ? closeMenu() : cancel();
+        if (e.key === "Enter" && !menuOpen()) capture();
+      });
+
+      // ---- the screen ----
+      const windowAt = (x, y) => st.windows.find((w) => x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h) ?? null;
+      const inBox = (x, y) => x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
       addEventListener("mousedown", (e) => {
-        start = { x: e.clientX, y: e.clientY };
-        hint.style.display = "none";
+        if (!st || e.button !== 0 || e.target.closest("#bar, #menu")) return;
+        if (menuOpen()) return closeMenu();
+        if (mode === "screen") return capture();
+        if (mode === "window") {
+          hover = windowAt(e.clientX, e.clientY);
+          return capture();
+        }
+        const handle = e.target.dataset?.h;
+        drag = { kind: handle || (inBox(e.clientX, e.clientY) ? "move" : "new"), x: e.clientX, y: e.clientY, from: { ...box } };
       });
       addEventListener("mousemove", (e) => {
-        if (!start) return;
-        const r = rect(e);
-        dim.style.display = "none";
-        Object.assign(box.style, { display: "block", left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px" });
-        Object.assign(size.style, { display: "block", left: r.x + "px", top: Math.max(0, r.y - 22) + "px" });
-        size.textContent = `${Math.round(r.w * devicePixelRatio)} × ${Math.round(r.h * devicePixelRatio)}`;
+        if (!st) return;
+        if (mode === "window") {
+          const w = e.target.closest("#bar, #menu") ? null : windowAt(e.clientX, e.clientY);
+          if (w !== hover) {
+            hover = w;
+            render();
+          }
+          return;
+        }
+        if (!drag) return;
+        const dx = e.clientX - drag.x;
+        const dy = e.clientY - drag.y;
+        const f = drag.from;
+        if (drag.kind === "move") box = { ...f, x: f.x + dx, y: f.y + dy };
+        else if (drag.kind === "new") {
+          // A click outside the box keeps it; a drag draws a new one.
+          if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+          box = { x: Math.min(drag.x, e.clientX), y: Math.min(drag.y, e.clientY), w: Math.abs(dx), h: Math.abs(dy) };
+        } else {
+          let [l, t, r, b] = [f.x, f.y, f.x + f.w, f.y + f.h];
+          if (drag.kind.includes("w")) l = clamp(l + dx, 0, r - MIN);
+          if (drag.kind.includes("e")) r = clamp(r + dx, l + MIN, innerWidth);
+          if (drag.kind.includes("n")) t = clamp(t + dy, 0, b - MIN);
+          if (drag.kind.includes("s")) b = clamp(b + dy, t + MIN, innerHeight);
+          box = { x: l, y: t, w: r - l, h: b - t };
+        }
+        fit();
+        render();
       });
-      addEventListener("mouseup", (e) => {
-        if (!start) return;
-        const r = rect(e);
-        window.snap.done(r.w < 6 || r.h < 6 ? { full: true } : r);
-      });
+      addEventListener("mouseup", () => (drag = null));
+      // Dragging is ours: no picking up the still as an image.
+      addEventListener("dragstart", (e) => e.preventDefault());
+      addEventListener("dblclick", (e) => mode === "portion" && inBox(e.clientX, e.clientY) && capture());
     </script>
   </body>
 </html>
