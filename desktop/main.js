@@ -272,9 +272,12 @@ async function snap() {
   try {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     trace("start", { display: display.bounds, scale: display.scaleFactor, permission: screenStatus(), wasInStand });
-    const front = frontApp();
+    const asked = frontInfo();
     const [still, windows] = (await within(Promise.all([grabDisplay(display), windowsOn(display)]), 8000)) ?? [null, []];
-    trace("grabbed", { still: still?.getSize() ?? null, windows: windows.length, permission: screenStatus(), cancelled: me.cancelled, front: await front });
+    const front = await asked;
+    // Snapped from another app: that's the app to hand the screen back to afterwards.
+    if (!wasInStand && front?.pid && front.pid !== process.pid) theirApp = front;
+    trace("grabbed", { still: still?.getSize() ?? null, windows: windows.length, permission: screenStatus(), cancelled: me.cancelled, front: front?.name });
     if (me.cancelled) return;
     if (!still || !screenAllowed()) return cantSee();
     const at = Date.now();
@@ -328,24 +331,32 @@ function trace(step, data = {}) {
 }
 
 /** After the toolbar closes: a Stand window in front now means Stand came forward during
- *  the snap. Hiding Stand puts back the app that was in front before. */
+ *  the snap. Put back the app that was in front before (hiding Stand if it's unknown). */
 async function handBack() {
   await new Promise((r) => setTimeout(r, 100));
   const standInFront = BrowserWindow.getFocusedWindow() != null;
   trace("after", { standInFront, front: await frontApp() });
-  if (standInFront) app.hide();
+  if (!standInFront) return;
+  if (theirApp) await giveBack("toolbar");
+  else app.hide();
 }
 
-/** The app in front, by name, for the Snap log. Only run from source on the Mac. */
-async function frontApp() {
-  if (!mac || app.isPackaged) return undefined;
+/** The app in front on the Mac: its name, bundle id and process id, from Launch Services. */
+async function frontInfo() {
+  if (!mac) return null;
   try {
-    const info = await run("lsappinfo", ["info", "-only", "name", await run("lsappinfo", ["front"])]);
-    return /"[^"]*"="([^"]*)"/.exec(info)?.[1] ?? info;
+    const asn = await run("lsappinfo", ["front"]);
+    // Each answer looks like "CFBundleIdentifier"="com.google.Chrome" or "pid"=1234.
+    const field = async (key) => /=\s*"?([^"\n]*)"?\s*$/.exec(await run("lsappinfo", ["info", "-only", key, asn]))?.[1] ?? "";
+    const [name, bundleId, pid] = await Promise.all(["name", "bundleid", "pid"].map(field));
+    return { name, bundleId, pid: Number(pid) || null };
   } catch {
     return null;
   }
 }
+
+/** The app in front, by name, for the Snap log. Only run from source. */
+const frontApp = async () => (app.isPackaged ? undefined : ((await frontInfo())?.name ?? null));
 
 /** Null if it takes longer than ms. */
 const within = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
@@ -664,6 +675,9 @@ function makeBar() {
   bar.on("moved", () => {
     const [x, y] = bar.getPosition();
     fs.promises.writeFile(barFile(), JSON.stringify({ x, y })).catch(() => {});
+    // Dragging the bar is a click on it too. On the Mac this fires all through the drag.
+    clearTimeout(dragged);
+    dragged = setTimeout(() => void giveBack("drag"), 300);
   });
   bar.on("closed", () => {
     bar = null;
@@ -678,17 +692,67 @@ function makeBar() {
 
 /** Up while in a meeting with no Stand window in front; down otherwise. */
 function updateBar() {
+  if (barHold) return;
   const want = Boolean(meeting && win && !barAway && !BrowserWindow.getAllWindows().some((w) => w !== bar && w.isFocused()));
   if (want && !bar) makeBar();
   if (!barLoaded) return;
-  if (want && !bar.isVisible()) bar.showInactive();
-  else if (!want && bar.isVisible()) bar.hide();
+  if (want && !bar.isVisible()) {
+    bar.showInactive();
+    void noteTheirApp();
+  } else if (!want && bar.isVisible()) bar.hide();
 }
 
-function pressOnBar(button) {
-  if (button === "open") showWindow();
-  else if (button === "mic") win?.webContents.send("app:command", "mic");
-  else if (button === "snap") void snap().then(tell);
+async function pressOnBar(button) {
+  if (button === "hover") return void noteTheirApp();
+  if (button === "open") return showWindow();
+  if (button === "mic") win?.webContents.send("app:command", "mic");
+  await giveBack(button);
+  if (button === "snap") tell(await snap());
+}
+
+/** The app the person is in while the bar is up: noted when the bar appears and when the
+ *  pointer reaches it, before any click. */
+let theirApp = null;
+async function noteTheirApp() {
+  const front = await frontInfo();
+  if (front?.pid && front.pid !== process.pid) theirApp = front;
+}
+
+/** While a click on the bar is being undone, the bar stays put rather than blinking off. */
+let barHold = false;
+let dragged;
+
+/** macOS makes an app active when one of its windows is clicked, and Electron's panels
+ *  don't fully opt out of that: a click on the bar can make Stand the active app and bring
+ *  its window up over the app the person is in. Bring that app back to the front. */
+async function giveBack(why) {
+  if (!mac || !theirApp) return;
+  const front = await frontInfo();
+  if (!front || front.pid !== process.pid) return trace("giveback", { why, needed: false, front: front?.name });
+  const them = theirApp;
+  barHold = true;
+  try {
+    // Launch Services brings it forward the way the Dock does, then macOS takes a moment to
+    // switch. Not Finder: with no Finder window open, that would open one.
+    let now = front;
+    if (them.bundleId && them.bundleId !== "com.apple.finder") {
+      await run("open", ["-b", them.bundleId]).catch(() => {});
+      for (let i = 0; i < 25 && now?.pid === process.pid; i++) {
+        await new Promise((r) => setTimeout(r, 30));
+        now = await frontInfo();
+      }
+    }
+    // Still Stand: hiding it hands macOS's focus back to the app that was in front before.
+    const hid = now?.pid === process.pid;
+    if (hid) {
+      app.hide();
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    trace("giveback", { why, needed: true, to: them.name, front: now?.name, hid });
+  } finally {
+    barHold = false;
+    updateBar();
+  }
 }
 
 // ---- start ----------------------------------------------------------------------
@@ -712,7 +776,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("app:snap", (e) => (isStand(e.senderFrame?.url) ? snap() : null));
   // The meeting page, and the floating bar's buttons.
   ipcMain.on("app:meeting", (e, m) => e.sender === win?.webContents && isStand(e.senderFrame?.url) && setMeeting(m));
-  ipcMain.on("bar:press", (e, button) => e.sender === bar?.webContents && pressOnBar(button));
+  ipcMain.on("bar:press", (e, button) => e.sender === bar?.webContents && void pressOnBar(button));
   // Focus moving between apps: a blur comes just before the next focus, so look once both have landed.
   for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));
   if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap().then(tell)))

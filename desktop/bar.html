@@ -91,6 +91,8 @@
     render();
   });
   for (const button of ["open", "mic", "snap"]) $(button).onclick = () => window.bar.press(button);
+  // So the app knows which app you're in before a click on the bar can change that.
+  document.documentElement.addEventListener("mouseenter", () => window.bar.press("hover"));
 </script>
 </body>
 </html>
