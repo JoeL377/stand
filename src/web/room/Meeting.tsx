@@ -165,6 +165,34 @@ export function Meeting(props: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleMic]);
+  // The agenda folds to a thin strip for more stage; this browser remembers the choice.
+  const [agendaFolded, setAgendaFolded] = useState(() => {
+    try {
+      return localStorage.getItem(AGENDA_FOLDED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const foldAgenda = () =>
+    setAgendaFolded((f) => {
+      try {
+        localStorage.setItem(AGENDA_FOLDED_KEY, f ? "0" : "1");
+      } catch {
+        // Private windows can refuse storage; it just won't be remembered.
+      }
+      return !f;
+    });
+  const foldRef = useRef(foldAgenda);
+  foldRef.current = foldAgenda;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key !== "\\") return;
+      e.preventDefault();
+      foldRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   if (!state) {
     return <div className="loading">{room.trouble ? <ConnectionPill room={room} /> : room.connected ? "Joining…" : "Connecting…"}</div>;
@@ -241,8 +269,11 @@ export function Meeting(props: {
         </div>
       )}
 
-      <div className="meeting-grid">
+      <div className={agendaFolded ? "meeting-grid agenda-folded" : "meeting-grid"}>
         <AgendaPanel
+          folded={agendaFolded}
+          onFold={foldAgenda}
+          foldKeys={`${MOD.cmd} + \\`}
           roomId={roomId}
           state={state}
           send={send}
@@ -420,6 +451,7 @@ function DemoMode({ parts }: { parts: string[] }) {
 
 // Key names written out: ⇧ alone reads as an arrow.
 const IS_MAC = /Mac/.test(navigator.platform);
+const AGENDA_FOLDED_KEY = "stand.agendaFolded";
 const MOD = IS_MAC ? { ctrl: "Control", alt: "Option", cmd: "Command" } : { ctrl: "Ctrl", alt: "Alt", cmd: "Ctrl" };
 
 function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => void }) {
@@ -432,6 +464,7 @@ function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => vo
         ] as Array<[string, string]>)
       : []),
     [`${MOD.cmd} + D`, "Mute or unmute"],
+    [`${MOD.cmd} + \\`, "Hide or show the agenda"],
     [`${MOD.ctrl} + Shift + S`, "Snap the shared screen into the meeting"],
     ["Paste or drop an image", "Add a screenshot to the item in focus"],
     ["Esc", "Close a menu or form"],

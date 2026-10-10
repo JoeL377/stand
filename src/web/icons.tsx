@@ -138,6 +138,15 @@ export const ChevronIcon = ({ size = 12 }: { size?: number }) => (
   </Svg>
 );
 
+/** A side panel with an arrow: pointing in to hide the panel, out to show it. */
+export const PanelIcon = ({ size = 16, open }: { size?: number; open: boolean }) => (
+  <Svg size={size}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+    <path d={open ? "m15.5 10-2 2 2 2" : "m13.5 10 2 2-2 2"} />
+  </Svg>
+);
+
 export const CameraIcon = ({ size = 16 }: { size?: number }) => (
   <Svg size={size}>
     <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
