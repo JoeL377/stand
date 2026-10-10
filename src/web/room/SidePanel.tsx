@@ -14,7 +14,7 @@ export function SidePanel(props: {
   discussions: Discussion[];
   notesBusy: string[];
   interims: Record<string, Interim>;
-  send: (m: ClientMessage) => void;
+  send: (m: ClientMessage) => boolean;
   participantId: string;
 }) {
   const [earlierOpen, setEarlierOpen] = useState(true);
@@ -47,7 +47,16 @@ export function SidePanel(props: {
         change: (n, text, owner) => send({ type: "note.edit", noteId: n.id, text, owner }),
         remove: (n) => {
           send({ type: "note.remove", noteId: n.id });
-          toast({ text: "Note deleted", action: { label: "Undo", run: () => send({ type: "note.restore", noteId: n.id }) } });
+          toast({
+            text: "Note deleted",
+            action: {
+              label: "Undo",
+              run: () => {
+                if (!send({ type: "note.restore", noteId: n.id }))
+                  toast({ tone: "error", text: "Couldn't undo while Stand is reconnecting. Try again in a moment." });
+              },
+            },
+          });
         },
         add: (kind, text, owner) => send({ type: "note.add", itemId: state.focusItemId, kind, text, owner }),
       }
@@ -129,7 +138,7 @@ export function SidePanel(props: {
                     compact
                     showDate
                     notes={earlier}
-                    onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
+                    onToggle={(n, done) => void send({ type: "followup.done", noteId: n.id, done })}
                   />
                 </div>
               )}
@@ -208,7 +217,7 @@ function LiveSliver(props: { segments: Segment[]; interims: Record<string, Inter
   );
 }
 
-function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => void }) {
+function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => boolean }) {
   const { segments, items, interims, send } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -246,7 +255,7 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
   );
 }
 
-function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => void }) {
+function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => boolean }) {
   const [moving, setMoving] = useState(false);
   return (
     <div className={s.kind === "chat" ? "seg chat" : "seg"}>

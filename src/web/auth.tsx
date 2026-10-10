@@ -50,6 +50,8 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  // Which box the message is about, so it's marked and the cursor goes there.
+  const [bad, setBad] = useState<"name" | "email" | null>(null);
   const next = location.pathname + (params.has("signin_error") ? "" : location.search);
 
   return (
@@ -77,9 +79,16 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
             noValidate
             onSubmit={async (e) => {
               e.preventDefault();
-              if (!name.trim()) return setError("Enter your name, so people know who's talking.");
-              if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Enter your work email, like ann@acme.com.");
+              const form = e.currentTarget;
+              const fail = (field: "name" | "email", msg: string) => {
+                setBad(field);
+                setError(msg);
+                form.querySelector<HTMLInputElement>(`[name=${field}]`)?.focus();
+              };
+              if (!name.trim()) return fail("name", "Enter your name, so people know who's talking.");
+              if (!/^\S+@\S+\.\S+$/.test(email.trim())) return fail("email", "Enter your work email, like ann@acme.com.");
               setBusy(true);
+              setBad(null);
               setError(null);
               try {
                 onSignedIn(await api.devSignIn(name, email));
@@ -94,14 +103,35 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
               <strong>Google sign-in isn't set up yet.</strong> Until it is, enter a name and email to try the app.
               Nothing is verified.
             </p>
-            <input autoFocus placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
-            <input placeholder="Work email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input
+              autoFocus
+              name="name"
+              placeholder="Your name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={60}
+              aria-invalid={bad === "name"}
+              aria-describedby={bad === "name" ? "signin-error" : undefined}
+            />
+            <input
+              name="email"
+              placeholder="Work email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={bad === "email"}
+              aria-describedby={bad === "email" ? "signin-error" : undefined}
+            />
             <button className="primary" disabled={busy}>
               {busy ? "Signing in…" : "Continue"}
             </button>
           </form>
         )}
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error" id="signin-error" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   );

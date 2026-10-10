@@ -132,6 +132,7 @@ export class RoomSession implements SpeechSink {
   /** Recent talk on the item in focus that names another item instead (see checkDrift). */
   private drift: { itemId: string; since: number; score: number } | null = null;
   private transcriber: Transcriber | null = null;
+  private transcriptionDown = false;
   private demoRunning = false;
   ended = false;
   /** When End meeting started the write-up. */
@@ -189,7 +190,7 @@ export class RoomSession implements SpeechSink {
       }
       this.handle(ws, msg).catch((err) => {
         console.error("[room]", err);
-        this.send(ws, { type: "error", message: String(err?.message ?? err) });
+        this.send(ws, { type: "error", message: "Something went wrong with that. Try again." });
       });
     });
     ws.on("close", () => this.detach(ws));
@@ -263,6 +264,7 @@ export class RoomSession implements SpeechSink {
       participants: [...this.participants.values()].map(({ conns: _c, ...p }) => ({ ...p, isHost: p.id === this.hostId })),
       focusItemId: this.focusItemId,
       pinnedBy: this.pinnedBy,
+      transcriptionDown: this.transcriptionDown,
       hostAway: this.hostAwayTimer && this.hostId && !this.participants.has(this.hostId) ? (this.names.get(this.hostId) ?? "The host") : null,
       suggestion: this.suggestion,
       items: this.items(),
@@ -455,7 +457,10 @@ export class RoomSession implements SpeechSink {
         clearTimeout(this.emptyTimer);
         this.emptyTimer = null;
       }
-      if (!this.transcriber && this.startTranscriber && !this.ended) this.transcriber = this.startTranscriber(this);
+      if (!this.transcriber && this.startTranscriber && !this.ended) {
+        this.transcriptionDown = false;
+        this.transcriber = this.startTranscriber(this);
+      }
       this.send(ws, {
         type: "welcome",
         participantId: id,
@@ -813,7 +818,9 @@ export class RoomSession implements SpeechSink {
     console.error(`[agent] transcription unavailable in room ${this.roomId}: ${reason}`);
     // Let the next person who joins try again.
     this.transcriber = null;
-    this.broadcast({ type: "error", message: `Transcription isn't working right now (${reason}). Chat still works.` });
+    this.transcriptionDown = true;
+    this.broadcastState();
+    this.broadcast({ type: "error", message: "Stand stopped transcribing. Leave and rejoin to start it again; what was said before is saved." });
   }
 
   interim(speakerId: string, speakerName: string, text: string) {

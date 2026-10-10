@@ -53,11 +53,18 @@ export function Meeting(props: {
 
   // Browser transcription when the server can't transcribe.
   const browserTranscribe = caps.transcription === "browser" && media.micOn;
+  const [speechBlocked, setSpeechBlocked] = useState(false);
+  useEffect(() => {
+    if (media.micOn) setSpeechBlocked(false);
+  }, [media.micOn]);
   useBrowserSpeech(
     browserTranscribe,
     (text, startedAt) => send({ type: "speech", text, startedAt }),
     (text) => send({ type: "speech.interim", text }),
-    (msg) => room.setError(msg),
+    (msg) => {
+      setSpeechBlocked(true);
+      room.setError(msg);
+    },
   );
 
   // Tell the room when we start/stop sharing, and feed the agent snapshots.
@@ -89,6 +96,16 @@ export function Meeting(props: {
   useEffect(() => {
     if (media.mediaError) toast({ tone: "error", text: media.mediaError });
   }, [media.mediaError]);
+
+  // Changes made while the connection was down went through once it came back: say so, once.
+  const hadWaiting = useRef(false);
+  useEffect(() => {
+    if (room.waiting > 0) hadWaiting.current = true;
+    else if (room.connected && hadWaiting.current) {
+      hadWaiting.current = false;
+      toast({ text: "Back online · your changes went through" });
+    }
+  }, [room.waiting, room.connected]);
 
   // Everyone hears about it when the host changes, not just the two people involved.
   const lastHost = useRef<string | null | undefined>(undefined);
@@ -132,6 +149,15 @@ export function Meeting(props: {
   // The server says so once it's on it; until then, our own click.
   const writingUp = ending || Boolean(state.ending);
 
+  // Why nothing said is being kept, while that lasts. A toast says it once; this stays until it's fixed.
+  const notRecording = state.transcriptionDown
+    ? "Stand stopped transcribing. Leave and rejoin to start it again; what was said before is saved."
+    : caps.transcription === "browser" && media.micOn && !browserSpeechSupported()
+      ? "This browser can't transcribe, so what you say isn't recorded. Use Chrome, Edge or Safari."
+      : caps.transcription === "browser" && media.micOn && speechBlocked
+        ? "Speech recognition is blocked, so what you say isn't recorded. Allow the microphone for this site, then click Mute and Unmute."
+        : null;
+
   const offParts = [
     !caps.livekit && "people can't hear each other yet (add LiveKit keys)",
     caps.transcription === "browser" &&
@@ -146,8 +172,13 @@ export function Meeting(props: {
           <Logo size={20} />
           <strong className="room-name">{state.roomName}</strong>
           <span className="timer">
-            <span className="rec-dot" aria-hidden /> {fmtDuration(now - state.meetingStartedAt)}
+            <span className={notRecording ? "rec-dot off" : "rec-dot"} aria-hidden /> {fmtDuration(now - state.meetingStartedAt)}
           </span>
+          {notRecording && (
+            <button className="badge not-recording" title={notRecording} onClick={() => toast({ tone: "error", text: notRecording })}>
+              Not recording
+            </button>
+          )}
           <ConnectionPill room={room} />
           {state.ending && !canSteer && <span className="badge">Writing notes…</span>}
           {!media.micOn && (
@@ -158,7 +189,15 @@ export function Meeting(props: {
         </div>
         <div className="topbar-right">
           {offParts.length > 0 && <DemoMode parts={offParts} />}
-          <button className="ghost icon-btn keys-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={() => setShowKeys((v) => !v)}>
+          <button
+            className="ghost icon-btn keys-btn"
+            title="How Stand works and keyboard shortcuts (?)"
+            aria-label="Help and keyboard shortcuts"
+            aria-expanded={showKeys}
+            // The sheet closes on any click outside it; this button toggles it instead.
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => setShowKeys((v) => !v)}
+          >
             ?
           </button>
           <button className="ghost invite" onClick={copyInvite}>
@@ -196,6 +235,7 @@ export function Meeting(props: {
           speaking={media.speaking}
           interims={room.interims}
           segments={room.segments}
+          offline={!room.connected}
           livekit={caps.livekit}
         />
         <SidePanel
@@ -339,12 +379,21 @@ function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => vo
     ["?", "Show or hide these shortcuts"],
   ];
   return (
-    <div className="shortcuts" role="dialog" aria-label="Keyboard shortcuts" ref={ref}>
+    <div className="shortcuts" role="dialog" aria-label="How Stand works and keyboard shortcuts" ref={ref}>
       <div className="shortcuts-head">
-        <strong>Keyboard shortcuts</strong>
+        <strong>How Stand works</strong>
         <button className="toast-x" aria-label="Close" onClick={onClose}>
           ✕
         </button>
+      </div>
+      <ul className="how">
+        <li>The host picks the item on the left. Everything said is filed under it.</li>
+        <li>Notes appear after a short pause in the talk. ✦ marks what the agent wrote or suggests.</li>
+        <li>Removed something by mistake? Undo is in the message at the bottom of the screen.</li>
+        <li>If the connection drops, edits and to-do checks wait and go through when Stand is back.</li>
+      </ul>
+      <div className="shortcuts-head">
+        <strong>Keyboard shortcuts</strong>
       </div>
       <dl>
         {rows.map(([k, v]) => (

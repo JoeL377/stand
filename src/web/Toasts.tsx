@@ -32,8 +32,13 @@ export function dismissToast(key: number) {
 }
 
 /** "Couldn't remove it. Can't reach Stand…" from a failed request. */
-export function errorToast(what: string) {
-  return (err: unknown) => toast({ tone: "error", text: `${what}. ${(err as Error)?.message ?? String(err)}` });
+export function errorToast(what: string, retry?: () => void) {
+  return (err: unknown) =>
+    toast({
+      tone: "error",
+      text: `${what}. ${(err as Error)?.message ?? String(err)}`,
+      ...(retry ? { action: { label: "Try again", run: retry } } : {}),
+    });
 }
 
 export function Toasts() {
@@ -44,11 +49,11 @@ export function Toasts() {
       listeners.delete(setList);
     };
   }, []);
-  if (!list.length) return null;
+  // The region is always there, so screen readers announce what lands in it.
   return (
-    <div className="toasts" role="status" aria-live="polite">
+    <div className="toasts" aria-live="polite">
       {list.map((t) => (
-        <div key={t.key} className={t.tone === "error" ? "toast error" : "toast"}>
+        <div key={t.key} className={t.tone === "error" ? "toast error" : "toast"} role={t.tone === "error" ? "alert" : "status"}>
           <span className="toast-text">{t.text}</span>
           {t.action && (
             <button

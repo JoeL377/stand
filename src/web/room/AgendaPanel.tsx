@@ -21,7 +21,7 @@ import { useDismiss } from "../useDismiss.ts";
 export function AgendaPanel(props: {
   roomId: string;
   state: RoomState;
-  send: (m: ClientMessage) => void;
+  send: (m: ClientMessage) => boolean;
   canSteer: boolean;
   /** The connection is down: switching items waits until it's back. */
   offline?: boolean;
@@ -58,6 +58,8 @@ export function AgendaPanel(props: {
     if (!canSteer) return;
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || e.metaKey || e.ctrlKey || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+      // In a text box, Option+↓ moves the cursor; it mustn't switch the item for everyone.
+      if ((e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]")) return;
       const { order, focus } = orderRef.current;
       const next = order[order.indexOf(focus) + (e.key === "ArrowDown" ? 1 : -1)];
       if (next === undefined) return;
@@ -69,14 +71,12 @@ export function AgendaPanel(props: {
   }, [canSteer, send]);
 
   /** Removing is one click, so it's also one click to take back. */
-  const remove = (ids: string[], what: string, run: () => Promise<unknown>) =>
-    run().then(
-      () =>
-        toast({
-          text: `Removed ${what}`,
-          action: { label: "Undo", run: () => void api.restoreItems(roomId, ids).catch(errorToast("Couldn't put it back")) },
-        }),
-      errorToast("Couldn't remove it"),
+  const restore = (ids: string[]): void =>
+    void api.restoreItems(roomId, ids).catch(errorToast("Couldn't put it back", () => restore(ids)));
+  const remove = (ids: string[], what: string, run: () => Promise<unknown>): void =>
+    void run().then(
+      () => toast({ text: `Removed ${what}`, action: { label: "Undo", run: () => restore(ids) } }),
+      errorToast("Couldn't remove it", () => remove(ids, what, run)),
     );
   const short = (t: string) => `“${t.length > 40 ? `${t.slice(0, 38)}…` : t}”`;
 
@@ -130,7 +130,14 @@ export function AgendaPanel(props: {
               {it.title}
             </span>
             {active && (it.externalId || n > 0 || a > 0 || e > 0 || u || state.carried?.[it.id]) && (
-              <span className="item-meta">
+              <span
+                className="item-meta"
+                title={
+                  (state.carried?.[it.id] ?? 0) > 0
+                    ? `Carried: still on the agenda after ${state.carried[it.id]} earlier meeting${state.carried[it.id] === 1 ? "" : "s"}`
+                    : undefined
+                }
+              >
                 {[
                   it.externalId,
                   n > 0 && `${n} remark${n === 1 ? "" : "s"}`,
@@ -158,7 +165,8 @@ export function AgendaPanel(props: {
           {canSteer && (
             <button
               className={state.pinnedBy && active ? "icon on" : "icon"}
-              title="Pin: stay on this item even if the screen changes"
+              disabled={offline}
+              title={offline ? "You can pin once Stand reconnects" : "Pin: stay on this item even if the screen changes"}
               onClick={() => send({ type: "pin", itemId: it.id })}
             >
               <PinIcon />
@@ -357,7 +365,7 @@ export function AgendaPanel(props: {
         </div>
       )}
 
-      {state.upNext && <Suggested upNext={state.upNext} canSteer={canSteer} send={send} emptyAgenda={empty} />}
+      {state.upNext && <Suggested upNext={state.upNext} canSteer={canSteer} send={send} emptyAgenda={empty} offline={offline} />}
 
       {empty && !add ? (
         <div className="agenda-empty">
@@ -402,7 +410,7 @@ function agoText(ts: number) {
   return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
 
-function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientMessage) => void; emptyAgenda: boolean }) {
+function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientMessage) => boolean; emptyAgenda: boolean; offline?: boolean }) {
   const { upNext, canSteer, send } = props;
   // Open while the agenda is empty (it's the place to start); once there's an agenda it folds to one line.
   const [open, setOpen] = useState(props.emptyAgenda);
@@ -432,20 +440,31 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
         <span className="item-tools upnext-tools">
           <button
             className="icon"
-            title="Add to the agenda"
+            disabled={props.offline}
+            title={props.offline ? "You can add it once Stand reconnects" : "Add to the agenda"}
             onClick={() => {
-              send({ type: "upnext.add", key: s.key });
-              toast({ text: `Added ${s.title.length > 40 ? `${s.title.slice(0, 38)}…` : s.title} to the agenda` });
+              if (send({ type: "upnext.add", key: s.key }))
+                toast({ text: `Added ${s.title.length > 40 ? `${s.title.slice(0, 38)}…` : s.title} to the agenda` });
             }}
           >
             <CheckIcon />
           </button>
           <button
             className="icon"
-            title="Dismiss"
+            disabled={props.offline}
+            title={props.offline ? "You can dismiss it once Stand reconnects" : "Dismiss"}
             onClick={() => {
-              send({ type: "upnext.dismiss", key: s.key });
-              toast({ text: "Suggestion dismissed", action: { label: "Undo", run: () => send({ type: "upnext.undismiss", key: s.key }) } });
+              if (!send({ type: "upnext.dismiss", key: s.key })) return;
+              toast({
+                text: "Suggestion dismissed",
+                action: {
+                  label: "Undo",
+                  run: () => {
+                    if (!send({ type: "upnext.undismiss", key: s.key }))
+                      toast({ tone: "error", text: "Couldn't undo while Stand is reconnecting. Try again in a moment." });
+                  },
+                },
+              });
             }}
           >
             <CloseIcon />

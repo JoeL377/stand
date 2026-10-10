@@ -268,6 +268,8 @@ export interface RoomState {
   pinnedBy: string | null;
   /** The host's name while their connection is down and they can still come back as host. */
   hostAway?: string | null;
+  /** The server's transcriber stopped: talk isn't being recorded until someone rejoins. */
+  transcriptionDown?: boolean;
   suggestion: Suggestion | null;
   items: Item[];
   decks: Deck[];

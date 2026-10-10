@@ -7,8 +7,7 @@ import { Slide } from "../slides.tsx";
 import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, addImageSnap, deleteSnap, takeSnap } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
-
-type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "delete" };
+import { errorToast, toast } from "../Toasts.tsx";
 
 /** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
 const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
@@ -21,7 +20,9 @@ export function Stage(props: {
   focusItem: Item | null;
   canSteer: boolean;
   participantId: string;
-  send: (m: ClientMessage) => void;
+  send: (m: ClientMessage) => boolean;
+  /** The connection is down: what steers the meeting waits until it's back. */
+  offline?: boolean;
   localScreen: MediaStream | null;
   remoteScreen: RemoteScreen | null;
   speaking: Set<string>;
@@ -34,9 +35,30 @@ export function Stage(props: {
   const sharer = state.participants.find((p) => p.isSharing);
   const host = state.participants.find((p) => p.isHost);
   // Accepting a nudge moves what was said since it started from this item to the suggested one.
-  const moving = state.suggestion
-    ? props.segments.filter((s) => s.itemId === state.focusItemId && s.ts >= state.suggestion!.since).length
-    : 0;
+  const movingIds = state.suggestion
+    ? props.segments.filter((s) => s.itemId === state.focusItemId && s.ts >= state.suggestion!.since).map((s) => s.id)
+    : [];
+  const moving = movingIds.length;
+  const accept = () => {
+    const from = state.focusItemId;
+    const ids = movingIds;
+    const to = suggested;
+    if (!send({ type: "suggestion.accept" }) || !ids.length || !to) return;
+    // Moving remarks is the part people might not have meant, so it can be taken back.
+    toast({
+      text: `Moved ${ids.length} remark${ids.length === 1 ? "" : "s"} to ${keyOf(to) ?? to.title}`,
+      action: {
+        label: "Undo",
+        run: () => {
+          if (!send({ type: "focus", itemId: from })) {
+            toast({ tone: "error", text: "Couldn't undo while Stand is reconnecting. Try again in a moment." });
+            return;
+          }
+          for (const segmentId of ids) send({ type: "segment.move", segmentId, itemId: from });
+        },
+      },
+    });
+  };
 
   // Slides of the deck in focus, in order, so the host can flip with arrows.
   const deckSlides = focusItem?.deckId ? state.items.filter((i) => i.deckId === focusItem.deckId) : [];
@@ -73,24 +95,20 @@ export function Stage(props: {
   // cropping waits for the gallery so nobody is pulled out of the talk.
   const screenRef = useRef<HTMLDivElement>(null);
   const showingScreen = Boolean(localScreen || remoteScreen);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState(0);
   const [cropId, setCropId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
-  const toast = (t: Omit<Toast, "key">, ms = 5000) => {
-    const key = Date.now() + Math.random();
-    setToasts((ts) => [...ts.slice(-2), { ...t, key }]);
-    setTimeout(() => setToasts((ts) => ts.filter((x) => x.key !== key)), ms);
-  };
+  const crop = (id: string) => ({ label: "Crop", run: () => setCropId(id) });
+  const failed = (err: unknown) => toast({ tone: "error", text: String((err as Error).message ?? err) });
   const snap = async () => {
     const video = screenRef.current?.querySelector("video");
     if (!video) return;
     setFlash((f) => f + 1);
     try {
       const id = await takeSnap(video, state.roomId);
-      toast({ text: "Snapped", snapId: id, action: "crop" });
+      toast({ text: "Snapped", action: crop(id) });
     } catch (err) {
-      toast({ text: String((err as Error).message ?? err) });
+      failed(err);
     }
   };
   // The Mac app's toolbar. Whatever comes of it, including why it couldn't, shows here.
@@ -99,9 +117,9 @@ export function Stage(props: {
       const r = await macApp?.snap();
       const text = r && `${r.title}. ${r.body}`;
       // Long ones say what to fix (a permission, say), so they stay up long enough to read.
-      if (text) toast({ text, ...(r.snapId ? { snapId: r.snapId, action: "crop" as const } : {}) }, Math.max(5000, text.length * 60));
+      if (text) toast({ text, ...(r.snapId ? { action: crop(r.snapId) } : {}), ms: Math.max(5000, text.length * 60) });
     } catch {
-      toast({ text: "Quit the Stand app and open it again to use Snap." });
+      toast({ tone: "error", text: "Quit the Stand app and open it again to use Snap." });
     }
   };
   const snapRef = useRef(snap);
@@ -127,9 +145,9 @@ export function Stage(props: {
     for (const f of files.slice(0, 5)) {
       try {
         const id = await addImageSnap(f, state.roomId);
-        toast({ text: `Added to ${focusLabel}`, snapId: id, action: "crop" });
+        toast({ text: `Added to ${focusLabel}`, action: crop(id) });
       } catch (err) {
-        toast({ text: String((err as Error).message ?? err) });
+        failed(err);
       }
     }
   };
@@ -180,7 +198,10 @@ export function Stage(props: {
       for (const s of state.snaps) {
         if (seenSnaps.current.has(s.id) || s.source !== "person") continue;
         if (s.sharerId === props.participantId && s.takenById !== props.participantId)
-          toast({ text: `${s.takenBy.split(" ")[0]} snapped your screen`, snapId: s.id, action: "delete" });
+          toast({
+            text: `${s.takenBy.split(" ")[0]} snapped your screen`,
+            action: { label: "Delete", run: () => void deleteSnap(s.id).catch(errorToast("Couldn't delete the snap")) },
+          });
       }
     }
     seenSnaps.current = ids;
@@ -232,8 +253,15 @@ export function Stage(props: {
           </span>
           <button
             className="link"
-            onClick={() => send({ type: "suggestion.accept" })}
-            title={moving ? `Opens it for everyone and files what was said since then under it` : undefined}
+            onClick={accept}
+            disabled={props.offline}
+            title={
+              props.offline
+                ? "You can switch once Stand reconnects"
+                : moving
+                  ? "Opens it for everyone and files what was said since then under it"
+                  : undefined
+            }
           >
             {moving ? `Switch and move ${moving} remark${moving === 1 ? "" : "s"}` : "Switch to it"}
           </button>
@@ -260,31 +288,6 @@ export function Stage(props: {
         {dropping && (
           <div className="shot-drop" aria-hidden>
             Drop to add it to {focusLabel}
-          </div>
-        )}
-        {toasts.length > 0 && (
-          <div className="snap-toasts" role="status">
-            {toasts.map((t) => (
-              <div key={t.key} className="snap-toast">
-                <span>{t.text}</span>
-                {t.snapId && t.action === "crop" && (
-                  <button className="link" onClick={() => setCropId(t.snapId!)}>
-                    Crop
-                  </button>
-                )}
-                {t.snapId && t.action === "delete" && (
-                  <button
-                    className="link"
-                    onClick={() => {
-                      deleteSnap(t.snapId!).catch((err) => toast({ text: `Couldn't delete the snap. ${(err as Error).message}` }));
-                      setToasts((ts) => ts.filter((x) => x.key !== t.key));
-                    }}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            ))}
           </div>
         )}
         {cropSnap && (
@@ -363,7 +366,9 @@ export function Stage(props: {
             talking={talkingIds.has(p.id)}
             tag={p.isHost ? "Host" : undefined}
             sharing={p.isSharing}
-            onMakeHost={canSteer && p.id !== props.participantId ? () => send({ type: "host.give", participantId: p.id }) : undefined}
+            onMakeHost={
+              canSteer && !props.offline && p.id !== props.participantId ? () => send({ type: "host.give", participantId: p.id }) : undefined
+            }
           />
         ))}
         {ghosts.map((g) => (
