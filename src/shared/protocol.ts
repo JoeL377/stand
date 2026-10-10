@@ -107,6 +107,34 @@ export interface Discussion {
   ts: number;
 }
 
+/** A still of the shared screen, pinned to the item in focus when it was taken.
+ *  People take them (the camera on the shared screen, or S); the agent keeps
+ *  one (source "agent") only when the frame backs a decision or to-do it wrote. */
+export interface Snap {
+  id: string;
+  meetingId: string;
+  itemId: string | null;
+  ts: number;
+  /** The image, at the size it was shared (cropped if someone cropped it). */
+  url: string;
+  width: number;
+  height: number;
+  source: "person" | "agent";
+  takenById: string | null;
+  takenBy: string;
+  /** Whose screen it is. */
+  sharerId: string | null;
+  sharerName: string | null;
+  /** The agent's one line on what's on screen; null until it has looked. */
+  caption: string | null;
+  /** The decision or to-do an agent snap backs. */
+  noteId: string | null;
+  /** The topic being talked about when it was taken, from the remarks around it. */
+  discussionId: string | null;
+  /** The remarks spoken around it. */
+  segmentIds: string[];
+}
+
 /** What an agent (or person) reported back on an item through the Stand MCP:
  *  progress, a blocker, a question for the next meeting, or a to-do checked off. */
 export type UpdateStatus = "progress" | "blocked" | "needs_decision" | "done";
@@ -222,6 +250,8 @@ export interface User {
 }
 
 export interface RoomState {
+  /** This meeting's snaps. */
+  snaps: Snap[];
   roomId: string;
   roomName: string;
   meetingId: string;
@@ -313,7 +343,7 @@ export interface MeetingRecap {
   startedAt: number;
   endedAt: number | null;
   summary: string | null;
-  items: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions: Discussion[] }>;
+  items: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions: Discussion[]; snaps: Snap[] }>;
 }
 
 /** One space (a room) as the home page lists it. */

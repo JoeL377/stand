@@ -4,6 +4,7 @@ import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
 import { LiveItemNotes, type NoteEditing } from "../Discussions.tsx";
+import { SnapsPill } from "../Snaps.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -39,6 +40,7 @@ export function SidePanel(props: {
   const unseen = Math.max(0, shown.length - seen);
   // The host can fix what the agent wrote: edit, delete or add notes for the item in focus.
   const isHost = state.participants.some((p) => p.id === props.participantId && p.isHost);
+  const focusSnaps = (state.snaps ?? []).filter((p) => p.itemId === state.focusItemId);
   const editing: NoteEditing | undefined = isHost
     ? {
         change: (n, text, owner) => send({ type: "note.edit", noteId: n.id, text, owner }),
@@ -53,6 +55,7 @@ export function SidePanel(props: {
         <h2 className="side-head-title" title={focus?.title}>
           {focus ? focus.title : "General / off-agenda"}
         </h2>
+        <SnapsPill snaps={focusSnaps} me={props.participantId} isHost={isHost} className="side-head-snaps" />
         {keyOf(focus) && <span className="side-head-key">{keyOf(focus)}</span>}
       </div>
 
@@ -110,6 +113,7 @@ export function SidePanel(props: {
                   segments={segments}
                   onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
                   editing={editing}
+                  snaps={{ list: focusSnaps, me: props.participantId, isHost }}
                 />
               )}
             </section>

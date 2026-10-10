@@ -1,9 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Item, Participant, RoomState } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
 import { Slide } from "../slides.tsx";
+import { CameraIcon } from "../icons.tsx";
+import { SnapGallery, deleteSnap, takeSnap } from "../Snaps.tsx";
+
+type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "delete" };
 
 export function Stage(props: {
   state: RoomState;
@@ -54,6 +58,58 @@ export function Stage(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, [presenting]);
 
+  // Snap: the camera on the shared screen, or S. Saves the frame as shared;
+  // cropping waits for the gallery so nobody is pulled out of the talk.
+  const screenRef = useRef<HTMLDivElement>(null);
+  const showingScreen = Boolean(localScreen || remoteScreen);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [flash, setFlash] = useState(0);
+  const [cropId, setCropId] = useState<string | null>(null);
+  const toast = (t: Omit<Toast, "key">) => {
+    const key = Date.now() + Math.random();
+    setToasts((ts) => [...ts.slice(-2), { ...t, key }]);
+    setTimeout(() => setToasts((ts) => ts.filter((x) => x.key !== key)), 5000);
+  };
+  const snap = async () => {
+    const video = screenRef.current?.querySelector("video");
+    if (!video) return;
+    setFlash((f) => f + 1);
+    try {
+      const id = await takeSnap(video, state.roomId);
+      toast({ text: "Snapped", snapId: id, action: "crop" });
+    } catch (err) {
+      toast({ text: String((err as Error).message ?? err) });
+    }
+  };
+  const snapRef = useRef(snap);
+  snapRef.current = snap;
+  useEffect(() => {
+    if (!showingScreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("input, textarea, [contenteditable], [role=dialog]") || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      if (e.key !== "s" && e.key !== "S") return;
+      e.preventDefault();
+      void snapRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showingScreen]);
+  // Tell whoever is sharing when someone else snaps their screen; they can take it back.
+  const seenSnaps = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = new Set(state.snaps.map((s) => s.id));
+    if (seenSnaps.current) {
+      for (const s of state.snaps) {
+        if (seenSnaps.current.has(s.id) || s.source !== "person") continue;
+        if (s.sharerId === props.participantId && s.takenById !== props.participantId)
+          toast({ text: `${s.takenBy.split(" ")[0]} snapped your screen`, snapId: s.id, action: "delete" });
+      }
+    }
+    seenSnaps.current = ids;
+  }, [state.snaps, props.participantId]);
+  const cropSnap = cropId ? state.snaps.find((s) => s.id === cropId) : undefined;
+
   // Demo speakers and remote talkers who aren't connected still show while talking.
   const talkingIds = new Set([...speaking, ...Object.keys(interims)]);
   const ghosts = Object.values(interims).filter((i) => !state.participants.some((p) => p.id === i.speakerId));
@@ -94,7 +150,41 @@ export function Stage(props: {
         </div>
       )}
 
-      <div className="screen">
+      <div className="screen" ref={screenRef}>
+        {showingScreen && (
+          <button className="snap-btn" title="Snap this screen (S)" aria-label="Snap this screen" onClick={() => void snap()}>
+            <CameraIcon />
+          </button>
+        )}
+        {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
+        {toasts.length > 0 && (
+          <div className="snap-toasts" role="status">
+            {toasts.map((t) => (
+              <div key={t.key} className="snap-toast">
+                <span>{t.text}</span>
+                {t.snapId && t.action === "crop" && (
+                  <button className="link" onClick={() => setCropId(t.snapId!)}>
+                    Crop
+                  </button>
+                )}
+                {t.snapId && t.action === "delete" && (
+                  <button
+                    className="link"
+                    onClick={() => {
+                      void deleteSnap(t.snapId!);
+                      setToasts((ts) => ts.filter((x) => x.key !== t.key));
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {cropSnap && (
+          <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
+        )}
         {localScreen ? (
           <Video stream={localScreen} label="You're sharing your screen" />
         ) : remoteScreen ? (

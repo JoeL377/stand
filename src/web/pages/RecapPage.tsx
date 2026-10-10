@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CopyForAgent } from "../CopyForAgent.tsx";
+import { SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
@@ -152,6 +153,7 @@ export function RecapPage() {
                   </button>
                 </div>
                 {gist && <p className="rc-gist">{gist.text}</p>}
+                <SnapStrip snaps={g.snaps ?? []} />
                 {(g.discussions ?? []).map((d) => (
                   <TopicRow key={d.id} d={d} segments={g.segments} />
                 ))}

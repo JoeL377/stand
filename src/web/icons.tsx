@@ -137,3 +137,23 @@ export const ChevronIcon = ({ size = 12 }: { size?: number }) => (
     <path d="m9 6 6 6-6 6" />
   </Svg>
 );
+
+export const CameraIcon = ({ size = 16 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
+    <circle cx="12" cy="13" r="3.5" />
+  </Svg>
+);
+
+export const CropIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+    <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+  </Svg>
+);
+
+export const TrashIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+  </Svg>
+);

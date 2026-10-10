@@ -28,6 +28,7 @@ import { importFromLinear, sampleSprint } from "./linear.ts";
 import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
+import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile } from "./snaps.ts";
 import { toSpaceSummary } from "./spaces.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
@@ -102,7 +103,7 @@ const agents = agentApi({
     return buildBrief({
       meeting: m,
       roomName: db.getRoom(m.roomId)!.name,
-      groups: meetingGroups(m),
+      groups: meetingGroups(m, baseUrl),
       decks: db.listDecks(m.roomId),
       baseUrl,
       followUps: db.roomFollowUps(m.roomId),
@@ -128,8 +129,88 @@ app.all(
   }),
 );
 
+// A snap's image, for people in its space and for their agents (with a token).
+app.get(
+  "/api/snaps/:file",
+  route((req, res) => {
+    const user = userFromRequest(db, req) ?? agentFromRequest(db, req)?.user ?? null;
+    if (!user) return res.status(401).json({ error: "Sign in first" });
+    const m = /^([a-z0-9]+)\.(png|jpg|webp)$/.exec(req.params.file);
+    const snap = m ? db.getSnap(m[1]) : null;
+    const file = snap && snap.ext === m![2] ? snapFile(snap.id, snap.ext) : null;
+    if (!snap || !file || !db.isMember(snap.roomId, user.id)) return notFound(res);
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.sendFile(file);
+  }),
+);
+
 // Everything else needs a signed-in user.
 app.use("/api", requireUser(db));
+
+// ---- snaps: stills of the shared screen ------------------------------------
+
+/** Who can crop or delete a snap: whoever took it, whoever's screen it is, and the host. */
+const canChangeSnap = (userId: string, snap: { roomId: string; takenById: string | null; sharerId: string | null }) =>
+  snap.takenById === userId || snap.sharerId === userId || Boolean(live(snap.roomId)?.hosts(userId));
+
+// Taken in the meeting: the image is the raw body, at the size it was shared.
+app.post(
+  "/api/rooms/:id/snaps",
+  express.raw({ type: () => true, limit: MAX_SNAP_BYTES }),
+  route((req, res) => {
+    const s = live(req.params.id);
+    if (!s || !s.has(req.user!.id)) return res.status(409).json({ error: "Snaps are taken in a live meeting." });
+    const buf = req.body as Buffer;
+    const ext = Buffer.isBuffer(buf) ? imageType(buf) : null;
+    if (!ext || ext === "gif") return res.status(400).json({ error: "Send a PNG, JPEG or WebP image." });
+    const size = (v: unknown) => Math.max(0, Math.min(20000, Math.round(Number(v) || 0)));
+    const id = s.addSnap({
+      buf,
+      ext,
+      width: size(req.query.w),
+      height: size(req.query.h),
+      at: Number(req.query.at) || Date.now(),
+      takenById: req.user!.id,
+      takenBy: req.user!.name,
+    });
+    res.json({ id });
+  }),
+);
+
+// A crop replaces the image.
+app.put(
+  "/api/snaps/:id/image",
+  express.raw({ type: () => true, limit: MAX_SNAP_BYTES }),
+  route((req, res) => {
+    const snap = db.getSnap(req.params.id);
+    if (!snap || !db.isMember(snap.roomId, req.user!.id)) return notFound(res);
+    if (!canChangeSnap(req.user!.id, snap))
+      return res.status(403).json({ error: "Only whoever took it, the sharer or the host can crop it." });
+    const buf = req.body as Buffer;
+    const ext = Buffer.isBuffer(buf) ? imageType(buf) : null;
+    if (!ext || ext === "gif") return res.status(400).json({ error: "Send a PNG, JPEG or WebP image." });
+    const size = (v: unknown) => Math.max(0, Math.min(20000, Math.round(Number(v) || 0)));
+    removeSnapFile(snap.id, snap.ext);
+    saveSnapFile(snap.id, ext, buf);
+    db.setSnapImage(snap.id, ext, size(req.query.w), size(req.query.h));
+    live(snap.roomId)?.snapsChanged();
+    res.json({ ok: true });
+  }),
+);
+
+app.delete(
+  "/api/snaps/:id",
+  route((req, res) => {
+    const snap = db.getSnap(req.params.id);
+    if (!snap || !db.isMember(snap.roomId, req.user!.id)) return notFound(res);
+    if (!canChangeSnap(req.user!.id, snap))
+      return res.status(403).json({ error: "Only whoever took it, the sharer or the host can delete it." });
+    db.deleteSnap(snap.id);
+    removeSnapFile(snap.id, snap.ext);
+    live(snap.roomId)?.snapsChanged();
+    res.json({ ok: true });
+  }),
+);
 
 app.get(
   "/api/tokens",
@@ -575,11 +656,12 @@ app.get(
 );
 
 /** A meeting's segments and notes grouped by agenda item, in agenda order. */
-function meetingGroups(m: { id: string; roomId: string }) {
+function meetingGroups(m: { id: string; roomId: string }, baseUrl = "") {
   const segments = db.meetingSegments(m.id);
   const notes = db.meetingNotes(m.id);
   const discussions = db.meetingDiscussions(m.id);
-  const ids = [...new Set([...segments.map((s) => s.itemId), ...notes.map((n) => n.itemId)])];
+  const snaps = linkSnaps(db.meetingSnaps(m.id), segments, discussions, baseUrl);
+  const ids = [...new Set([...segments.map((s) => s.itemId), ...notes.map((n) => n.itemId), ...snaps.map((s) => s.itemId)])];
   const items = db.listItems(m.roomId);
   ids.sort((a, b) => (items.find((i) => i.id === a)?.position ?? 1e9) - (items.find((i) => i.id === b)?.position ?? 1e9));
   return ids.map((id) => ({
@@ -587,6 +669,7 @@ function meetingGroups(m: { id: string; roomId: string }) {
     segments: segments.filter((s) => s.itemId === id),
     notes: notes.filter((n) => n.itemId === id),
     discussions: discussions.filter((d) => d.itemId === id),
+    snaps: snaps.filter((s) => s.itemId === id),
   }));
 }
 
@@ -619,7 +702,7 @@ app.get(
     const brief = buildBrief({
       meeting: m,
       roomName: db.getRoom(m.roomId)!.name,
-      groups: meetingGroups(m),
+      groups: meetingGroups(m, `${req.protocol}://${req.get("host")}`),
       decks: db.listDecks(m.roomId),
       baseUrl: `${req.protocol}://${req.get("host")}`,
       followUps: db.roomFollowUps(m.roomId),

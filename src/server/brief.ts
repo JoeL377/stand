@@ -2,7 +2,7 @@
 // follow-up. One JSON shape (versioned, stable ids, links back to the source
 // ticket or slide) and a Markdown rendering of the same thing.
 
-import type { Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment } from "../shared/protocol.ts";
+import type { Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment, Snap } from "../shared/protocol.ts";
 
 type Meeting = { id: string; roomId: string; startedAt: number; endedAt: number | null; summary: string | null };
 
@@ -80,8 +80,26 @@ export interface MeetingBrief {
     speakers: string[];
     /** The talk grouped into discussions, one per question, in order. */
     discussions: BriefDiscussion[];
+    /** Stills of the shared screen taken while this item was in focus. */
+    snaps: BriefSnap[];
     transcript?: Array<{ speaker: string; kind: "speech" | "chat"; at: string; text: string }>;
   }>;
+}
+
+export interface BriefSnap {
+  id: string;
+  /** The image; agents fetch it with the same token they use for the MCP. */
+  imageUrl: string;
+  at: string;
+  takenBy: string;
+  /** "agent" when the agent kept it because it backs a decision or to-do. */
+  source: "person" | "agent";
+  caption: string | null;
+  topic: string | null;
+  /** The note it backs, for agent snaps. */
+  noteId: string | null;
+  /** What was said around it. */
+  said: Array<{ speaker: string; text: string }>;
 }
 
 /** Links an agenda item back to its source and to its pages in Stand. */
@@ -122,7 +140,7 @@ function toAction(n: Note, item: BriefItemRef, discussionById?: DiscussionLookup
 export function buildBrief(input: {
   meeting: Meeting;
   roomName: string;
-  groups: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions?: Discussion[] }>;
+  groups: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions?: Discussion[]; snaps?: Snap[] }>;
   decks: Deck[];
   baseUrl: string;
   /** The room's action items from other meetings; open ones from before this meeting carry over. */
@@ -191,6 +209,17 @@ export function buildBrief(input: {
           }),
         };
       }),
+      snaps: (g.snaps ?? []).map((p) => ({
+        id: p.id,
+        imageUrl: p.url.startsWith("/") ? `${baseUrl}${p.url}` : p.url,
+        at: iso(p.ts),
+        takenBy: p.takenBy,
+        source: p.source,
+        caption: p.caption,
+        topic: (p.discussionId && here.get(p.discussionId)?.topic) || null,
+        noteId: p.noteId,
+        said: p.segmentIds.flatMap((id) => g.segments.filter((x) => x.id === id)).map((x) => ({ speaker: x.speakerName, text: x.text })),
+      })),
       ...(input.withTranscript && { transcript: g.segments.map(turn) }),
     });
   }
@@ -274,6 +303,9 @@ export function briefToMarkdown(b: MeetingBrief): string {
       ...g.openQuestions.filter((q) => !inAny.has(q)).map((q) => `- Question: ${q}`),
     ];
     if (loose.length) out.push(...loose, "");
+    for (const p of g.snaps)
+      out.push(`- Snap ${p.at.slice(11, 16)} by ${p.takenBy}${p.caption ? `: ${p.caption}` : ""} (${p.imageUrl})`);
+    if (g.snaps.length) out.push("");
     if (g.transcript?.length) {
       out.push("<details><summary>Transcript</summary>", "");
       for (const s of g.transcript) out.push(`- ${s.speaker}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`);

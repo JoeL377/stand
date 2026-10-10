@@ -46,10 +46,21 @@ export interface Agent {
   summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
   /** Slides from a brief: an outline, rough notes or a one-line ask. */
   draftDeck(brief: string): Promise<DraftSlide[]>;
+  /** One line on what a snap of the shared screen shows. Null without a model. */
+  describeSnap(image: { data: string; mediaType: SnapMedia }, item: Item | null, remarks: string[]): Promise<string | null>;
+  /** Whether the screen the agent was reading backs one of the decisions or
+   *  to-dos it just wrote: which one (by key), and a caption. Null when it doesn't. */
+  frameBacks(
+    image: { data: string; mediaType: SnapMedia },
+    item: Item | null,
+    notes: Array<{ key: string; kind: "action" | "decision"; text: string }>,
+  ): Promise<{ key: string; caption: string } | null>;
   /** Tidies the space's suggested agenda: folds duplicates, writes short agenda
    *  lines and reasons, and orders it. Null when there's no model to ask. */
   polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null>;
 }
+
+export type SnapMedia = "image/jpeg" | "image/png" | "image/webp";
 
 /** A suggestion as the agent sees it when tidying the agenda, with what it came from. */
 export interface AgendaDraftRow {
@@ -125,6 +136,15 @@ const DeckSchema = z.object({
       notes: z.string().describe("What the presenter says on this slide, 1-3 sentences"),
     }),
   ),
+});
+
+const SnapSchema = z.object({
+  caption: z.string().describe("What's on screen, in one short line under 110 characters, naming the specific thing shown"),
+});
+
+const BacksSchema = z.object({
+  backs: z.string().nullable().describe("The key of the decision or to-do this screen is evidence for, or null if none"),
+  caption: z.string().describe("What's on screen, in one short line under 110 characters"),
 });
 
 const AgendaSchema = z.object({
@@ -263,6 +283,48 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
     return out.slides.slice(0, 60).map((s) => ({ ...s, image: null }));
   }
 
+  async describeSnap(image: { data: string; mediaType: SnapMedia }, item: Item | null, remarks: string[]): Promise<string | null> {
+    const out = await this.parse(
+      SnapSchema,
+      [
+        { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+        {
+          type: "text",
+          text: `Someone in a meeting saved this still of the shared screen while discussing: ${itemLabel(item)}.${
+            remarks.length ? `\n\nWhat was being said around then:\n${remarks.slice(0, 6).join("\n")}` : ""
+          }\n\nSay what's on screen.`,
+        },
+      ],
+      "You caption screenshots from team meetings so people and agents can find them later. Be concrete: name the ticket, file, chart, page or error shown, and the detail that matters. No preamble.",
+      "low",
+    );
+    return out?.caption.trim().slice(0, 160) || null;
+  }
+
+  async frameBacks(
+    image: { data: string; mediaType: SnapMedia },
+    item: Item | null,
+    notes: Array<{ key: string; kind: "action" | "decision"; text: string }>,
+  ): Promise<{ key: string; caption: string } | null> {
+    if (!notes.length) return null;
+    const out = await this.parse(
+      BacksSchema,
+      [
+        { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+        {
+          type: "text",
+          text: `This was on the shared screen while the team discussed ${itemLabel(item)} and wrote down:\n${notes
+            .map((n) => `- ${n.key} ${n.kind === "action" ? "to-do" : "decision"}: ${n.text}`)
+            .join("\n")}\n\nIs the screen evidence for one of these (it shows the thing decided on or the work to do)? A screen that's merely open at the time doesn't count.`,
+        },
+      ],
+      "You decide whether a meeting screenshot is worth keeping next to a decision or to-do. Keep it only when someone acting on that note later would want to see this screen. When in doubt, null.",
+      "low",
+    );
+    if (!out?.backs || !notes.some((n) => n.key === out.backs)) return null;
+    return { key: out.backs, caption: out.caption.trim().slice(0, 160) };
+  }
+
   async polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null> {
     if (!suggestions.length) return [];
     const list = suggestions
@@ -391,6 +453,14 @@ export class HeuristicAgent implements Agent {
   }
 
   async polishAgenda(): Promise<AgendaPolishRow[] | null> {
+    return null;
+  }
+
+  async describeSnap(): Promise<string | null> {
+    return null;
+  }
+
+  async frameBacks(): Promise<{ key: string; caption: string } | null> {
     return null;
   }
 

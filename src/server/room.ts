@@ -19,6 +19,8 @@ import type { Agent } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes } from "./notesMerge.ts";
+import { newId } from "./ids.ts";
+import { linkSnaps, saveSnapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
 import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
@@ -28,6 +30,8 @@ const SUGGEST_MIN_CONFIDENCE = 0.55;
 const DISMISS_QUIET_MS = 90_000;
 /** Minimum gap between screen reads, to bound vision cost. */
 const FRAME_MIN_INTERVAL_MS = 4_000;
+/** The agent keeps a frame next to a note only if it saw it this recently. */
+const FRAME_BACKS_MS = 180_000;
 /** Notes for the item in focus refresh this long after the last new remark. */
 const NOTES_DEBOUNCE_MS = 3_000;
 /** While talk keeps going, refresh notes at least this often instead of waiting for a pause. */
@@ -97,6 +101,9 @@ export class RoomSession implements SpeechSink {
   private noteQueued = new Map<string | null, Promise<Note[]>>();
   private frame: { dataUrl: string; at: number } | null = null;
   private frameBusy = false;
+  /** The last screen the agent was shown, for keeping next to what it writes. */
+  private seen: { dataUrl: string; at: number; itemId: string | null } | null = null;
+  private seenUsed: number | null = null;
   private lastFrameRead = 0;
   private emptyTimer: NodeJS.Timeout | null = null;
   private transcriber: Transcriber | null = null;
@@ -184,6 +191,7 @@ export class RoomSession implements SpeechSink {
 
   state(): RoomState {
     return {
+      snaps: this.snaps(),
       roomId: this.roomId,
       roomName: this.roomName,
       meetingId: this.meetingId,
@@ -201,6 +209,105 @@ export class RoomSession implements SpeechSink {
       ...this.upNext(),
       capabilities: capabilities(),
     };
+  }
+
+  private snaps() {
+    const rows = this.db.meetingSnaps(this.meetingId);
+    return rows.length ? linkSnaps(rows, this.db.meetingSegments(this.meetingId), this.db.meetingDiscussions(this.meetingId)) : [];
+  }
+
+  /** Someone snapped the shared screen. It's pinned to whatever was in focus
+   *  at that moment; the agent captions it afterwards. */
+  addSnap(snap: { buf: Buffer; ext: string; width: number; height: number; at: number; takenById: string; takenBy: string }) {
+    const at = Math.min(Math.max(snap.at || Date.now(), this.meetingStartedAt), Date.now());
+    const sharer = [...this.participants.values()].find((p) => p.isSharing) ?? null;
+    const id = newId(12);
+    saveSnapFile(id, snap.ext, snap.buf);
+    const itemId = this.focusAt(at);
+    this.db.addSnap({
+      id,
+      meetingId: this.meetingId,
+      itemId,
+      ts: at,
+      ext: snap.ext,
+      width: snap.width,
+      height: snap.height,
+      source: "person",
+      takenById: snap.takenById,
+      takenBy: snap.takenBy,
+      sharerId: sharer?.id ?? null,
+      sharerName: sharer?.name ?? null,
+      noteId: null,
+    });
+    this.broadcastState();
+    void this.captionSnap(id, snap.buf, snap.ext, itemId, at);
+    return id;
+  }
+
+  private async captionSnap(id: string, buf: Buffer, ext: string, itemId: string | null, at: number) {
+    if (buf.length > 5 * 1024 * 1024) return;
+    try {
+      const remarks = this.db
+        .meetingSegments(this.meetingId)
+        .filter((g) => g.itemId === itemId && Math.abs(g.ts - at) < 45_000)
+        .map((g) => `${g.speakerName}: ${g.text}`);
+      const mediaType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+      const caption = await this.agent.describeSnap(
+        { data: buf.toString("base64"), mediaType },
+        itemId ? this.db.getItem(itemId) : null,
+        remarks,
+      );
+      if (!caption || !this.db.getSnap(id)) return;
+      this.db.setSnapCaption(id, caption);
+      this.broadcastState();
+    } catch (err) {
+      console.error("[agent] snap caption failed:", err);
+    }
+  }
+
+  /** A snap was cropped or deleted through the REST API. */
+  snapsChanged() {
+    this.broadcastState();
+  }
+
+  /** The agent just wrote decisions or to-dos: if the screen it was reading
+   *  backs one of them, keep that frame next to it (once per frame). */
+  private async keepBackingFrame(itemId: string | null, notes: Note[]) {
+    const seen = this.seen;
+    if (!seen || seen.itemId !== itemId || Date.now() - seen.at > FRAME_BACKS_MS || this.seenUsed === seen.at) return;
+    const candidates = notes.filter((n) => n.kind === "action" || n.kind === "decision").slice(0, 8);
+    if (!candidates.length) return;
+    this.seenUsed = seen.at;
+    try {
+      const data = seen.dataUrl.replace(/^data:image\/jpeg;base64,/, "");
+      const keyed = candidates.map((n, i) => ({ key: `N${i + 1}`, kind: n.kind as "action" | "decision", text: n.text }));
+      const out = await this.agent.frameBacks({ data, mediaType: "image/jpeg" }, itemId ? this.db.getItem(itemId) : null, keyed);
+      const note = out ? candidates[keyed.findIndex((k) => k.key === out.key)] : null;
+      if (!out || !note || this.ended) return;
+      const buf = Buffer.from(data, "base64");
+      const id = newId(12);
+      saveSnapFile(id, "jpg", buf);
+      const sharer = [...this.participants.values()].find((p) => p.isSharing) ?? null;
+      this.db.addSnap({
+        id,
+        meetingId: this.meetingId,
+        itemId,
+        ts: seen.at,
+        ext: "jpg",
+        width: 0,
+        height: 0,
+        source: "agent",
+        takenById: null,
+        takenBy: "Stand agent",
+        sharerId: sharer?.id ?? null,
+        sharerName: sharer?.name ?? null,
+        noteId: note.id,
+      });
+      this.db.setSnapCaption(id, out.caption);
+      this.broadcastState();
+    } catch (err) {
+      console.error("[agent] keeping a frame failed:", err);
+    }
   }
 
   private upNext() {
@@ -337,6 +444,7 @@ export class RoomSession implements SpeechSink {
         // The agent only follows the host's screen.
         if (isHost && me?.isSharing && typeof msg.dataUrl === "string" && msg.dataUrl.startsWith("data:image/jpeg;base64,")) {
           this.frame = { dataUrl: msg.dataUrl, at: Date.now() };
+          this.seen = { dataUrl: msg.dataUrl, at: this.frame.at, itemId: this.focusItemId };
           void this.readScreen();
         }
         break;
@@ -432,6 +540,16 @@ export class RoomSession implements SpeechSink {
       notes: this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId),
       discussions: this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId),
     });
+  }
+
+  /** Whether this signed-in person is driving the meeting right now. */
+  hosts(userId: string) {
+    return this.isHost(userId);
+  }
+
+  /** Whether this signed-in person is in the meeting right now. */
+  has(userId: string) {
+    return this.participants.has(userId);
   }
 
   private isHost(participantId: string) {
@@ -647,6 +765,9 @@ export class RoomSession implements SpeechSink {
           ),
         );
         this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
+        const before = new Set(current.map((n) => n.id));
+        const fresh = notes.filter((n) => !before.has(n.id) && (n.kind === "action" || n.kind === "decision"));
+        if (fresh.length) void this.keepBackingFrame(itemId, fresh);
         console.log(
           `[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
         );

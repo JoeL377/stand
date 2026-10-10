@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { Discussion, DiscussionOutcome, Note, Segment } from "../shared/protocol.ts";
+import type { Discussion, DiscussionOutcome, Note, Segment, Snap } from "../shared/protocol.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
+import { SnapsPill } from "./Snaps.tsx";
 import { NoteList } from "./room/SidePanel.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { colorFor, fmtDate, fmtTime, initials } from "./util.ts";
@@ -53,6 +54,8 @@ function DiscussionBlock(props: {
   titleOnly?: boolean;
   /** Live panel: point at this topic's to-dos in the To do card. */
   onShowTodos?: (ids: string[]) => void;
+  /** Live panel: snaps taken while this topic was talked about. */
+  snaps?: { list: Snap[]; me: string; isHost: boolean };
 }) {
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
@@ -192,6 +195,7 @@ function DiscussionBlock(props: {
                   {todoLabel}
                 </button>
               )}
+              {props.snaps && <SnapsPill snaps={props.snaps.list} me={props.snaps.me} isHost={props.snaps.isHost} />}
             </span>
             <CopyForAgent kind="topic" id={d.id} />
           </div>
@@ -360,6 +364,7 @@ export function LiveItemNotes(props: {
   segments: Segment[];
   onToggle?: (n: Note, done: boolean) => void;
   editing?: NoteEditing;
+  snaps?: { list: Snap[]; me: string; isHost: boolean };
 }) {
   const { notes, discussions, segments, onToggle, editing } = props;
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -549,6 +554,7 @@ export function LiveItemNotes(props: {
                 live={d.id === liveId}
                 titleOnly
                 onShowTodos={setFlash}
+                snaps={props.snaps && { ...props.snaps, list: props.snaps.list.filter((p) => p.discussionId === d.id) }}
               />
             ))}
           </div>

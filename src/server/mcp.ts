@@ -109,7 +109,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Get the context for a Stand item",
       description:
-        "Everything Stand knows about one agenda item (task, ticket or slide), ranked: decisions, open questions, open and recently done to-dos, the topics discussed with each person's position, and updates reported since. Use it before starting work on an item.",
+        "Everything Stand knows about one agenda item (task, ticket or slide), ranked: decisions, open questions, open and recently done to-dos, the topics discussed with each person's position, updates reported since, and snaps of the shared screen with what's on them (fetch image_url with this same token). Use it before starting work on an item.",
       inputSchema: { item_id: z.string().describe("The item's id, from list_spaces, list_my_work or get") },
       annotations: READ,
     },

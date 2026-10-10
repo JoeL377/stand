@@ -380,6 +380,13 @@ export function agentApi(deps: AgentDeps) {
           positions: d.positions.map((p) => `${p.speaker}: ${p.position}`),
         })),
         updates: db.itemUpdates(item.id, 10).map(updateInfo),
+        snaps: db.itemSnaps(item.id, 8).map((p) => ({
+          image_url: `${baseUrl}/api/snaps/${p.id}.${p.ext}?v=${p.version}`,
+          caption: p.caption ?? undefined,
+          by: p.source === "agent" ? "the Stand agent (kept because it backs a note)" : p.takenBy,
+          backs: p.noteId ? notes.find((n) => n.id === p.noteId)?.text : undefined,
+          at: new Date(p.ts).toISOString(),
+        })),
         meetings: [...new Set(notes.map((n) => n.meetingId))].length,
       };
     },

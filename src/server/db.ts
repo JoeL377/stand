@@ -21,6 +21,7 @@ import type {
   User,
 } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
+import type { SnapRow } from "./snaps.ts";
 import type { Polish, UpNextInput } from "./upNext.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -124,6 +125,26 @@ CREATE TABLE IF NOT EXISTS upnext_dismissed (
   at INTEGER NOT NULL,
   PRIMARY KEY (room_id, key)
 );
+-- Stills of the shared screen (snaps.ts). The image is a file named by id.
+CREATE TABLE IF NOT EXISTS snaps (
+  id TEXT PRIMARY KEY,
+  meeting_id TEXT NOT NULL REFERENCES meetings(id),
+  item_id TEXT,
+  ts INTEGER NOT NULL,
+  ext TEXT NOT NULL,
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  source TEXT NOT NULL,
+  taken_by_id TEXT,
+  taken_by TEXT NOT NULL,
+  sharer_id TEXT,
+  sharer_name TEXT,
+  caption TEXT,
+  note_id TEXT
+);
+CREATE INDEX IF NOT EXISTS snaps_meeting ON snaps(meeting_id, ts);
+CREATE INDEX IF NOT EXISTS snaps_item ON snaps(item_id, ts);
 -- Claude's last pass over a space's suggested agenda (upNext.ts Polish), as JSON.
 CREATE TABLE IF NOT EXISTS upnext_polish (
   room_id TEXT PRIMARY KEY,
@@ -247,6 +268,25 @@ const toSegment = (r: Row): Segment => ({
   kind: r.kind as SegmentKind,
   text: r.text as string,
   ts: r.ts as number,
+});
+
+const toSnapRow = (r: Row): SnapRow => ({
+  id: r.id as string,
+  roomId: r.room_id as string,
+  meetingId: r.meeting_id as string,
+  itemId: (r.item_id as string) ?? null,
+  ts: r.ts as number,
+  ext: r.ext as string,
+  version: r.version as number,
+  width: r.width as number,
+  height: r.height as number,
+  source: r.source as SnapRow["source"],
+  takenById: (r.taken_by_id as string) ?? null,
+  takenBy: r.taken_by as string,
+  sharerId: (r.sharer_id as string) ?? null,
+  sharerName: (r.sharer_name as string) ?? null,
+  caption: (r.caption as string) ?? null,
+  noteId: (r.note_id as string) ?? null,
 });
 
 const toNote = (r: Row): Note => ({
@@ -991,6 +1031,59 @@ export function openDb(file?: string) {
           )
           .all(roomId) as Row[]
       ).map(toNote);
+    },
+    addSnap(s: Omit<SnapRow, "roomId" | "version" | "caption">): void {
+      db.prepare(
+        `INSERT INTO snaps (id, meeting_id, item_id, ts, ext, width, height, source, taken_by_id, taken_by, sharer_id, sharer_name, note_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        s.id,
+        s.meetingId,
+        s.itemId,
+        s.ts,
+        s.ext,
+        s.width,
+        s.height,
+        s.source,
+        s.takenById,
+        s.takenBy,
+        s.sharerId,
+        s.sharerName,
+        s.noteId,
+      );
+    },
+    getSnap(id: string): SnapRow | null {
+      const r = db.prepare("SELECT s.*, m.room_id FROM snaps s JOIN meetings m ON m.id = s.meeting_id WHERE s.id = ?").get(id) as
+        | Row
+        | undefined;
+      return r ? toSnapRow(r) : null;
+    },
+    meetingSnaps(meetingId: string): SnapRow[] {
+      return (
+        db
+          .prepare("SELECT s.*, m.room_id FROM snaps s JOIN meetings m ON m.id = s.meeting_id WHERE s.meeting_id = ? ORDER BY s.ts")
+          .all(meetingId) as Row[]
+      ).map(toSnapRow);
+    },
+    /** An item's snaps across meetings, newest first. */
+    itemSnaps(itemId: string, limit = 20): SnapRow[] {
+      return (
+        db
+          .prepare(
+            "SELECT s.*, m.room_id FROM snaps s JOIN meetings m ON m.id = s.meeting_id WHERE s.item_id = ? ORDER BY s.ts DESC LIMIT ?",
+          )
+          .all(itemId, limit) as Row[]
+      ).map(toSnapRow);
+    },
+    setSnapCaption(id: string, caption: string) {
+      db.prepare("UPDATE snaps SET caption = ? WHERE id = ?").run(caption, id);
+    },
+    /** After a crop: the new image replaces the old one. */
+    setSnapImage(id: string, ext: string, width: number, height: number) {
+      db.prepare("UPDATE snaps SET ext = ?, width = ?, height = ?, version = version + 1 WHERE id = ?").run(ext, width, height, id);
+    },
+    deleteSnap(id: string) {
+      db.prepare("DELETE FROM snaps WHERE id = ?").run(id);
     },
     getPolish(roomId: string): Polish | null {
       const r = db.prepare("SELECT at, rows_json FROM upnext_polish WHERE room_id = ?").get(roomId) as Row | undefined;
