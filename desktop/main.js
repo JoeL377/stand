@@ -21,7 +21,8 @@ let picking = null;
 
 // ---- one instance, and stand:// links -----------------------------------------
 
-if (!app.requestSingleInstanceLock()) app.quit();
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.quit();
 app.setAsDefaultProtocolClient("stand");
 app.on("open-url", (e, url) => {
   e.preventDefault();
@@ -234,12 +235,15 @@ function pickRegion(display, image) {
       if (e.sender !== overlay.webContents) return;
       if (!r) return finish(null);
       if (r.full) return finish({ full: true });
-      const s = image.getSize().width / display.bounds.width;
+      // Map from the crosshair window to image pixels (macOS may have kept it off the menu bar).
+      const [cw, ch] = overlay.getContentSize();
+      const sx = image.getSize().width / cw;
+      const sy = image.getSize().height / ch;
       finish({
-        x: Math.round(r.x * s),
-        y: Math.round(r.y * s),
-        width: Math.max(1, Math.round(r.w * s)),
-        height: Math.max(1, Math.round(r.h * s)),
+        x: Math.round(r.x * sx),
+        y: Math.round(r.y * sy),
+        width: Math.max(1, Math.round(r.w * sx)),
+        height: Math.max(1, Math.round(r.h * sy)),
       });
     };
     picking = { cancel: () => finish(null) };
@@ -270,6 +274,7 @@ app.on("web-contents-created", (_e, wc) => {
 });
 
 app.whenReady().then(() => {
+  if (!primary) return;
   allowMediaAndSharing(session.fromPartition(PARTITION));
   showWindow();
   if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap()))
