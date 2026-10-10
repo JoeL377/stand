@@ -92,8 +92,6 @@ export function origin(req: Request) {
 }
 
 const DESKTOP_CLIENT = "stand-desktop";
-const DESKTOP_REDIRECT = "stand://signed-in";
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
 /** Only same-site paths, so the sign-in flow can't be used as an open redirect. */
 const safeNext = (next: unknown) => (typeof next === "string" && /^\/(?!\/)/.test(next) ? next : "/");
@@ -186,25 +184,22 @@ export function authRoutes(db: DB) {
 
   // ---- the Mac app ----------------------------------------------------------
   // Google won't sign people in inside an app's own window, so the Mac app
-  // sends them here in their browser. Once signed in, the browser hands a
-  // one-time code back to the app (stand://signed-in), and the app swaps it,
-  // with the secret only it holds (PKCE), for a session of its own.
+  // sends them here in their browser. Once signed in, the browser carries a
+  // one-time code back to the app, which listens on this computer only
+  // (127.0.0.1, RFC 8252), and the app swaps it, with the secret only it
+  // holds (PKCE), for a session of its own.
   r.get("/desktop", (req, res) => {
     const challenge = typeof req.query.challenge === "string" ? req.query.challenge : "";
-    if (!/^[A-Za-z0-9_-]{43}$/.test(challenge)) return res.status(400).send("Open this from the Stand app.");
+    const port = Number(req.query.port);
+    if (!/^[A-Za-z0-9_-]{43}$/.test(challenge) || !Number.isInteger(port) || port < 1024 || port > 65535)
+      return res.status(400).send("Open this from the Stand app.");
     // Without Google, the app's own window can sign in with the stand-in form.
     if (!googleEnabled()) return res.status(404).send("Sign in inside the Stand app.");
     const user = userFromRequest(db, req);
-    if (!user) return res.redirect(`/api/auth/google?next=${encodeURIComponent(`/api/auth/desktop?challenge=${challenge}`)}`);
-    const code = db.createAuthCode({ clientId: DESKTOP_CLIENT, userId: user.id, redirectUri: DESKTOP_REDIRECT, challenge, scope: "read" });
-    const to = `${DESKTOP_REDIRECT}?code=${encodeURIComponent(code)}`;
-    res.set("Cache-Control", "no-store").type("html").send(`<!doctype html><meta charset="utf-8"><title>Stand</title>
-<meta name="viewport" content="width=device-width">
-<body style="font:15px system-ui;display:grid;place-items:center;height:90vh;margin:0;color:#222">
-<div style="text-align:center"><p>Signed in as ${escapeHtml(user.email)}.</p>
-<p><a href="${to}" style="color:#2d6cdf">Open the Stand app</a></p>
-<p style="color:#888;font-size:13px">You can close this tab afterwards.</p></div>
-<script>location.href=${JSON.stringify(to)}</script>`);
+    if (!user) return res.redirect(`/api/auth/google?next=${encodeURIComponent(`/api/auth/desktop?challenge=${challenge}&port=${port}`)}`);
+    const back = `http://127.0.0.1:${port}/signed-in`;
+    const code = db.createAuthCode({ clientId: DESKTOP_CLIENT, userId: user.id, redirectUri: back, challenge, scope: "read" });
+    res.set("Cache-Control", "no-store").redirect(`${back}?code=${encodeURIComponent(code)}`);
   });
 
   r.post("/desktop/redeem", (req, res) => {

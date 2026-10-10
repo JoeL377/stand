@@ -13,7 +13,7 @@ npm run app        # Stand.app in dist/mac-arm64 (or dist/mac), signed for this 
 open dist/mac*/Stand.app
 ```
 
-Drag it to Applications to keep it. `npm start` runs it straight from the source, but signing in needs the built app, because macOS only sends `stand://` links to an installed app.
+Drag it to Applications to keep it. `npm start` runs it straight from the source.
 
 To point it at another Stand: `STAND_URL=http://localhost:5173 npm start`.
 
@@ -26,7 +26,9 @@ npm install && npm --prefix desktop install
 npm run try:mac
 ```
 
-This starts a local Stand with Google sign-in turned off (you sign in with a name and email inside the app) and opens the app on it. Quitting the app or pressing Ctrl-C stops both. The first launch downloads Electron, so it takes a minute.
+This starts a local Stand with your `.env` and opens the app on it. Quitting the app or pressing Ctrl-C stops both. The first launch downloads Electron, so it takes a minute.
+
+Google sign-in on the local Stand needs `http://localhost:5173/api/auth/google/callback` among the authorized redirect URIs of your Google OAuth client (Google Cloud console › APIs & Services › Credentials). Without Google keys in `.env`, you sign in with a name and email instead.
 
 ## First run
 
@@ -41,5 +43,6 @@ This starts a local Stand with Google sign-in turned off (you sign in with a nam
 ## How it fits together
 
 - `main.js`: the window, browser sign-in, and Snap.
-- Sign-in: the app sends you to `/api/auth/desktop` with a PKCE challenge, the server hands back a one-time code via `stand://signed-in`, and the app swaps it for its own session (`/api/auth/desktop/redeem`).
+- Sign-in: the app opens `/api/auth/desktop` in your browser with a PKCE challenge and the port of a one-off listener on 127.0.0.1. After Google, the browser brings a one-time code back to that listener, and the app swaps it for its own session (`/api/auth/desktop/redeem`).
+- No title bar: Stand runs edge to edge with the window buttons in its top-left corner. `preload.js` marks the page `html.mac-app`, and Stand's CSS makes room for the buttons.
 - Snap: a screen capture of the display under the pointer, frozen in `snap.html` for picking a region, then uploaded to `/api/rooms/<space>/snaps` like a snap taken in the page.

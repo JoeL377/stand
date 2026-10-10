@@ -5,6 +5,7 @@
 
 const { app, BrowserWindow, Notification, desktopCapturer, globalShortcut, ipcMain, screen, session, shell } = require("electron");
 const crypto = require("node:crypto");
+const http = require("node:http");
 
 const STAND_URL = (process.env.STAND_URL || "https://stand-production-3d3f.up.railway.app").replace(/\/$/, "");
 const STAND_ORIGIN = new URL(STAND_URL).origin;
@@ -12,32 +13,21 @@ const STAND_ORIGIN = new URL(STAND_URL).origin;
 const SNAP_SHORTCUT = process.env.STAND_SNAP_SHORTCUT || "Control+Shift+S";
 const PARTITION = "persist:stand";
 const mac = process.platform === "darwin";
+/** No title bar on the Mac: Stand runs edge to edge, with the window buttons in its top-left corner. */
+/** @type {Electron.BrowserWindowConstructorOptions} */
+const chrome = mac ? { titleBarStyle: "hidden", trafficLightPosition: { x: 16, y: 21 } } : {};
 
 let win = null;
-/** The browser sign-in in flight: the PKCE secret, and the page to land on. */
+/** The browser sign-in in flight, if any. */
 let signingIn = null;
 /** The crosshair, while it's up. */
 let picking = null;
 
-// ---- one instance, and stand:// links -----------------------------------------
+// ---- one instance -----------------------------------------------------------------
 
 const primary = app.requestSingleInstanceLock();
 if (!primary) app.quit();
-app.setAsDefaultProtocolClient("stand");
-app.on("open-url", (e, url) => {
-  e.preventDefault();
-  void app.whenReady().then(() => handleLink(url));
-});
-app.on("second-instance", (_e, argv) => {
-  const link = argv.find((a) => a.startsWith("stand://"));
-  if (link) void handleLink(link);
-  else showWindow();
-});
-
-async function handleLink(link) {
-  const url = new URL(link);
-  if (url.hostname === "signed-in") await finishSignIn(url.searchParams.get("code"));
-}
+app.on("second-instance", () => showWindow());
 
 // ---- the window -----------------------------------------------------------------
 
@@ -50,7 +40,8 @@ function showWindow(path) {
       minHeight: 600,
       title: "Stand",
       backgroundColor: "#191919",
-      webPreferences: { partition: PARTITION, contextIsolation: true, sandbox: true },
+      ...chrome,
+      webPreferences: { partition: PARTITION, preload: mac ? `${__dirname}/preload.js` : undefined, contextIsolation: true, sandbox: true },
     });
     win.on("closed", () => (win = null));
     if (!path) void win.loadURL(STAND_URL);
@@ -72,7 +63,8 @@ function keepOnStand(wc) {
   wc.setWindowOpenHandler(({ url }) => {
     if (signIn(url) !== false) return { action: "deny" };
     // Stand's own links (the recap, a brief) open as another app window.
-    if (new URL(url).origin === STAND_ORIGIN) return { action: "allow", overrideBrowserWindowOptions: { width: 1100, height: 800 } };
+    if (new URL(url).origin === STAND_ORIGIN)
+      return { action: "allow", overrideBrowserWindowOptions: { width: 1100, height: 800, ...chrome } };
     void shell.openExternal(url);
     return { action: "deny" };
   });
@@ -87,21 +79,43 @@ function keepOnStand(wc) {
 
 // ---- signing in through the browser ---------------------------------------------
 
+const SIGNED_IN_PAGE = `<!doctype html><meta charset="utf-8"><title>Signed in · Stand</title>
+<body style="margin:0;height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui;color-scheme:light dark">
+<p>You're signed in. Head back to the Stand app; you can close this tab.</p>`;
+
+/** The browser signs in, then comes back to a one-off listener on this computer
+ *  with a code that only this app's secret (PKCE) can turn into a session. */
 async function startSignIn(next) {
+  signingIn?.close();
   const verifier = crypto.randomBytes(32).toString("base64url");
-  signingIn = { verifier, next: next && next.startsWith("/") && !next.startsWith("//") ? next : "/" };
   const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
-  await shell.openExternal(`${STAND_URL}/api/auth/desktop?challenge=${challenge}`);
+  const land = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const listener = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname !== "/signed-in") return void res.writeHead(404).end();
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(SIGNED_IN_PAGE);
+    close();
+    void finishSignIn(url.searchParams.get("code"), verifier, land);
+  });
+  const timer = setTimeout(() => close(), 10 * 60_000);
+  const close = () => {
+    clearTimeout(timer);
+    listener.close();
+    if (signingIn?.close === close) signingIn = null;
+  };
+  signingIn = { close };
+  await new Promise((resolve) => listener.listen(0, "127.0.0.1", () => resolve(null)));
+  const { port } = /** @type {import("node:net").AddressInfo} */ (listener.address());
+  await shell.openExternal(`${STAND_URL}/api/auth/desktop?challenge=${challenge}&port=${port}`);
 }
 
-async function finishSignIn(code) {
-  const pending = signingIn;
-  signingIn = null;
-  if (!code || !pending) return showWindow();
+async function finishSignIn(code, verifier, land) {
+  if (mac) app.focus({ steal: true });
+  if (!code) return showWindow();
   const res = await fetch(`${STAND_URL}/api/auth/desktop/redeem`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code, verifier: pending.verifier }),
+    body: JSON.stringify({ code, verifier }),
   }).catch(() => null);
   if (!res?.ok) {
     showWindow();
@@ -118,7 +132,7 @@ async function finishSignIn(code) {
     sameSite: "lax",
     expirationDate: Math.floor((Date.now() + s.maxAgeMs) / 1000),
   });
-  showWindow(pending.next);
+  showWindow(land);
 }
 
 // ---- microphone and screen sharing inside the window ----------------------------

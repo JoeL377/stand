@@ -20,16 +20,9 @@
     "productName": "Stand",
     "files": [
       "main.js",
+      "preload.js",
       "snap.html",
       "snap-preload.js"
-    ],
-    "protocols": [
-      {
-        "name": "Stand",
-        "schemes": [
-          "stand"
-        ]
-      }
     ],
     "mac": {
       "category": "public.app-category.productivity",
