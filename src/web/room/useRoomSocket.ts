@@ -113,6 +113,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [trouble, setTrouble] = useState<Trouble | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const outbox = useRef<Outgoing[]>([]);
+  // Offline adds that were deleted before they went out, kept so Undo can bring them back.
+  const droppedAdds = useRef(new Map<string, Outgoing>());
   /** The meeting we're in, so a reconnect can tell the server. */
   const meetingRef = useRef<string | null>(null);
   /** Gives up on the current socket and reconnects. */
@@ -279,11 +281,24 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
           setNotes((ns) => patchNotes(ns, { cid: "", msg, sentAt: null }));
         } else {
           outbox.current = outbox.current.filter((o) => o !== add);
+          droppedAdds.current.set(msg.noteId, add);
           setWaiting(outbox.current.length);
           setNotes((ns) => ns.filter((n) => n.id !== msg.noteId));
         }
         return true;
       }
+    }
+    // Undo of deleting one of those: the add goes back in the queue as it was.
+    if (msg.type === "note.restore" && droppedAdds.current.has(msg.noteId)) {
+      const add = droppedAdds.current.get(msg.noteId)!;
+      droppedAdds.current.delete(msg.noteId);
+      outbox.current.push(add);
+      if (open) {
+        ws.send(JSON.stringify({ ...add.msg, cid: add.cid }));
+        add.sentAt = Date.now();
+      } else setWaiting(outbox.current.length);
+      setNotes((ns) => patchNotes(ns, add));
+      return true;
     }
     // Not crypto.randomUUID: that needs https, and people test over plain http on their network.
     const o: Outgoing = { cid: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`, msg, sentAt: null };
