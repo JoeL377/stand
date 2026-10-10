@@ -9,6 +9,9 @@ import { SnapGallery, deleteSnap, takeSnap } from "../Snaps.tsx";
 
 type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "delete" };
 
+/** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
+const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
+
 export function Stage(props: {
   state: RoomState;
   me: Participant | undefined;
@@ -58,7 +61,7 @@ export function Stage(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, [presenting]);
 
-  // Snap: the camera on the shared screen, or S. Saves the frame as shared;
+  // Snap: the camera on the shared screen, or ⌃⇧S. Saves the frame as shared;
   // cropping waits for the gallery so nobody is pulled out of the talk.
   const screenRef = useRef<HTMLDivElement>(null);
   const showingScreen = Boolean(localScreen || remoteScreen);
@@ -87,8 +90,7 @@ export function Stage(props: {
     if (!showingScreen) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t.closest("input, textarea, [contenteditable], [role=dialog]") || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
-      if (e.key !== "s" && e.key !== "S") return;
+      if (!e.ctrlKey || !e.shiftKey || e.metaKey || e.altKey || e.code !== "KeyS" || e.repeat || t.closest("[role=dialog]")) return;
       e.preventDefault();
       void snapRef.current();
     };
@@ -152,7 +154,7 @@ export function Stage(props: {
 
       <div className="screen" ref={screenRef}>
         {showingScreen && (
-          <button className="snap-btn" title="Snap this screen (S)" aria-label="Snap this screen" onClick={() => void snap()}>
+          <button className="snap-btn" title={`Snap this screen (${SNAP_KEYS})`} aria-label="Snap this screen" onClick={() => void snap()}>
             <CameraIcon />
           </button>
         )}
