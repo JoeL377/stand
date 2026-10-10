@@ -5,6 +5,7 @@ import { SnapFigures, SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
+import { Markdown } from "../Synthesis.tsx";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
 import { colorFor, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
@@ -108,6 +109,18 @@ export function RecapPage() {
       </header>
 
       {groups.length === 0 && <p className="muted">Nothing was recorded in this meeting.</p>}
+
+      {data.synthesis && (
+        <section id="synthesis" className="doc-section rc-section rc-synthesis">
+          <h2 className="rc-h synth">
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>{" "}
+            Synthesis
+          </h2>
+          <Markdown text={data.synthesis} />
+        </section>
+      )}
 
       {actions.length > 0 && (
         <section id="todo" className="doc-section rc-section">

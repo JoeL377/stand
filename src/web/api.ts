@@ -20,6 +20,7 @@ export interface RoomInfo {
   id: string;
   name: string;
   purpose: string;
+  synthesisInstructions: string;
   items: Item[];
   decks: Deck[];
   people: Array<{ name: string; picture: string | null }>;
@@ -42,8 +43,8 @@ export const api = {
   myRooms: () => call<Array<{ id: string; name: string; lastJoinedAt: number }>>("GET", "/api/my/rooms"),
   createRoom: (name: string, purpose = "") => call<{ id: string; name: string }>("POST", "/api/rooms", { name, purpose }),
   spaces: () => call<SpaceSummary[]>("GET", "/api/spaces"),
-  updateSpace: (id: string, patch: { name?: string; purpose?: string }) =>
-    call<{ id: string; name: string; purpose: string }>("PATCH", `/api/rooms/${id}`, patch),
+  updateSpace: (id: string, patch: { name?: string; purpose?: string; synthesisInstructions?: string }) =>
+    call<{ id: string; name: string; purpose: string; synthesisInstructions: string }>("PATCH", `/api/rooms/${id}`, patch),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   addAgenda: (roomId: string, titles: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items`, { titles }),
   importLinear: (roomId: string, input: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/linear`, { input }),

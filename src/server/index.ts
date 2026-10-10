@@ -4,6 +4,7 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer } from "ws";
 import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
+import { MAX_SYNTHESIS_INSTRUCTIONS } from "../shared/protocol.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } from "./auth.ts";
 import { handleMcp } from "./mcp.ts";
@@ -103,6 +104,7 @@ const agents = agentApi({
     return buildBrief({
       meeting: m,
       roomName: db.getRoom(m.roomId)!.name,
+      synthesisInstructions: db.getRoom(m.roomId)!.synthesisInstructions,
       groups: meetingGroups(m, baseUrl),
       decks: db.listDecks(m.roomId),
       baseUrl,
@@ -308,18 +310,23 @@ app.get(
   }),
 );
 
-/** Rename a space or change its purpose; only whoever created it (or anyone, for older spaces with no creator). */
+/** Rename a space or change its purpose: only whoever created it (or anyone, for
+ *  older spaces with no creator). Anyone in the space can change its synthesis instructions. */
 app.patch(
   "/api/rooms/:id",
   route((req, res) => {
     const room = db.getRoom(req.params.id);
     if (!room) return notFound(res, "Space not found");
-    if (room.createdBy && room.createdBy !== req.user!.id)
-      return void res.status(403).json({ error: "Only the person who created this space can change it" });
     const name = req.body?.name === undefined ? undefined : String(req.body.name).trim().slice(0, 80);
     const purpose = req.body?.purpose === undefined ? undefined : String(req.body.purpose).trim().slice(0, 200);
+    const synthesisInstructions =
+      req.body?.synthesisInstructions === undefined ? undefined : String(req.body.synthesisInstructions).trim().slice(0, MAX_SYNTHESIS_INSTRUCTIONS);
+    const creatorOnly = name !== undefined || purpose !== undefined;
+    if (creatorOnly && room.createdBy && room.createdBy !== req.user!.id)
+      return void res.status(403).json({ error: "Only the person who created this space can change it" });
+    if (!creatorOnly && !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
     if (name === "") return void res.status(400).json({ error: "A space needs a name" });
-    db.updateRoom(room.id, { name, purpose });
+    db.updateRoom(room.id, { name, purpose, synthesisInstructions });
     if (name) sessions.get(room.id)?.renamed(name);
     res.json(db.getRoom(room.id));
   }),
@@ -688,6 +695,7 @@ app.get(
       startedAt: m.startedAt,
       endedAt: m.endedAt,
       summary: m.summary,
+      synthesis: m.synthesis,
       items: meetingGroups(m),
     };
     res.json(body);
@@ -704,6 +712,7 @@ app.get(
     const brief = buildBrief({
       meeting: m,
       roomName: db.getRoom(m.roomId)!.name,
+      synthesisInstructions: db.getRoom(m.roomId)!.synthesisInstructions,
       groups: meetingGroups(m, `${req.protocol}://${req.get("host")}`),
       decks: db.listDecks(m.roomId),
       baseUrl: `${req.protocol}://${req.get("host")}`,

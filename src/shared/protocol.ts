@@ -344,14 +344,21 @@ export interface MeetingRecap {
   startedAt: number;
   endedAt: number | null;
   summary: string | null;
+  /** The space's synthesis instructions applied to this meeting, as Markdown; null when it had none. */
+  synthesis: string | null;
   items: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions: Discussion[]; snaps: Snap[] }>;
 }
+
+/** Synthesis instructions are a paragraph or a short list, not a document. */
+export const MAX_SYNTHESIS_INSTRUCTIONS = 2000;
 
 /** One space (a room) as the home page lists it. */
 export interface SpaceSummary {
   id: string;
   name: string;
   purpose: string;
+  /** What the space asks the agent to pull out of every meeting, besides the default notes. */
+  synthesisInstructions: string;
   /** You created it, so it shows on Manage spaces. */
   mine: boolean;
   /** You have been in it (room_members). */

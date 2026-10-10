@@ -92,8 +92,8 @@ test("the recap sees the snaps and puts each under the note it backs or the topi
   let recapIn: import("./llm.ts").RecapInput | null = null;
   const agent = Object.assign(new HeuristicAgent(), {
     describeSnap: async () => "Stripe dashboard",
-    notesFor: async (_i: unknown, _s: unknown, _e: unknown, _c: unknown, screens?: unknown[]) => {
-      screensSeen.push(screens);
+    notesFor: async (_i: unknown, _s: unknown, _e: unknown, _c: unknown, context?: { screens?: unknown[] }) => {
+      screensSeen.push(context?.screens);
       return {
         notes: [
           { kind: "action" as const, text: "Lower retries to 3", owner: "Huy", discussion: 0 },

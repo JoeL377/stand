@@ -763,7 +763,8 @@ export class RoomSession implements SpeechSink {
           .meetingSnaps(this.meetingId)
           .filter((p) => p.itemId === itemId && p.caption)
           .map((p) => ({ at: p.ts, by: p.source === "agent" ? "Stand agent" : p.takenBy, caption: p.caption! }));
-        const draft = await this.agent.notesFor(item, segments, earlier, keys, screens);
+        const instructions = this.db.getRoom(this.roomId)?.synthesisInstructions;
+        const draft = await this.agent.notesFor(item, segments, earlier, keys, { instructions, screens });
         const discussions = this.db.replaceDiscussions(
           this.meetingId,
           itemId,
@@ -849,6 +850,21 @@ export class RoomSession implements SpeechSink {
     for (const id of itemIds) {
       perItem.push({ item: id ? this.db.getItem(id) : null, notes: await this.refreshNotes(id) });
     }
+    // The recap (with the snaps in view), and the Synthesis when the space has instructions for one, side by side.
+    const room = this.db.getRoom(this.roomId);
+    const instructions = room?.synthesisInstructions.trim() ?? "";
+    const synthesizing = instructions
+      ? this.agent
+          .synthesizeMeeting({
+            spaceName: room!.name,
+            instructions,
+            items: perItem.map((p) => ({ ...p, segments: segments.filter((s) => s.itemId === (p.item?.id ?? null)) })),
+          })
+          .catch((err) => {
+            console.error("[agent] synthesis failed:", err);
+            return null;
+          })
+      : Promise.resolve(null);
     let summary = "";
     try {
       const recap = await this.agent.recapMeeting(this.recapInput(perItem));
@@ -868,7 +884,7 @@ export class RoomSession implements SpeechSink {
         console.error("[agent] summary failed:", err2);
       }
     }
-    this.db.endMeeting(this.meetingId, summary || null);
+    this.db.endMeeting(this.meetingId, summary || null, await synthesizing);
     this.polisher?.schedule(this.roomId, 0);
     this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
     for (const ws of this.conns.keys()) ws.close();

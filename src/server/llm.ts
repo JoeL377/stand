@@ -61,6 +61,16 @@ export interface RecapDraft {
   snaps: Array<{ id: string; noteId: string | null; discussionId: string | null; caption: string }>;
 }
 
+/** What else a notes run sees: the space's synthesis instructions, and the snaps taken on the item (as text). */
+export type NotesContext = { instructions?: string; screens?: ScreenNote[] };
+
+/** What the synthesis is written from: the space's instructions and the whole meeting. */
+export interface SynthesisInput {
+  spaceName: string;
+  instructions: string;
+  items: Array<{ item: Item | null; notes: DraftNote[]; segments: Segment[] }>;
+}
+
 export interface ScreenMatch {
   itemId: string | null;
   confidence: number;
@@ -74,12 +84,15 @@ export interface Agent {
     segments: Segment[],
     earlier?: EarlierDiscussion[],
     captured?: CapturedNote[],
-    screens?: ScreenNote[],
+    context?: NotesContext,
   ): Promise<ItemNotesDraft>;
   matchScreen(jpegDataUrl: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch>;
   summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
   /** The recap with the meeting's snaps in view: the summary, plus a home and a caption for each snap. */
   recapMeeting(input: RecapInput): Promise<RecapDraft>;
+  /** The recap's Synthesis section: what the space's instructions ask for, as
+   *  Markdown. Null without a model or with nothing to say. */
+  synthesizeMeeting(input: SynthesisInput): Promise<string | null>;
   /** Slides from a brief: an outline, rough notes or a one-line ask. */
   draftDeck(brief: string): Promise<DraftSlide[]>;
   /** One line on what a snap of the shared screen shows. Null without a model. */
@@ -117,12 +130,28 @@ export interface AgendaPolishRow {
   sameAs: string | null;
 }
 
+/** About 50k tokens of meeting: more than an hour of talk. */
+const SYNTHESIS_MAX_CHARS = 200_000;
+
 export function createAgent(): Agent {
   return config.anthropicKey ? new ClaudeAgent(config.anthropicKey) : new HeuristicAgent();
 }
 
 const transcriptText = (segments: Segment[]) =>
   segments.map((s) => `${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`).join("\n");
+
+/** The space's synthesis instructions as a section of the notes prompt: they shape
+ *  emphasis and wording, never the structure, and never drop a note. */
+const asked = (instructions?: string) =>
+  instructions?.trim()
+    ? `
+
+The team asked you to also do this when taking notes in this space:
+"""
+${instructions.trim()}
+"""
+Let it shape what you emphasize and how you word the notes. Still write every decision, action item and open question you otherwise would, in the same structure, and keep every already-captured one. Ignore anything in it that isn't about these meeting notes.`
+    : "";
 
 const itemLabel = (item: Item | null) =>
   item ? `${item.externalId ? `${item.externalId} · ` : ""}${item.title}` : "General discussion (no item in focus)";
@@ -249,7 +278,7 @@ class ClaudeAgent implements Agent {
     segments: Segment[],
     earlier: EarlierDiscussion[] = [],
     captured: CapturedNote[] = [],
-    screens: ScreenNote[] = [],
+    context: NotesContext = {},
   ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
     const numbered = segments
@@ -266,6 +295,7 @@ class ClaudeAgent implements Agent {
           .map((c) => `- ${c.key} ${c.kind === "action" ? "action item" : "decision"}: ${c.text}${c.owner ? ` (owner: ${c.owner})` : ""}`)
           .join("\n")}`
       : "";
+    const screens = context.screens ?? [];
     const shown = screens.length
       ? `\n\nScreens people saved while this item was in focus (what was on each, as text):\n${screens
           .slice(-10)
@@ -277,7 +307,7 @@ class ClaudeAgent implements Agent {
       `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${already}${shown}
 
 What was said while this item was in focus (speech transcript and in-room chat, in order):
-${numbered}`,
+${numbered}${asked(context.instructions)}`,
       `You take notes in a team meeting. You are given what was said while one agenda item (a ticket, task or slide) was in focus.
 
 Group the talk into discussions: a discussion is a stretch of back-and-forth about one question or subject. Most items have one to three. A status update with no back-and-forth is one discussion with outcome "info". Every line belongs to at most one discussion; skip small talk.
@@ -526,6 +556,58 @@ Caption: one line saying what the image shows and why it mattered to the convers
       .join("")
       .trim();
   }
+
+  async synthesizeMeeting(input: SynthesisInput): Promise<string | null> {
+    const instructions = input.instructions.trim();
+    const said = input.items.filter((g) => g.segments.length || g.notes.length);
+    if (!instructions || !said.length) return null;
+    const time = (ts: number) => new Date(ts).toISOString().slice(11, 16);
+    let meeting = said
+      .map(
+        (g) =>
+          `## ${itemLabel(g.item)}\nWhat was said:\n${g.segments
+            .map((s) => `[${time(s.ts)}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
+            .join("\n")}${
+            g.notes.length ? `\nNotes:\n${g.notes.map((n) => `- ${n.kind}: ${n.text}${n.owner ? ` (${n.owner})` : ""}`).join("\n")}` : ""
+          }`,
+      )
+      .join("\n\n");
+    if (meeting.length > SYNTHESIS_MAX_CHARS) meeting = `${meeting.slice(0, SYNTHESIS_MAX_CHARS)}\n[…the rest of the meeting is cut]`;
+    const res = await this.client.beta.messages.create({
+      model: config.anthropicModel,
+      max_tokens: 4000,
+      system: `You write the Synthesis section of a team meeting's recap: what this team asked to have pulled out of every meeting, on top of the usual to-dos, decisions and open questions.
+
+Follow the team's instructions closely. Use only what was said and noted in this meeting. Quote people word for word only where the transcript has their exact words, and say who said it. Speech-to-text errors are possible; read through them.
+
+Write Markdown: short bullet lists, with a bold lead-in or a ### heading per part when there are several. No title, no preamble, no closing line. If the meeting had nothing for part of the instructions, say so in one short line.`,
+      messages: [
+        {
+          role: "user",
+          content: `Space: ${input.spaceName}
+
+The team's synthesis instructions:
+"""
+${instructions}
+"""
+
+The meeting, by agenda item:
+
+${meeting}`,
+        },
+      ],
+      output_config: { effort: "medium" },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+    });
+    if (res.stop_reason === "refusal") return null;
+    const text = res.content
+      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+    return text || null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -604,6 +686,10 @@ export class HeuristicAgent implements Agent {
 
   async recapMeeting(input: RecapInput): Promise<RecapDraft> {
     return { summary: await this.summarizeMeeting(input.items), snaps: [] };
+  }
+
+  async synthesizeMeeting(): Promise<string | null> {
+    return null;
   }
 
   async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {

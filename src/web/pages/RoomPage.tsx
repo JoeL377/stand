@@ -8,6 +8,7 @@ import { Meeting } from "../room/Meeting.tsx";
 import { DeckIcon, LinkIcon, Logo, PdfIcon, TaskIcon, TicketIcon } from "../icons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
+import { SynthesisLine } from "../Synthesis.tsx";
 
 export function RoomPage() {
   const { roomId = "" } = useParams();
@@ -111,6 +112,7 @@ export function RoomPage() {
           </span>
           <h1>{room.name}</h1>
           {room.purpose && <p className="lobby-purpose">{room.purpose}</p>}
+          <SynthesisLine roomId={room.id} instructions={room.synthesisInstructions} onSaved={(v) => setRoom({ ...room, synthesisInstructions: v })} />
           {live && room.people.length > 0 && (
             <div className="lobby-people">
               <span className="stack">
