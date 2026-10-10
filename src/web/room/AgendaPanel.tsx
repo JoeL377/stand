@@ -9,6 +9,7 @@ import {
   EditIcon,
   HistoryIcon,
   MoreIcon,
+  PanelIcon,
   PdfIcon,
   PinIcon,
   TaskIcon,
@@ -25,6 +26,11 @@ export function AgendaPanel(props: {
   canSteer: boolean;
   /** The connection is down: switching items waits until it's back. */
   offline?: boolean;
+  /** Folded down to a thin strip, so the stage gets the room. */
+  folded: boolean;
+  onFold: () => void;
+  /** The keys that fold and unfold it, for the tooltips. */
+  foldKeys: string;
   segments: Segment[];
   notes: Note[];
 }) {
@@ -298,6 +304,50 @@ export function AgendaPanel(props: {
     );
   };
 
+  if (props.folded) {
+    // A strip with one numbered button per agenda entry, so the host can still move the meeting along.
+    const inBlock = (b: Block) => (b.kind === "item" ? b.item.id === state.focusItemId : b.block.items.some((i) => i.id === state.focusItemId));
+    const titleOf = (b: Block) => (b.kind === "item" ? `${b.item.externalId ? `${b.item.externalId} · ` : ""}${b.item.title}` : `${b.block.deck.title} (slides)`);
+    return (
+      <aside className={`panel agenda rail${canSteer && offline ? " offline" : ""}`} aria-label="Agenda">
+        <button className="icon agenda-fold" title={`Show the agenda (${props.foldKeys})`} aria-label="Show the agenda" onClick={props.onFold}>
+          <PanelIcon open={false} />
+        </button>
+        <ol className="rail-items">
+          {blocks.map((b, i) => {
+            const here = inBlock(b);
+            const go = b.kind === "item" ? b.item.id : b.block.items[0]?.id;
+            return (
+              <li key={b.kind === "item" ? b.item.id : b.block.deck.id}>
+                <button
+                  className={here ? "rail-item active" : "rail-item"}
+                  title={canSteer && !here ? `${titleOf(b)}: open it` : titleOf(b)}
+                  aria-label={titleOf(b)}
+                  aria-current={here || undefined}
+                  disabled={!canSteer || offline || here}
+                  onClick={() => go && send({ type: "focus", itemId: go })}
+                >
+                  {b.kind === "deck" ? <DeckIcon size={13} /> : i + 1}
+                </button>
+              </li>
+            );
+          })}
+          <li>
+            <button
+              className={state.focusItemId === null ? "rail-item active" : "rail-item"}
+              title="General / off-agenda"
+              aria-label="General / off-agenda"
+              disabled={!canSteer || offline || state.focusItemId === null}
+              onClick={() => send({ type: "focus", itemId: null })}
+            >
+              <ChatIcon size={13} />
+            </button>
+          </li>
+        </ol>
+      </aside>
+    );
+  }
+
   return (
     <aside
       ref={listRef}
@@ -321,6 +371,9 @@ export function AgendaPanel(props: {
     >
       <div className="panel-head">
         <h2>Agenda</h2>
+        <button className="icon agenda-fold" title={`Hide the agenda (${props.foldKeys})`} aria-label="Hide the agenda" onClick={props.onFold}>
+          <PanelIcon open />
+        </button>
         <div className="add-menu-wrap pop-wrap">
           <button
             className="ghost small add-btn"
