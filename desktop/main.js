@@ -678,6 +678,9 @@ app.whenReady().then(async () => {
   if (replacing) primary = await replacing;
   if (!primary) return app.quit();
   allowMediaAndSharing(session.fromPartition(PARTITION));
+  // A built Stand.app has its icon in the bundle. Run from source (npm start, npm run
+  // try:mac) the Dock would show Electron's, so give it Stand's.
+  if (mac && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, "build", "icon.png"));
   showWindow();
   // The Snap button on Stand's meeting page.
   ipcMain.handle("app:snap", (e) => (isStand(e.senderFrame?.url) ? snap() : null));
