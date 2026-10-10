@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("snap", {
-  onImage: (fn) => ipcRenderer.on("snap:image", (_e, dataUrl) => fn(dataUrl)),
+  onOpen: (fn) => ipcRenderer.on("snap:open", (_e, o) => fn(o)),
   ready: () => ipcRenderer.send("snap:ready"),
-  done: (region) => ipcRenderer.send("snap:region", region),
+  done: (choice) => ipcRenderer.send("snap:done", choice),
 });
