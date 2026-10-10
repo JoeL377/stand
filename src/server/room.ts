@@ -133,6 +133,8 @@ export class RoomSession implements SpeechSink {
   private drift: { itemId: string; since: number; score: number } | null = null;
   private transcriber: Transcriber | null = null;
   private transcriptionDown = false;
+  /** The creator handed hosting to someone on purpose, so rejoining doesn't take it back. */
+  private creatorHandedOver = false;
   private demoRunning = false;
   ended = false;
   /** When End meeting started the write-up. */
@@ -452,7 +454,7 @@ export class RoomSession implements SpeechSink {
       this.names.set(id, name);
       // The host coming back keeps the seat; nobody takes it while it's held for them.
       const seatFree = !this.hostId || (!this.participants.has(this.hostId) && !this.hostAwayTimer);
-      if (id === this.hostId || seatFree || (isNew && id === this.createdBy)) this.setHost(id);
+      if (id === this.hostId || seatFree || (isNew && id === this.createdBy && !this.creatorHandedOver)) this.setHost(id);
       if (this.emptyTimer) {
         clearTimeout(this.emptyTimer);
         this.emptyTimer = null;
@@ -516,6 +518,8 @@ export class RoomSession implements SpeechSink {
       case "host.give": {
         const hostHere = this.hostId && this.participants.has(this.hostId);
         if ((isHost || !hostHere) && this.participants.has(msg.participantId)) {
+          if (conn.participantId === this.createdBy && msg.participantId !== this.createdBy) this.creatorHandedOver = true;
+          if (msg.participantId === this.createdBy) this.creatorHandedOver = false;
           this.setHost(msg.participantId);
           this.suggestion = null;
           this.broadcastState();

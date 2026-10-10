@@ -21,6 +21,7 @@ const LASTING = new Set<ClientMessage["type"]>([
   "upnext.add",
   "upnext.addAll",
   "upnext.dismiss",
+  "upnext.undismiss",
   "host.give",
   "chat",
   "speech",
@@ -28,13 +29,14 @@ const LASTING = new Set<ClientMessage["type"]>([
   "followup.done",
   "note.edit",
   "note.remove",
+  "note.restore",
   "note.add",
   "stage.snap.close",
   "meeting.end",
 ]);
 /** Of those, what can wait for the connection to come back. The rest steer the
  *  meeting as it happens, so they need the connection now. */
-const CAN_WAIT = new Set<ClientMessage["type"]>(["chat", "speech", "segment.move", "followup.done", "note.edit", "note.remove", "note.add"]);
+const CAN_WAIT = new Set<ClientMessage["type"]>(["chat", "speech", "segment.move", "followup.done", "note.edit", "note.remove", "note.restore", "note.add"]);
 /** Sent on their own as things happen; nobody clicked anything. */
 const BACKGROUND = new Set<ClientMessage["type"]>(["hello", "ping", "speech.interim", "frame", "sharing"]);
 /** No ack or pong this long after sending: the connection is dead, even if the browser hasn't noticed yet. */
@@ -106,7 +108,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   /** Changes made while disconnected, to be sent when the connection is back. */
   const [waiting, setWaiting] = useState(0);
   /** Something was clicked that needs the connection, while it was down. */
-  const [refused, setRefused] = useState(false);
+  /** What was just turned away for want of a connection, so the pill can say what didn't happen. */
+  const [refused, setRefused] = useState<ClientMessage["type"] | null>(null);
   const [trouble, setTrouble] = useState<Trouble | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const outbox = useRef<Outgoing[]>([]);
@@ -259,9 +262,9 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     if (!LASTING.has(msg.type) || (!open && !CAN_WAIT.has(msg.type))) {
       if (open) ws.send(JSON.stringify(msg));
       else if (!BACKGROUND.has(msg.type)) {
-        setRefused(true);
+        setRefused(msg.type);
         clearTimeout(refusedTimer.current);
-        refusedTimer.current = setTimeout(() => setRefused(false), 4_000);
+        refusedTimer.current = setTimeout(() => setRefused(null), 4_000);
       }
       return open;
     }

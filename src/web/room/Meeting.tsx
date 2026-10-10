@@ -307,6 +307,22 @@ export function Meeting(props: {
   );
 }
 
+/** What didn't happen, when a click needed the connection and it was down. */
+const REFUSED: Partial<Record<string, string>> = {
+  focus: "switching items waits for the connection",
+  pin: "pinning waits for the connection",
+  unpin: "pinning waits for the connection",
+  "suggestion.accept": "switching waits for the connection",
+  "suggestion.dismiss": "couldn't dismiss the suggestion yet",
+  "upnext.add": "couldn't add the suggestion yet",
+  "upnext.addAll": "couldn't add the suggestions yet",
+  "upnext.dismiss": "couldn't dismiss the suggestion yet",
+  "upnext.undismiss": "couldn't undo yet",
+  "host.give": "handing over hosting waits for the connection",
+  "stage.snap.close": "couldn't take the snap down yet",
+  "meeting.end": "ending the meeting waits for the connection",
+};
+
 /** Only while something's wrong with the connection: what's happening to your changes, or what to do. */
 function ConnectionPill(props: { room: Pick<ReturnType<typeof useRoomSocket>, "connected" | "waiting" | "refused" | "trouble"> }) {
   const { connected, waiting, refused, trouble } = props.room;
@@ -318,10 +334,15 @@ function ConnectionPill(props: { room: Pick<ReturnType<typeof useRoomSocket>, "c
       </a>
     );
   }
-  if (trouble === "gone") return <span className="conn-pill">This space no longer exists</span>;
+  if (trouble === "gone")
+    return (
+      <a className="conn-pill" href="/">
+        This space no longer exists · Back to spaces
+      </a>
+    );
   if (connected) return null;
   const text = refused
-    ? "Reconnecting · that didn't go through"
+    ? `Reconnecting · ${REFUSED[refused] ?? "that didn't go through, try again once Stand is back"}`
     : waiting > 0
       ? `Reconnecting · ${waiting} change${waiting === 1 ? "" : "s"} waiting`
       : trouble === "unreachable"
