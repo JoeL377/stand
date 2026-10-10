@@ -4,7 +4,7 @@ import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { Avatar } from "../room/Stage.tsx";
 import { fmtDuration } from "../util.ts";
-import { SpacesShell, spaceHref, useNewSpace } from "./SpacesShell.tsx";
+import { SpacesShell, joinHref, spaceHref, useNewSpace } from "./SpacesShell.tsx";
 
 type Filter = "all" | "live" | "decide";
 
@@ -142,47 +142,61 @@ function LiveCard({ s }: { s: SpaceSummary }) {
         ? `${names[0]} and ${names[1]} are`
         : `${names[0]} and ${names.length - 1} others are`;
   return (
-    <Link to={spaceHref(s.id)} className="sp-card live">
-      <div className="sp-card-head">
-        <span className="sp-live-dot" aria-hidden />
-        <span className="sp-name">{s.name}</span>
-        <span className="sp-enter primary">Enter</span>
-      </div>
-      <div>
-        {who} {live.focusTitle ? <>on “{live.focusTitle}”</> : "talking"}
-      </div>
-      <div className="sp-card-foot">
-        <span className="sp-faces">
-          {live.people.slice(0, 4).map((p, i) => (
-            <Avatar key={i} id={p.name} name={p.name} picture={p.picture} size={24} />
-          ))}
-        </span>
-        <span className="sp-live-for">
-          {Date.now() - live.since < 60_000 ? "Just started" : `Talking for ${fmtDuration(Date.now() - live.since)}`}
-        </span>
-      </div>
+    <div className="sp-card-wrap">
+      <Link to={spaceHref(s.id)} className="sp-card live">
+        <div className="sp-card-head">
+          <span className="sp-live-dot" aria-hidden />
+          <span className="sp-name">{s.name}</span>
+        </div>
+        <div>
+          {who} {live.focusTitle ? <>on “{live.focusTitle}”</> : "talking"}
+        </div>
+        <div className="sp-card-foot">
+          <span className="sp-faces">
+            {live.people.slice(0, 4).map((p, i) => (
+              <Avatar key={i} id={p.name} name={p.name} picture={p.picture} size={24} />
+            ))}
+          </span>
+          <span className="sp-live-for">
+            {Date.now() - live.since < 60_000 ? "Just started" : `Talking for ${fmtDuration(Date.now() - live.since)}`}
+          </span>
+        </div>
+      </Link>
+      <JoinButton s={s} />
+    </div>
+  );
+}
+
+/** One click into talking, on top of the card. The rest of the card opens the space's overview. */
+function JoinButton({ s }: { s: SpaceSummary }) {
+  return (
+    <Link to={joinHref(s.id)} className={s.live ? "sp-enter primary sp-card-join" : "sp-enter outline sp-card-join"}>
+      {s.live ? "Join them" : "Start talking"}
     </Link>
   );
 }
 
 function SpaceCard({ s }: { s: SpaceSummary }) {
   return (
-    <Link to={spaceHref(s.id)} className="sp-card">
-      <div className="sp-card-head">
-        <span className="sp-name">{s.name}</span>
-        {s.forYou > 0 && (
-          <span className="sp-foryou" title="Open to-dos with your name on them">
-            {s.forYou} for you
-          </span>
-        )}
-      </div>
-      <div className={s.purpose ? "muted" : "muted sp-nopurpose"}>{s.purpose || "No purpose yet"}</div>
-      <StateChips s={s} />
-      <div className="sp-last">
-        <span className="sp-last-text">{s.last ? lastLine(s.last) : "Nothing decided yet"}</span>
-        <span className="muted small">{ago(s.last?.ts ?? s.activeAt)}</span>
-      </div>
-    </Link>
+    <div className="sp-card-wrap">
+      <Link to={spaceHref(s.id)} className="sp-card">
+        <div className="sp-card-head">
+          <span className="sp-name">{s.name}</span>
+          {s.forYou > 0 && (
+            <span className="sp-foryou" title="Open to-dos with your name on them">
+              {s.forYou} for you
+            </span>
+          )}
+        </div>
+        <div className={s.purpose ? "muted" : "muted sp-nopurpose"}>{s.purpose || "No purpose yet"}</div>
+        <StateChips s={s} />
+        <div className="sp-last">
+          <span className="sp-last-text">{s.last ? lastLine(s.last) : "Nothing decided yet"}</span>
+          <span className="muted small">{ago(s.last?.ts ?? s.activeAt)}</span>
+        </div>
+      </Link>
+      <JoinButton s={s} />
+    </div>
   );
 }
 
