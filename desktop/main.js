@@ -271,9 +271,10 @@ async function snap() {
   const wasInStand = BrowserWindow.getFocusedWindow() != null;
   try {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    trace("start", { display: display.bounds, scale: display.scaleFactor, permission: screenStatus() });
+    trace("start", { display: display.bounds, scale: display.scaleFactor, permission: screenStatus(), wasInStand });
+    const front = frontApp();
     const [still, windows] = (await within(Promise.all([grabDisplay(display), windowsOn(display)]), 8000)) ?? [null, []];
-    trace("grabbed", { still: still?.getSize() ?? null, windows: windows.length, permission: screenStatus(), cancelled: me.cancelled });
+    trace("grabbed", { still: still?.getSize() ?? null, windows: windows.length, permission: screenStatus(), cancelled: me.cancelled, front: await front });
     if (me.cancelled) return;
     if (!still || !screenAllowed()) return cantSee();
     const at = Date.now();
@@ -282,8 +283,9 @@ async function snap() {
     trace("toolbar", { choice: choice && (choice.failed ?? (choice.cancel ? "cancel" : choice.mode)) });
     if (choice?.failed) return { title: "Snap's toolbar didn't open", body: choice.failed };
     if (choice?.prefs) fs.promises.writeFile(prefsFile(), JSON.stringify(cleanPrefs(choice.prefs))).catch(() => {});
-    // Hand the screen back to whatever the person was in.
-    if (mac && !wasInStand) app.hide();
+    // Snapping from another app leaves Stand in the background (the toolbar never makes it
+    // the active app). Should Stand have come forward anyway, give the screen back.
+    if (mac && !wasInStand) await handBack();
     if (!choice || choice.cancel) return;
     const prefs = cleanPrefs(choice.prefs);
     let shot = still;
@@ -323,6 +325,26 @@ function trace(step, data = {}) {
   if (app.isPackaged) return;
   const line = `${new Date().toISOString()} ${step} ${JSON.stringify(data)}\n`;
   fs.promises.appendFile(path.join(__dirname, "snap-debug.log"), line).catch(() => {});
+}
+
+/** After the toolbar closes: a Stand window in front now means Stand came forward during
+ *  the snap. Hiding Stand puts back the app that was in front before. */
+async function handBack() {
+  await new Promise((r) => setTimeout(r, 100));
+  const standInFront = BrowserWindow.getFocusedWindow() != null;
+  trace("after", { standInFront, front: await frontApp() });
+  if (standInFront) app.hide();
+}
+
+/** The app in front, by name, for the Snap log. Only run from source on the Mac. */
+async function frontApp() {
+  if (!mac || app.isPackaged) return undefined;
+  try {
+    const info = await run("lsappinfo", ["info", "-only", "name", await run("lsappinfo", ["front"])]);
+    return /"[^"]*"="([^"]*)"/.exec(info)?.[1] ?? info;
+  } catch {
+    return null;
+  }
 }
 
 /** Null if it takes longer than ms. */
@@ -435,10 +457,14 @@ function openToolbar(me, display, still, windows, { prefs, inMeeting }) {
     const onReady = (e) => {
       if (e.sender !== overlay.webContents || overlay.isDestroyed()) return;
       clearTimeout(slow);
-      if (mac) app.focus({ steal: true });
+      // The toolbar is a panel: it takes the keyboard without making Stand the active app.
+      // Activating Stand here would bring its window up over the app you're in, or switch to
+      // Stand's Space when that app is full screen or on another desktop.
       overlay.show();
       overlay.focus();
-      trace("shown", { visible: overlay.isVisible(), bounds: overlay.getBounds() });
+      void frontApp().then((front) =>
+        trace("shown", { visible: overlay.isDestroyed() ? null : overlay.isVisible(), focused: !overlay.isDestroyed() && overlay.isFocused(), front }),
+      );
     };
     // The toolbar shows once its still has loaded. If that never happens, say so rather
     // than leave an invisible toolbar holding Snap.
