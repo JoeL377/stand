@@ -397,7 +397,7 @@ export function Avatar({ id, name, picture, size = 44 }: { id: string; name: str
   return picture ? (
     <img className="avatar" src={picture} alt="" width={size} height={size} referrerPolicy="no-referrer" />
   ) : (
-    <div className="avatar" style={{ background: colorFor(id), width: size, height: size, fontSize: size * 0.36 }}>
+    <div className="avatar" style={{ background: colorFor(id), width: size, height: size, fontSize: Math.max(11, size * 0.36) }}>
       {initials(name)}
     </div>
   );
