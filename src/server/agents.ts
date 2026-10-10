@@ -6,6 +6,7 @@
 import type { AgentToken, Discussion, Item, ItemUpdate, Note, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
+import { linkSnaps, type SnapRow } from "./snaps.ts";
 
 export type RefKind = "action" | "decision" | "question" | "topic";
 const NOTE_KINDS: Record<string, RefKind> = { action: "action", decision: "decision", question: "question" };
@@ -109,6 +110,25 @@ export function agentApi(deps: AgentDeps) {
     };
   };
 
+  /** A snap of the screen as agents see it: the image (fetched with the same token) and what's on it. */
+  const snapInfo = (p: SnapRow, notes: Note[], baseUrl: string) => ({
+    image_url: `${baseUrl}/api/snaps/${p.id}.${p.ext}?v=${p.version}`,
+    caption: p.caption ?? undefined,
+    by: p.source === "agent" ? "the Stand agent (kept because it backs a note)" : p.takenBy,
+    backs: p.noteId ? notes.find((n) => n.id === p.noteId)?.text : undefined,
+    at: new Date(p.ts).toISOString(),
+  });
+
+  /** A meeting's snaps that belong with a topic or a note: where the recap put them, else the topic of the remarks around them. */
+  function snapsWith(meetingId: string, belongs: (s: { noteId: string | null; discussionId: string | null }) => boolean, baseUrl: string) {
+    const rows = db.meetingSnaps(meetingId);
+    if (!rows.length) return undefined;
+    const linked = new Map(linkSnaps(rows, db.meetingSegments(meetingId), db.meetingDiscussions(meetingId)).map((s) => [s.id, s]));
+    const notes = db.meetingNotes(meetingId);
+    const mine = rows.filter((p) => belongs({ noteId: p.noteId, discussionId: linked.get(p.id)?.discussionId ?? null }));
+    return mine.length ? mine.slice(0, 8).map((p) => snapInfo(p, notes, baseUrl)) : undefined;
+  }
+
   /** Finds what a reference points to, checking the caller is in its space. */
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
   function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number }>, baseUrl: string) {
@@ -180,6 +200,7 @@ export function agentApi(deps: AgentDeps) {
             .map((n) => ({ ref: refOf(NOTE_KINDS[n.kind], n.id), kind: n.kind, text: n.text, owner: n.owner ?? undefined })),
           ...where,
           quotes: quotes(r.topic),
+          snaps: snapsWith(r.meeting.id, (s) => s.discussionId === r.topic!.id || notes.some((n) => n.id === s.noteId), baseUrl),
           url: refUrl(baseUrl, "topic", r.topic!.id),
         };
       }
@@ -199,6 +220,12 @@ export function agentApi(deps: AgentDeps) {
         decided_with_it: sameTopic.filter((x) => x.kind === "decision").map((x) => x.text),
         on_this_item: onItem(r.itemId, n.id),
         quotes: quotes(r.topic),
+        // Snaps that back this note, and ones from its topic that don't back another note.
+        snaps: snapsWith(
+          r.meeting.id,
+          (s) => s.noteId === n.id || (!s.noteId && n.discussionId !== null && s.discussionId === n.discussionId),
+          baseUrl,
+        ),
         updates: updates.length ? updates.map(updateInfo) : undefined,
         url: refUrl(baseUrl, r.ref.kind, n.id),
         next:
@@ -380,13 +407,7 @@ export function agentApi(deps: AgentDeps) {
           positions: d.positions.map((p) => `${p.speaker}: ${p.position}`),
         })),
         updates: db.itemUpdates(item.id, 10).map(updateInfo),
-        snaps: db.itemSnaps(item.id, 8).map((p) => ({
-          image_url: `${baseUrl}/api/snaps/${p.id}.${p.ext}?v=${p.version}`,
-          caption: p.caption ?? undefined,
-          by: p.source === "agent" ? "the Stand agent (kept because it backs a note)" : p.takenBy,
-          backs: p.noteId ? notes.find((n) => n.id === p.noteId)?.text : undefined,
-          at: new Date(p.ts).toISOString(),
-        })),
+        snaps: db.itemSnaps(item.id, 8).map((p) => snapInfo(p, notes, baseUrl)),
         meetings: [...new Set(notes.map((n) => n.meetingId))].length,
       };
     },

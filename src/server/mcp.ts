@@ -40,7 +40,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Get one Stand to-do, decision, question or topic",
       description:
-        "Returns one thing from Stand by its reference (stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id>, or a Stand /ref/ link) with just enough context to act on it: its text, owner and status, the space and item it belongs to, the topic it came from with each person's position, related decisions and open questions on that item, short quotes, and earlier updates.",
+        "Returns one thing from Stand by its reference (stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id>, or a Stand /ref/ link) with just enough context to act on it: its text, owner and status, the space and item it belongs to, the topic it came from with each person's position, related decisions and open questions on that item, short quotes, earlier updates, and snaps of the screen that go with it (fetch image_url with this same token).",
       inputSchema: { ref: z.string().describe("A Stand reference like stand:action/k3m9xq2p, or a Stand link to one") },
       annotations: READ,
     },

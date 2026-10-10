@@ -75,6 +75,43 @@ test("get returns a to-do with its decision, topic and item, only to people in t
   assert.throws(() => api.get({ user: andy, token: null }, `stand:action/${action.id}`, "x"), AgentError);
 });
 
+test("get brings the snaps that go with a topic or a note", () => {
+  const { db, api, joe, item, topic, action, notes } = setup();
+  const decision = notes.find((n) => n.kind === "decision")!;
+  const meetingId = decision.meetingId;
+  const snap = (id: string) =>
+    db.addSnap({
+      id,
+      meetingId,
+      itemId: item.id,
+      ts: Date.now(),
+      ext: "jpg",
+      width: 800,
+      height: 500,
+      source: "person",
+      takenById: joe.id,
+      takenBy: "Joe Liang",
+      sharerId: joe.id,
+      sharerName: "Joe Liang",
+      noteId: null,
+    });
+  // The recap put one under the decision; the other was taken while nobody spoke.
+  snap("backsdecision");
+  db.placeSnap("backsdecision", { noteId: decision.id, discussionId: topic.id, caption: "Transcript lag by browser" });
+  snap("loose");
+  const caller = { user: joe, token: null };
+  const ids = (got: Record<string, any>) => (got.snaps ?? []).map((p: { image_url: string }) => p.image_url.split("/").pop()!.split(".")[0]);
+
+  const ofTopic = api.get(caller, `stand:topic/${topic.id}`, "http://stand.test") as Record<string, any>;
+  assert.deepEqual(ids(ofTopic), ["backsdecision"]);
+  assert.equal(ofTopic.snaps[0].image_url, "http://stand.test/api/snaps/backsdecision.jpg?v=1");
+  assert.equal(ofTopic.snaps[0].caption, "Transcript lag by browser");
+  assert.equal(ofTopic.snaps[0].backs, decision.text);
+  assert.deepEqual(ids(api.get(caller, `stand:decision/${decision.id}`, "http://stand.test") as Record<string, any>), ["backsdecision"]);
+  // A to-do in the same topic doesn't get a snap that backs a different note.
+  assert.equal((api.get(caller, `stand:action/${action.id}`, "http://stand.test") as Record<string, any>).snaps, undefined);
+});
+
 test("the copied prompt names the ref, the to-do and the decision", () => {
   const { api, joe, action } = setup();
   const text = api.prompt({ user: joe, token: null }, `stand:action/${action.id}`, "http://stand.test");
