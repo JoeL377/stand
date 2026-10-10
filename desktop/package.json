@@ -9,7 +9,8 @@
   "scripts": {
     "start": "electron .",
     "app": "electron-builder --mac dir -c.mac.identity=null && codesign --force --deep --sign - dist/mac*/Stand.app",
-    "dist": "electron-builder --mac dmg"
+    "dist": "node scripts/dist-mac.js",
+    "dist:unsigned": "node scripts/dist-mac.js --unsigned"
   },
   "devDependencies": {
     "electron": "44.7.0",
@@ -38,6 +39,9 @@
         "NSMicrophoneUsageDescription": "Stand uses the microphone so others in the meeting can hear you.",
         "NSScreenCaptureUsageDescription": "Stand captures your screen when you share it or snap part of it."
       }
+    },
+    "dmg": {
+      "artifactName": "Stand-${version}-mac.${ext}"
     }
   }
 }
