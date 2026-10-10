@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { Capabilities } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth, UserMenu } from "../auth.tsx";
@@ -18,6 +18,7 @@ export function RoomPage() {
   const [joined, setJoined] = useState(false);
   const [copied, setCopied] = useState(false);
   const nav = useNavigate();
+  const [params, setParams] = useSearchParams();
 
   const load = useCallback(() => {
     api
@@ -29,6 +30,14 @@ export function RoomPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // "Start talking" on the Spaces page comes straight in. The flag goes once used, so
+  // leaving the meeting lands on the overview rather than joining again.
+  useEffect(() => {
+    if (!room || !params.has("join")) return;
+    setJoined(true);
+    setParams({}, { replace: true });
+  }, [room, params, setParams]);
 
   if (error) {
     return (

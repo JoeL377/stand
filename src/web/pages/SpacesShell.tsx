@@ -3,9 +3,11 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { UserMenu } from "../auth.tsx";
-import { Logo } from "../icons.tsx";
+import { Logo, MicIcon } from "../icons.tsx";
 
 export const spaceHref = (id: string) => `/s/${id}`;
+/** Straight into talking in the space, past its overview page. */
+export const joinHref = (id: string) => `/s/${id}?join=1`;
 
 /** Opens the New space pop-up, optionally with a name filled in. */
 const NewSpaceContext = createContext<(name?: string) => void>(() => {});
@@ -46,11 +48,21 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
             <div className="sp-side-list">
               <div className="sp-side-label">Your spaces</div>
               {quick.map((s) => (
-                <Link key={s.id} to={spaceHref(s.id)} className="sp-side-space" title={s.purpose || s.name}>
-                  <span className={s.live ? "sp-side-dot live" : "sp-side-dot"} aria-hidden />
-                  <span className="sp-side-name">{s.name}</span>
-                  {s.live && <span className="sr-only">(talking now)</span>}
-                </Link>
+                <div key={s.id} className="sp-side-row">
+                  <Link to={spaceHref(s.id)} className="sp-side-space" title={s.purpose || s.name}>
+                    <span className={s.live ? "sp-side-dot live" : "sp-side-dot"} aria-hidden />
+                    <span className="sp-side-name">{s.name}</span>
+                    {s.live && <span className="sr-only">(talking now)</span>}
+                  </Link>
+                  <Link
+                    to={joinHref(s.id)}
+                    className="sp-side-join"
+                    title={s.live ? "Join them" : "Start talking"}
+                    aria-label={`${s.live ? "Join them in" : "Start talking in"} ${s.name}`}
+                  >
+                    <MicIcon />
+                  </Link>
+                </div>
               ))}
             </div>
           )}
