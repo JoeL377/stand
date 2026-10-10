@@ -252,9 +252,9 @@ export function Meeting(props: {
 
       <footer className="controls">
         <div className="controls-group">
-          <button className={media.micOn ? "control" : "control off"} onClick={() => void media.toggleMic()}>
+          <button className={media.micOn ? "control" : "control off"} onClick={() => void media.toggleMic()} disabled={media.micStarting}>
             {media.micOn ? <MicIcon /> : <MicOffIcon />}
-            <span>{media.micOn ? "Mute" : "Unmute"}</span>
+            <span>{media.micStarting ? "Starting…" : media.micOn ? "Mute" : "Unmute"}</span>
           </button>
           {sharing ? (
             <button className="control sharing" onClick={() => void media.stopShare()}>

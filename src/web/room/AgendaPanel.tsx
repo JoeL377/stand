@@ -71,13 +71,19 @@ export function AgendaPanel(props: {
   }, [canSteer, send]);
 
   /** Removing is one click, so it's also one click to take back. */
-  const restore = (ids: string[]): void =>
-    void api.restoreItems(roomId, ids).catch(errorToast("Couldn't put it back", () => restore(ids)));
-  const remove = (ids: string[], what: string, run: () => Promise<unknown>): void =>
+  // Undo puts the rows back and, if the meeting was on one of them, the meeting too.
+  const restore = (ids: string[], refocus: string | null): void =>
+    void api.restoreItems(roomId, ids).then(
+      () => refocus && send({ type: "focus", itemId: refocus }),
+      errorToast("Couldn't put it back", () => restore(ids, refocus)),
+    );
+  const remove = (ids: string[], what: string, run: () => Promise<unknown>): void => {
+    const refocus = canSteer && state.focusItemId && ids.includes(state.focusItemId) ? state.focusItemId : null;
     void run().then(
-      () => toast({ text: `Removed ${what}`, action: { label: "Undo", run: () => restore(ids) } }),
+      () => toast({ text: `Removed ${what}`, action: { label: "Undo", run: () => restore(ids, refocus) } }),
       errorToast("Couldn't remove it", () => remove(ids, what, run)),
     );
+  };
   const short = (t: string) => `“${t.length > 40 ? `${t.slice(0, 38)}…` : t}”`;
 
   useEffect(() => {
@@ -414,8 +420,10 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
   const { upNext, canSteer, send } = props;
   // Open while the agenda is empty (it's the place to start); once there's an agenda it folds to one line.
   const [open, setOpen] = useState(props.emptyAgenda);
+  // Adding from here to an empty agenda keeps it open for the next one.
+  const addingHere = useRef(false);
   useEffect(() => {
-    if (!props.emptyAgenda) setOpen(false);
+    if (!props.emptyAgenda && !addingHere.current) setOpen(false);
   }, [props.emptyAgenda]);
   const [showParked, setShowParked] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -443,6 +451,7 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
             disabled={props.offline}
             title={props.offline ? "You can add it once Stand reconnects" : "Add to the agenda"}
             onClick={() => {
+              addingHere.current = true;
               if (send({ type: "upnext.add", key: s.key }))
                 toast({ text: `Added ${s.title.length > 40 ? `${s.title.slice(0, 38)}…` : s.title} to the agenda` });
             }}

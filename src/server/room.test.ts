@@ -102,6 +102,8 @@ test("talk that keeps naming another item nudges the host, and switching moves t
   session.addSpeech("p3", "Ann", "retry needs a cap on the backoff.", later + 500);
   assert.equal(db.meetingSegments(session.meetingId).length, 4, "the two fragments are one remark");
   assert.equal(session.state().suggestion?.itemId, items[1].id, "fragments of one turn count together");
+  session.addSpeech("p1", "Sam", "Back to the onboarding checklist drop-off.", later + 5_000);
+  assert.equal(session.state().suggestion, null, "talk back on the item in focus withdraws the nudge");
   assert.equal(mentionScore("eng-1 again", items[0]), 2);
 });
 

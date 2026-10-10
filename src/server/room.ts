@@ -133,6 +133,8 @@ export class RoomSession implements SpeechSink {
   private drift: { itemId: string; since: number; score: number } | null = null;
   private transcriber: Transcriber | null = null;
   private transcriptionDown = false;
+  /** The last notes run failed; people are told once, not on every retry. */
+  private notesFailing = false;
   /** The creator handed hosting to someone on purpose, so rejoining doesn't take it back. */
   private creatorHandedOver = false;
   private demoRunning = false;
@@ -856,6 +858,11 @@ export class RoomSession implements SpeechSink {
     }
     if (here && mentionScore(seg.text, here) >= (best?.score ?? 1)) {
       this.drift = null;
+      // The talk came back: a nudge to leave would now move on-topic remarks away.
+      if (this.suggestion?.source === "talk") {
+        this.suggestion = null;
+        this.broadcastState();
+      }
       return;
     }
     if (!best) return;
@@ -953,8 +960,13 @@ export class RoomSession implements SpeechSink {
         console.log(
           `[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
         );
+        this.notesFailing = false;
       } catch (err) {
         console.error("[agent] notes failed:", err);
+        if (!this.notesFailing) {
+          this.notesFailing = true;
+          this.broadcast({ type: "error", message: "The agent couldn't write notes just now. It tries again after the next pause, and everything said is kept." });
+        }
       } finally {
         if (this.noteRuns.get(itemId) === run) this.broadcast({ type: "notes.busy", itemId, busy: false });
       }

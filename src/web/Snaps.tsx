@@ -44,10 +44,15 @@ async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number,
   const blob = await new Promise<Blob>((ok, fail) =>
     canvas.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't read the image"))), "image/jpeg", 0.92),
   );
-  const res = await fetch(`/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}${pasted ? "&pasted=1" : ""}`, {
-    method: "POST",
-    body: blob,
-  });
+  // A blip in the connection shouldn't lose the frame: try a few times before giving up.
+  const url = `/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}${pasted ? "&pasted=1" : ""}`;
+  let res: Response | null = null;
+  for (const wait of [0, 1000, 3000, 6000]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    res = await fetch(url, { method: "POST", body: blob }).catch(() => null);
+    if (res && res.status < 502) break;
+  }
+  if (!res || res.status >= 502) throw new Error("Can't reach Stand, so the snap wasn't saved. Try again once you're back online.");
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Couldn't save the snap");
   return ((await res.json()) as { id: string }).id;
 }

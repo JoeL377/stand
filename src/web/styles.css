@@ -1515,3 +1515,7 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .person-action, .person-action .link { font-size: 12px; }
 .person-action .link, .person-action.link { padding: 3px 4px; }
 .signin-form input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3px rgb(229 72 77 / 0.15); }
+/* The row scrolled into view clears the sticky Agenda header. */
+.meeting .agenda { scroll-padding-top: 52px; }
+/* No hover on touch screens: Make host shows without it. */
+@media (hover: none) { .person-action { opacity: 1; } }

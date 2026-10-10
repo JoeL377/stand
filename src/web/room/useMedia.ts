@@ -109,9 +109,12 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   const mockMicStream = useRef<MediaStream | null>(null);
   // One permission prompt at a time: a second click while the first is open would open a second mic.
   const micBusy = useRef(false);
+  // Shown on the button while the browser asks for the mic, so a click there isn't a mystery.
+  const [micStarting, setMicStarting] = useState(false);
   const toggleMic = useCallback(async () => {
     if (micBusy.current) return;
     micBusy.current = true;
+    if (!micOn) setMicStarting(true);
     setMediaError(null);
     try {
       if (livekit) {
@@ -134,6 +137,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
       setMediaError(mediaMessage("mic", err));
     } finally {
       micBusy.current = false;
+      setMicStarting(false);
     }
   }, [livekit, micOn]);
 
@@ -185,6 +189,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
 
   return {
     micOn,
+    micStarting,
     toggleMic,
     localScreen,
     remoteScreen,
