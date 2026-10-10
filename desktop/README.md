@@ -9,6 +9,8 @@ The Stand app in its own window, plus **Snap from anywhere**: press **⌃⇧S** 
 
 Esc or ⌃⇧S again closes it. The toolbar remembers its mode and options in `snap.json` in the app's data folder.
 
+**The floating bar.** In a meeting, whenever Stand isn't the app in front (you're presenting a web page, say), a small bar floats at the top of the screen, over every app and Space: the Stand logo (click it to go back to Stand), what's in focus in the meeting, your mic, and **Snap**. Snap opens the same toolbar; the bar steps out of the picture while it reads the screen, and the snap goes on everyone's middle screen. The bar never takes focus from the app you're in. Drag it anywhere and it stays there (`bar.json` in the app's data folder). It asks macOS to keep it out of screen sharing and screenshots, which some macOS versions ignore.
+
 Guests still join in the browser. The app loads the live Stand site, so web changes show up without a new build.
 
 ## Build it (on a Mac)
@@ -53,7 +55,8 @@ Google sign-in on the local Stand needs `http://localhost:5173/api/auth/google/c
 
 ## How it fits together
 
-- `main.js`: the window, browser sign-in, and Snap.
+- `main.js`: the window, browser sign-in, Snap and the floating bar.
+- The floating bar (`bar.html`): the meeting page tells the app what's in focus and whether the mic is on (`standApp.meeting`), and the bar's mic button goes back to the page (`standApp.onCommand`).
 - Sign-in: the app opens `/api/auth/desktop` in your browser with a PKCE challenge and the port of a one-off listener on 127.0.0.1. After Google, the browser brings a one-time code back to that listener, and the app swaps it for its own session (`/api/auth/desktop/redeem`).
 - No title bar or window buttons: Stand runs edge to edge with its logo in the corner; ⌘W closes, ⌘M minimizes and ⌃⌘F goes full screen. `preload.js` marks the page `html.mac-app` and adds a strip along the top that drags the window.
 - Snap: a still of the display under the pointer, shown in `snap.html` with the toolbar. Windows and their positions come from CoreGraphics through `osascript` (no extra permission); a window snap is the window by itself from `desktopCapturer`. The snap is uploaded to `/api/rooms/<space>/snaps` like a snap taken in the page, and written to the clipboard. With the timer, the screen is captured again when it runs out.

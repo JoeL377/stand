@@ -22,7 +22,9 @@
       "main.js",
       "preload.js",
       "snap.html",
-      "snap-preload.js"
+      "snap-preload.js",
+      "bar.html",
+      "bar-preload.js"
     ],
     "mac": {
       "category": "public.app-category.productivity",

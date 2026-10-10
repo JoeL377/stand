@@ -7,7 +7,8 @@ import { useFrameSampler } from "./useFrameSampler.ts";
 import { AgendaPanel } from "./AgendaPanel.tsx";
 import { Stage } from "./Stage.tsx";
 import { SidePanel } from "./SidePanel.tsx";
-import { fmtDuration } from "../util.ts";
+import { fmtDuration, keyOf } from "../util.ts";
+import { macApp } from "../macApp.ts";
 import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
 
 export function Meeting(props: {
@@ -62,6 +63,15 @@ export function Meeting(props: {
     () => state?.items.find((i) => i.id === state.focusItemId) ?? null,
     [state?.items, state?.focusItemId],
   );
+
+  // Stand for Mac keeps a small bar on screen while Stand is in the background
+  // (presenting another app, say): what's in focus, the mic, and Snap.
+  const { micOn, toggleMic } = media;
+  useEffect(() => {
+    if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn });
+  }, [state?.roomName, focusItem, micOn]);
+  useEffect(() => () => macApp?.meeting?.(null), []);
+  useEffect(() => macApp?.onCommand?.((c) => c === "mic" && void toggleMic()), [toggleMic]);
 
   if (!state) {
     return <div className="loading">{room.connected ? "Joining…" : "Connecting…"}</div>;
