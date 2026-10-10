@@ -31,6 +31,16 @@ export function Meeting(props: {
     return () => clearInterval(t);
   }, []);
 
+  // End meeting went out but the server never took it up (the host seat moved, say): offer it again.
+  useEffect(() => {
+    if (!ending || state?.ending || !room.connected) return;
+    const t = setTimeout(() => setEnding(false), 15_000);
+    return () => clearTimeout(t);
+  }, [ending, state?.ending, room.connected]);
+  useEffect(() => {
+    if (room.error) setEnding(false);
+  }, [room.error]);
+
   useEffect(() => {
     if (room.endedMeetingId) {
       media.leave();
@@ -74,8 +84,10 @@ export function Meeting(props: {
   useEffect(() => macApp?.onCommand?.((c) => c === "mic" && void toggleMic()), [toggleMic]);
 
   if (!state) {
-    return <div className="loading">{room.connected ? "Joining…" : "Connecting…"}</div>;
+    return <div className="loading">{room.trouble ? <ConnectionPill room={room} /> : room.connected ? "Joining…" : "Connecting…"}</div>;
   }
+  // The server says so once it's on it; until then, our own click.
+  const writingUp = ending || Boolean(state.ending);
 
   const anyErr = room.error ?? media.mediaError;
 
@@ -88,7 +100,8 @@ export function Meeting(props: {
           <span className="timer">
             <span className="rec-dot" aria-hidden /> {fmtDuration(now - state.meetingStartedAt)}
           </span>
-          {!room.connected && <span className="badge warn">Reconnecting…</span>}
+          <ConnectionPill room={room} />
+          {state.ending && !canSteer && <span className="badge">Writing notes…</span>}
         </div>
         <div className="topbar-right">
           {!caps.livekit && <span className="badge" title="Add LiveKit keys so people can hear each other">Mock audio</span>}
@@ -116,7 +129,15 @@ export function Meeting(props: {
       )}
 
       <div className="meeting-grid">
-        <AgendaPanel roomId={roomId} state={state} send={send} canSteer={canSteer} notes={room.notes} segments={room.segments} />
+        <AgendaPanel
+          roomId={roomId}
+          state={state}
+          send={send}
+          canSteer={canSteer}
+          offline={!room.connected}
+          notes={room.notes}
+          segments={room.segments}
+        />
         <Stage
           state={state}
           me={me}
@@ -184,17 +205,48 @@ export function Meeting(props: {
         {canSteer && (
         <button
           className="control pill danger"
-          disabled={ending}
+          disabled={writingUp || !room.connected}
+          title={room.connected ? undefined : "You can end the meeting once Stand reconnects"}
           onClick={() => {
             if (!confirm("End the meeting for everyone and write up the notes?")) return;
-            setEnding(true);
-            send({ type: "meeting.end" });
+            if (send({ type: "meeting.end" })) setEnding(true);
           }}
         >
-          {ending ? "Writing notes…" : "End meeting"}
+          {writingUp ? "Writing notes…" : "End meeting"}
         </button>
         )}
       </footer>
     </div>
+  );
+}
+
+/** Only while something's wrong with the connection: what's happening to your changes, or what to do. */
+function ConnectionPill(props: { room: Pick<ReturnType<typeof useRoomSocket>, "connected" | "waiting" | "refused" | "trouble"> }) {
+  const { connected, waiting, refused, trouble } = props.room;
+  if (trouble === "signed-out") {
+    return (
+      // Reloading shows the sign-in page, which brings you back here.
+      <a className="conn-pill" href={location.pathname}>
+        Signed out · Sign in again
+      </a>
+    );
+  }
+  if (trouble === "gone") return <span className="conn-pill">This space no longer exists</span>;
+  if (connected) return null;
+  const text = refused
+    ? "Reconnecting · that didn't go through"
+    : waiting > 0
+      ? `Reconnecting · ${waiting} change${waiting === 1 ? "" : "s"} waiting`
+      : trouble === "unreachable"
+        ? "Can't reach Stand · retrying"
+        : "Reconnecting…";
+  return (
+    <span
+      className="conn-pill"
+      role="status"
+      title="Edits, to-do checks and speech are kept and sent when Stand is back. Switching items and ending the meeting wait for the connection."
+    >
+      {text}
+    </span>
   );
 }

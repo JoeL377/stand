@@ -15,7 +15,7 @@ import type {
   Suggestion,
 } from "../shared/protocol.ts";
 import { capabilities } from "./config.ts";
-import type { DB } from "./db.ts";
+import type { DB, OpenMeeting } from "./db.ts";
 import type { Agent, RecapInput, SnapMedia } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
@@ -47,6 +47,11 @@ const SPEECH_MAX_ENTRY_MS = 60_000;
 const SPEECH_MAX_ENTRY_CHARS = 700;
 /** How long an empty room waits before the meeting is closed. */
 const EMPTY_ROOM_GRACE_MS = 120_000;
+/** A host whose connection drops keeps the seat this long, so a blip or a
+ *  server restart doesn't hand the meeting to someone else. */
+const HOST_AWAY_GRACE_MS = 30_000;
+/** How many message ids (cids) the room remembers, to ignore ones sent again after a reconnect. */
+const HANDLED_CIDS = 2_000;
 
 interface Conn {
   participantId: string;
@@ -112,9 +117,14 @@ export class RoomSession implements SpeechSink {
   private seenUsed: number | null = null;
   private lastFrameRead = 0;
   private emptyTimer: NodeJS.Timeout | null = null;
+  private hostAwayTimer: NodeJS.Timeout | null = null;
+  /** Message ids already handled (see ClientMessage). */
+  private handled = new Set<string>();
   private transcriber: Transcriber | null = null;
   private demoRunning = false;
   ended = false;
+  /** When End meeting started the write-up. */
+  endingSince = 0;
 
   constructor(
     private db: DB,
@@ -123,15 +133,31 @@ export class RoomSession implements SpeechSink {
     private onClosed: (s: RoomSession) => void,
     private startTranscriber?: (s: RoomSession) => Transcriber | null,
     private polisher?: UpNextPolisher,
+    /** A meeting the server was running when it stopped: carry on with it instead of starting a new one. */
+    resume?: OpenMeeting | null,
   ) {
     this.roomId = room.id;
     this.roomName = room.name;
     this.createdBy = room.createdBy;
-    const m = db.startMeeting(room.id);
-    this.meetingId = m.id;
-    this.meetingStartedAt = m.startedAt;
-    const first = db.listItems(room.id)[0];
-    this.setFocusInternal(first?.id ?? null, "system", "start");
+    const items = db.listItems(room.id);
+    if (resume) {
+      this.meetingId = resume.id;
+      this.meetingStartedAt = resume.startedAt;
+      // Back on the item it was on, with the same host once they reconnect.
+      this.focusLog = db.focusHistory(resume.id);
+      const last = this.focusLog.at(-1);
+      if (last && (last.itemId === null || items.some((i) => i.id === last.itemId))) this.focusItemId = last.itemId;
+      else this.setFocusInternal(items[0]?.id ?? null, "system", "start");
+      this.hostId = resume.hostId;
+      if (this.hostId) this.hostLeft();
+      // Nobody is here yet; it ends as usual if nobody comes back.
+      this.emptyTimer = setTimeout(() => void this.end(), EMPTY_ROOM_GRACE_MS);
+    } else {
+      const m = db.startMeeting(room.id);
+      this.meetingId = m.id;
+      this.meetingStartedAt = m.startedAt;
+      this.setFocusInternal(items[0]?.id ?? null, "system", "start");
+    }
     // Tidy the suggested agenda now, before anyone has started talking.
     polisher?.schedule(room.id, 0);
   }
@@ -166,14 +192,33 @@ export class RoomSession implements SpeechSink {
       const p = this.participants.get(conn.participantId);
       if (p && --p.conns <= 0) {
         this.participants.delete(conn.participantId);
-        // The host left: hand over to whoever has been here longest.
-        if (this.hostId === conn.participantId) this.hostId = this.participants.keys().next().value ?? null;
+        if (this.hostId === conn.participantId) this.hostLeft();
       }
       this.broadcastState();
     }
     if (this.participants.size === 0 && !this.emptyTimer && !this.ended) {
       this.emptyTimer = setTimeout(() => void this.end(), EMPTY_ROOM_GRACE_MS);
     }
+  }
+
+  private setHost(id: string | null) {
+    if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
+    this.hostAwayTimer = null;
+    if (id === this.hostId) return;
+    this.hostId = id;
+    this.db.setMeetingHost(this.meetingId, id);
+  }
+
+  /** The host's connection dropped: keep the seat for them a while, then
+   *  hand it to whoever has been here longest. */
+  private hostLeft() {
+    if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
+    this.hostAwayTimer = setTimeout(() => {
+      this.hostAwayTimer = null;
+      if (this.ended || (this.hostId && this.participants.has(this.hostId))) return;
+      this.setHost(this.participants.keys().next().value ?? null);
+      this.broadcastState();
+    }, HOST_AWAY_GRACE_MS);
   }
 
   private send(ws: WebSocket, msg: ServerMessage) {
@@ -216,6 +261,7 @@ export class RoomSession implements SpeechSink {
       updates: this.db.roomUpdates(this.roomId, this.db.previousMeetingStart(this.roomId, this.meetingStartedAt) ?? 0),
       ...this.upNext(),
       capabilities: capabilities(),
+      ending: this.ended,
     };
   }
 
@@ -369,9 +415,16 @@ export class RoomSession implements SpeechSink {
   // ---- message handling ----------------------------------------------------
 
   private async handle(ws: WebSocket, msg: ClientMessage) {
+    if (msg.type === "ping") return this.send(ws, { type: "pong" });
     if (msg.type === "hello") {
       const user = this.pendingUser.get(ws);
       if (!user || this.conns.get(ws)) return;
+      // The meeting this client was in ended while it was away: show it the recap, not a new meeting.
+      if (msg.meetingId && msg.meetingId !== this.meetingId && this.db.getMeeting(msg.meetingId)?.endedAt) {
+        this.send(ws, { type: "meeting.ended", meetingId: msg.meetingId });
+        ws.close();
+        return;
+      }
       const { id, name } = user;
       this.conns.set(ws, { participantId: id, name });
       const existing = this.participants.get(id);
@@ -382,12 +435,14 @@ export class RoomSession implements SpeechSink {
         this.participants.set(id, { id, name, picture: user.picture, isHost: false, isSharing: false, conns: 1 });
       }
       const isNew = !existing;
-      if (!this.hostId || !this.participants.has(this.hostId) || (isNew && id === this.createdBy)) this.hostId = id;
+      // The host coming back keeps the seat; nobody takes it while it's held for them.
+      const seatFree = !this.hostId || (!this.participants.has(this.hostId) && !this.hostAwayTimer);
+      if (id === this.hostId || seatFree || (isNew && id === this.createdBy)) this.setHost(id);
       if (this.emptyTimer) {
         clearTimeout(this.emptyTimer);
         this.emptyTimer = null;
       }
-      if (!this.transcriber && this.startTranscriber) this.transcriber = this.startTranscriber(this);
+      if (!this.transcriber && this.startTranscriber && !this.ended) this.transcriber = this.startTranscriber(this);
       this.send(ws, {
         type: "welcome",
         participantId: id,
@@ -402,6 +457,13 @@ export class RoomSession implements SpeechSink {
     const conn = this.conns.get(ws);
     if (!conn) return;
     const me = this.participants.get(conn.participantId);
+    if (msg.cid) {
+      this.send(ws, { type: "ack", cid: msg.cid });
+      // Sent again after a reconnect, but it got here the first time.
+      if (this.handled.has(msg.cid)) return;
+      this.handled.add(msg.cid);
+      if (this.handled.size > HANDLED_CIDS) this.handled.delete(this.handled.values().next().value!);
+    }
 
     const isHost = this.isHost(conn.participantId);
 
@@ -436,7 +498,7 @@ export class RoomSession implements SpeechSink {
       case "host.give": {
         const hostHere = this.hostId && this.participants.has(this.hostId);
         if ((isHost || !hostHere) && this.participants.has(msg.participantId)) {
-          this.hostId = msg.participantId;
+          this.setHost(msg.participantId);
           this.suggestion = null;
           this.broadcastState();
         }
@@ -554,6 +616,7 @@ export class RoomSession implements SpeechSink {
         break;
       case "meeting.end":
         if (isHost) await this.end();
+        else this.send(ws, { type: "error", message: "Only the host can end the meeting." });
         break;
     }
   }
@@ -852,25 +915,35 @@ export class RoomSession implements SpeechSink {
 
   // ---- end ----------------------------------------------------------------
 
-  async end() {
+  /** `endedAt`: when it really ended, for a meeting the server lost track of
+   *  and is only now writing up. */
+  async end(endedAt?: number) {
     if (this.ended) return;
     this.ended = true;
+    this.endingSince = Date.now();
     if (this.emptyTimer) clearTimeout(this.emptyTimer);
+    if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
     for (const t of this.noteTimers.values()) clearTimeout(t);
     this.noteTimers.clear();
+    // Everyone sees "Writing notes…"; a restart before it's done finishes the recap instead of resuming.
+    this.db.meetingEnding(this.meetingId);
+    this.broadcastState();
     await this.transcriber?.stop().catch(() => {});
 
-    const segments = this.db.meetingSegments(this.meetingId);
-    const itemIds = [...new Set(segments.map((s) => s.itemId))];
-    const perItem: Array<{ item: Item | null; notes: Note[] }> = [];
-    for (const id of itemIds) {
-      perItem.push({ item: id ? this.db.getItem(id) : null, notes: await this.refreshNotes(id) });
-    }
-    // The recap (with the snaps in view), and the Synthesis when the space has instructions for one, side by side.
-    const room = this.db.getRoom(this.roomId);
-    const instructions = room?.synthesisInstructions.trim() ?? "";
-    const synthesizing = instructions
-      ? this.agent
+    let summary = "";
+    let synthesizing: Promise<string | null> = Promise.resolve(null);
+    try {
+      const segments = this.db.meetingSegments(this.meetingId);
+      const itemIds = [...new Set(segments.map((s) => s.itemId))];
+      const perItem: Array<{ item: Item | null; notes: Note[] }> = [];
+      for (const id of itemIds) {
+        perItem.push({ item: id ? this.db.getItem(id) : null, notes: await this.refreshNotes(id) });
+      }
+      // The recap (with the snaps in view), and the Synthesis when the space has instructions for one, side by side.
+      const room = this.db.getRoom(this.roomId);
+      const instructions = room?.synthesisInstructions.trim() ?? "";
+      if (instructions) {
+        synthesizing = this.agent
           .synthesizeMeeting({
             spaceName: room!.name,
             instructions,
@@ -879,32 +952,32 @@ export class RoomSession implements SpeechSink {
           .catch((err) => {
             console.error("[agent] synthesis failed:", err);
             return null;
-          })
-      : Promise.resolve(null);
-    let summary = "";
-    try {
-      const recap = await this.agent.recapMeeting(this.recapInput(perItem));
-      summary = recap.summary;
-      const kept = new Map(this.db.meetingSnaps(this.meetingId).map((p) => [p.id, p]));
-      for (const place of recap.snaps) {
-        const row = kept.get(place.id);
-        if (!row) continue;
-        // The agent's own snaps were kept for a note; that stands unless the recap names another.
-        this.db.placeSnap(place.id, { ...place, noteId: place.noteId ?? (row.source === "agent" ? row.noteId : null) });
+          });
+      }
+      try {
+        const recap = await this.agent.recapMeeting(this.recapInput(perItem));
+        summary = recap.summary;
+        const kept = new Map(this.db.meetingSnaps(this.meetingId).map((p) => [p.id, p]));
+        for (const place of recap.snaps) {
+          const row = kept.get(place.id);
+          if (!row) continue;
+          // The agent's own snaps were kept for a note; that stands unless the recap names another.
+          this.db.placeSnap(place.id, { ...place, noteId: place.noteId ?? (row.source === "agent" ? row.noteId : null) });
+        }
+      } catch (err) {
+        console.error("[agent] recap failed:", err);
+        summary = await this.agent.summarizeMeeting(perItem);
       }
     } catch (err) {
-      console.error("[agent] recap failed:", err);
-      try {
-        summary = await this.agent.summarizeMeeting(perItem);
-      } catch (err2) {
-        console.error("[agent] summary failed:", err2);
-      }
+      console.error("[agent] summary failed:", err);
+    } finally {
+      // Whatever the agent managed, the meeting ends and the room is free again.
+      this.db.endMeeting(this.meetingId, summary || null, await synthesizing, endedAt);
+      this.polisher?.schedule(this.roomId, 0);
+      this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
+      for (const ws of this.conns.keys()) ws.close();
+      this.onClosed(this);
     }
-    this.db.endMeeting(this.meetingId, summary || null, await synthesizing);
-    this.polisher?.schedule(this.roomId, 0);
-    this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
-    for (const ws of this.conns.keys()) ws.close();
-    this.onClosed(this);
   }
 
   /** Everything the recap looks at: each item's notes and topics, and the snaps

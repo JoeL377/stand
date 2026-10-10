@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Discussion, DiscussionOutcome, Note, Segment, Snap } from "../shared/protocol.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
@@ -358,6 +358,9 @@ function EditButton(props: { onClick: () => void }) {
   );
 }
 
+/** How long a checked-off to-do stays in the list before it folds away. */
+const FOLD_DONE_AFTER_MS = 5_000;
+
 export function LiveItemNotes(props: {
   notes: Note[];
   discussions: Discussion[];
@@ -378,8 +381,22 @@ export function LiveItemNotes(props: {
     const t = setTimeout(() => setFlash([]), 2200);
     return () => clearTimeout(t);
   }, [flash]);
-  const todo = notes.filter((n) => n.kind === "action" && !n.doneAt);
-  const done = notes.filter((n) => n.kind === "action" && n.doneAt);
+  // A to-do just checked off (here or by someone else) stays in place, struck
+  // through, for a few seconds: uncheck it to undo. Then it folds into "n done".
+  const [lingering, setLingering] = useState<string[]>([]);
+  const wasDone = useRef(new Map<string, boolean>());
+  useLayoutEffect(() => {
+    const newly = notes.filter((n) => n.kind === "action" && n.doneAt && wasDone.current.get(n.id) === false).map((n) => n.id);
+    wasDone.current = new Map(notes.map((n) => [n.id, Boolean(n.doneAt)]));
+    if (newly.length) setLingering((l) => [...l, ...newly.filter((id) => !l.includes(id))]);
+  }, [notes]);
+  useEffect(() => {
+    if (!lingering.length) return;
+    const t = setTimeout(() => setLingering([]), FOLD_DONE_AFTER_MS);
+    return () => clearTimeout(t);
+  }, [lingering]);
+  const todo = notes.filter((n) => n.kind === "action" && (!n.doneAt || lingering.includes(n.id)));
+  const done = notes.filter((n) => n.kind === "action" && n.doneAt && !lingering.includes(n.id));
   const decided = notes.filter((n) => n.kind === "decision");
   const open = notes.filter((n) => n.kind === "question");
   const summary = notes.filter((n) => n.kind === "summary");

@@ -26,6 +26,18 @@ import type { Polish, UpNextInput } from "./upNext.ts";
 
 export type DB = ReturnType<typeof openDb>;
 
+export interface OpenMeeting {
+  id: string;
+  roomId: string;
+  startedAt: number;
+  /** Who was hosting when it last ran. */
+  hostId: string | null;
+  endRequestedAt: number | null;
+  segmentCount: number;
+  /** When anything last happened in it: speech, a focus change or a note. */
+  activeAt: number;
+}
+
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -370,6 +382,8 @@ export function openDb(file?: string) {
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
+  if (!meetingCols.includes("host_id")) db.exec("ALTER TABLE meetings ADD COLUMN host_id TEXT;");
+  if (!meetingCols.includes("end_requested_at")) db.exec("ALTER TABLE meetings ADD COLUMN end_requested_at INTEGER;");
   const snapCols = (db.prepare("PRAGMA table_info(snaps)").all() as Row[]).map((c) => c.name);
   if (!snapCols.includes("discussion_id")) db.exec("ALTER TABLE snaps ADD COLUMN discussion_id TEXT;");
   if (!deckCols.includes("kind"))
@@ -694,8 +708,47 @@ export function openDb(file?: string) {
       db.prepare("INSERT INTO meetings (id, room_id, started_at) VALUES (?, ?, ?)").run(id, roomId, startedAt);
       return { id, startedAt };
     },
-    endMeeting(id: string, summary: string | null, synthesis: string | null = null) {
-      db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ? WHERE id = ?").run(Date.now(), summary, synthesis, id);
+    endMeeting(id: string, summary: string | null, synthesis: string | null = null, at = Date.now()) {
+      db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ? WHERE id = ?").run(at, summary, synthesis, id);
+    },
+    /** Someone pressed End meeting; the recap is being written. A restart before it's done finishes the job instead of resuming. */
+    meetingEnding(id: string) {
+      db.prepare("UPDATE meetings SET end_requested_at = COALESCE(end_requested_at, ?) WHERE id = ?").run(Date.now(), id);
+    },
+    setMeetingHost(id: string, hostId: string | null) {
+      db.prepare("UPDATE meetings SET host_id = ? WHERE id = ?").run(hostId, id);
+    },
+    /** Meetings that were never ended (the server stopped while they ran), with
+     *  when anything last happened in them. Newest first. */
+    openMeetings(roomId?: string): OpenMeeting[] {
+      return (
+        db
+          .prepare(
+            `SELECT m.id, m.room_id, m.started_at, m.host_id, m.end_requested_at,
+               (SELECT COUNT(*) FROM segments s WHERE s.meeting_id = m.id) AS n,
+               MAX(m.started_at,
+                 COALESCE((SELECT MAX(ts) FROM segments s WHERE s.meeting_id = m.id), 0),
+                 COALESCE((SELECT MAX(ts) FROM focus_events f WHERE f.meeting_id = m.id), 0),
+                 COALESCE((SELECT MAX(ts) FROM notes n WHERE n.meeting_id = m.id), 0)) AS active_at
+             FROM meetings m WHERE m.ended_at IS NULL AND (? IS NULL OR m.room_id = ?) ORDER BY m.started_at DESC`,
+          )
+          .all(roomId ?? null, roomId ?? null) as Row[]
+      ).map((r) => ({
+        id: r.id as string,
+        roomId: r.room_id as string,
+        startedAt: r.started_at as number,
+        hostId: (r.host_id as string) ?? null,
+        endRequestedAt: (r.end_requested_at as number) ?? null,
+        segmentCount: r.n as number,
+        activeAt: r.active_at as number,
+      }));
+    },
+    /** Where the meeting's focus went, in order, for picking up after a restart. */
+    focusHistory(meetingId: string): Array<{ ts: number; itemId: string | null }> {
+      return (db.prepare("SELECT item_id, ts FROM focus_events WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map((r) => ({
+        ts: r.ts as number,
+        itemId: (r.item_id as string) ?? null,
+      }));
     },
     getMeeting(id: string) {
       const r = db.prepare("SELECT * FROM meetings WHERE id = ?").get(id) as Row | undefined;

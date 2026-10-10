@@ -433,6 +433,23 @@ img.avatar { object-fit: cover; }
 /* ---- host ---- */
 .host-note { margin-left: auto; white-space: nowrap; }
 .item-main:disabled { opacity: 1; cursor: default; }
+/* The host's connection dropped: items can't be switched until it's back. */
+.agenda.offline .item-main { opacity: 0.55; cursor: progress; }
+/* Only shown while the connection is in trouble. */
+.conn-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgb(194 65 12 / 0.12);
+  color: var(--warn-text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+}
+a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 .person-action { font-size: 11px; }
 .focus-desc { max-height: 40vh; overflow-y: auto; text-align: left; }
 .nudge {

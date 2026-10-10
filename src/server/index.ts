@@ -2,7 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
-import { WebSocketServer } from "ws";
+import { type WebSocket, WebSocketServer } from "ws";
 import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
 import { MAX_SYNTHESIS_INSTRUCTIONS } from "../shared/protocol.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
@@ -10,7 +10,7 @@ import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } fr
 import { handleMcp } from "./mcp.ts";
 import { oauthRoutes } from "./oauth.ts";
 import { capabilities, config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { type OpenMeeting, openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "./brief.ts";
 import {
   MAX_DECK_BYTES,
@@ -47,11 +47,25 @@ const polisher = new UpNextPolisher(
   (roomId) => live(roomId)?.upNextChanged(),
 );
 
+/** A meeting left running when the server stopped is picked up again if
+ *  anything happened in it this recently; an older one gets its recap instead. */
+const RESUME_WINDOW_MS = 30 * 60_000;
+const recent = (m: OpenMeeting) => Date.now() - m.activeAt < RESUME_WINDOW_MS;
+/** People who arrive while a meeting is being written up wait for it, unless the write-up is stuck. */
+const WAIT_FOR_RECAP_MS = 3 * 60_000;
+
 function session(roomId: string): RoomSession | null {
   const existing = sessions.get(roomId);
-  if (existing && !existing.ended) return existing;
+  if (existing && (!existing.ended || Date.now() - existing.endingSince < WAIT_FOR_RECAP_MS)) return existing;
   const room = db.getRoom(roomId);
   if (!room) return null;
+  // The server may have stopped mid-meeting (every deploy does): carry on with it.
+  let resume: OpenMeeting | null = null;
+  for (const m of db.openMeetings(roomId)) {
+    if (m.id === existing?.meetingId) continue; // still being written up
+    if (!resume && !finishing.has(m.id) && recent(m)) resume = m;
+    else finishOpenMeeting(m);
+  }
   const s = new RoomSession(
     db,
     agent,
@@ -61,10 +75,40 @@ function session(roomId: string): RoomSession | null {
     },
     capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r) : undefined,
     polisher,
+    resume,
   );
   sessions.set(roomId, s);
+  if (resume) console.log(`[room] ${roomId}: picked up meeting ${resume.id} after a restart`);
+  // It was being written up when the server stopped: finish that, with everyone watching.
+  if (resume?.endRequestedAt) void s.end();
   return s;
 }
+
+/** Meetings being written up after the fact, one at a time. */
+const finishing = new Set<string>();
+let finishQueue = Promise.resolve();
+function finishOpenMeeting(m: OpenMeeting) {
+  if (finishing.has(m.id)) return;
+  finishing.add(m.id);
+  const room = db.getRoom(m.roomId);
+  // Nothing was said: nothing to write up.
+  if (!room || !m.segmentCount) return db.endMeeting(m.id, null, null, m.activeAt);
+  finishQueue = finishQueue
+    .then(() => new RoomSession(db, agent, room, () => {}, undefined, polisher, m).end(m.activeAt))
+    .then(() => console.log(`[room] ${m.roomId}: wrote up meeting ${m.id}, left open by an earlier run`))
+    .catch((err) => console.error("[room] writing up an open meeting failed:", err));
+}
+
+/** On start: meetings the last run left open come back if they're recent (and
+ *  end as usual if nobody returns); older ones get the recap they missed. */
+function recoverMeetings() {
+  const open = db.openMeetings();
+  for (const roomId of new Set(open.map((m) => m.roomId))) {
+    if (open.some((m) => m.roomId === roomId && recent(m))) session(roomId);
+    else for (const m of open.filter((x) => x.roomId === roomId)) finishOpenMeeting(m);
+  }
+}
+recoverMeetings();
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -799,8 +843,26 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
   db.touchMembership(s.roomId, user.id);
-  wss.handleUpgrade(req, socket, head, (ws) => s.attach(ws, user));
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    answering.add(ws);
+    ws.on("pong", () => answering.add(ws));
+    s.attach(ws, user);
+  });
 });
+
+// A connection that stops answering pings (a laptop lid shut, Wi-Fi gone) is
+// dropped, so its person leaves the room and the host seat can pass on.
+const answering = new WeakSet<WebSocket>();
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!answering.has(ws)) {
+      ws.terminate();
+      continue;
+    }
+    answering.delete(ws);
+    ws.ping();
+  }
+}, 30_000).unref();
 
 server.listen(config.port, () => {
   const c = capabilities();
