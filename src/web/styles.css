@@ -1352,12 +1352,9 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .snap-thumb-mark { position: absolute; top: 4px; right: 6px; color: #fff; font-size: 12px; text-shadow: 0 1px 3px rgb(0 0 0 / 0.6); }
 .snaps-pill { display: inline-flex; align-items: center; gap: 5px; }
 
-/* ---- Stand for Mac: no title bar, so the window buttons sit in the top-left corner and the top edge drags the window ---- */
+/* ---- Stand for Mac: no title bar or window buttons, so the top edge drags the window ---- */
 html.mac-app :is(button, a, input, textarea, select, label, summary, [role="button"], [contenteditable="true"]) { -webkit-app-region: no-drag; }
 html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
-html.mac-app :is(.topbar, .editor-top) { padding-left: 84px; }
-html.mac-app .lobby-bar { padding: 16px 24px 12px 84px; }
-html.mac-app .sp-side-brand { margin: -3px 0 0 64px; }
 
 /* ---- visual pass 2026-10-10 ---- */
 /* Note rows: Edit and Copy for agent float over the row's end on hover, so the text gets the card's full width. */

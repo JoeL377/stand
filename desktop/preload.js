@@ -1,5 +1,5 @@
-// Stand runs edge to edge under the Mac's window buttons: Stand's own CSS makes
-// room for them (html.mac-app), and a strip along the top drags the window.
+// Stand runs edge to edge with no title bar or window buttons: the page is marked
+// html.mac-app for Stand's CSS, and a strip along the top drags the window.
 // The strip goes first in the page so buttons and links in it stay clickable.
 window.addEventListener("DOMContentLoaded", () => {
   document.documentElement.classList.add("mac-app");

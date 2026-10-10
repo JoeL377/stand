@@ -44,5 +44,5 @@ Google sign-in on the local Stand needs `http://localhost:5173/api/auth/google/c
 
 - `main.js`: the window, browser sign-in, and Snap.
 - Sign-in: the app opens `/api/auth/desktop` in your browser with a PKCE challenge and the port of a one-off listener on 127.0.0.1. After Google, the browser brings a one-time code back to that listener, and the app swaps it for its own session (`/api/auth/desktop/redeem`).
-- No title bar: Stand runs edge to edge with the window buttons in its top-left corner. `preload.js` marks the page `html.mac-app`, and Stand's CSS makes room for the buttons.
+- No title bar or window buttons: Stand runs edge to edge with its logo in the corner; ⌘W closes, ⌘M minimizes and ⌃⌘F goes full screen. `preload.js` marks the page `html.mac-app` and adds a strip along the top that drags the window.
 - Snap: a screen capture of the display under the pointer, frozen in `snap.html` for picking a region, then uploaded to `/api/rooms/<space>/snaps` like a snap taken in the page.

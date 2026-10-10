@@ -13,9 +13,10 @@ const STAND_ORIGIN = new URL(STAND_URL).origin;
 const SNAP_SHORTCUT = process.env.STAND_SNAP_SHORTCUT || "Control+Shift+S";
 const PARTITION = "persist:stand";
 const mac = process.platform === "darwin";
-/** No title bar on the Mac: Stand runs edge to edge, with the window buttons in its top-left corner. */
+/** No title bar and no window buttons on the Mac: Stand runs edge to edge, the logo
+ *  sits in the corner, and ⌘W, ⌘M and ⌃⌘F close, minimize and go full screen. */
 /** @type {Electron.BrowserWindowConstructorOptions} */
-const chrome = mac ? { titleBarStyle: "hidden", trafficLightPosition: { x: 16, y: 21 } } : {};
+const chrome = mac ? { titleBarStyle: "hidden" } : {};
 
 let win = null;
 /** The browser sign-in in flight, if any. */
@@ -281,6 +282,8 @@ function notify(title, body) {
 }
 
 // ---- start ----------------------------------------------------------------------
+
+if (mac) app.on("browser-window-created", (_e, w) => w.setWindowButtonVisibility(false));
 
 app.on("web-contents-created", (_e, wc) => {
   if (wc.session === session.fromPartition(PARTITION)) keepOnStand(wc);
