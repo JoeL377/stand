@@ -12,6 +12,7 @@ import { DeckEditorPage } from "./pages/DeckEditorPage.tsx";
 import { ConnectAgentPage } from "./pages/ConnectAgentPage.tsx";
 import { RefPage } from "./pages/RefPage.tsx";
 import { AuthGate } from "./auth.tsx";
+import { Toasts } from "./Toasts.tsx";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -30,6 +31,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/decks/:deckId/edit" element={<DeckEditorPage />} />
         </Routes>
       </AuthGate>
+      <Toasts />
     </BrowserRouter>
   </StrictMode>,
 );

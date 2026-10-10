@@ -15,6 +15,8 @@ import {
   TicketIcon,
 } from "../icons.tsx";
 import { uploadDeck } from "../slides.tsx";
+import { errorToast, toast } from "../Toasts.tsx";
+import { useDismiss } from "../useDismiss.ts";
 
 export function AgendaPanel(props: {
   roomId: string;
@@ -41,6 +43,43 @@ export function AgendaPanel(props: {
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const [dropping, setDropping] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+
+  // Whoever moves the meeting (the host, a suggestion, a slide flip), the item in focus stays in view.
+  useEffect(() => {
+    listRef.current?.querySelector(".item.active")?.scrollIntoView({ block: "nearest" });
+  }, [state.focusItemId]);
+
+  // The host can walk the agenda from the keyboard: Alt+↓ / Alt+↑.
+  const order = [...state.items.map((i) => i.id), null];
+  const orderRef = useRef({ order, focus: state.focusItemId });
+  orderRef.current = { order, focus: state.focusItemId };
+  useEffect(() => {
+    if (!canSteer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.metaKey || e.ctrlKey || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+      const { order, focus } = orderRef.current;
+      const next = order[order.indexOf(focus) + (e.key === "ArrowDown" ? 1 : -1)];
+      if (next === undefined) return;
+      e.preventDefault();
+      send({ type: "focus", itemId: next });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canSteer, send]);
+
+  /** Removing is one click, so it's also one click to take back. */
+  const remove = (ids: string[], what: string, run: () => Promise<unknown>) =>
+    run().then(
+      () =>
+        toast({
+          text: `Removed ${what}`,
+          action: { label: "Undo", run: () => void api.restoreItems(roomId, ids).catch(errorToast("Couldn't put it back")) },
+        }),
+      errorToast("Couldn't remove it"),
+    );
+  const short = (t: string) => `“${t.length > 40 ? `${t.slice(0, 38)}…` : t}”`;
+
   useEffect(() => {
     if (!pop) return;
     const close = (e: MouseEvent) => {
@@ -96,7 +135,7 @@ export function AgendaPanel(props: {
                   it.externalId,
                   n > 0 && `${n} remark${n === 1 ? "" : "s"}`,
                   a > 0 && `${a} to-do${a === 1 ? "" : "s"}`,
-                  (state.carried?.[it.id] ?? 0) > 0 && `↻${state.carried[it.id]}`,
+                  (state.carried?.[it.id] ?? 0) > 0 && `carried ${state.carried[it.id]}×`,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -129,7 +168,7 @@ export function AgendaPanel(props: {
             <HistoryIcon />
           </a>
           {canSteer && (
-            <button className="icon" title="Remove from agenda" onClick={() => void api.removeItem(roomId, it.id)}>
+            <button className="icon" title="Remove from agenda" onClick={() => void remove([it.id], short(it.title), () => api.removeItem(roomId, it.id))}>
               <CloseIcon />
             </button>
           )}
@@ -220,7 +259,14 @@ export function AgendaPanel(props: {
                     <span>Notes for every slide ↗</span>
                   </a>
                   {canSteer && (
-                    <button role="menuitem" className="danger-text" onClick={() => (setPop(null), void api.removeDeck(roomId, b.deck.id))}>
+                    <button
+                      role="menuitem"
+                      className="danger-text"
+                      onClick={() => {
+                        setPop(null);
+                        void remove(b.items.map((i) => i.id), short(b.deck.title), () => api.removeDeck(roomId, b.deck.id));
+                      }}
+                    >
                       <span>Remove from agenda</span>
                     </button>
                   )}
@@ -236,6 +282,7 @@ export function AgendaPanel(props: {
 
   return (
     <aside
+      ref={listRef}
       className={`panel agenda${dropping ? " dropping" : ""}${canSteer && offline ? " offline" : ""}`}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes("Files")) return;
@@ -287,6 +334,8 @@ export function AgendaPanel(props: {
         />
       </div>
 
+      {/* The add form opens right under + Add, so a long agenda doesn't hide it. */}
+      {add && <AddForm mode={add} roomId={roomId} llm={llm} onClose={() => setAdd(null)} />}
       {state.pinnedBy && (
         <div className="pinned-note">
           <PinIcon size={13} /> Pinned by {state.pinnedBy}. The agent won't suggest other items.{" "}
@@ -308,7 +357,7 @@ export function AgendaPanel(props: {
         </div>
       )}
 
-      {state.upNext && <Suggested upNext={state.upNext} canSteer={canSteer} send={send} startOpen={empty} />}
+      {state.upNext && <Suggested upNext={state.upNext} canSteer={canSteer} send={send} emptyAgenda={empty} />}
 
       {empty && !add ? (
         <div className="agenda-empty">
@@ -336,7 +385,6 @@ export function AgendaPanel(props: {
         </ol>
       )}
 
-      {add && <AddForm mode={add} roomId={roomId} llm={llm} onClose={() => setAdd(null)} />}
       {dropping && <div className="drop-hint">Drop a PDF to add it as slides</div>}
     </aside>
   );
@@ -354,11 +402,16 @@ function agoText(ts: number) {
   return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
 
-function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientMessage) => void; startOpen: boolean }) {
+function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientMessage) => void; emptyAgenda: boolean }) {
   const { upNext, canSteer, send } = props;
-  const [open, setOpen] = useState(props.startOpen);
+  // Open while the agenda is empty (it's the place to start); once there's an agenda it folds to one line.
+  const [open, setOpen] = useState(props.emptyAgenda);
+  useEffect(() => {
+    if (!props.emptyAgenda) setOpen(false);
+  }, [props.emptyAgenda]);
   const [showParked, setShowParked] = useState(false);
   const [menu, setMenu] = useState(false);
+  const menuRef = useDismiss<HTMLSpanElement>(menu, () => setMenu(false));
   const { suggestions, parked } = upNext;
   if (!suggestions.length && !parked.length && !upNext.total) return null;
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -377,10 +430,24 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
       </span>
       {canSteer && (
         <span className="item-tools upnext-tools">
-          <button className="icon" title="Add to the agenda" onClick={() => send({ type: "upnext.add", key: s.key })}>
+          <button
+            className="icon"
+            title="Add to the agenda"
+            onClick={() => {
+              send({ type: "upnext.add", key: s.key });
+              toast({ text: `Added ${s.title.length > 40 ? `${s.title.slice(0, 38)}…` : s.title} to the agenda` });
+            }}
+          >
             <CheckIcon />
           </button>
-          <button className="icon" title="Dismiss" onClick={() => send({ type: "upnext.dismiss", key: s.key })}>
+          <button
+            className="icon"
+            title="Dismiss"
+            onClick={() => {
+              send({ type: "upnext.dismiss", key: s.key });
+              toast({ text: "Suggestion dismissed", action: { label: "Undo", run: () => send({ type: "upnext.undismiss", key: s.key }) } });
+            }}
+          >
             <CloseIcon />
           </button>
         </span>
@@ -396,8 +463,8 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
           </span>
           <span>{suggestions.length ? `Suggested · ${suggestions.length}` : "Suggested"}</span>
           {upNext.total > 0 && (
-            <span className="upnext-progress" title="To-dos from earlier meetings closed since the last one">
-              {upNext.closed}/{upNext.total} closed
+            <span className="upnext-progress" title="To-dos from earlier meetings that are done now">
+              {upNext.closed} of {upNext.total} to-dos done
             </span>
           )}
           <span className={open ? "chev open" : "chev"} aria-hidden>
@@ -405,12 +472,12 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
           </span>
         </button>
         {canSteer && suggestions.length > 1 && (
-          <span className="pop-wrap">
+          <span className="pop-wrap" ref={menuRef}>
             <button className="icon upnext-more" title="More" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
               <MoreIcon />
             </button>
             {menu && (
-              <div className="add-menu row-menu upnext-menu" role="menu" onMouseLeave={() => setMenu(false)}>
+              <div className="add-menu row-menu upnext-menu" role="menu">
                 <button
                   role="menuitem"
                   onClick={() => {

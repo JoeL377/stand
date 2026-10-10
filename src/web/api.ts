@@ -1,12 +1,28 @@
 import type { DraftSlide } from "../shared/outline.ts";
 import type { AgentToken, Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, SpaceSummary, UpNext, User } from "../shared/protocol.ts";
 
+/** Thrown when the server can't be reached at all, as opposed to saying no. */
+export class OfflineError extends Error {
+  constructor() {
+    super("Can't reach Stand. Check your connection and try again.");
+  }
+}
+
+/** Long enough for a slow network, short enough that a dead one doesn't look like a hang. */
+const REQUEST_TIMEOUT_MS = 20_000;
+
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new OfflineError();
+  }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && !url.startsWith("/api/auth/")) {
     // Session expired: send them through sign-in and back here.
@@ -50,6 +66,7 @@ export const api = {
   renameItem: (roomId: string, itemId: string, title: string) =>
     call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { title }),
   removeItem: (roomId: string, itemId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/items/${itemId}`),
+  restoreItems: (roomId: string, ids: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items/restore`, { ids }),
   reorder: (roomId: string, ids: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items/reorder`, { ids }),
   removeDeck: (roomId: string, deckId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/decks/${deckId}`),
   newDeck: (roomId: string, title: string, brief: string, parentItemId: string | null = null) =>

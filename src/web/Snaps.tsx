@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Segment, Snap } from "../shared/protocol.ts";
 import { CameraIcon, CloseIcon, CropIcon, TrashIcon } from "./icons.tsx";
 import { fmtTime } from "./util.ts";
+import { errorToast } from "./Toasts.tsx";
 
 /** Grabs the frame a video is showing, at the size it's shared, and uploads it. */
 export async function takeSnap(video: HTMLVideoElement, roomId: string): Promise<string> {
@@ -51,7 +52,10 @@ async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number,
   return ((await res.json()) as { id: string }).id;
 }
 
-export const deleteSnap = (id: string) => fetch(`/api/snaps/${id}`, { method: "DELETE" });
+export const deleteSnap = async (id: string) => {
+  const r = await fetch(`/api/snaps/${id}`, { method: "DELETE" }).catch(() => null);
+  if (!r?.ok) throw new Error(r ? "You can't delete this snap" : "Can't reach Stand. Check your connection and try again.");
+};
 
 /** Who may crop or delete a snap: whoever took it, whoever's screen it is, and the host. */
 export const canChangeSnap = (s: Snap, me: string, isHost: boolean) => isHost || s.takenById === me || s.sharerId === me;
@@ -134,7 +138,7 @@ export function SnapGallery(props: {
                     <button className="icon-btn" title="Crop" onClick={() => setCropping(true)}>
                       <CropIcon size={17} />
                     </button>
-                    <button className="icon-btn" title="Delete" onClick={() => void deleteSnap(snap.id)}>
+                    <button className="icon-btn" title="Delete" onClick={() => deleteSnap(snap.id).catch(errorToast("Couldn't delete the snap"))}>
                       <TrashIcon size={17} />
                     </button>
                   </>

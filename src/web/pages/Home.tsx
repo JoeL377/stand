@@ -25,7 +25,14 @@ export function Home() {
   const [filter, setFilter] = useState<Filter>("all");
 
   useEffect(() => {
-    const load = () => api.spaces().then(setSpaces, (e: Error) => setError(e.message));
+    const load = () =>
+      api.spaces().then(
+        (s) => {
+          setSpaces(s);
+          setError(null);
+        },
+        (e: Error) => setError(e.message),
+      );
     load();
     // Keep "Talking now" current while the page is open.
     const t = setInterval(load, 20_000);

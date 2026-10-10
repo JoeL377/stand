@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Item, Participant, RoomState, Snap } from "../../shared/protocol.ts";
+import type { ClientMessage, Item, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -12,6 +12,8 @@ type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "de
 
 /** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
 const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
+/** The same, written out where there's room: ⇧ alone reads as an arrow. */
+const SNAP_KEYS_WORDS = /Mac/.test(navigator.platform) ? "Control + Shift + S" : "Ctrl + Shift + S";
 
 export function Stage(props: {
   state: RoomState;
@@ -24,12 +26,17 @@ export function Stage(props: {
   remoteScreen: RemoteScreen | null;
   speaking: Set<string>;
   interims: Record<string, Interim>;
+  segments: Segment[];
   livekit: boolean;
 }) {
   const { state, focusItem, canSteer, send, localScreen, remoteScreen, speaking, interims } = props;
   const suggested = state.suggestion ? state.items.find((i) => i.id === state.suggestion!.itemId) : null;
   const sharer = state.participants.find((p) => p.isSharing);
   const host = state.participants.find((p) => p.isHost);
+  // Accepting a nudge moves what was said since it started from this item to the suggested one.
+  const moving = state.suggestion
+    ? props.segments.filter((s) => s.itemId === state.focusItemId && s.ts >= state.suggestion!.since).length
+    : 0;
 
   // Slides of the deck in focus, in order, so the host can flip with arrows.
   const deckSlides = focusItem?.deckId ? state.items.filter((i) => i.deckId === focusItem.deckId) : [];
@@ -100,12 +107,15 @@ export function Stage(props: {
   const snapRef = useRef(snap);
   snapRef.current = snap;
   useEffect(() => {
-    if (!showingScreen) return;
+    // The Mac app catches the shortcut itself, from any app.
+    if (!showingScreen && macApp) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (!e.ctrlKey || !e.shiftKey || e.metaKey || e.altKey || e.code !== "KeyS" || e.repeat || t.closest("[role=dialog]")) return;
       e.preventDefault();
-      void snapRef.current();
+      // Pressing it with nothing on screen says how to get something to snap, rather than doing nothing.
+      if (showingScreen) void snapRef.current();
+      else toast({ text: `Snap works once someone shares a screen. You can also paste or drop an image here.` });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -195,13 +205,15 @@ export function Stage(props: {
     <main className="stage">
       <div className="now">
         <span className="now-label">Now discussing</span>
-        <span className="now-title">
+        <span className="now-title" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}
         </span>
         {state.pinnedBy && <span className="badge">📌 Pinned</span>}
-        {host && (
+        {host ? (
           <span className="host-note muted small">{canSteer ? "You're the host" : `${host.name} is hosting`}</span>
+        ) : (
+          state.hostAway && <span className="host-note muted small">{state.hostAway} is reconnecting…</span>
         )}
       </div>
 
@@ -212,14 +224,18 @@ export function Stage(props: {
             ✦
           </span>
           <span className="nudge-text">
-            Your screen shows{" "}
+            {state.suggestion.source === "talk" ? "Sounds like " : "Your screen shows "}
             <strong>
               {keyOf(suggested) ? `${keyOf(suggested)} · ` : ""}
               {suggested.title}
             </strong>
           </span>
-          <button className="link" onClick={() => send({ type: "suggestion.accept" })}>
-            Switch to it
+          <button
+            className="link"
+            onClick={() => send({ type: "suggestion.accept" })}
+            title={moving ? `Opens it for everyone and files what was said since then under it` : undefined}
+          >
+            {moving ? `Switch and move ${moving} remark${moving === 1 ? "" : "s"}` : "Switch to it"}
           </button>
           <button className="link muted" onClick={() => send({ type: "suggestion.dismiss" })} aria-label="Dismiss">
             ✕
@@ -260,7 +276,7 @@ export function Stage(props: {
                   <button
                     className="link"
                     onClick={() => {
-                      void deleteSnap(t.snapId!);
+                      deleteSnap(t.snapId!).catch((err) => toast({ text: `Couldn't delete the snap. ${(err as Error).message}` }));
                       setToasts((ts) => ts.filter((x) => x.key !== t.key));
                     }}
                   >
@@ -278,7 +294,7 @@ export function Stage(props: {
         {/* While a screen is shared, the share keeps the middle and the snap waits in the corner. */}
         {onStage && showingScreen && <StageSnap {...onStage} small />}
         {localScreen ? (
-          <Video stream={localScreen} label="You're sharing your screen" />
+          <Video stream={localScreen} label={`You're sharing your screen · ${SNAP_KEYS_WORDS} snaps it`} />
         ) : remoteScreen ? (
           <RemoteVideo screen={remoteScreen} label={`${state.participants.find((p) => p.id === remoteScreen.participantId)?.name ?? "Someone"}'s screen`} />
         ) : onStage ? (
@@ -368,11 +384,20 @@ function Person(props: {
   onMakeHost?: () => void;
 }) {
   const { id, name, picture, talking, tag, sharing, onMakeHost } = props;
+  // Handing over hosting takes a second click, so a stray one doesn't give the meeting away.
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => {
+    if (!confirm) return;
+    const t = setTimeout(() => setConfirm(false), 5000);
+    return () => clearTimeout(t);
+  }, [confirm]);
   return (
     <div className={talking ? "person talking" : "person"}>
       <Avatar id={id} name={name} picture={picture} />
       <div className="person-label">
-        <span className="person-name">{name}</span>
+        <span className="person-name" title={name}>
+          {name}
+        </span>
         {(tag || sharing) && (
           <span className="person-tag">
             {tag}
@@ -384,11 +409,21 @@ function Person(props: {
           </span>
         )}
       </div>
-      {onMakeHost && (
-        <button className="link person-action" onClick={onMakeHost} title={`Let ${name} drive the meeting`}>
-          Make host
-        </button>
-      )}
+      {onMakeHost &&
+        (confirm ? (
+          <span className="person-action confirm">
+            <button className="link" onClick={onMakeHost} title={`${name.split(" ")[0]} will choose the item everyone talks about`}>
+              Hand over
+            </button>
+            <button className="link muted" onClick={() => setConfirm(false)} aria-label="Cancel">
+              ✕
+            </button>
+          </span>
+        ) : (
+          <button className="link person-action" onClick={() => setConfirm(true)} title={`Let ${name} drive the meeting`}>
+            Make host
+          </button>
+        ))}
     </div>
   );
 }

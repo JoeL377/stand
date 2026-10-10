@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Capabilities, User } from "../../shared/protocol.ts";
 import { useRoomSocket } from "./useRoomSocket.ts";
 import { useMedia } from "./useMedia.ts";
@@ -10,6 +10,8 @@ import { SidePanel } from "./SidePanel.tsx";
 import { fmtDuration, keyOf } from "../util.ts";
 import { macApp } from "../macApp.ts";
 import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
+import { toast } from "../Toasts.tsx";
+import { useDismiss } from "../useDismiss.ts";
 
 export function Meeting(props: {
   roomId: string;
@@ -77,6 +79,47 @@ export function Meeting(props: {
   // Stand for Mac keeps a small bar on screen while Stand is in the background
   // (presenting another app, say): what's in focus, the mic, and Snap.
   const { micOn, toggleMic } = media;
+
+  // Problems with the connection, the mic or the screen show up as a message that goes away, not a row.
+  useEffect(() => {
+    if (!room.error) return;
+    toast({ tone: "error", text: room.error });
+    room.setError(null);
+  }, [room.error]);
+  useEffect(() => {
+    if (media.mediaError) toast({ tone: "error", text: media.mediaError });
+  }, [media.mediaError]);
+
+  // Everyone hears about it when the host changes, not just the two people involved.
+  const lastHost = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const id = host?.id ?? null;
+    if (lastHost.current !== undefined && id && id !== lastHost.current) {
+      toast({ text: id === participantId ? "You're the host now: you choose the item everyone talks about." : `${host!.name} is hosting now` });
+    }
+    if (id) lastHost.current = id;
+  }, [host?.id]);
+
+  const [copied, setCopied] = useState(false);
+  const copyInvite = () => {
+    navigator.clipboard?.writeText(`${location.origin}/r/${roomId}`).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      },
+      () => toast({ tone: "error", text: `Couldn't copy. The link is ${location.origin}/r/${roomId}` }),
+    );
+  };
+  const [showKeys, setShowKeys] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.key !== "?" || t.closest("input, textarea, select, [contenteditable]")) return;
+      setShowKeys((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   useEffect(() => {
     if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn });
   }, [state?.roomName, focusItem, micOn]);
@@ -89,7 +132,12 @@ export function Meeting(props: {
   // The server says so once it's on it; until then, our own click.
   const writingUp = ending || Boolean(state.ending);
 
-  const anyErr = room.error ?? media.mediaError;
+  const offParts = [
+    !caps.livekit && "people can't hear each other yet (add LiveKit keys)",
+    caps.transcription === "browser" &&
+      (browserSpeechSupported() ? "each browser transcribes its own mic" : "this browser can't transcribe; use Chrome, Edge or Safari"),
+    !caps.llm && "notes come from simple rules, not Claude (add an Anthropic key)",
+  ].filter(Boolean) as string[];
 
   return (
     <div className="meeting">
@@ -102,26 +150,24 @@ export function Meeting(props: {
           </span>
           <ConnectionPill room={room} />
           {state.ending && !canSteer && <span className="badge">Writing notes…</span>}
+          {!media.micOn && (
+            <button className="badge muted-pill" onClick={() => void media.toggleMic()} title="Nothing you say is recorded while you're muted. Click to unmute.">
+              <MicOffIcon /> Muted
+            </button>
+          )}
         </div>
         <div className="topbar-right">
-          {!caps.livekit && <span className="badge" title="Add LiveKit keys so people can hear each other">Mock audio</span>}
-          {caps.transcription === "browser" && (
-            <span className="badge" title="Each browser transcribes its own mic">
-              Browser transcription{!browserSpeechSupported() && " (unsupported here)"}
-            </span>
-          )}
-          {!caps.llm && <span className="badge" title="Add an Anthropic key for AI notes and screen reading">Heuristic notes</span>}
-          <button className="ghost invite" onClick={() => void navigator.clipboard?.writeText(`${location.origin}/r/${roomId}`)}>
-            <LinkIcon /> Copy invite link
+          {offParts.length > 0 && <DemoMode parts={offParts} />}
+          <button className="ghost icon-btn keys-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={() => setShowKeys((v) => !v)}>
+            ?
+          </button>
+          <button className="ghost invite" onClick={copyInvite}>
+            <LinkIcon /> {copied ? "Copied ✓" : "Copy invite link"}
           </button>
         </div>
       </header>
 
-      {anyErr && (
-        <div className="banner error" onClick={() => room.setError(null)}>
-          {anyErr}
-        </div>
-      )}
+      {showKeys && <Shortcuts canSteer={canSteer} onClose={() => setShowKeys(false)} />}
       {media.needsAudioUnlock && (
         <div className="banner">
           Your browser blocked audio. <button onClick={() => void media.unlockAudio()}>Turn on sound</button>
@@ -149,6 +195,7 @@ export function Meeting(props: {
           remoteScreen={media.remoteScreen}
           speaking={media.speaking}
           interims={room.interims}
+          segments={room.segments}
           livekit={caps.livekit}
         />
         <SidePanel
@@ -248,5 +295,67 @@ function ConnectionPill(props: { room: Pick<ReturnType<typeof useRoomSocket>, "c
     >
       {text}
     </span>
+  );
+}
+
+/** One pill for what isn't connected yet, with the details a click away. */
+function DemoMode({ parts }: { parts: string[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
+  return (
+    <span className="pop-wrap demo-mode" ref={ref}>
+      <button className="badge" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        Demo mode
+      </button>
+      {open && (
+        <div className="add-menu demo-mode-pop" role="dialog">
+          <strong>Demo mode</strong>
+          <ul>
+            {parts.map((p) => (
+              <li key={p}>{p[0].toUpperCase() + p.slice(1)}.</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </span>
+  );
+}
+
+// Key names written out: ⇧ alone reads as an arrow.
+const MOD = /Mac/.test(navigator.platform) ? { ctrl: "Control", alt: "Option" } : { ctrl: "Ctrl", alt: "Alt" };
+
+function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => void }) {
+  const ref = useDismiss<HTMLDivElement>(true, onClose);
+  const rows: Array<[string, string]> = [
+    ...(canSteer
+      ? ([
+          [`${MOD.alt} + ↓  /  ↑`, "Next / previous agenda item"],
+          ["←  /  →", "Flip slides while a deck is open"],
+        ] as Array<[string, string]>)
+      : []),
+    [`${MOD.ctrl} + Shift + S`, "Snap the shared screen into the meeting"],
+    ["Paste or drop an image", "Add a screenshot to the item in focus"],
+    ["Esc", "Close a menu or form"],
+    ["?", "Show or hide these shortcuts"],
+  ];
+  return (
+    <div className="shortcuts" role="dialog" aria-label="Keyboard shortcuts" ref={ref}>
+      <div className="shortcuts-head">
+        <strong>Keyboard shortcuts</strong>
+        <button className="toast-x" aria-label="Close" onClick={onClose}>
+          ✕
+        </button>
+      </div>
+      <dl>
+        {rows.map(([k, v]) => (
+          <div key={k}>
+            <dt>
+              <kbd>{k}</kbd>
+            </dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Capabilities, User } from "../shared/protocol.ts";
-import { api } from "./api.ts";
+import { OfflineError, api } from "./api.ts";
 import { Avatar } from "./room/Stage.tsx";
 import { Logo } from "./icons.tsx";
 
@@ -17,12 +17,23 @@ export const useAuth = () => useContext(Ctx)!;
 export function AuthGate({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [caps, setCaps] = useState<Capabilities | null>(null);
+  // Can't reach the server: say so, rather than loading forever or asking a signed-in person to sign in again.
+  const [offline, setOffline] = useState(false);
 
-  useEffect(() => {
-    api.config().then(setCaps).catch(() => {});
-    api.me().then(setUser).catch(() => setUser(null));
-  }, []);
+  const load = () => {
+    setOffline(false);
+    api.config().then(setCaps, () => setOffline(true));
+    api.me().then(setUser, (e) => (e instanceof OfflineError ? setOffline(true) : setUser(null)));
+  };
+  useEffect(load, []);
 
+  if (offline)
+    return (
+      <div className="loading offline">
+        <p>Can't reach Stand. Check your connection.</p>
+        <button onClick={load}>Try again</button>
+      </div>
+    );
   if (user === undefined || !caps) return <div className="loading">Loading…</div>;
   if (!user) return <SignIn caps={caps} onSignedIn={setUser} />;
 
@@ -63,8 +74,11 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
         ) : (
           <form
             className="signin-form"
+            noValidate
             onSubmit={async (e) => {
               e.preventDefault();
+              if (!name.trim()) return setError("Enter your name, so people know who's talking.");
+              if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Enter your work email, like ann@acme.com.");
               setBusy(true);
               setError(null);
               try {
@@ -82,8 +96,8 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
             </p>
             <input autoFocus placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
             <input placeholder="Work email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <button className="primary" disabled={busy || !name.trim() || !email.trim()}>
-              Continue
+            <button className="primary" disabled={busy}>
+              {busy ? "Signing in…" : "Continue"}
             </button>
           </form>
         )}

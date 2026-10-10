@@ -611,6 +611,6 @@ export class HeuristicAgent implements Agent {
     const decisions = discussed.flatMap((p) => p.notes.filter((n) => n.kind === "decision")).length;
     const actions = discussed.flatMap((p) => p.notes.filter((n) => n.kind === "action")).length;
     if (!discussed.length) return "";
-    return `Covered ${discussed.length} item${discussed.length === 1 ? "" : "s"} with ${decisions} decision${decisions === 1 ? "" : "s"} and ${actions} action item${actions === 1 ? "" : "s"}.`;
+    return `Covered ${discussed.length} item${discussed.length === 1 ? "" : "s"} with ${decisions} decision${decisions === 1 ? "" : "s"} and ${actions} to-do${actions === 1 ? "" : "s"}.`;
   }
 }
