@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Segment, Snap } from "../shared/protocol.ts";
 import { CameraIcon, CloseIcon, CropIcon, TrashIcon } from "./icons.tsx";
 import { fmtTime } from "./util.ts";
+import { errorToast } from "./Toasts.tsx";
+import { request } from "./api.ts";
 
 /** Grabs the frame a video is showing, at the size it's shared, and uploads it. */
 export async function takeSnap(video: HTMLVideoElement, roomId: string): Promise<string> {
@@ -43,15 +45,24 @@ async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number,
   const blob = await new Promise<Blob>((ok, fail) =>
     canvas.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't read the image"))), "image/jpeg", 0.92),
   );
-  const res = await fetch(`/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}${pasted ? "&pasted=1" : ""}`, {
-    method: "POST",
-    body: blob,
-  });
+  // A blip in the connection shouldn't lose the frame: try a few times before giving up.
+  const url = `/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}${pasted ? "&pasted=1" : ""}`;
+  let res: Response | null = null;
+  for (const wait of [0, 1000, 3000, 6000]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    res = await fetch(url, { method: "POST", body: blob }).catch(() => null);
+    if (res && res.status < 502) break;
+  }
+  if (!res || res.status >= 502) throw new Error("Can't reach Stand, so the snap wasn't saved. Try again once you're back online.");
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Couldn't save the snap");
   return ((await res.json()) as { id: string }).id;
 }
 
-export const deleteSnap = (id: string) => fetch(`/api/snaps/${id}`, { method: "DELETE" });
+export const deleteSnap = async (id: string) => {
+  const r = await request(`/api/snaps/${id}`, { method: "DELETE" });
+  if (r.status === 403) throw new Error("Only whoever took it, whoever's screen it is, or the host can delete it.");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? "Try again in a moment.");
+};
 
 /** Who may crop or delete a snap: whoever took it, whoever's screen it is, and the host. */
 export const canChangeSnap = (s: Snap, me: string, isHost: boolean) => isHost || s.takenById === me || s.sharerId === me;
@@ -134,7 +145,7 @@ export function SnapGallery(props: {
                     <button className="icon-btn" title="Crop" onClick={() => setCropping(true)}>
                       <CropIcon size={17} />
                     </button>
-                    <button className="icon-btn" title="Delete" onClick={() => void deleteSnap(snap.id)}>
+                    <button className="icon-btn" title="Delete" onClick={() => deleteSnap(snap.id).catch(errorToast("Couldn't delete the snap"))}>
                       <TrashIcon size={17} />
                     </button>
                   </>
@@ -174,15 +185,24 @@ function CropView(props: { snap: Snap; onDone: () => void }) {
     const el = img.current;
     if (!el || !box || box.w < 0.02 || box.h < 0.02) return;
     setSaving(true);
-    const nw = el.naturalWidth;
-    const nh = el.naturalHeight;
-    const c = document.createElement("canvas");
-    c.width = Math.round(box.w * nw);
-    c.height = Math.round(box.h * nh);
-    c.getContext("2d")!.drawImage(el, box.x * nw, box.y * nh, c.width, c.height, 0, 0, c.width, c.height);
-    const blob = await new Promise<Blob | null>((ok) => c.toBlob(ok, "image/jpeg", 0.92));
-    if (blob) await fetch(`/api/snaps/${props.snap.id}/image?w=${c.width}&h=${c.height}`, { method: "PUT", body: blob });
-    props.onDone();
+    try {
+      const nw = el.naturalWidth;
+      const nh = el.naturalHeight;
+      const c = document.createElement("canvas");
+      c.width = Math.round(box.w * nw);
+      c.height = Math.round(box.h * nh);
+      c.getContext("2d")!.drawImage(el, box.x * nw, box.y * nh, c.width, c.height, 0, 0, c.width, c.height);
+      const blob = await new Promise<Blob | null>((ok) => c.toBlob(ok, "image/jpeg", 0.92));
+      if (blob) {
+        const r = await request(`/api/snaps/${props.snap.id}/image?w=${c.width}&h=${c.height}`, { method: "PUT", body: blob });
+        if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? "Try again in a moment.");
+      }
+      props.onDone();
+    } catch (err) {
+      // The box stays where it was, so Save can simply be clicked again.
+      errorToast("Couldn't save the crop")(err);
+      setSaving(false);
+    }
   };
   return (
     <>

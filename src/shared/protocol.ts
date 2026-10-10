@@ -225,8 +225,10 @@ export interface Suggestion {
   /** Why the agent thinks so, e.g. "ENG-142 is visible in the window title". */
   reason: string;
   confidence: number;
-  /** When the screen changed; confirming re-pins speech from this moment. */
+  /** When the screen changed (or the talk turned to the item); confirming re-pins speech from this moment. */
   since: number;
+  /** What the agent noticed: the shared screen, or the talk naming another item. */
+  source?: "screen" | "talk";
 }
 
 export interface Capabilities {
@@ -264,6 +266,10 @@ export interface RoomState {
   focusItemId: string | null;
   /** When pinned, the agent stops suggesting until someone unpins. */
   pinnedBy: string | null;
+  /** The host's name while their connection is down and they can still come back as host. */
+  hostAway?: string | null;
+  /** The server's transcriber stopped: talk isn't being recorded until someone rejoins. */
+  transcriptionDown?: boolean;
   suggestion: Suggestion | null;
   items: Item[];
   decks: Deck[];
@@ -297,6 +303,9 @@ export type ClientMessage = (
   | { type: "upnext.add"; key: string }
   | { type: "upnext.addAll" }
   | { type: "upnext.dismiss"; key: string }
+  /** Host: Undo for a dismissed suggestion or a deleted note, within a minute. */
+  | { type: "upnext.undismiss"; key: string }
+  | { type: "note.restore"; noteId: string }
   | { type: "suggestion.dismiss" }
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */
   | { type: "host.give"; participantId: string }

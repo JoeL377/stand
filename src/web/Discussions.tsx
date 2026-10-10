@@ -6,6 +6,7 @@ import { SnapsPill } from "./Snaps.tsx";
 import { NoteList } from "./room/SidePanel.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { colorFor, fmtDate, fmtTime, initials } from "./util.ts";
+import { useDismiss } from "./useDismiss.ts";
 
 /** An item's notes as the agent grouped them: the summary, then one block per
  *  discussion with who argued what and what came of it. Notes that belong to
@@ -368,12 +369,16 @@ export function LiveItemNotes(props: {
   onToggle?: (n: Note, done: boolean) => void;
   editing?: NoteEditing;
   snaps?: { list: Snap[]; me: string; isHost: boolean };
+  /** Notes that just arrived or changed, highlighted for a moment. */
+  fresh?: string[];
 }) {
   const { notes, discussions, segments, onToggle, editing } = props;
+  const isFresh = (n: Note) => (props.fresh?.includes(n.id) ? " fresh" : "");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState<EditableKind | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
+  const addMenuRef = useDismiss<HTMLSpanElement>(addMenu, () => setAddMenu(false));
   const [flash, setFlash] = useState<string[]>([]);
   useEffect(() => {
     if (!flash.length) return;
@@ -439,7 +444,7 @@ export function LiveItemNotes(props: {
 
   const action = (n: Note) =>
     editRow(n) ?? (
-      <li key={n.id} data-note-id={n.id} className={`tk action${n.doneAt ? " done" : ""}${flash.includes(n.id) ? " flash" : ""}`}>
+      <li key={n.id} data-note-id={n.id} className={`tk action${n.doneAt ? " done" : ""}${flash.includes(n.id) ? " flash" : ""}${isFresh(n)}`}>
         <input
           type="checkbox"
           checked={!!n.doneAt}
@@ -447,7 +452,7 @@ export function LiveItemNotes(props: {
           onChange={(e) => onToggle?.(n, e.target.checked)}
           aria-label={n.doneAt ? "Mark not done" : "Mark done"}
         />
-        <span className="tk-text">
+        <span className="tk-text" dir="auto">
           {n.text}
           {edited(n)}
         </span>
@@ -464,7 +469,7 @@ export function LiveItemNotes(props: {
           <h4 className="tk-card-head">
             To do
             {editing && !adding && (
-              <span className="add-menu-wrap">
+              <span className="add-menu-wrap" ref={addMenuRef}>
                 <button
                   className="note-add-btn"
                   title="Add a to-do, decision or question"
@@ -474,7 +479,7 @@ export function LiveItemNotes(props: {
                   +
                 </button>
                 {addMenu && (
-                  <div className="add-menu note-add-menu" role="menu" onMouseLeave={() => setAddMenu(false)}>
+                  <div className="add-menu note-add-menu" role="menu">
                     {(["action", "decision", "question"] as const).map((k) => (
                       <button
                         key={k}
@@ -511,9 +516,9 @@ export function LiveItemNotes(props: {
             {decided.map(
               (n) =>
                 editRow(n) ?? (
-                  <li key={n.id} className="tk decision">
+                  <li key={n.id} data-note-id={n.id} className={`tk decision${isFresh(n)}`}>
                     <span className="tk-icon">✓</span>
-                    <span className="tk-text">
+                    <span className="tk-text" dir="auto">
                       {n.text}
                       {edited(n)}
                     </span>
@@ -531,9 +536,9 @@ export function LiveItemNotes(props: {
             {open.map(
               (n) =>
                 editRow(n) ?? (
-                  <li key={n.id} className="tk question">
+                  <li key={n.id} data-note-id={n.id} className={`tk question${isFresh(n)}`}>
                     <span className="tk-icon">?</span>
-                    <span className="tk-text">
+                    <span className="tk-text" dir="auto">
                       {n.text}
                       {edited(n)}
                     </span>

@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Capabilities, User } from "../shared/protocol.ts";
-import { api } from "./api.ts";
+import { OfflineError, api } from "./api.ts";
 import { Avatar } from "./room/Stage.tsx";
 import { Logo } from "./icons.tsx";
 
@@ -17,12 +17,48 @@ export const useAuth = () => useContext(Ctx)!;
 export function AuthGate({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [caps, setCaps] = useState<Capabilities | null>(null);
+  // Can't reach the server: say so, rather than loading forever or asking a signed-in person to sign in again.
+  const [offline, setOffline] = useState(false);
 
+  // Only the latest attempt counts: a slow answer from an earlier one mustn't undo a later success.
+  const attempt = useRef(0);
+  // A retry keeps the offline page up until it gets an answer, rather than flashing "Loading…".
+  const load = () => {
+    const n = ++attempt.current;
+    const latest = () => n === attempt.current;
+    api.config().then(
+      (c) => latest() && (setCaps(c), setOffline(false)),
+      () => latest() && setOffline(true),
+    );
+    api.me().then(
+      (u) => latest() && setUser(u),
+      (e) => latest() && (e instanceof OfflineError ? setOffline(true) : setUser(null)),
+    );
+  };
+  useEffect(load, []);
+  // A click says it's trying, so a second click isn't needed to find out.
+  const [retrying, setRetrying] = useState(false);
+  const retry = () => {
+    setRetrying(true);
+    load();
+    setTimeout(() => setRetrying(false), 1_500);
+  };
+  // While it's unreachable, keep trying, so it comes back without a click.
   useEffect(() => {
-    api.config().then(setCaps).catch(() => {});
-    api.me().then(setUser).catch(() => setUser(null));
-  }, []);
+    if (!offline) return;
+    const t = setInterval(load, 5_000);
+    return () => clearInterval(t);
+  }, [offline]);
 
+  if (offline)
+    return (
+      <div className="loading offline">
+        <p>Can't reach Stand. Check your connection; this page keeps trying.</p>
+        <button onClick={retry} disabled={retrying}>
+          {retrying ? "Trying…" : "Try again"}
+        </button>
+      </div>
+    );
   if (user === undefined || !caps) return <div className="loading">Loading…</div>;
   if (!user) return <SignIn caps={caps} onSignedIn={setUser} />;
 
@@ -39,6 +75,8 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  // Which box the message is about, so it's marked and the cursor goes there.
+  const [bad, setBad] = useState<"name" | "email" | null>(null);
   const next = location.pathname + (params.has("signin_error") ? "" : location.search);
 
   return (
@@ -63,9 +101,19 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
         ) : (
           <form
             className="signin-form"
+            noValidate
             onSubmit={async (e) => {
               e.preventDefault();
+              const form = e.currentTarget;
+              const fail = (field: "name" | "email", msg: string) => {
+                setBad(field);
+                setError(msg);
+                form.querySelector<HTMLInputElement>(`[name=${field}]`)?.focus();
+              };
+              if (!name.trim()) return fail("name", "Enter your name, so people know who's talking.");
+              if (!/^\S+@\S+\.\S+$/.test(email.trim())) return fail("email", "Enter your work email, like ann@acme.com.");
               setBusy(true);
+              setBad(null);
               setError(null);
               try {
                 onSignedIn(await api.devSignIn(name, email));
@@ -80,14 +128,35 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
               <strong>Google sign-in isn't set up yet.</strong> Until it is, enter a name and email to try the app.
               Nothing is verified.
             </p>
-            <input autoFocus placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
-            <input placeholder="Work email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <button className="primary" disabled={busy || !name.trim() || !email.trim()}>
-              Continue
+            <input
+              autoFocus
+              name="name"
+              placeholder="Your name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={60}
+              aria-invalid={bad === "name"}
+              aria-describedby={bad === "name" ? "signin-error" : undefined}
+            />
+            <input
+              name="email"
+              placeholder="Work email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={bad === "email"}
+              aria-describedby={bad === "email" ? "signin-error" : undefined}
+            />
+            <button className="primary" disabled={busy}>
+              {busy ? "Signing in…" : "Continue"}
             </button>
           </form>
         )}
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error" id="signin-error" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   );

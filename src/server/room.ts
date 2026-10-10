@@ -52,6 +52,10 @@ const EMPTY_ROOM_GRACE_MS = 120_000;
 const HOST_AWAY_GRACE_MS = 30_000;
 /** How many message ids (cids) the room remembers, to ignore ones sent again after a reconnect. */
 const HANDLED_CIDS = 2_000;
+/** How long a deleted note or a dismissed suggestion can still be brought back with Undo. */
+const UNDO_KEEP_MS = 60_000;
+/** Talk that keeps naming another agenda item adds up to this before the host is nudged to switch. */
+const DRIFT_NUDGE_SCORE = 3;
 
 interface Conn {
   participantId: string;
@@ -120,7 +124,19 @@ export class RoomSession implements SpeechSink {
   private hostAwayTimer: NodeJS.Timeout | null = null;
   /** Message ids already handled (see ClientMessage). */
   private handled = new Set<string>();
+  /** Names of everyone who's been in this meeting, so "X is reconnecting" can name a host who dropped. */
+  private names = new Map<string, string>();
+  /** Deleted notes and dismissed suggestions, kept a minute for Undo. */
+  private removedNotes = new Map<string, Note>();
+  private dismissedKeys = new Map<string, string[]>();
+  /** Recent talk on the item in focus that names another item instead (see checkDrift). */
+  private drift: { itemId: string; since: number; score: number; remarks: Set<string>; unnamed: Set<string> } | null = null;
   private transcriber: Transcriber | null = null;
+  private transcriptionDown = false;
+  /** The last notes run failed; people are told once, not on every retry. */
+  private notesFailing = false;
+  /** The creator handed hosting to someone on purpose, so rejoining doesn't take it back. */
+  private creatorHandedOver = false;
   private demoRunning = false;
   ended = false;
   /** When End meeting started the write-up. */
@@ -178,7 +194,7 @@ export class RoomSession implements SpeechSink {
       }
       this.handle(ws, msg).catch((err) => {
         console.error("[room]", err);
-        this.send(ws, { type: "error", message: String(err?.message ?? err) });
+        this.send(ws, { type: "error", message: "Something went wrong with that. Try again." });
       });
     });
     ws.on("close", () => this.detach(ws));
@@ -252,6 +268,8 @@ export class RoomSession implements SpeechSink {
       participants: [...this.participants.values()].map(({ conns: _c, ...p }) => ({ ...p, isHost: p.id === this.hostId })),
       focusItemId: this.focusItemId,
       pinnedBy: this.pinnedBy,
+      transcriptionDown: this.transcriptionDown,
+      hostAway: this.hostAwayTimer && this.hostId && !this.participants.has(this.hostId) ? (this.names.get(this.hostId) ?? "The host") : null,
       suggestion: this.suggestion,
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
@@ -435,14 +453,18 @@ export class RoomSession implements SpeechSink {
         this.participants.set(id, { id, name, picture: user.picture, isHost: false, isSharing: false, conns: 1 });
       }
       const isNew = !existing;
+      this.names.set(id, name);
       // The host coming back keeps the seat; nobody takes it while it's held for them.
       const seatFree = !this.hostId || (!this.participants.has(this.hostId) && !this.hostAwayTimer);
-      if (id === this.hostId || seatFree || (isNew && id === this.createdBy)) this.setHost(id);
+      if (id === this.hostId || seatFree || (isNew && id === this.createdBy && !this.creatorHandedOver)) this.setHost(id);
       if (this.emptyTimer) {
         clearTimeout(this.emptyTimer);
         this.emptyTimer = null;
       }
-      if (!this.transcriber && this.startTranscriber && !this.ended) this.transcriber = this.startTranscriber(this);
+      if (!this.transcriber && this.startTranscriber && !this.ended) {
+        this.transcriptionDown = false;
+        this.transcriber = this.startTranscriber(this);
+      }
       this.send(ws, {
         type: "welcome",
         participantId: id,
@@ -498,6 +520,8 @@ export class RoomSession implements SpeechSink {
       case "host.give": {
         const hostHere = this.hostId && this.participants.has(this.hostId);
         if ((isHost || !hostHere) && this.participants.has(msg.participantId)) {
+          if (conn.participantId === this.createdBy && msg.participantId !== this.createdBy) this.creatorHandedOver = true;
+          if (msg.participantId === this.createdBy) this.creatorHandedOver = false;
           this.setHost(msg.participantId);
           this.suggestion = null;
           this.broadcastState();
@@ -574,8 +598,18 @@ export class RoomSession implements SpeechSink {
         const before = this.db.meetingNotes(this.meetingId).find((n) => n.id === msg.noteId);
         if (!before) return;
         this.db.removeNote(before.id);
+        this.keepForUndo(this.removedNotes, before.id, before);
         this.sendItemNotes(before.itemId);
         if (before.kind === "action") this.broadcastState();
+        break;
+      }
+      case "note.restore": {
+        const note = this.removedNotes.get(msg.noteId);
+        if (!isHost || !note || note.meetingId !== this.meetingId) return;
+        this.removedNotes.delete(note.id);
+        this.db.restoreNote(note);
+        this.sendItemNotes(note.itemId);
+        if (note.kind === "action") this.broadcastState();
         break;
       }
       case "note.add": {
@@ -608,6 +642,15 @@ export class RoomSession implements SpeechSink {
         const s = [...suggestions, ...parked].find((x) => x.key === msg.key);
         if (!s) return;
         for (const key of [s.key, ...s.merged]) this.db.dismissUpNext(this.roomId, key);
+        this.keepForUndo(this.dismissedKeys, s.key, [s.key, ...s.merged]);
+        this.broadcastState();
+        break;
+      }
+      case "upnext.undismiss": {
+        const keys = this.dismissedKeys.get(msg.key);
+        if (!isHost || !keys) return;
+        this.dismissedKeys.delete(msg.key);
+        for (const key of keys) this.db.undismissUpNext(this.roomId, key);
         this.broadcastState();
         break;
       }
@@ -647,12 +690,20 @@ export class RoomSession implements SpeechSink {
     return this.hostId === participantId;
   }
 
+  private keepForUndo<T>(store: Map<string, T>, key: string, value: T) {
+    store.set(key, value);
+    setTimeout(() => store.get(key) === value && store.delete(key), UNDO_KEEP_MS).unref?.();
+  }
+
   // ---- focus ---------------------------------------------------------------
 
   private setFocusInternal(itemId: string | null, actor: string, reason: string, at = Date.now()) {
     const prev = this.focusItemId;
     this.focusItemId = itemId;
-    if (prev !== itemId) this.stageSnapId = null;
+    if (prev !== itemId) {
+      this.stageSnapId = null;
+      this.drift = null;
+    }
     this.focusLog.push({ ts: at, itemId });
     this.focusLog.sort((a, b) => a.ts - b.ts);
     this.db.logFocus(this.meetingId, itemId, actor, reason);
@@ -725,7 +776,7 @@ export class RoomSession implements SpeechSink {
       const dismissedAt = this.dismissed.get(match.itemId);
       if (dismissedAt && Date.now() - dismissedAt < DISMISS_QUIET_MS) return;
       if (this.suggestion?.itemId === match.itemId) return;
-      this.suggestion = { itemId: match.itemId, reason: match.reason, confidence: match.confidence, since: frame.at };
+      this.suggestion = { itemId: match.itemId, reason: match.reason, confidence: match.confidence, since: frame.at, source: "screen" };
       this.broadcastState();
     } catch (err) {
       console.error("[agent] screen read failed:", err);
@@ -760,6 +811,8 @@ export class RoomSession implements SpeechSink {
         this.lastSpeech = { ...last, endedAt: Math.max(last.endedAt, endedAt), length: seg.text.length };
         this.broadcast({ type: "segment.updated", segment: seg });
         this.scheduleNotes(seg.itemId, NOTES_DEBOUNCE_MS);
+        // Only the words just added count, so a long turn isn't scored twice.
+        this.checkDrift({ ...seg, text: t });
         return;
       }
     }
@@ -771,7 +824,9 @@ export class RoomSession implements SpeechSink {
     console.error(`[agent] transcription unavailable in room ${this.roomId}: ${reason}`);
     // Let the next person who joins try again.
     this.transcriber = null;
-    this.broadcast({ type: "error", message: `Transcription isn't working right now (${reason}). Chat still works.` });
+    this.transcriptionDown = true;
+    this.broadcastState();
+    this.broadcast({ type: "error", message: "Stand stopped transcribing. Leave and rejoin to start it again; what was said before is saved." });
   }
 
   interim(speakerId: string, speakerName: string, text: string) {
@@ -784,7 +839,57 @@ export class RoomSession implements SpeechSink {
     if (kind === "chat") this.lastSpeech = null;
     this.broadcast({ type: "segment", segment });
     this.scheduleNotes(itemId, NOTES_DEBOUNCE_MS);
+    this.checkDrift(segment);
     return segment;
+  }
+
+  /** When the talk on the item in focus keeps naming a different agenda item, nudge the host
+   *  to switch, the way a screen showing another ticket does. Accepting moves those remarks too. */
+  private checkDrift(seg: Segment) {
+    if (this.pinnedBy || seg.itemId !== this.focusItemId || this.demoRunning) return;
+    if (this.suggestion && this.suggestion.source !== "talk") return;
+    const items = this.items();
+    const here = items.find((i) => i.id === this.focusItemId);
+    let best: { item: Item; score: number } | null = null;
+    for (const it of items) {
+      if (it.id === this.focusItemId) continue;
+      const score = mentionScore(seg.text, it);
+      if (score > (best?.score ?? 0)) best = { item: it, score };
+    }
+    if (here && mentionScore(seg.text, here) >= (best?.score ?? 1)) {
+      this.drift = null;
+      // The talk came back: a nudge to leave would now move on-topic remarks away.
+      if (this.suggestion?.source === "talk") {
+        this.suggestion = null;
+        this.broadcastState();
+      }
+      return;
+    }
+    if (!best) {
+      // Two remarks in a row that name neither item: the talk has likely settled back here, and
+      // accepting the nudge now would carry that on-topic talk away with it.
+      if (this.drift && this.suggestion?.source === "talk") {
+        this.drift.unnamed.add(seg.id);
+        if (this.drift.unnamed.size >= 2) {
+          this.drift = null;
+          this.suggestion = null;
+          this.broadcastState();
+        }
+      }
+      return;
+    }
+    // A long gap means the earlier mentions were a passing remark, not a change of subject.
+    if (this.drift?.itemId === best.item.id && seg.ts - this.drift.since < 5 * 60_000) this.drift.score += best.score;
+    else this.drift = { itemId: best.item.id, since: seg.ts, score: best.score, remarks: new Set(), unnamed: new Set() };
+    this.drift.remarks.add(seg.id);
+    this.drift.unnamed.clear();
+    // One remark, however pointed, is a passing mention; it takes the talk coming back to it.
+    if (this.drift.score < DRIFT_NUDGE_SCORE || this.drift.remarks.size < 2) return;
+    const quiet = this.dismissed.get(best.item.id);
+    if ((quiet && Date.now() - quiet < DISMISS_QUIET_MS) || this.suggestion?.itemId === best.item.id) return;
+    const label = best.item.externalId ?? best.item.title;
+    this.suggestion = { itemId: best.item.id, reason: `The talk keeps coming back to ${label}`, confidence: 0.7, since: this.drift.since, source: "talk" };
+    this.broadcastState();
   }
 
   // ---- notes --------------------------------------------------------------
@@ -871,8 +976,13 @@ export class RoomSession implements SpeechSink {
         console.log(
           `[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
         );
+        this.notesFailing = false;
       } catch (err) {
         console.error("[agent] notes failed:", err);
+        if (!this.notesFailing) {
+          this.notesFailing = true;
+          this.broadcast({ type: "error", message: "The agent couldn't write notes just now. It tries again after the next pause, and everything said is kept." });
+        }
       } finally {
         if (this.noteRuns.get(itemId) === run) this.broadcast({ type: "notes.busy", itemId, busy: false });
       }
@@ -1022,4 +1132,31 @@ export class RoomSession implements SpeechSink {
   segments(): Segment[] {
     return this.db.meetingSegments(this.meetingId);
   }
+}
+
+const DRIFT_STOPWORDS = new Set(
+  "about after again agenda being could every first issue issues other review meeting should their there these thing things those through update which while would".split(" "),
+);
+/** Scripts written without spaces between words: matched on pairs of characters instead. */
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const driftWords = (t: string) =>
+  t
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]+/gu, " ")
+    .split(/\s+/)
+    .flatMap((w) => {
+      if (!UNSPACED.test(w)) return [w.replace(/s$/, "")].filter((x) => [...x].length >= 5 && !DRIFT_STOPWORDS.has(x));
+      const cs = [...w];
+      return cs.slice(1).map((c, i) => cs[i] + c);
+    });
+
+/** How strongly a remark is about an agenda item: its ticket key counts 2, each distinctive title word 1. */
+export function mentionScore(text: string, item: Pick<Item, "title" | "externalId">): number {
+  let score = 0;
+  // Speech-to-text writes a key the way it's said: "demo 103" as well as "DEMO-103".
+  const key = item.externalId?.replace(/[^A-Za-z0-9-]/g, "").split("-").filter(Boolean).join("[-\\s]?");
+  if (key && new RegExp(`\\b${key}\\b`, "i").test(text)) score += 2;
+  const said = new Set(driftWords(text));
+  for (const w of new Set(driftWords(item.title))) if (said.has(w)) score++;
+  return score;
 }

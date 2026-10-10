@@ -8,7 +8,7 @@ import { looksLikePdf, parseDeck } from "./decks.ts";
 import { type CapturedNote, HeuristicAgent, type ItemNotesDraft } from "./llm.ts";
 import type { ClientMessage, Note, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
-import { RoomSession } from "./room.ts";
+import { RoomSession, mentionScore } from "./room.ts";
 import { outlineToSlides } from "../shared/outline.ts";
 
 function setup() {
@@ -68,6 +68,71 @@ test("accepting the agent's suggestion re-pins what was said since the screen ch
   assert.equal(segs[1].itemId, items[2].id);
   assert.equal(session.state().focusItemId, items[2].id);
   assert.equal(session.state().suggestion, null);
+});
+
+test("talk that keeps naming another item nudges the host, and switching moves that talk", () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const items = db.addItems(room.id, [
+    { source: "linear" as const, externalId: "ENG-1", title: "Onboarding checklist drops users", url: null, description: null },
+    { source: "linear" as const, externalId: "ENG-2", title: "Webhooks retry with exponential backoff", url: null, description: null },
+  ]);
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  const t = Date.now();
+  session.addSpeech("p1", "Sam", "Step three of the onboarding checklist is where people drop.", t - 9_000);
+  assert.equal(session.state().suggestion, null);
+  session.addSpeech("p2", "Alex", "Separate thing, ENG-2 is still failing.", t - 6_000);
+  assert.equal(session.state().suggestion, null, "one passing mention is not a change of subject");
+  session.addSpeech("p1", "Sam", "Did the webhooks retry change ship?", t - 3_000);
+  const s = session.state().suggestion;
+  assert.equal(s?.itemId, items[1].id);
+  assert.equal(s?.source, "talk");
+  session.demoAccept();
+  const segs = db.meetingSegments(session.meetingId);
+  assert.deepEqual(
+    segs.map((x) => x.itemId),
+    [items[0].id, items[1].id, items[1].id],
+  );
+  assert.equal(mentionScore("nothing relevant here", items[0]), 0);
+  // One speaker's turn arrives in fragments; the drift still adds up across them.
+  session.setFocus(items[0].id, "p1", "manual");
+  assert.equal(session.state().suggestion, null);
+  const later = Date.now() + 5;
+  session.addSpeech("p3", "Ann", "Quick one, the webhooks", later);
+  session.addSpeech("p3", "Ann", "retry needs a cap on the backoff.", later + 500);
+  assert.equal(db.meetingSegments(session.meetingId).length, 4, "the two fragments are one remark");
+  assert.equal(session.state().suggestion, null, "one remark, however pointed, is a passing mention");
+  session.addSpeech("p1", "Sam", "Agreed, and the backoff should double.", later + 1_500);
+  assert.equal(session.state().suggestion?.itemId, items[1].id, "a second remark makes it a change of subject");
+  session.addSpeech("p1", "Sam", "Back to the onboarding checklist drop-off.", later + 5_000);
+  assert.equal(session.state().suggestion, null, "talk back on the item in focus withdraws the nudge");
+  // Talk that comes back without naming the item in focus withdraws it too, after two remarks.
+  session.addSpeech("p3", "Ann", "One more on the webhooks retry backoff.", later + 8_000);
+  session.addSpeech("p1", "Sam", "Yes, the webhooks retry cap.", later + 11_000);
+  assert.equal(session.state().suggestion?.itemId, items[1].id);
+  session.addSpeech("p3", "Ann", "Right, so step three loses most people.", later + 14_000);
+  assert.equal(session.state().suggestion?.itemId, items[1].id, "one remark naming neither is not enough");
+  session.addSpeech("p1", "Sam", "We should shorten it to two steps.", later + 17_000);
+  assert.equal(session.state().suggestion, null, "two in a row means the talk settled back");
+  assert.equal(mentionScore("eng-1 again", items[0]), 2);
+  assert.equal(mentionScore("so eng 1 again", items[0]), 2, "a key said aloud");
+  assert.equal(mentionScore("Обновление платежей сломалось", { title: "Обновление платежей", externalId: null }), 2);
+  assert.equal(mentionScore("结账页面又出错了", { title: "结账页面", externalId: null }), 3);
+});
+
+test("a deleted note and removed agenda items come back with Undo", () => {
+  const { db, items, meetingId } = setup();
+  const note = db.addNote(meetingId, items[0].id, { kind: "decision", text: "Ship it", owner: null }, null);
+  db.removeNote(note.id);
+  assert.equal(db.meetingNotes(meetingId).length, 0);
+  assert.equal(db.dismissedNotes(meetingId, items[0].id).length, 1);
+  db.restoreNote(note);
+  assert.deepEqual(db.meetingNotes(meetingId).map((n) => n.id), [note.id]);
+  assert.equal(db.dismissedNotes(meetingId, items[0].id).length, 0);
+  db.archiveItem(items[1].id);
+  assert.deepEqual(db.listItems(items[0].roomId).map((i) => i.title), ["One", "Three"]);
+  db.unarchiveItems(items[0].roomId, [items[1].id]);
+  assert.deepEqual(db.listItems(items[0].roomId).map((i) => i.title), ["One", "Two", "Three"]);
 });
 
 test("items keep their history when re-imported", () => {

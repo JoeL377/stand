@@ -8,6 +8,10 @@ import { useEffect, useRef, useState } from "react";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import type { Deck, DeckTheme, Item, SlideContent, SlideLayout } from "../shared/protocol.ts";
+import { request } from "./api.ts";
+
+/** A big PDF over a slow link takes a while; that isn't the network being down. */
+const SLOW_UPLOAD_MS = 120_000;
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
 
@@ -83,11 +87,11 @@ export function SlideView({ deckId, page, width, className }: { deckId: string; 
 export async function uploadDeck(roomId: string, file: File, parentItemId: string | null = null) {
   if (file.size > 50 * 1024 * 1024) throw new Error("That file is over 50 MB.");
   const parent = parentItemId ? `&parent=${encodeURIComponent(parentItemId)}` : "";
-  const res = await fetch(`/api/rooms/${roomId}/decks?name=${encodeURIComponent(file.name)}${parent}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/pdf" },
-    body: file,
-  });
+  const res = await request(
+    `/api/rooms/${roomId}/decks?name=${encodeURIComponent(file.name)}${parent}`,
+    { method: "POST", headers: { "Content-Type": "application/pdf" }, body: file },
+    SLOW_UPLOAD_MS,
+  );
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `Upload failed (${res.status})`);
   return data;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Deck, DeckDraft, SlideLayout } from "../../shared/protocol.ts";
-import { api } from "../api.ts";
+import { api, request } from "../api.ts";
 import { LAYOUTS, NativeSlide, THEMES } from "../slides.tsx";
 
 type EditSlide = DeckDraft["slides"][number];
@@ -222,7 +222,7 @@ function ImagePicker({ deckId, image, onChange }: { deckId: string; image: strin
     setError(null);
     try {
       if (file.size > 10 * 1024 * 1024) throw new Error("That image is over 10 MB.");
-      const res = await fetch(`/api/decks/${deckId}/images`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      const res = await request(`/api/decks/${deckId}/images`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file }, 120_000);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
       onChange(data.image);

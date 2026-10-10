@@ -1,0 +1,124 @@
+// Short messages at the bottom of the screen: what just happened, with Undo
+// when it can be taken back, and why something failed when it did.
+
+import { useEffect, useState } from "react";
+
+export interface ToastSpec {
+  text: string;
+  tone?: "info" | "error";
+  /** One action, like Undo or Retry. Clicking it closes the toast. */
+  action?: { label: string; run: () => void };
+  ms?: number;
+}
+type Shown = ToastSpec & { key: number };
+
+let shown: Shown[] = [];
+const listeners = new Set<(list: Shown[]) => void>();
+const emit = () => listeners.forEach((l) => l(shown));
+
+// Each toast's time left; it stops running while the pointer or keyboard focus is on the toast.
+const timers = new Map<number, { left: number; started: number; t?: ReturnType<typeof setTimeout> }>();
+function runTimer(key: number) {
+  const x = timers.get(key);
+  if (!x || x.t) return;
+  x.started = Date.now();
+  x.t = setTimeout(() => dismissToast(key), x.left);
+}
+function holdTimer(key: number) {
+  const x = timers.get(key);
+  if (!x?.t) return;
+  clearTimeout(x.t);
+  x.t = undefined;
+  x.left = Math.max(1500, x.left - (Date.now() - x.started));
+}
+
+export function toast(t: ToastSpec): number {
+  const key = Date.now() + Math.random();
+  const item = { ...t, key };
+  // Three at a time, but a newer message never pushes out one that can still be undone.
+  let list = [...shown, item];
+  while (list.length > 3) {
+    const i = list.findIndex((x) => !x.action && x !== item);
+    if (i < 0 && list.length <= 5) break;
+    const drop = list[i < 0 ? 0 : i];
+    clearTimeout(timers.get(drop.key)?.t);
+    timers.delete(drop.key);
+    list = list.filter((x) => x !== drop);
+  }
+  shown = list;
+  emit();
+  // Undo stays long enough to reach; errors long enough to read.
+  const ms = t.ms ?? (t.action ? 7000 : t.tone === "error" ? Math.max(6000, t.text.length * 70) : 3500);
+  timers.set(key, { left: ms, started: Date.now() });
+  runTimer(key);
+  return key;
+}
+
+export function dismissToast(key: number) {
+  clearTimeout(timers.get(key)?.t);
+  timers.delete(key);
+  shown = shown.filter((t) => t.key !== key);
+  emit();
+}
+
+/** "Couldn't remove it. Can't reach Stand…" from a failed request. */
+export function errorToast(what: string, retry?: () => void) {
+  return (err: unknown) =>
+    toast({
+      tone: "error",
+      text: `${what}. ${(err as Error)?.message ?? String(err)}`,
+      ...(retry ? { action: { label: "Try again", run: retry } } : {}),
+    });
+}
+
+/** An Undo that needs the connection: when it's down, the message keeps a button to try again. */
+export function undoing(run: () => boolean) {
+  const attempt = () => {
+    if (!run()) toast({ tone: "error", text: "Couldn't undo while Stand is reconnecting.", action: { label: "Try again", run: attempt } });
+  };
+  return attempt;
+}
+
+export function Toasts() {
+  const [list, setList] = useState(shown);
+  useEffect(() => {
+    listeners.add(setList);
+    return () => {
+      listeners.delete(setList);
+    };
+  }, []);
+  // The region is always there, so screen readers announce what lands in it.
+  return (
+    <div className="toasts" aria-live="polite">
+      {list.map((t) => (
+        <div
+          key={t.key}
+          className={t.tone === "error" ? "toast error" : "toast"}
+          role={t.tone === "error" ? "alert" : "status"}
+          onMouseEnter={() => holdTimer(t.key)}
+          onMouseLeave={() => runTimer(t.key)}
+          onFocus={() => holdTimer(t.key)}
+          onBlur={() => runTimer(t.key)}
+        >
+          <span className="toast-text" dir="auto">
+            {t.text}
+          </span>
+          {t.action && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                t.action!.run();
+                dismissToast(t.key);
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
+          <button className="toast-x" aria-label="Dismiss" onClick={() => dismissToast(t.key)}>
+            ✕
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}

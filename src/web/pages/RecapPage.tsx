@@ -3,7 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
-import { api, type RoomInfo } from "../api.ts";
+import { api, request, type RoomInfo } from "../api.ts";
+import { errorToast, toast } from "../Toasts.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { Markdown } from "../Synthesis.tsx";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
@@ -42,10 +43,22 @@ export function RecapPage() {
   const carried = (room?.followUps ?? []).filter((f) => f.meetingStartedAt < data.startedAt);
   const briefUrl = (fmt: "json" | "md") => `/api/meetings/${data.meetingId}/brief.${fmt}`;
   const copyBrief = async () => {
-    const md = await fetch(briefUrl("md")).then((r) => r.text());
-    await navigator.clipboard?.writeText(md);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+    let md: string;
+    try {
+      const res = await request(briefUrl("md"));
+      if (!res.ok) throw new Error("Stand couldn't put it together just now.");
+      md = await res.text();
+    } catch (err) {
+      errorToast("Couldn't copy the brief", () => void copyBrief())(err);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(md);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast({ text: "Your browser blocked copying.", action: { label: "Open the brief", run: () => window.open(briefUrl("md"), "_blank") } });
+    }
   };
 
   const groups = data.items;

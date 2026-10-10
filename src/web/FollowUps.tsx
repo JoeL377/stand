@@ -4,6 +4,7 @@ import { CopyForAgent } from "./CopyForAgent.tsx";
 import type { Deck, Item, Note } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { fmtDate, keyOf } from "./util.ts";
+import { errorToast } from "./Toasts.tsx";
 
 /** An action item as a follow-up: the note plus, when it came from another
  *  meeting, when that meeting was. */
@@ -55,6 +56,8 @@ export function FollowUpList(props: {
                 try {
                   const next = await props.onToggle(n, !done);
                   if (next) setSaved((s) => ({ ...s, [n.id]: next }));
+                } catch (err) {
+                  errorToast(done ? "Couldn't reopen it" : "Couldn't mark it done")(err);
                 } finally {
                   setBusy(null);
                 }

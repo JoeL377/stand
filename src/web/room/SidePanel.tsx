@@ -5,6 +5,7 @@ import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
 import { LiveItemNotes, type NoteEditing } from "../Discussions.tsx";
 import { SnapsPill } from "../Snaps.tsx";
+import { toast, undoing } from "../Toasts.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -13,7 +14,7 @@ export function SidePanel(props: {
   discussions: Discussion[];
   notesBusy: string[];
   interims: Record<string, Interim>;
-  send: (m: ClientMessage) => void;
+  send: (m: ClientMessage) => boolean;
   participantId: string;
 }) {
   const [earlierOpen, setEarlierOpen] = useState(true);
@@ -44,10 +45,41 @@ export function SidePanel(props: {
   const editing: NoteEditing | undefined = isHost
     ? {
         change: (n, text, owner) => send({ type: "note.edit", noteId: n.id, text, owner }),
-        remove: (n) => send({ type: "note.remove", noteId: n.id }),
+        remove: (n) => {
+          send({ type: "note.remove", noteId: n.id });
+          toast({
+            text: "Note deleted",
+            action: {
+              label: "Undo",
+              run: undoing(() => send({ type: "note.restore", noteId: n.id })),
+            },
+          });
+        },
         add: (kind, text, owner) => send({ type: "note.add", itemId: state.focusItemId, kind, text, owner }),
       }
     : undefined;
+
+  // What the agent just wrote or changed lights up for a moment, so people see what's new without rereading.
+  const seenNotes = useRef(new Map<string | null, Set<string>>());
+  const [fresh, setFresh] = useState<string[]>([]);
+  const freshTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const noteSig = (n: Note) => `${n.kind}:${n.text.trim().toLowerCase()}`;
+  const notesKey = focusNotes.map((n) => `${n.id}=${noteSig(n)}`).join("|");
+  useEffect(() => {
+    const seen = seenNotes.current.get(state.focusItemId);
+    if (!seen) {
+      // First look at this item: everything here is already "seen".
+      seenNotes.current.set(state.focusItemId, new Set(focusNotes.map(noteSig)));
+      return;
+    }
+    const added = focusNotes.filter((n) => !seen.has(noteSig(n)));
+    if (!added.length) return;
+    for (const n of added) seen.add(noteSig(n));
+    setFresh(added.map((n) => n.id));
+    clearTimeout(freshTimer.current);
+    freshTimer.current = setTimeout(() => setFresh([]), 2500);
+  }, [notesKey, state.focusItemId]);
+  useEffect(() => () => clearTimeout(freshTimer.current), []);
 
   return (
     <aside className="panel side">
@@ -80,7 +112,13 @@ export function SidePanel(props: {
       </div>
       {tab === "notes" ? (
         <div className="side-notes-tab">
-          {!hasNotes && <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>}
+          {!hasNotes && (
+            <p className="side-notes-empty">
+              {shown.length > 0
+                ? `Listening · ${shown.length} remark${shown.length === 1 ? "" : "s"} so far. Notes show up after a short pause in the talk.`
+                : "Agent notes and topics for this item show up here once people start talking."}
+            </p>
+          )}
           {since.length > 0 && <SinceLastTime updates={since} />}
           {earlier.length > 0 && (
             <section className={earlierOpen ? "focus-notes earlier open" : "focus-notes earlier"}>
@@ -97,7 +135,7 @@ export function SidePanel(props: {
                     compact
                     showDate
                     notes={earlier}
-                    onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
+                    onToggle={(n, done) => void send({ type: "followup.done", noteId: n.id, done })}
                   />
                 </div>
               )}
@@ -108,6 +146,8 @@ export function SidePanel(props: {
               {!focusNotes.length && <p className="tk-empty">Writing the first notes…</p>}
               {focusNotes.length > 0 && (
                 <LiveItemNotes
+                  key={state.focusItemId ?? "general"}
+                  fresh={fresh}
                   notes={focusNotes}
                   discussions={focusDiscussions}
                   segments={segments}
@@ -120,7 +160,7 @@ export function SidePanel(props: {
           )}
           {isHost && focusNotes.length === 0 && !notesUpdating && (
             <section className="side-agent-notes">
-              <LiveItemNotes notes={[]} discussions={[]} segments={[]} editing={editing} />
+              <LiveItemNotes key={state.focusItemId ?? "general"} notes={[]} discussions={[]} segments={[]} editing={editing} />
             </section>
           )}
         </div>
@@ -174,7 +214,7 @@ function LiveSliver(props: { segments: Segment[]; interims: Record<string, Inter
   );
 }
 
-function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => void }) {
+function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => boolean }) {
   const { segments, items, interims, send } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -212,7 +252,7 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
   );
 }
 
-function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => void }) {
+function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => boolean }) {
   const [moving, setMoving] = useState(false);
   return (
     <div className={s.kind === "chat" ? "seg chat" : "seg"}>

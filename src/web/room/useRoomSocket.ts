@@ -21,6 +21,7 @@ const LASTING = new Set<ClientMessage["type"]>([
   "upnext.add",
   "upnext.addAll",
   "upnext.dismiss",
+  "upnext.undismiss",
   "host.give",
   "chat",
   "speech",
@@ -28,13 +29,14 @@ const LASTING = new Set<ClientMessage["type"]>([
   "followup.done",
   "note.edit",
   "note.remove",
+  "note.restore",
   "note.add",
   "stage.snap.close",
   "meeting.end",
 ]);
 /** Of those, what can wait for the connection to come back. The rest steer the
  *  meeting as it happens, so they need the connection now. */
-const CAN_WAIT = new Set<ClientMessage["type"]>(["chat", "speech", "segment.move", "followup.done", "note.edit", "note.remove", "note.add"]);
+const CAN_WAIT = new Set<ClientMessage["type"]>(["chat", "speech", "segment.move", "followup.done", "note.edit", "note.remove", "note.restore", "note.add"]);
 /** Sent on their own as things happen; nobody clicked anything. */
 const BACKGROUND = new Set<ClientMessage["type"]>(["hello", "ping", "speech.interim", "frame", "sharing"]);
 /** No ack or pong this long after sending: the connection is dead, even if the browser hasn't noticed yet. */
@@ -106,10 +108,13 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   /** Changes made while disconnected, to be sent when the connection is back. */
   const [waiting, setWaiting] = useState(0);
   /** Something was clicked that needs the connection, while it was down. */
-  const [refused, setRefused] = useState(false);
+  /** What was just turned away for want of a connection, so the pill can say what didn't happen. */
+  const [refused, setRefused] = useState<ClientMessage["type"] | null>(null);
   const [trouble, setTrouble] = useState<Trouble | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const outbox = useRef<Outgoing[]>([]);
+  // Offline adds that were deleted before they went out, kept so Undo can bring them back.
+  const droppedAdds = useRef(new Map<string, Outgoing>());
   /** The meeting we're in, so a reconnect can tell the server. */
   const meetingRef = useRef<string | null>(null);
   /** Gives up on the current socket and reconnects. */
@@ -161,6 +166,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
             answersPings = true;
             break;
           case "welcome":
+            // A "done" for a notes run may have been missed while away; the next run says busy again.
+            setNotesBusy([]);
             setSegments(reapply(msg.segments, patchSegments));
             setNotes(reapply(msg.notes, patchNotes));
             setDiscussions(msg.discussions ?? []);
@@ -259,11 +266,39 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     if (!LASTING.has(msg.type) || (!open && !CAN_WAIT.has(msg.type))) {
       if (open) ws.send(JSON.stringify(msg));
       else if (!BACKGROUND.has(msg.type)) {
-        setRefused(true);
+        setRefused(msg.type);
         clearTimeout(refusedTimer.current);
-        refusedTimer.current = setTimeout(() => setRefused(false), 4_000);
+        refusedTimer.current = setTimeout(() => setRefused(null), 4_000);
       }
       return open;
+    }
+    // A note added while offline has no real id yet: an edit or delete of it changes the waiting add instead.
+    if ((msg.type === "note.edit" || msg.type === "note.remove") && msg.noteId.startsWith("pending-")) {
+      const add = outbox.current.find((o) => `pending-${o.cid}` === msg.noteId && o.msg.type === "note.add" && o.sentAt === null);
+      if (add && add.msg.type === "note.add") {
+        if (msg.type === "note.edit") {
+          add.msg = { ...add.msg, text: msg.text, owner: msg.owner ?? null };
+          setNotes((ns) => patchNotes(ns, { cid: "", msg, sentAt: null }));
+        } else {
+          outbox.current = outbox.current.filter((o) => o !== add);
+          droppedAdds.current.set(msg.noteId, add);
+          setWaiting(outbox.current.length);
+          setNotes((ns) => ns.filter((n) => n.id !== msg.noteId));
+        }
+        return true;
+      }
+    }
+    // Undo of deleting one of those: the add goes back in the queue as it was.
+    if (msg.type === "note.restore" && droppedAdds.current.has(msg.noteId)) {
+      const add = droppedAdds.current.get(msg.noteId)!;
+      droppedAdds.current.delete(msg.noteId);
+      outbox.current.push(add);
+      if (open) {
+        ws.send(JSON.stringify({ ...add.msg, cid: add.cid }));
+        add.sentAt = Date.now();
+      } else setWaiting(outbox.current.length);
+      setNotes((ns) => patchNotes(ns, add));
+      return true;
     }
     // Not crypto.randomUUID: that needs https, and people test over plain http on their network.
     const o: Outgoing = { cid: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`, msg, sentAt: null };

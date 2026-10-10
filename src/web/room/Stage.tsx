@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Item, Participant, RoomState, Snap } from "../../shared/protocol.ts";
+import type { ClientMessage, Item, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -7,11 +7,12 @@ import { Slide } from "../slides.tsx";
 import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, addImageSnap, deleteSnap, takeSnap } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
-
-type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "delete" };
+import { errorToast, toast, undoing } from "../Toasts.tsx";
 
 /** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
 const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
+/** The same, written out where there's room: ⇧ alone reads as an arrow. */
+const SNAP_KEYS_WORDS = /Mac/.test(navigator.platform) ? "Control + Shift + S" : "Ctrl + Shift + S";
 
 export function Stage(props: {
   state: RoomState;
@@ -19,17 +20,43 @@ export function Stage(props: {
   focusItem: Item | null;
   canSteer: boolean;
   participantId: string;
-  send: (m: ClientMessage) => void;
+  send: (m: ClientMessage) => boolean;
+  /** The connection is down: what steers the meeting waits until it's back. */
+  offline?: boolean;
   localScreen: MediaStream | null;
   remoteScreen: RemoteScreen | null;
   speaking: Set<string>;
   interims: Record<string, Interim>;
+  segments: Segment[];
   livekit: boolean;
 }) {
   const { state, focusItem, canSteer, send, localScreen, remoteScreen, speaking, interims } = props;
   const suggested = state.suggestion ? state.items.find((i) => i.id === state.suggestion!.itemId) : null;
   const sharer = state.participants.find((p) => p.isSharing);
   const host = state.participants.find((p) => p.isHost);
+  // Accepting a nudge moves what was said since it started from this item to the suggested one.
+  const movingIds = state.suggestion
+    ? props.segments.filter((s) => s.itemId === state.focusItemId && s.ts >= state.suggestion!.since).map((s) => s.id)
+    : [];
+  const moving = movingIds.length;
+  const accept = () => {
+    const from = state.focusItemId;
+    const ids = movingIds;
+    const to = suggested;
+    if (!send({ type: "suggestion.accept" }) || !ids.length || !to) return;
+    // Moving remarks is the part people might not have meant, so it can be taken back.
+    toast({
+      text: `Moved ${ids.length} remark${ids.length === 1 ? "" : "s"} to ${keyOf(to) ?? to.title}`,
+      action: {
+        label: "Undo",
+        run: undoing(() => {
+          if (!send({ type: "focus", itemId: from })) return false;
+          for (const segmentId of ids) send({ type: "segment.move", segmentId, itemId: from });
+          return true;
+        }),
+      },
+    });
+  };
 
   // Slides of the deck in focus, in order, so the host can flip with arrows.
   const deckSlides = focusItem?.deckId ? state.items.filter((i) => i.deckId === focusItem.deckId) : [];
@@ -66,24 +93,20 @@ export function Stage(props: {
   // cropping waits for the gallery so nobody is pulled out of the talk.
   const screenRef = useRef<HTMLDivElement>(null);
   const showingScreen = Boolean(localScreen || remoteScreen);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState(0);
   const [cropId, setCropId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
-  const toast = (t: Omit<Toast, "key">, ms = 5000) => {
-    const key = Date.now() + Math.random();
-    setToasts((ts) => [...ts.slice(-2), { ...t, key }]);
-    setTimeout(() => setToasts((ts) => ts.filter((x) => x.key !== key)), ms);
-  };
+  const crop = (id: string) => ({ label: "Crop", run: () => setCropId(id) });
+  const failed = (err: unknown) => toast({ tone: "error", text: String((err as Error).message ?? err) });
   const snap = async () => {
     const video = screenRef.current?.querySelector("video");
     if (!video) return;
     setFlash((f) => f + 1);
     try {
       const id = await takeSnap(video, state.roomId);
-      toast({ text: "Snapped", snapId: id, action: "crop" });
+      toast({ text: "Snapped", action: crop(id) });
     } catch (err) {
-      toast({ text: String((err as Error).message ?? err) });
+      failed(err);
     }
   };
   // The Mac app's toolbar. Whatever comes of it, including why it couldn't, shows here.
@@ -92,20 +115,23 @@ export function Stage(props: {
       const r = await macApp?.snap();
       const text = r && `${r.title}. ${r.body}`;
       // Long ones say what to fix (a permission, say), so they stay up long enough to read.
-      if (text) toast({ text, ...(r.snapId ? { snapId: r.snapId, action: "crop" as const } : {}) }, Math.max(5000, text.length * 60));
+      if (text) toast({ text, ...(r.snapId ? { action: crop(r.snapId) } : {}), ms: Math.max(5000, text.length * 60) });
     } catch {
-      toast({ text: "Quit the Stand app and open it again to use Snap." });
+      toast({ tone: "error", text: "Quit the Stand app and open it again to use Snap." });
     }
   };
   const snapRef = useRef(snap);
   snapRef.current = snap;
   useEffect(() => {
-    if (!showingScreen) return;
+    // The Mac app catches the shortcut itself, from any app.
+    if (!showingScreen && macApp) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (!e.ctrlKey || !e.shiftKey || e.metaKey || e.altKey || e.code !== "KeyS" || e.repeat || t.closest("[role=dialog]")) return;
       e.preventDefault();
-      void snapRef.current();
+      // Pressing it with nothing on screen says how to get something to snap, rather than doing nothing.
+      if (showingScreen) void snapRef.current();
+      else toast({ text: `Snap works once someone shares a screen. You can also paste or drop an image here.` });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -117,9 +143,9 @@ export function Stage(props: {
     for (const f of files.slice(0, 5)) {
       try {
         const id = await addImageSnap(f, state.roomId);
-        toast({ text: `Added to ${focusLabel}`, snapId: id, action: "crop" });
+        toast({ text: `Added to ${focusLabel}`, action: crop(id) });
       } catch (err) {
-        toast({ text: String((err as Error).message ?? err) });
+        failed(err);
       }
     }
   };
@@ -170,7 +196,10 @@ export function Stage(props: {
       for (const s of state.snaps) {
         if (seenSnaps.current.has(s.id) || s.source !== "person") continue;
         if (s.sharerId === props.participantId && s.takenById !== props.participantId)
-          toast({ text: `${s.takenBy.split(" ")[0]} snapped your screen`, snapId: s.id, action: "delete" });
+          toast({
+            text: `${s.takenBy.split(" ")[0]} snapped your screen`,
+            action: { label: "Delete", run: () => void deleteSnap(s.id).catch(errorToast("Couldn't delete the snap")) },
+          });
       }
     }
     seenSnaps.current = ids;
@@ -195,13 +224,15 @@ export function Stage(props: {
     <main className="stage">
       <div className="now">
         <span className="now-label">Now discussing</span>
-        <span className="now-title">
+        <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}
         </span>
         {state.pinnedBy && <span className="badge">📌 Pinned</span>}
-        {host && (
+        {host ? (
           <span className="host-note muted small">{canSteer ? "You're the host" : `${host.name} is hosting`}</span>
+        ) : (
+          state.hostAway && <span className="host-note muted small">{state.hostAway} is reconnecting…</span>
         )}
       </div>
 
@@ -212,14 +243,25 @@ export function Stage(props: {
             ✦
           </span>
           <span className="nudge-text">
-            Your screen shows{" "}
+            {state.suggestion.source === "talk" ? "Sounds like " : sharer && sharer.id !== props.participantId ? "The shared screen shows " : "Your screen shows "}
             <strong>
               {keyOf(suggested) ? `${keyOf(suggested)} · ` : ""}
               {suggested.title}
             </strong>
           </span>
-          <button className="link" onClick={() => send({ type: "suggestion.accept" })}>
-            Switch to it
+          <button
+            className="link"
+            onClick={accept}
+            disabled={props.offline}
+            title={
+              props.offline
+                ? "You can switch once Stand reconnects"
+                : moving
+                  ? "Opens it for everyone and files what was said since then under it"
+                  : undefined
+            }
+          >
+            {moving ? `Switch and move ${moving} remark${moving === 1 ? "" : "s"}` : "Switch to it"}
           </button>
           <button className="link muted" onClick={() => send({ type: "suggestion.dismiss" })} aria-label="Dismiss">
             ✕
@@ -246,31 +288,6 @@ export function Stage(props: {
             Drop to add it to {focusLabel}
           </div>
         )}
-        {toasts.length > 0 && (
-          <div className="snap-toasts" role="status">
-            {toasts.map((t) => (
-              <div key={t.key} className="snap-toast">
-                <span>{t.text}</span>
-                {t.snapId && t.action === "crop" && (
-                  <button className="link" onClick={() => setCropId(t.snapId!)}>
-                    Crop
-                  </button>
-                )}
-                {t.snapId && t.action === "delete" && (
-                  <button
-                    className="link"
-                    onClick={() => {
-                      void deleteSnap(t.snapId!);
-                      setToasts((ts) => ts.filter((x) => x.key !== t.key));
-                    }}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
         {cropSnap && (
           <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
         )}
@@ -278,7 +295,7 @@ export function Stage(props: {
         {/* While a screen is shared, the share keeps the middle and the snap waits in the corner. */}
         {onStage && showingScreen && <StageSnap {...onStage} small />}
         {localScreen ? (
-          <Video stream={localScreen} label="You're sharing your screen" />
+          <Video stream={localScreen} label={`You're sharing your screen · ${SNAP_KEYS_WORDS} snaps it`} />
         ) : remoteScreen ? (
           <RemoteVideo screen={remoteScreen} label={`${state.participants.find((p) => p.id === remoteScreen.participantId)?.name ?? "Someone"}'s screen`} />
         ) : onStage ? (
@@ -347,7 +364,9 @@ export function Stage(props: {
             talking={talkingIds.has(p.id)}
             tag={p.isHost ? "Host" : undefined}
             sharing={p.isSharing}
-            onMakeHost={canSteer && p.id !== props.participantId ? () => send({ type: "host.give", participantId: p.id }) : undefined}
+            onMakeHost={
+              canSteer && !props.offline && p.id !== props.participantId ? () => send({ type: "host.give", participantId: p.id }) : undefined
+            }
           />
         ))}
         {ghosts.map((g) => (
@@ -368,11 +387,20 @@ function Person(props: {
   onMakeHost?: () => void;
 }) {
   const { id, name, picture, talking, tag, sharing, onMakeHost } = props;
+  // Handing over hosting takes a second click, so a stray one doesn't give the meeting away.
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => {
+    if (!confirm) return;
+    const t = setTimeout(() => setConfirm(false), 5000);
+    return () => clearTimeout(t);
+  }, [confirm]);
   return (
     <div className={talking ? "person talking" : "person"}>
       <Avatar id={id} name={name} picture={picture} />
       <div className="person-label">
-        <span className="person-name">{name}</span>
+        <span className="person-name" title={name}>
+          {name}
+        </span>
         {(tag || sharing) && (
           <span className="person-tag">
             {tag}
@@ -384,11 +412,21 @@ function Person(props: {
           </span>
         )}
       </div>
-      {onMakeHost && (
-        <button className="link person-action" onClick={onMakeHost} title={`Let ${name} drive the meeting`}>
-          Make host
-        </button>
-      )}
+      {onMakeHost &&
+        (confirm ? (
+          <span className="person-action confirm">
+            <button className="link" onClick={onMakeHost} title={`${name.split(" ")[0]} will choose the item everyone talks about`}>
+              Hand over
+            </button>
+            <button className="link muted" onClick={() => setConfirm(false)} aria-label="Cancel">
+              ✕
+            </button>
+          </span>
+        ) : (
+          <button className="link person-action" onClick={() => setConfirm(true)} title={`Let ${name} drive the meeting`}>
+            Make host
+          </button>
+        ))}
     </div>
   );
 }
