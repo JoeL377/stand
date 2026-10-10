@@ -681,6 +681,18 @@ app.delete(
   }),
 );
 
+// Undo for "Remove from agenda": the items come back where they were.
+app.post(
+  "/api/rooms/:id/items/restore",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room) return notFound(res);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown) => typeof x === "string").slice(0, 500) : [];
+    db.unarchiveItems(room.id, ids);
+    res.json(afterItemsChange(room.id));
+  }),
+);
+
 app.get(
   "/api/items/:itemId/history",
   route((req, res) => {

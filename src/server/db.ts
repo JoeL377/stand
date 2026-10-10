@@ -909,6 +909,15 @@ export function openDb(file?: string) {
       db.prepare("DELETE FROM notes WHERE id = ?").run(id);
       return toNote(r);
     },
+    /** Undoes removeNote: the note comes back as it was, and the agent may write it again. */
+    restoreNote(n: Note) {
+      db.prepare(
+        "INSERT OR IGNORE INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(n.id, n.meetingId, n.itemId, n.kind, n.text, n.owner, n.ts, n.doneAt, n.doneBy, n.discussionId, n.editedBy ?? null);
+      db.prepare(
+        "DELETE FROM dismissed_notes WHERE rowid IN (SELECT rowid FROM dismissed_notes WHERE meeting_id = ? AND item_id IS ? AND kind = ? AND text = ? LIMIT 1)",
+      ).run(n.meetingId, n.itemId, n.kind, n.text);
+    },
     /** by: who wrote it, which also keeps the agent's redrafts from rewording it; null for notes carried in as they were. */
     addNote(meetingId: string, itemId: string | null, n: { kind: NoteKind; text: string; owner: string | null }, by: string | null): Note {
       const note: Note = {
@@ -1166,6 +1175,17 @@ export function openDb(file?: string) {
       db.prepare(
         "INSERT INTO upnext_dismissed (room_id, key, at) VALUES (?, ?, ?) ON CONFLICT (room_id, key) DO UPDATE SET at = excluded.at",
       ).run(roomId, key, Date.now());
+    },
+    /** Undoes dismissUpNext, for the host's Undo. */
+    undismissUpNext(roomId: string, key: string) {
+      db.prepare("DELETE FROM upnext_dismissed WHERE room_id = ? AND key = ?").run(roomId, key);
+    },
+    /** Undoes archiveItem / archiveDeck for these items, in their old places. */
+    unarchiveItems(roomId: string, ids: string[]): number {
+      if (!ids.length) return 0;
+      return db
+        .prepare(`UPDATE items SET archived = 0 WHERE room_id = ? AND id IN (${ids.map(() => "?").join(",")})`)
+        .run(roomId, ...ids).changes as number;
     },
     /** Puts a task that came off the agenda back at the end of it. */
     restoreItem(roomId: string, itemId: string): boolean {
