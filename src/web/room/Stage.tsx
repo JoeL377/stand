@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Item, Participant, RoomState } from "../../shared/protocol.ts";
+import type { ClientMessage, Item, Participant, RoomState, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -72,6 +72,7 @@ export function Stage(props: {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState(0);
   const [cropId, setCropId] = useState<string | null>(null);
+  const [viewId, setViewId] = useState<string | null>(null);
   const toast = (t: Omit<Toast, "key">, ms = 5000) => {
     const key = Date.now() + Math.random();
     setToasts((ts) => [...ts.slice(-2), { ...t, key }]);
@@ -178,6 +179,16 @@ export function Stage(props: {
     seenSnaps.current = ids;
   }, [state.snaps, props.participantId]);
   const cropSnap = cropId ? state.snaps.find((s) => s.id === cropId) : undefined;
+  const viewSnap = viewId ? state.snaps.find((s) => s.id === viewId) : undefined;
+  // The snap on everyone's middle screen. The host or whoever took it can take it down.
+  const stageSnap = state.stageSnapId ? state.snaps.find((s) => s.id === state.stageSnapId) : undefined;
+  const onStage = stageSnap && {
+    snap: stageSnap,
+    me: props.participantId,
+    canClose: canSteer || stageSnap.takenById === props.participantId,
+    onOpen: () => setViewId(stageSnap.id),
+    onClose: () => send({ type: "stage.snap.close" }),
+  };
 
   // Demo speakers and remote talkers who aren't connected still show while talking.
   const talkingIds = new Set([...speaking, ...Object.keys(interims)]);
@@ -266,10 +277,15 @@ export function Stage(props: {
         {cropSnap && (
           <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
         )}
+        {viewSnap && <SnapGallery snaps={[viewSnap]} me={props.participantId} isHost={canSteer} onClose={() => setViewId(null)} />}
+        {/* While a screen is shared, the share keeps the middle and the snap waits in the corner. */}
+        {onStage && showingScreen && <StageSnap {...onStage} small />}
         {localScreen ? (
           <Video stream={localScreen} label="You're sharing your screen" />
         ) : remoteScreen ? (
           <RemoteVideo screen={remoteScreen} label={`${state.participants.find((p) => p.id === remoteScreen.participantId)?.name ?? "Someone"}'s screen`} />
+        ) : onStage ? (
+          <StageSnap {...onStage} />
         ) : sharer && !props.livekit ? (
           <div className="screen-empty">
             <p>
@@ -387,6 +403,36 @@ export function Avatar({ id, name, picture, size = 44 }: { id: string; name: str
     <div className="avatar" style={{ background: colorFor(id), width: size, height: size, fontSize: size * 0.36 }}>
       {initials(name)}
     </div>
+  );
+}
+
+/** A snap on the middle screen: the picture, who took it and the agent's caption. Clicking
+ *  it opens it full size; ✕ takes it off everyone's screen, and it stays on the item. */
+function StageSnap(props: { snap: Snap; me: string; canClose: boolean; small?: boolean; onOpen: () => void; onClose: () => void }) {
+  const { snap } = props;
+  const who = snap.takenById === props.me ? "You" : snap.takenBy.split(" ")[0];
+  return (
+    <figure className={props.small ? "stage-snap small" : "stage-snap"}>
+      <button className="stage-snap-img" onClick={props.onOpen} title="See it full size">
+        <img src={snap.url} alt={snap.caption ?? `${who} snapped this`} />
+      </button>
+      {!props.small && (
+        <figcaption>
+          <CameraIcon />
+          <span>{who} snapped this</span>
+          {snap.caption && (
+            <span className="stage-snap-cap" title={snap.caption}>
+              <span className="agent-mark">✦</span> {snap.caption}
+            </span>
+          )}
+        </figcaption>
+      )}
+      {props.canClose && (
+        <button className="stage-snap-close" onClick={props.onClose} title="Take it off everyone's screen. It stays on the item." aria-label="Take the snap off the screen">
+          ✕
+        </button>
+      )}
+    </figure>
   );
 }
 

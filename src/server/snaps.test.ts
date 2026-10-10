@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import type { Discussion, Note, Segment } from "../shared/protocol.ts";
 import { openDb } from "./db.ts";
@@ -218,4 +219,53 @@ test("the recap call sends the images and maps its keys back to notes and topics
     { id: "s-a", noteId: "n-dec", discussionId: "d1", caption: "The error banner they decided to remove" },
     { id: "s-b", noteId: null, discussionId: "d1", caption: "Funnel chart behind the drop-off talk" },
   ]);
+});
+
+test("a new snap goes on everyone's middle screen until the host or whoever took it takes it down, or the meeting moves on", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Standup", null);
+  const [billing, search] = db.addItems(room.id, [
+    { source: "agenda", externalId: null, title: "Billing", url: null, description: null },
+    { source: "agenda", externalId: null, title: "Search", url: null, description: null },
+  ]);
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  const settle = () => new Promise((r) => setImmediate(r));
+  const join = (id: string, name: string) => {
+    const ws = Object.assign(new EventEmitter(), { OPEN: 1, readyState: 1, send() {} });
+    session.attach(ws as never, { id, email: `${id}@stand.test`, name, picture: null });
+    const say = (m: object) => ws.emit("message", JSON.stringify(m));
+    say({ type: "hello" });
+    return say;
+  };
+  const joe = join("joe", "Joe Liang"); // in first, so hosting
+  const huy = join("huy", "Huy Ngo");
+  const andy = join("andy", "Andy Li");
+  await settle();
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const snapBy = (id: string, name: string) =>
+    session.addSnap({ buf: jpeg, ext: "jpg", width: 800, height: 600, at: Date.now(), takenById: id, takenBy: name });
+  const onStage = () => session.state().stageSnapId;
+
+  const first = snapBy("huy", "Huy Ngo");
+  assert.equal(onStage(), first);
+  andy({ type: "stage.snap.close" });
+  await settle();
+  assert.equal(onStage(), first, "only the host or whoever took it can take it down");
+  huy({ type: "stage.snap.close" });
+  await settle();
+  assert.equal(onStage(), null);
+
+  snapBy("andy", "Andy Li");
+  const newer = snapBy("huy", "Huy Ngo");
+  assert.equal(onStage(), newer, "a newer snap takes its place");
+  joe({ type: "stage.snap.close" });
+  await settle();
+  assert.equal(onStage(), null);
+
+  snapBy("andy", "Andy Li");
+  joe({ type: "focus", itemId: search.id });
+  await settle();
+  assert.equal(onStage(), null, "moving on to the next item clears it");
+  assert.equal(session.state().snaps.length, 4, "taking it down never deletes it");
+  assert.ok(session.state().snaps.every((s) => s.itemId === billing.id));
 });
