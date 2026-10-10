@@ -32,6 +32,9 @@ export function SidePanel(props: {
   // What agents and people reported on this item since the last meeting.
   const since = (state.updates ?? []).filter((u) => u.itemId === state.focusItemId);
   const hasNotes = since.length > 0 || earlier.length > 0 || focusNotes.length > 0 || notesUpdating;
+  // Someone is speaking right now (their words land on the item in focus), or has said something in this meeting.
+  const talking = Object.keys(interims).length > 0;
+  const talkStarted = talking || segments.length > 0;
   // New remarks for this item while the Transcript tab isn't open.
   const [seen, setSeen] = useState(0);
   useEffect(() => {
@@ -112,12 +115,15 @@ export function SidePanel(props: {
       </div>
       {tab === "notes" ? (
         <div className="side-notes-tab">
-          {!hasNotes && (
+          {!hasNotes && (shown.length > 0 || talking) && (
             <p className="side-notes-empty">
-              {shown.length > 0
-                ? `Listening · ${shown.length} remark${shown.length === 1 ? "" : "s"} so far. Notes show up after a short pause in the talk.`
-                : "Agent notes and topics for this item show up here once people start talking."}
+              {`Listening${shown.length > 0 ? ` · ${shown.length} remark${shown.length === 1 ? "" : "s"} so far` : ""}. `}
+              Notes show up after a short pause in the talk.
             </p>
+          )}
+          {/* Only until the first words: after that it's clear where notes go. */}
+          {!hasNotes && !talkStarted && (
+            <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>
           )}
           {since.length > 0 && <SinceLastTime updates={since} />}
           {earlier.length > 0 && (
