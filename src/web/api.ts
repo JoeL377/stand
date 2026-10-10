@@ -23,7 +23,10 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
   } catch {
     throw new OfflineError();
   }
-  const data = await res.json().catch(() => ({}));
+  const json = res.headers.get("content-type")?.includes("json");
+  const data = json ? await res.json().catch(() => ({})) : {};
+  // A gateway (or the dev proxy) answering for a server that's down isn't the server saying no.
+  if ([502, 503, 504].includes(res.status) || (res.status === 500 && !json)) throw new OfflineError();
   if (res.status === 401 && !url.startsWith("/api/auth/")) {
     // Session expired: send them through sign-in and back here.
     location.reload();

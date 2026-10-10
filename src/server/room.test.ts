@@ -94,6 +94,14 @@ test("talk that keeps naming another item nudges the host, and switching moves t
     [items[0].id, items[1].id, items[1].id],
   );
   assert.equal(mentionScore("nothing relevant here", items[0]), 0);
+  // One speaker's turn arrives in fragments; the drift still adds up across them.
+  session.setFocus(items[0].id, "p1", "manual");
+  assert.equal(session.state().suggestion, null);
+  const later = Date.now() + 5;
+  session.addSpeech("p3", "Ann", "Quick one, the webhooks", later);
+  session.addSpeech("p3", "Ann", "retry needs a cap on the backoff.", later + 500);
+  assert.equal(db.meetingSegments(session.meetingId).length, 4, "the two fragments are one remark");
+  assert.equal(session.state().suggestion?.itemId, items[1].id, "fragments of one turn count together");
   assert.equal(mentionScore("eng-1 again", items[0]), 2);
 });
 

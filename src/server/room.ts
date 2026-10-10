@@ -800,6 +800,8 @@ export class RoomSession implements SpeechSink {
         this.lastSpeech = { ...last, endedAt: Math.max(last.endedAt, endedAt), length: seg.text.length };
         this.broadcast({ type: "segment.updated", segment: seg });
         this.scheduleNotes(seg.itemId, NOTES_DEBOUNCE_MS);
+        // Only the words just added count, so a long turn isn't scored twice.
+        this.checkDrift({ ...seg, text: t });
         return;
       }
     }
