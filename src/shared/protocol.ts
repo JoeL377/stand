@@ -253,6 +253,9 @@ export interface User {
 export interface RoomState {
   /** This meeting's snaps. */
   snaps: Snap[];
+  /** The snap on everyone's middle screen: the latest one someone took of the item in
+   *  focus, until the host or whoever took it takes it down, or the meeting moves on. */
+  stageSnapId: string | null;
   roomId: string;
   roomName: string;
   meetingId: string;
@@ -303,6 +306,8 @@ export type ClientMessage =
   | { type: "note.remove"; noteId: string }
   | { type: "note.add"; itemId: string | null; kind: "action" | "decision" | "question"; text: string; owner?: string | null }
   | { type: "demo.play" }
+  /** The host, or whoever took it: take the snap off everyone's middle screen. It stays on the item. */
+  | { type: "stage.snap.close" }
   | { type: "meeting.end" };
 
 export type ServerMessage =

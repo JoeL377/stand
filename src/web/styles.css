@@ -1399,3 +1399,22 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .app-snap { position: absolute; right: 12px; bottom: 12px; z-index: 5; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 10px; border: 0; border-radius: 999px; background: rgb(255 255 255 / 0.1); color: #e8e8ee; font-size: 13px; font-weight: 500; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14); cursor: pointer; }
 .app-snap:hover { background: rgb(255 255 255 / 0.18); color: #fff; }
 .app-snap svg { width: 16px; height: 16px; }
+
+/* ---- the snap on the middle screen ---- */
+.stage-snap { position: relative; margin: 0; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.stage-snap-img { flex: 1; min-height: 0; display: flex; padding: 12px 12px 0; border: 0; border-radius: 0; background: none; box-shadow: none; cursor: zoom-in; }
+.stage-snap-img img { width: 100%; height: 100%; min-height: 0; object-fit: contain; border-radius: 6px; }
+.stage-snap figcaption { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 10px 8px; color: #a5a5b3; font-size: 12px; }
+.screen:has(.app-snap) .stage-snap figcaption { padding-right: 100px; }
+.stage-snap figcaption svg { flex: none; width: 14px; height: 14px; }
+.stage-snap-cap { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d7d7e0; }
+.stage-snap-cap::before { content: "·"; margin-right: 6px; color: #a5a5b3; }
+.stage-snap-close { position: absolute; top: 18px; right: 18px; z-index: 2; width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 999px; background: rgb(0 0 0 / 0.6); color: #fff; font-size: 13px; box-shadow: 0 0 0 1px rgb(255 255 255 / 0.15); cursor: pointer; }
+.stage-snap-close:hover { background: rgb(0 0 0 / 0.85); }
+.stage-snap.small { position: absolute; left: 12px; bottom: 40px; z-index: 5; flex: none; width: 200px; border-radius: 8px; overflow: hidden; background: #000; box-shadow: 0 6px 20px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.14); }
+.stage-snap.small .stage-snap-img { padding: 0; }
+.stage-snap.small .stage-snap-img img { height: auto; border-radius: 0; }
+.stage-snap.small .stage-snap-close { top: 6px; right: 6px; width: 22px; height: 22px; font-size: 11px; }
+/* Longer snap messages (what to fix, say) wrap instead of running off the stage. */
+.snap-toasts { left: 12px; right: 12px; transform: none; }
+.snap-toast { max-width: 560px; white-space: normal; }

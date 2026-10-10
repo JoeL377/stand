@@ -81,6 +81,8 @@ export class RoomSession implements SpeechSink {
   private participants = new Map<string, Participant & { conns: number }>();
   private hostId: string | null = null;
   private focusItemId: string | null = null;
+  /** See RoomState.stageSnapId. */
+  private stageSnapId: string | null = null;
   private pinnedBy: string | null = null;
   private suggestion: Suggestion | null = null;
   /** (ts, item) pairs, so late-arriving transcripts land on the item that was
@@ -194,8 +196,10 @@ export class RoomSession implements SpeechSink {
   }
 
   state(): RoomState {
+    const snaps = this.snaps();
     return {
-      snaps: this.snaps(),
+      snaps,
+      stageSnapId: snaps.some((s) => s.id === this.stageSnapId) ? this.stageSnapId : null,
       roomId: this.roomId,
       roomName: this.roomName,
       meetingId: this.meetingId,
@@ -254,6 +258,8 @@ export class RoomSession implements SpeechSink {
       sharerName: sharer?.name ?? null,
       noteId: null,
     });
+    // Everyone sees what was just captured, unless the meeting has already moved on.
+    if (itemId === this.focusItemId) this.stageSnapId = id;
     this.broadcastState();
     void this.captionSnap(id, snap.buf, snap.ext, itemId, at);
     return id;
@@ -475,6 +481,13 @@ export class RoomSession implements SpeechSink {
         }
         break;
       }
+      case "stage.snap.close": {
+        const snap = this.stageSnapId ? this.db.getSnap(this.stageSnapId) : null;
+        if (!snap || !(isHost || snap.takenById === conn.participantId)) return;
+        this.stageSnapId = null;
+        this.broadcastState();
+        break;
+      }
       case "followup.done": {
         const note = this.db.setActionDone(this.roomId, msg.noteId, msg.done ? conn.name : null);
         if (!note) break;
@@ -576,6 +589,7 @@ export class RoomSession implements SpeechSink {
   private setFocusInternal(itemId: string | null, actor: string, reason: string, at = Date.now()) {
     const prev = this.focusItemId;
     this.focusItemId = itemId;
+    if (prev !== itemId) this.stageSnapId = null;
     this.focusLog.push({ ts: at, itemId });
     this.focusLog.sort((a, b) => a.ts - b.ts);
     this.db.logFocus(this.meetingId, itemId, actor, reason);
