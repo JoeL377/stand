@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
+    "try:mac": "concurrently -k -n stand,app -c blue,magenta \"PORT=3001 GOOGLE_CLIENT_ID= GOOGLE_CLIENT_SECRET= ALLOWED_EMAILS= ALLOWED_EMAIL_DOMAINS= npm run dev\" \"sleep 4 && STAND_URL=http://localhost:5173 npm --prefix desktop start\"",
     "dev:server": "tsx watch --env-file-if-exists=.env src/server/index.ts",
     "dev:web": "vite",
     "build": "vite build",

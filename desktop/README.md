@@ -15,7 +15,18 @@ open dist/mac*/Stand.app
 
 Drag it to Applications to keep it. `npm start` runs it straight from the source, but signing in needs the built app, because macOS only sends `stand://` links to an installed app.
 
-To point it at another Stand (a local one, say): `STAND_URL=http://localhost:5173 npm start`.
+To point it at another Stand: `STAND_URL=http://localhost:5173 npm start`.
+
+## Try it against a local Stand
+
+From the repo root (with your `.env` in place):
+
+```sh
+npm install && npm --prefix desktop install
+npm run try:mac
+```
+
+This starts a local Stand with Google sign-in turned off (you sign in with a name and email inside the app) and opens the app on it. Quitting the app or pressing Ctrl-C stops both. The first launch downloads Electron, so it takes a minute.
 
 ## First run
 
