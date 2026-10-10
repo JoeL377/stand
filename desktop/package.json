@@ -1,0 +1,48 @@
+{
+  "name": "stand-desktop",
+  "productName": "Stand",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stand for Mac: the Stand app in its own window, plus Snap from anywhere.",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "app": "electron-builder --mac dir -c.mac.identity=null && codesign --force --deep --sign - dist/mac*/Stand.app",
+    "dist": "electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "app.stand.desktop",
+    "productName": "Stand",
+    "files": [
+      "main.js",
+      "snap.html",
+      "snap-preload.js"
+    ],
+    "protocols": [
+      {
+        "name": "Stand",
+        "schemes": [
+          "stand"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Stand uses the microphone so others in the meeting can hear you.",
+        "NSScreenCaptureUsageDescription": "Stand captures your screen when you share it or snap part of it."
+      }
+    }
+  }
+}

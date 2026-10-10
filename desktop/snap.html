@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        cursor: crosshair;
+        user-select: none;
+        background: transparent;
+      }
+      #shot {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #dim {
+        position: fixed;
+        inset: 0;
+        background: rgb(0 0 0 / 0.35);
+      }
+      #box {
+        position: fixed;
+        display: none;
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.35);
+        background: transparent;
+      }
+      #size {
+        position: fixed;
+        display: none;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgb(0 0 0 / 0.75);
+        color: #fff;
+        font:
+          12px -apple-system,
+          system-ui;
+      }
+      #hint {
+        position: fixed;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: rgb(20 20 22 / 0.85);
+        color: #fff;
+        font:
+          13px -apple-system,
+          system-ui;
+      }
+    </style>
+  </head>
+  <body>
+    <img id="shot" alt="" />
+    <div id="dim"></div>
+    <div id="box"></div>
+    <div id="size"></div>
+    <div id="hint">Drag over what to snap · click for the whole screen · Esc to cancel</div>
+    <script>
+      const shot = document.getElementById("shot"),
+        dim = document.getElementById("dim"),
+        box = document.getElementById("box"),
+        size = document.getElementById("size"),
+        hint = document.getElementById("hint");
+      shot.onload = () => window.snap.ready();
+      window.snap.onImage((url) => (shot.src = url));
+      let start = null;
+      const rect = (e) => ({
+        x: Math.min(start.x, e.clientX),
+        y: Math.min(start.y, e.clientY),
+        w: Math.abs(e.clientX - start.x),
+        h: Math.abs(e.clientY - start.y),
+      });
+      addEventListener("keydown", (e) => e.key === "Escape" && window.snap.done(null));
+      addEventListener("mousedown", (e) => {
+        start = { x: e.clientX, y: e.clientY };
+        hint.style.display = "none";
+      });
+      addEventListener("mousemove", (e) => {
+        if (!start) return;
+        const r = rect(e);
+        dim.style.display = "none";
+        Object.assign(box.style, { display: "block", left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px" });
+        Object.assign(size.style, { display: "block", left: r.x + "px", top: Math.max(0, r.y - 22) + "px" });
+        size.textContent = `${Math.round(r.w * devicePixelRatio)} × ${Math.round(r.h * devicePixelRatio)}`;
+      });
+      addEventListener("mouseup", (e) => {
+        if (!start) return;
+        const r = rect(e);
+        window.snap.done(r.w < 6 || r.h < 6 ? { full: true } : r);
+      });
+    </script>
+  </body>
+</html>
