@@ -11,6 +11,8 @@ type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "de
 
 /** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
 const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
+/** Stand for Mac, when the page runs inside it: its snap toolbar (screen, window or part of it). */
+const macApp = (window as { standApp?: { snap(): void } }).standApp;
 
 export function Stage(props: {
   state: RoomState;
@@ -205,10 +207,17 @@ export function Stage(props: {
       )}
 
       <div className="screen" ref={screenRef}>
-        {showingScreen && (
-          <button className="snap-btn" title={`Snap this screen (${SNAP_KEYS})`} aria-label="Snap this screen" onClick={() => void snap()}>
+        {macApp ? (
+          <button className="app-snap" title={`Snap the screen, a window or part of it (${SNAP_KEYS})`} onClick={() => macApp.snap()}>
             <CameraIcon />
+            Snap
           </button>
+        ) : (
+          showingScreen && (
+            <button className="snap-btn" title={`Snap this screen (${SNAP_KEYS})`} aria-label="Snap this screen" onClick={() => void snap()}>
+              <CameraIcon />
+            </button>
+          )
         )}
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
         {dropping && (
