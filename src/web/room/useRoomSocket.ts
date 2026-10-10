@@ -164,6 +164,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
             answersPings = true;
             break;
           case "welcome":
+            // A "done" for a notes run may have been missed while away; the next run says busy again.
+            setNotesBusy([]);
             setSegments(reapply(msg.segments, patchSegments));
             setNotes(reapply(msg.notes, patchNotes));
             setDiscussions(msg.discussions ?? []);
@@ -267,6 +269,21 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
         refusedTimer.current = setTimeout(() => setRefused(null), 4_000);
       }
       return open;
+    }
+    // A note added while offline has no real id yet: an edit or delete of it changes the waiting add instead.
+    if ((msg.type === "note.edit" || msg.type === "note.remove") && msg.noteId.startsWith("pending-")) {
+      const add = outbox.current.find((o) => `pending-${o.cid}` === msg.noteId && o.msg.type === "note.add" && o.sentAt === null);
+      if (add && add.msg.type === "note.add") {
+        if (msg.type === "note.edit") {
+          add.msg = { ...add.msg, text: msg.text, owner: msg.owner ?? null };
+          setNotes((ns) => patchNotes(ns, { cid: "", msg, sentAt: null }));
+        } else {
+          outbox.current = outbox.current.filter((o) => o !== add);
+          setWaiting(outbox.current.length);
+          setNotes((ns) => ns.filter((n) => n.id !== msg.noteId));
+        }
+        return true;
+      }
     }
     // Not crypto.randomUUID: that needs https, and people test over plain http on their network.
     const o: Outgoing = { cid: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`, msg, sentAt: null };
