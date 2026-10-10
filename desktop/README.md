@@ -7,7 +7,7 @@ The Stand app in its own window, plus **Snap from anywhere**: press **⌃⇧S** 
 - **Selected portion**: a box you drag to move and pull by its handles to resize; it's where you left it last time. Capture, Enter or a double-click snaps it.
 - **Options**: save to the meeting (on whatever is being discussed) and/or the clipboard, both on by default, and a 5 or 10 second timer. Out of a meeting, a snap goes to the clipboard.
 
-Esc or ⌃⇧S again closes it. The toolbar remembers its mode and options in `snap.json` in the app's data folder.
+Esc or ⌃⇧S again closes it. Snapping from another app never brings Stand forward: the app you're in stays in front, full screen or on another desktop included. The toolbar remembers its mode and options in `snap.json` in the app's data folder.
 
 **The floating bar.** In a meeting, whenever Stand isn't the app in front (you're presenting a web page, say), a small bar floats at the top of the screen, over every app and Space: the Stand logo (click it to go back to Stand), what's in focus in the meeting, your mic, and **Snap**. Snap opens the same toolbar; the bar steps out of the picture while it reads the screen, and the snap goes on everyone's middle screen. The bar never takes focus from the app you're in. Drag it anywhere and it stays there (`bar.json` in the app's data folder). It asks macOS to keep it out of screen sharing and screenshots, which some macOS versions ignore.
 
