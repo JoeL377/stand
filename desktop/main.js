@@ -3,7 +3,20 @@
 // anywhere: a global shortcut opens a capture toolbar like macOS's ⌘⇧5, and the
 // snap lands in the meeting you're in, pinned to whatever is in focus, and on the clipboard.
 
-const { app, BrowserWindow, ClipboardItem, Notification, clipboard, desktopCapturer, globalShortcut, ipcMain, screen, session, shell } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ClipboardItem,
+  Notification,
+  clipboard,
+  desktopCapturer,
+  globalShortcut,
+  ipcMain,
+  screen,
+  session,
+  shell,
+  systemPreferences,
+} = require("electron");
 const { execFile } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -204,14 +217,22 @@ let picking = null;
 
 async function snap() {
   if (picking) return picking.cancel();
-  const me = { cancelled: false, cancel: () => (me.cancelled = true) };
+  // Pressed again while the screen is still being read (macOS asking for permission, say):
+  // give up on this one and free the shortcut, so it can never get stuck.
+  const me = {
+    cancelled: false,
+    cancel: () => {
+      me.cancelled = true;
+      if (picking === me) picking = null;
+    },
+  };
   picking = me;
   const wasInStand = BrowserWindow.getFocusedWindow() != null;
   try {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    const [still, windows] = await Promise.all([grabDisplay(display), windowsOn(display)]);
+    const [still, windows] = (await within(Promise.all([grabDisplay(display), windowsOn(display)]), 8000)) ?? [null, []];
     if (me.cancelled) return;
-    if (!still) return cantSee();
+    if (!still || !screenAllowed()) return cantSee();
     const at = Date.now();
     const roomId = spaceId();
     const choice = await openToolbar(me, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId) });
@@ -225,7 +246,7 @@ async function snap() {
     if (prefs.timer) {
       // The timer is for setting the screen up (opening a menu, say), so it snaps the screen as it is then.
       if (!(await countdown(me, display, prefs.timer))) return;
-      shot = await grabDisplay(display);
+      shot = await within(grabDisplay(display), 8000);
       shotAt = Date.now();
       if (!shot) return cantSee();
     }
@@ -238,8 +259,20 @@ async function snap() {
   }
 }
 
-const cantSee = () =>
-  notify("Stand can't see your screen", "Allow Stand in System Settings › Privacy & Security › Screen Recording, then reopen it.");
+/** Null if it takes longer than ms. */
+const within = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
+
+/** Without the permission, macOS hands back a still of just the wallpaper, so ask it directly. */
+const screenAllowed = () => !mac || !["denied", "restricted"].includes(systemPreferences.getMediaAccessStatus("screen"));
+
+/** Says what's missing and opens the right page of System Settings. */
+function cantSee() {
+  notify(
+    "Stand can't see your screen",
+    "Turn on Stand in Screen & System Audio Recording (Terminal, if you started it from there), then reopen it.",
+  );
+  if (mac) void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+}
 
 /** The display at full resolution. */
 async function grabDisplay(display) {
