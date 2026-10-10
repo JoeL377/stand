@@ -277,10 +277,18 @@ export interface RoomState {
   /** Agenda item id -> how many meetings its open to-dos have carried over. */
   carried: Record<string, number>;
   capabilities: Capabilities;
+  /** The host pressed End meeting and the recap is being written. */
+  ending?: boolean;
 }
 
-export type ClientMessage =
-  | { type: "hello" }
+/** What a client asks of the room. Messages that change something carry a
+ *  `cid`: the server acks it, the client sends it again after a dropped
+ *  connection until it does, and the server ignores a cid it has seen. */
+export type ClientMessage = (
+  /** `meetingId`: the meeting this client was last in, when it reconnects. */
+  | { type: "hello"; meetingId?: string }
+  /** Is the connection still alive? The server answers "pong". */
+  | { type: "ping" }
   | { type: "focus"; itemId: string | null }
   | { type: "pin"; itemId: string }
   | { type: "unpin" }
@@ -308,7 +316,8 @@ export type ClientMessage =
   | { type: "demo.play" }
   /** The host, or whoever took it: take the snap off everyone's middle screen. It stays on the item. */
   | { type: "stage.snap.close" }
-  | { type: "meeting.end" };
+  | { type: "meeting.end" }
+) & { cid?: string };
 
 export type ServerMessage =
   | { type: "state"; state: RoomState }
@@ -320,6 +329,9 @@ export type ServerMessage =
   /** The agent started or finished rewriting an item's notes. */
   | { type: "notes.busy"; itemId: string | null; busy: boolean }
   | { type: "meeting.ended"; meetingId: string }
+  /** The server has a message the client sent with this cid. */
+  | { type: "ack"; cid: string }
+  | { type: "pong" }
   | { type: "error"; message: string };
 
 export interface ItemHistory {

@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -5,7 +6,7 @@ import { openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps } from "./brief.ts";
 import { looksLikePdf, parseDeck } from "./decks.ts";
 import { type CapturedNote, HeuristicAgent, type ItemNotesDraft } from "./llm.ts";
-import type { Note } from "../shared/protocol.ts";
+import type { ClientMessage, Note, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession } from "./room.ts";
 import { outlineToSlides } from "../shared/outline.ts";
@@ -398,4 +399,112 @@ test("spaces: every space is listed with its open to-dos, the ones for you, and 
   const other = toSpaceSummary(db.spaceRows(joe.id).find((r) => r.id === b.id)!, joe, null);
   assert.equal(other.mine, false);
   assert.ok(ownedBy("joe liang", "Joe Liang") && ownedBy("Joe", "Joe Liang") && !ownedBy("Joey", "Joe Liang"));
+});
+
+/** Just enough of a WebSocket for a RoomSession: what it was sent, and a way to talk to it. */
+class FakeSocket extends EventEmitter {
+  OPEN = 1;
+  readyState = 1;
+  got: ServerMessage[] = [];
+  send(data: string) {
+    this.got.push(JSON.parse(data));
+  }
+  close() {
+    if (this.readyState === 3) return;
+    this.readyState = 3;
+    this.emit("close");
+  }
+}
+async function join(session: RoomSession, user: Pick<User, "id" | "name">, hello: ClientMessage = { type: "hello" }) {
+  const ws = new FakeSocket();
+  session.attach(ws as never, { picture: null, ...user } as User);
+  await say(ws, hello);
+  return ws;
+}
+async function say(ws: FakeSocket, msg: ClientMessage) {
+  ws.emit("message", Buffer.from(JSON.stringify(msg)));
+  await new Promise((r) => setImmediate(r));
+}
+
+test("a meeting the server was running when it stopped picks up where it was, host and all", async () => {
+  const { db, session, items, meetingId } = setup();
+  const room = db.getRoom(session.roomId)!;
+  const host = await join(session, { id: "u1", name: "Joe" });
+  await join(session, { id: "u2", name: "Priya" });
+  await say(host, { type: "focus", itemId: items[1].id });
+  session.addSpeech("u2", "Priya", "Second item, still going", Date.now());
+
+  // The server restarts: the live session is gone, the meeting is still open.
+  const [open] = db.openMeetings(room.id);
+  assert.equal(open.id, meetingId);
+  assert.equal(open.hostId, "u1");
+  assert.equal(open.segmentCount, 1);
+  const again = new RoomSession(db, new HeuristicAgent(), room, () => {}, undefined, undefined, open);
+  assert.equal(again.meetingId, meetingId);
+  assert.equal(again.meetingStartedAt, session.meetingStartedAt);
+  assert.equal(again.state().focusItemId, items[1].id);
+
+  // Priya is back first, but the seat is kept for Joe.
+  await join(again, { id: "u2", name: "Priya" });
+  assert.equal(again.state().participants.find((p) => p.isHost), undefined);
+  const back = await join(again, { id: "u1", name: "Joe" });
+  assert.equal(again.state().participants.find((p) => p.isHost)?.id, "u1");
+  const welcome = back.got.find((m) => m.type === "welcome");
+  assert.equal(welcome?.type === "welcome" && welcome.segments.length, 1);
+
+  await again.end();
+  assert.ok(db.getMeeting(meetingId)?.endedAt);
+  assert.equal(db.openMeetings(room.id).length, 0);
+});
+
+test("a change sent again after a reconnect is acked and applied once", async () => {
+  const { db, session, meetingId } = setup();
+  const ws = await join(session, { id: "u1", name: "Joe" });
+  const add: ClientMessage = { type: "note.add", itemId: null, kind: "action", text: "Write the doc", owner: null, cid: "c1" };
+  await say(ws, add);
+  const again = await join(session, { id: "u1", name: "Joe" });
+  await say(again, add);
+  assert.equal(db.meetingNotes(meetingId).filter((n) => n.text === "Write the doc").length, 1);
+  assert.ok(ws.got.some((m) => m.type === "ack" && m.cid === "c1"));
+  assert.ok(again.got.some((m) => m.type === "ack" && m.cid === "c1"));
+  await session.end();
+});
+
+test("a host's dropped connection doesn't hand the meeting to someone else", async () => {
+  const { session } = setup();
+  const host = await join(session, { id: "u1", name: "Joe" });
+  await join(session, { id: "u2", name: "Priya" });
+  host.close();
+  assert.equal(session.state().participants.find((p) => p.isHost), undefined);
+  await join(session, { id: "u1", name: "Joe" });
+  assert.equal(session.state().participants.find((p) => p.isHost)?.id, "u1");
+  await session.end();
+});
+
+test("someone whose meeting ended while they were away is sent to its recap", async () => {
+  const { db, session, meetingId } = setup();
+  const room = db.getRoom(session.roomId)!;
+  await session.end();
+  const next = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  const ws = await join(next, { id: "u1", name: "Joe" }, { type: "hello", meetingId });
+  assert.deepEqual(ws.got, [{ type: "meeting.ended", meetingId }]);
+  assert.equal(next.state().participants.length, 0);
+  await next.end();
+});
+
+test("End meeting shows everyone it's ending, and the meeting ends even when the agent fails", async () => {
+  const { db, session, meetingId } = setup();
+  const agent = new HeuristicAgent();
+  agent.recapMeeting = () => Promise.reject(new Error("down"));
+  agent.summarizeMeeting = () => Promise.reject(new Error("down"));
+  const room = db.getRoom(session.roomId)!;
+  await session.end();
+  const s = new RoomSession(db, agent, room, () => {});
+  const ws = await join(s, { id: "u1", name: "Joe" });
+  s.addSpeech("u1", "Joe", "Something worth a note", Date.now());
+  await say(ws, { type: "meeting.end", cid: "end" });
+  assert.ok(ws.got.some((m) => m.type === "state" && m.state.ending));
+  assert.ok(ws.got.some((m) => m.type === "meeting.ended" && m.meetingId === s.meetingId));
+  assert.ok(db.getMeeting(s.meetingId)?.endedAt);
+  assert.ok(db.getMeeting(meetingId)?.endedAt);
 });

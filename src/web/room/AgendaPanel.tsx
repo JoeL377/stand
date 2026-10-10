@@ -21,14 +21,18 @@ export function AgendaPanel(props: {
   state: RoomState;
   send: (m: ClientMessage) => void;
   canSteer: boolean;
+  /** The connection is down: switching items waits until it's back. */
+  offline?: boolean;
   segments: Segment[];
   notes: Note[];
 }) {
-  const { roomId, state, send, canSteer, segments, notes } = props;
+  const { roomId, state, send, canSteer, offline, segments, notes } = props;
   const host = state.participants.find((p) => p.isHost);
-  const steerTitle = canSteer
-    ? "Open this item: everything said now is recorded against it"
-    : `${host?.name ?? "The host"} chooses the item`;
+  const steerTitle = !canSteer
+    ? `${host?.name ?? "The host"} chooses the item`
+    : offline
+      ? "Reconnecting… you can switch items once Stand is back"
+      : "Open this item: everything said now is recorded against it";
   const { linear, llm } = state.capabilities;
   const [openDecks, setOpenDecks] = useState<Record<string, boolean>>({});
   // One open popover at a time: "head" for + Add, "item:<id>" or "deck:<id>" for a row's menu.
@@ -64,7 +68,7 @@ export function AgendaPanel(props: {
     reported.set(u.itemId, r);
   }
   const actions = new Map<string | null, number>();
-  for (const n of notes) if (n.kind === "action") actions.set(n.itemId, (actions.get(n.itemId) ?? 0) + 1);
+  for (const n of notes) if (n.kind === "action" && !n.doneAt) actions.set(n.itemId, (actions.get(n.itemId) ?? 0) + 1);
 
   const row = (it: Item) => {
     const active = it.id === state.focusItemId;
@@ -74,7 +78,7 @@ export function AgendaPanel(props: {
     const u = reported.get(it.id);
     return (
       <li key={it.id} className={active ? "item active" : "item"}>
-        <button className="item-main" disabled={!canSteer} onClick={() => send({ type: "focus", itemId: it.id })} title={steerTitle}>
+        <button className="item-main" disabled={!canSteer || offline} onClick={() => send({ type: "focus", itemId: it.id })} title={steerTitle}>
           {active && it.source === "slide" && <span className="live-dot" aria-label="In focus" />}
           {it.source !== "slide" && (
             <span className={active ? "kind live" : "kind"} title={it.source === "linear" ? "Linear ticket" : "Agenda task"}>
@@ -232,7 +236,7 @@ export function AgendaPanel(props: {
 
   return (
     <aside
-      className={dropping ? "panel agenda dropping" : "panel agenda"}
+      className={`panel agenda${dropping ? " dropping" : ""}${canSteer && offline ? " offline" : ""}`}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes("Files")) return;
         // Images are screenshots for the item in focus (the stage takes them), not slides.
@@ -319,7 +323,7 @@ export function AgendaPanel(props: {
         <ol className="items">
           {blocks.map((b) => (b.kind === "item" ? row(b.item) : deckRow(b.block)))}
           <li className={state.focusItemId === null ? "item active" : "item"}>
-            <button className="item-main" disabled={!canSteer} title={steerTitle} onClick={() => send({ type: "focus", itemId: null })}>
+            <button className="item-main" disabled={!canSteer || offline} title={steerTitle} onClick={() => send({ type: "focus", itemId: null })}>
               <span className={state.focusItemId === null ? "kind live" : "kind"} title="Anything not on the agenda">
                 <ChatIcon />
               </span>
