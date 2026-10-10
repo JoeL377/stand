@@ -90,9 +90,17 @@
     };
     render();
   });
-  for (const button of ["open", "mic", "snap"]) $(button).onclick = () => window.bar.press(button);
+  // On press, not on click: a press on the bar can bring Stand forward, which used to hide
+  // the bar before the click finished, so the click was lost.
+  for (const button of ["open", "mic", "snap"])
+    $(button).addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      window.bar.press(button);
+    });
   // So the app knows which app you're in before a click on the bar can change that.
   document.documentElement.addEventListener("mouseenter", () => window.bar.press("hover"));
+  document.documentElement.addEventListener("mouseleave", () => window.bar.press("leave"));
 </script>
 </body>
 </html>

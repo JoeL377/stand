@@ -90,6 +90,8 @@ function showWindow(path) {
     if (!path) void win.loadURL(STAND_URL);
   }
   if (path) void win.loadURL(`${STAND_URL}${path}`);
+  // The floating bar makes the window unfocusable while the pointer is on it.
+  if (mac) win.setFocusable(true);
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
@@ -247,7 +249,7 @@ let picking = null;
 /** Snaps, and resolves to what to tell the person ({ title, body }), or nothing when they
  *  cancelled. The shortcut shows it as a notification; the page's Snap button shows it in
  *  the page, where it can't be missed. */
-async function snap() {
+async function snap(from) {
   // Pressed again while the screen is still being read (macOS asking for permission, say):
   // give up on this one and free the shortcut, so it can never get stuck.
   if (picking) {
@@ -271,7 +273,7 @@ async function snap() {
   const wasInStand = BrowserWindow.getFocusedWindow() != null;
   try {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    trace("start", { display: display.bounds, scale: display.scaleFactor, permission: screenStatus(), wasInStand });
+    trace("start", { from, display: display.bounds, scale: display.scaleFactor, permission: screenStatus(), wasInStand });
     const asked = frontInfo();
     const [still, windows] = (await within(Promise.all([grabDisplay(display), windowsOn(display)]), 8000)) ?? [null, []];
     const front = await asked;
@@ -703,11 +705,26 @@ function updateBar() {
 }
 
 async function pressOnBar(button) {
-  if (button === "hover") return void noteTheirApp();
+  if (button === "hover") {
+    // A press on the bar can make Stand the active app, and macOS then brings up Stand's
+    // window to take the keyboard. While the pointer is on the bar, that window can't.
+    if (mac && win && !win.isFocused()) win.setFocusable(false);
+    return void noteTheirApp();
+  }
+  if (button === "leave") return void (mac && !barHold && win?.setFocusable(true));
+  trace("bar", { button, theirApp: theirApp?.name });
   if (button === "open") return showWindow();
   if (button === "mic") win?.webContents.send("app:command", "mic");
-  await giveBack(button);
-  if (button === "snap") tell(await snap());
+  // The press may have just made Stand the active app; keep the bar up while that's undone.
+  barHold = true;
+  try {
+    await giveBack(button);
+  } finally {
+    barHold = false;
+    if (mac) win?.setFocusable(true);
+  }
+  if (button === "snap") tell(await snap("bar"));
+  else updateBar();
 }
 
 /** The app the person is in while the bar is up: noted when the bar appears and when the
@@ -730,6 +747,8 @@ async function giveBack(why) {
   const front = await frontInfo();
   if (!front || front.pid !== process.pid) return trace("giveback", { why, needed: false, front: front?.name });
   const them = theirApp;
+  const t0 = Date.now();
+  const held = barHold;
   barHold = true;
   try {
     // Launch Services brings it forward the way the Dock does, then macOS takes a moment to
@@ -748,10 +767,10 @@ async function giveBack(why) {
       app.hide();
       await new Promise((r) => setTimeout(r, 150));
     }
-    trace("giveback", { why, needed: true, to: them.name, front: now?.name, hid });
+    trace("giveback", { why, needed: true, to: them.name, front: now?.name, hid, ms: Date.now() - t0 });
   } finally {
-    barHold = false;
-    updateBar();
+    barHold = held;
+    if (!held) updateBar();
   }
 }
 
@@ -773,13 +792,13 @@ app.whenReady().then(async () => {
   if (mac && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, "build", "icon.png"));
   showWindow();
   // The Snap button on Stand's meeting page.
-  ipcMain.handle("app:snap", (e) => (isStand(e.senderFrame?.url) ? snap() : null));
+  ipcMain.handle("app:snap", (e) => (isStand(e.senderFrame?.url) ? snap("page") : null));
   // The meeting page, and the floating bar's buttons.
   ipcMain.on("app:meeting", (e, m) => e.sender === win?.webContents && isStand(e.senderFrame?.url) && setMeeting(m));
   ipcMain.on("bar:press", (e, button) => e.sender === bar?.webContents && void pressOnBar(button));
   // Focus moving between apps: a blur comes just before the next focus, so look once both have landed.
   for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));
-  if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap().then(tell)))
+  if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap("shortcut").then(tell)))
     notify("Snap shortcut is taken", `Another app already uses ${SNAP_SHORTCUT}, so Snap from anywhere is off.`);
   app.on("activate", () => showWindow());
 });
