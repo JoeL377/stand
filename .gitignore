@@ -3,3 +3,5 @@ dist
 data
 .env
 desktop/snap-debug.log
+desktop/native/stand-native.node
+desktop/native/build.log

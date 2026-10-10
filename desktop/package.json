@@ -7,8 +7,8 @@
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
-    "start": "electron .",
-    "app": "electron-builder --mac dir -c.mac.identity=null && codesign --force --deep --sign - dist/mac*/Stand.app",
+    "start": "node scripts/build-native.js && electron .",
+    "app": "node scripts/build-native.js --required && electron-builder --mac dir -c.mac.identity=null && codesign --force --deep --sign - dist/mac*/Stand.app",
     "dist": "node scripts/dist-mac.js",
     "dist:unsigned": "node scripts/dist-mac.js --unsigned"
   },
@@ -25,7 +25,11 @@
       "snap.html",
       "snap-preload.js",
       "bar.html",
-      "bar-preload.js"
+      "bar-preload.js",
+      "native/stand-native.node"
+    ],
+    "asarUnpack": [
+      "native/stand-native.node"
     ],
     "mac": {
       "category": "public.app-category.productivity",
