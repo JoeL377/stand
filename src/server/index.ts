@@ -154,6 +154,7 @@ const canChangeSnap = (userId: string, snap: { roomId: string; takenById: string
   snap.takenById === userId || snap.sharerId === userId || Boolean(live(snap.roomId)?.hosts(userId));
 
 // Taken in the meeting: the image is the raw body, at the size it was shared.
+// ?pasted=1 for a screenshot someone pasted or dropped in, which is nobody's shared screen.
 app.post(
   "/api/rooms/:id/snaps",
   express.raw({ type: () => true, limit: MAX_SNAP_BYTES }),
@@ -172,6 +173,7 @@ app.post(
       at: Number(req.query.at) || Date.now(),
       takenById: req.user!.id,
       takenBy: req.user!.name,
+      pasted: req.query.pasted === "1",
     });
     res.json({ id });
   }),

@@ -10,7 +10,13 @@ import { config } from "./config.ts";
 export const MAX_SNAP_BYTES = 15 * 1024 * 1024;
 
 /** A snap as stored, before it's matched to the talk around it. */
-export type SnapRow = Omit<Snap, "url" | "discussionId" | "segmentIds"> & { roomId: string; ext: string; version: number };
+export type SnapRow = Omit<Snap, "url" | "discussionId" | "segmentIds"> & {
+  roomId: string;
+  ext: string;
+  version: number;
+  /** The topic the recap placed it under; otherwise the remarks around it decide. */
+  topicId?: string | null;
+};
 
 const dir = () => path.join(config.dataDir, "snaps");
 
@@ -35,10 +41,11 @@ const NEAR_MS = 45_000;
 /** With nothing that close, the topic of the nearest remark within this. */
 const TOPIC_MS = 120_000;
 
-/** Matches each snap to the remarks spoken around it and the topic they belong to.
- *  Topics are redrafted as the meeting goes on, so this runs on every read. */
+/** Matches each snap to the remarks spoken around it and the topic they belong to,
+ *  unless the recap already placed it. Topics are redrafted as the meeting goes
+ *  on, so this runs on every read. */
 export function linkSnaps(rows: SnapRow[], segments: Segment[], discussions: Discussion[], baseUrl = ""): Snap[] {
-  return rows.map(({ roomId: _r, ext, version, ...s }) => {
+  return rows.map(({ roomId: _r, ext, version, topicId, ...s }) => {
     const onItem = segments.filter((g) => g.itemId === s.itemId);
     const byDistance = onItem.map((g) => ({ g, d: Math.abs(g.ts - s.ts) })).sort((a, b) => a.d - b.d);
     const near = byDistance.filter((x) => x.d <= NEAR_MS).slice(0, 6);
@@ -49,7 +56,8 @@ export function linkSnaps(rows: SnapRow[], segments: Segment[], discussions: Dis
       const t = topicOf(g.id);
       if (t) votes.set(t, (votes.get(t) ?? 0) + 1);
     }
-    const discussionId = [...votes].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const placed = topicId && discussions.some((d) => d.id === topicId) ? topicId : null;
+    const discussionId = placed ?? [...votes].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
     return {
       ...s,
       url: `${baseUrl}/api/snaps/${s.id}.${ext}?v=${version}`,

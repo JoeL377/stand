@@ -1,6 +1,7 @@
 // One live meeting in a room: who is here, which item is in focus, and the
 // agent's pinning of speech and chat to that item.
 
+import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
   User,
@@ -15,12 +16,12 @@ import type {
 } from "../shared/protocol.ts";
 import { capabilities } from "./config.ts";
 import type { DB } from "./db.ts";
-import type { Agent } from "./llm.ts";
+import type { Agent, RecapInput, SnapMedia } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes } from "./notesMerge.ts";
 import { newId } from "./ids.ts";
-import { linkSnaps, saveSnapFile } from "./snaps.ts";
+import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
 import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
@@ -32,6 +33,9 @@ const DISMISS_QUIET_MS = 90_000;
 const FRAME_MIN_INTERVAL_MS = 4_000;
 /** The agent keeps a frame next to a note only if it saw it this recently. */
 const FRAME_BACKS_MS = 180_000;
+/** The recap sees at most this many snaps, and this many bytes of them, so the request stays within the API's limits. */
+const RECAP_MAX_SNAPS = 20;
+const RECAP_MAX_BYTES = 18 * 1024 * 1024;
 /** Notes for the item in focus refresh this long after the last new remark. */
 const NOTES_DEBOUNCE_MS = 3_000;
 /** While talk keeps going, refresh notes at least this often instead of waiting for a pause. */
@@ -216,11 +220,22 @@ export class RoomSession implements SpeechSink {
     return rows.length ? linkSnaps(rows, this.db.meetingSegments(this.meetingId), this.db.meetingDiscussions(this.meetingId)) : [];
   }
 
-  /** Someone snapped the shared screen. It's pinned to whatever was in focus
-   *  at that moment; the agent captions it afterwards. */
-  addSnap(snap: { buf: Buffer; ext: string; width: number; height: number; at: number; takenById: string; takenBy: string }) {
+  /** Someone snapped the shared screen, or pasted or dropped a screenshot of
+   *  their own. It's pinned to whatever was in focus at that moment; the agent
+   *  captions it afterwards. */
+  addSnap(snap: {
+    buf: Buffer;
+    ext: string;
+    width: number;
+    height: number;
+    at: number;
+    takenById: string;
+    takenBy: string;
+    /** Pasted or dropped: nobody's shared screen. */
+    pasted?: boolean;
+  }) {
     const at = Math.min(Math.max(snap.at || Date.now(), this.meetingStartedAt), Date.now());
-    const sharer = [...this.participants.values()].find((p) => p.isSharing) ?? null;
+    const sharer = snap.pasted ? null : ([...this.participants.values()].find((p) => p.isSharing) ?? null);
     const id = newId(12);
     saveSnapFile(id, snap.ext, snap.buf);
     const itemId = this.focusAt(at);
@@ -743,7 +758,12 @@ export class RoomSession implements SpeechSink {
               .map((d) => ({ id: d.id, topic: d.topic, meetingStartedAt: d.meetingStartedAt }))
           : [];
         const keys = capturedFor(this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId));
-        const draft = await this.agent.notesFor(item, segments, earlier, keys);
+        // What people saved off the screen, as words: the notes never see the images.
+        const screens = this.db
+          .meetingSnaps(this.meetingId)
+          .filter((p) => p.itemId === itemId && p.caption)
+          .map((p) => ({ at: p.ts, by: p.source === "agent" ? "Stand agent" : p.takenBy, caption: p.caption! }));
+        const draft = await this.agent.notesFor(item, segments, earlier, keys, screens);
         const discussions = this.db.replaceDiscussions(
           this.meetingId,
           itemId,
@@ -831,15 +851,66 @@ export class RoomSession implements SpeechSink {
     }
     let summary = "";
     try {
-      summary = await this.agent.summarizeMeeting(perItem);
+      const recap = await this.agent.recapMeeting(this.recapInput(perItem));
+      summary = recap.summary;
+      const kept = new Map(this.db.meetingSnaps(this.meetingId).map((p) => [p.id, p]));
+      for (const place of recap.snaps) {
+        const row = kept.get(place.id);
+        if (!row) continue;
+        // The agent's own snaps were kept for a note; that stands unless the recap names another.
+        this.db.placeSnap(place.id, { ...place, noteId: place.noteId ?? (row.source === "agent" ? row.noteId : null) });
+      }
     } catch (err) {
-      console.error("[agent] summary failed:", err);
+      console.error("[agent] recap failed:", err);
+      try {
+        summary = await this.agent.summarizeMeeting(perItem);
+      } catch (err2) {
+        console.error("[agent] summary failed:", err2);
+      }
     }
     this.db.endMeeting(this.meetingId, summary || null);
     this.polisher?.schedule(this.roomId, 0);
     this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
     for (const ws of this.conns.keys()) ws.close();
     this.onClosed(this);
+  }
+
+  /** Everything the recap looks at: each item's notes and topics, and the snaps
+   *  with their images (within what one request can carry). */
+  private recapInput(perItem: Array<{ item: Item | null; notes: Note[] }>): RecapInput {
+    const discussions = this.db.meetingDiscussions(this.meetingId);
+    const segments = this.db.meetingSegments(this.meetingId);
+    const items = perItem.map((p) => ({
+      ...p,
+      topics: discussions.filter((d) => d.itemId === (p.item?.id ?? null)).map((d) => ({ id: d.id, topic: d.topic })),
+    }));
+    // Snaps people took first, then the agent's; each image under 5 MB, at most
+    // RECAP_MAX_SNAPS of them and RECAP_MAX_BYTES in all.
+    const rows = this.db.meetingSnaps(this.meetingId);
+    const linked = new Map(linkSnaps(rows, segments, discussions).map((s) => [s.id, s]));
+    const ordered = [...rows.filter((r) => r.source === "person"), ...rows.filter((r) => r.source === "agent")];
+    const snaps: RecapInput["snaps"] = [];
+    let bytes = 0;
+    for (const r of ordered) {
+      if (snaps.length >= RECAP_MAX_SNAPS) break;
+      const file = snapFile(r.id, r.ext);
+      const size = file ? fs.statSync(file).size : 0;
+      if (!file || !size || size > 5 * 1024 * 1024 || bytes + size > RECAP_MAX_BYTES) continue;
+      bytes += size;
+      const mediaType: SnapMedia = r.ext === "png" ? "image/png" : r.ext === "webp" ? "image/webp" : "image/jpeg";
+      const said = (linked.get(r.id)?.segmentIds ?? []).flatMap((id) => segments.filter((g) => g.id === id)).map((g) => `${g.speakerName}: ${g.text}`);
+      snaps.push({
+        id: r.id,
+        itemId: r.itemId,
+        at: r.ts,
+        by: r.source === "agent" ? "the Stand agent" : r.takenBy,
+        caption: r.caption,
+        said,
+        image: { data: fs.readFileSync(file).toString("base64"), mediaType },
+      });
+    }
+    snaps.sort((a, b) => a.at - b.at);
+    return { items, snaps };
   }
 
   /** For the demo script: segments currently in this meeting. */

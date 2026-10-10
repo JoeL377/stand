@@ -235,6 +235,8 @@ export function AgendaPanel(props: {
       className={dropping ? "panel agenda dropping" : "panel agenda"}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes("Files")) return;
+        // Images are screenshots for the item in focus (the stage takes them), not slides.
+        if ([...e.dataTransfer.items].every((i) => i.type.startsWith("image/"))) return;
         e.preventDefault();
         setDropping(true);
       }}
@@ -242,7 +244,7 @@ export function AgendaPanel(props: {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
       }}
       onDrop={(e) => {
-        if (!e.dataTransfer.files.length) return;
+        if (!e.dataTransfer.files.length || e.dataTransfer.files[0].type.startsWith("image/")) return;
         e.preventDefault();
         setDropping(false);
         void upload(e.dataTransfer.files[0]);

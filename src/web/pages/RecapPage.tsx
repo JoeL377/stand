@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CopyForAgent } from "../CopyForAgent.tsx";
-import { SnapStrip } from "../Snaps.tsx";
-import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, UpNext } from "../../shared/protocol.ts";
+import { SnapFigures, SnapStrip } from "../Snaps.tsx";
+import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
@@ -56,6 +56,15 @@ export function RecapPage() {
   const many = groups.length > 1;
   const src = many ? source : undefined;
   const open = actions.filter((n) => !n.doneAt).length;
+  // Each screenshot has one home: under the to-do, decision or question it
+  // backs; otherwise under the topic it was discussed in; otherwise its item.
+  const snaps = groups.flatMap((g) => g.snaps ?? []);
+  const noteIds = new Set(all.map((n) => n.id));
+  const onNote = (id: string) => snaps.filter((p) => p.noteId === id);
+  const unplaced = (p: Snap) => !(p.noteId && noteIds.has(p.noteId));
+  const onTopic = (id: string) => snaps.filter((p) => unplaced(p) && p.discussionId === id);
+  const topicIds = new Set(groups.flatMap((g) => (g.discussions ?? []).map((d) => d.id)));
+  const shots = (n: Note) => <SnapFigures snaps={onNote(n.id)} />;
 
   return (
     <div className="doc recap">
@@ -105,7 +114,7 @@ export function RecapPage() {
           <h2 className="rc-h todo">
             <TodoIcon /> To do
           </h2>
-          <FollowUpList notes={actions} onToggle={saveFollowUp(data.roomId)} source={src} />
+          <FollowUpList notes={actions} onToggle={saveFollowUp(data.roomId)} source={src} below={shots} />
         </section>
       )}
       {decided.length > 0 && (
@@ -113,7 +122,7 @@ export function RecapPage() {
           <h2 className="rc-h decided">
             <DecidedIcon /> Decided
           </h2>
-          <PointList notes={decided} kind="decided" source={src} />
+          <PointList notes={decided} kind="decided" source={src} below={shots} />
         </section>
       )}
       {questions.length > 0 && (
@@ -121,7 +130,7 @@ export function RecapPage() {
           <h2 className="rc-h question">
             <QuestionIcon /> Open questions
           </h2>
-          <PointList notes={questions} kind="question" source={src} />
+          <PointList notes={questions} kind="question" source={src} below={shots} />
         </section>
       )}
       {carried.length > 0 && (
@@ -153,9 +162,9 @@ export function RecapPage() {
                   </button>
                 </div>
                 {gist && <p className="rc-gist">{gist.text}</p>}
-                <SnapStrip snaps={g.snaps ?? []} />
+                <SnapStrip snaps={(g.snaps ?? []).filter((p) => unplaced(p) && !(p.discussionId && topicIds.has(p.discussionId)))} />
                 {(g.discussions ?? []).map((d) => (
-                  <TopicRow key={d.id} d={d} segments={g.segments} />
+                  <TopicRow key={d.id} d={d} segments={g.segments} snaps={onTopic(d.id)} />
                 ))}
                 {open_[key] && <Turns segments={g.segments} />}
               </div>
@@ -206,6 +215,7 @@ function PointList(props: {
   notes: Note[];
   kind: "decided" | "question";
   source?: (n: Note) => { label: string; href: string | null } | null;
+  below?: (n: Note) => React.ReactNode;
 }) {
   const Icon = props.kind === "decided" ? DecidedIcon : QuestionIcon;
   return (
@@ -218,6 +228,7 @@ function PointList(props: {
             <span className="rc-point-body">
               <span>{n.text}</span>
               {src && <span className="rc-src">{src.href ? <Link to={src.href}>{src.label}</Link> : src.label}</span>}
+              {props.below?.(n)}
             </span>
             <CopyForAgent kind={props.kind === "decided" ? "decision" : "question"} id={n.id} />
           </li>
@@ -234,46 +245,54 @@ const OUTCOME: Record<DiscussionOutcome, { label: string; Icon: (p: { size?: num
   info: { label: "FYI", Icon: InfoIcon },
 };
 
-/** One topic: a single line with its outcome; who said what opens below it. */
-function TopicRow({ d, segments }: { d: Discussion; segments: Segment[] }) {
+/** One topic: a single line with its outcome; who said what opens below it.
+ *  Screenshots discussed under it show below the line, with what was said around them. */
+function TopicRow({ d, segments, snaps }: { d: Discussion; segments: Segment[]; snaps: Snap[] }) {
   const [showTurns, setShowTurns] = useState(false);
   const turns = d.segmentIds.flatMap((id) => segments.filter((s) => s.id === id));
   const idOf = (name: string) => turns.find((s) => s.speakerName === name)?.speakerId ?? name;
   const o = OUTCOME[d.outcome];
   return (
-    <details className="rc-topic">
-      <summary>
-        <span className="rc-topic-title">{d.topic}</span>
-        <span className={`rc-outcome ${d.outcome}`}>
-          <o.Icon size={13} /> {o.label}
-        </span>
-        <span className="rc-people">{d.positions.map((p) => p.speaker).join(", ")}</span>
-      </summary>
-      <div className="rc-topic-body">
-        {d.continues && (
-          <p className="muted small">
-            Continues from <Link to={`/meetings/${d.continues.meetingId}`}>{fmtDate(d.continues.startedAt)}</Link>
-          </p>
-        )}
-        {d.positions.map((p, i) => (
-          <p key={i} className="rc-position">
-            <span className="who" style={{ color: colorFor(idOf(p.speaker)) }}>
-              {p.speaker}
-            </span>
-            {p.position}
-          </p>
-        ))}
-        <div className="disc-foot">
-          {turns.length > 0 && (
-            <button className="link small" onClick={() => setShowTurns((s) => !s)}>
-              {showTurns ? "Hide what was said" : `What was said (${turns.length})`}
-            </button>
+    <>
+      <details className="rc-topic">
+        <summary>
+          <span className="rc-topic-title">{d.topic}</span>
+          <span className={`rc-outcome ${d.outcome}`}>
+            <o.Icon size={13} /> {o.label}
+          </span>
+          <span className="rc-people">{d.positions.map((p) => p.speaker).join(", ")}</span>
+        </summary>
+        <div className="rc-topic-body">
+          {d.continues && (
+            <p className="muted small">
+              Continues from <Link to={`/meetings/${d.continues.meetingId}`}>{fmtDate(d.continues.startedAt)}</Link>
+            </p>
           )}
-          <CopyForAgent kind="topic" id={d.id} label />
+          {d.positions.map((p, i) => (
+            <p key={i} className="rc-position">
+              <span className="who" style={{ color: colorFor(idOf(p.speaker)) }}>
+                {p.speaker}
+              </span>
+              {p.position}
+            </p>
+          ))}
+          <div className="disc-foot">
+            {turns.length > 0 && (
+              <button className="link small" onClick={() => setShowTurns((s) => !s)}>
+                {showTurns ? "Hide what was said" : `What was said (${turns.length})`}
+              </button>
+            )}
+            <CopyForAgent kind="topic" id={d.id} label />
+          </div>
+          {showTurns && <Turns segments={turns} />}
         </div>
-        {showTurns && <Turns segments={turns} />}
-      </div>
-    </details>
+      </details>
+      {snaps.length > 0 && (
+        <div className="rc-topic-shots">
+          <SnapFigures snaps={snaps} segments={segments} />
+        </div>
+      )}
+    </>
   );
 }
 

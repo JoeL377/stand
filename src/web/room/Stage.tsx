@@ -5,7 +5,7 @@ import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
 import { Slide } from "../slides.tsx";
 import { CameraIcon } from "../icons.tsx";
-import { SnapGallery, deleteSnap, takeSnap } from "../Snaps.tsx";
+import { SnapGallery, addImageSnap, deleteSnap, takeSnap } from "../Snaps.tsx";
 
 type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "delete" };
 
@@ -97,6 +97,58 @@ export function Stage(props: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showingScreen]);
+  // Paste or drop a screenshot of your own: it's kept on the item in focus, like a snap.
+  const [dropping, setDropping] = useState(false);
+  const focusLabel = focusItem ? (keyOf(focusItem) ?? focusItem.title) : "General";
+  const addImages = async (files: File[]) => {
+    for (const f of files.slice(0, 5)) {
+      try {
+        const id = await addImageSnap(f, state.roomId);
+        toast({ text: `Added to ${focusLabel}`, snapId: id, action: "crop" });
+      } catch (err) {
+        toast({ text: String((err as Error).message ?? err) });
+      }
+    }
+  };
+  const addRef = useRef(addImages);
+  addRef.current = addImages;
+  useEffect(() => {
+    const imagesIn = (dt: DataTransfer | null) => [...(dt?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+    const carriesImage = (dt: DataTransfer | null) => [...(dt?.items ?? [])].some((i) => i.kind === "file" && i.type.startsWith("image/"));
+    const onPaste = (e: ClipboardEvent) => {
+      const files = imagesIn(e.clipboardData);
+      if (!files.length) return;
+      // Pasting into a text box with text on the clipboard pastes the text, as usual.
+      const t = e.target as HTMLElement;
+      if (t.closest("input, textarea, [contenteditable]") && e.clipboardData?.types.includes("text/plain")) return;
+      e.preventDefault();
+      void addRef.current(files);
+    };
+    let leave: ReturnType<typeof setTimeout> | undefined;
+    const onOver = (e: DragEvent) => {
+      if (!carriesImage(e.dataTransfer)) return;
+      e.preventDefault();
+      setDropping(true);
+      clearTimeout(leave);
+      leave = setTimeout(() => setDropping(false), 250);
+    };
+    const onDrop = (e: DragEvent) => {
+      const files = imagesIn(e.dataTransfer);
+      setDropping(false);
+      if (!files.length) return;
+      e.preventDefault();
+      void addRef.current(files);
+    };
+    window.addEventListener("paste", onPaste);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      clearTimeout(leave);
+      window.removeEventListener("paste", onPaste);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
   // Tell whoever is sharing when someone else snaps their screen; they can take it back.
   const seenSnaps = useRef<Set<string> | null>(null);
   useEffect(() => {
@@ -159,6 +211,11 @@ export function Stage(props: {
           </button>
         )}
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
+        {dropping && (
+          <div className="shot-drop" aria-hidden>
+            Drop to add it to {focusLabel}
+          </div>
+        )}
         {toasts.length > 0 && (
           <div className="snap-toasts" role="status">
             {toasts.map((t) => (
