@@ -31,6 +31,9 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   const roomRef = useRef<Room | null>(null);
   const [micOn, setMicOn] = useState(false);
   const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
+  useEffect(() => {
+    screenRef.current = localScreen;
+  }, [localScreen]);
   const [remoteScreen, setRemoteScreen] = useState<RemoteScreen | null>(null);
   const [speaking, setSpeaking] = useState<Set<string>>(new Set());
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
@@ -90,8 +93,21 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
         if (cancelled) return room.disconnect();
         setConnected(true);
         setNeedsAudioUnlock(!room.canPlaybackAudio);
-        await room.localParticipant.setMicrophoneEnabled(true);
-        setMicOn(true);
+        // Connected is one thing; the mic is another, with its own prompt and its own ways to fail.
+        micBusy.current = true;
+        setMicStarting(true);
+        try {
+          await room.localParticipant.setMicrophoneEnabled(true);
+          setMicOn(true);
+          setMicError(null);
+        } catch (err) {
+          const msg = mediaMessage("mic", err);
+          setMediaError(msg);
+          setMicError(msg);
+        } finally {
+          micBusy.current = false;
+          setMicStarting(false);
+        }
       } catch (err) {
         setMediaError(`Couldn't connect audio: ${(err as Error).message}`);
       }
@@ -107,14 +123,17 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
 
   // ---- mic ----------------------------------------------------------------
   const mockMicStream = useRef<MediaStream | null>(null);
-  // Leaving the page (Back, say) must let go of the mic, even if it was still being asked for.
+  // Leaving the page (Back, say) must let go of the mic and any shared screen,
+  // even if the mic was still being asked for.
   const alive = useRef(true);
+  const screenRef = useRef<MediaStream | null>(null);
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
       mockMicStream.current?.getTracks().forEach((t) => t.stop());
       mockMicStream.current = null;
+      screenRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
   /** Why the mic couldn't start, until it does: the Muted pill says so instead of "click to unmute". */

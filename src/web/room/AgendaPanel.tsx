@@ -15,7 +15,7 @@ import {
   TicketIcon,
 } from "../icons.tsx";
 import { uploadDeck } from "../slides.tsx";
-import { errorToast, toast } from "../Toasts.tsx";
+import { errorToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 
 export function AgendaPanel(props: {
@@ -182,7 +182,11 @@ export function AgendaPanel(props: {
             <HistoryIcon />
           </a>
           {canSteer && (
-            <button className="icon" title="Remove from agenda" onClick={() => void remove([it.id], short(it.title), () => api.removeItem(roomId, it.id))}>
+            <button
+              className="icon"
+              title="Remove from agenda"
+              onClick={(e) => e.detail < 2 && remove([it.id], short(it.title), () => api.removeItem(roomId, it.id))}
+            >
               <CloseIcon />
             </button>
           )}
@@ -450,7 +454,8 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
             className="icon"
             disabled={props.offline}
             title={props.offline ? "You can add it once Stand reconnects" : "Add to the agenda"}
-            onClick={() => {
+            onClick={(e) => {
+              if (e.detail > 1) return;
               addingHere.current = true;
               if (send({ type: "upnext.add", key: s.key }))
                 toast({ text: `Added ${s.title.length > 40 ? `${s.title.slice(0, 38)}…` : s.title} to the agenda` });
@@ -462,16 +467,14 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
             className="icon"
             disabled={props.offline}
             title={props.offline ? "You can dismiss it once Stand reconnects" : "Dismiss"}
-            onClick={() => {
-              if (!send({ type: "upnext.dismiss", key: s.key })) return;
+            onClick={(e) => {
+              // A double click would act on the next row too, once this one is gone.
+              if (e.detail > 1 || !send({ type: "upnext.dismiss", key: s.key })) return;
               toast({
                 text: "Suggestion dismissed",
                 action: {
                   label: "Undo",
-                  run: () => {
-                    if (!send({ type: "upnext.undismiss", key: s.key }))
-                      toast({ tone: "error", text: "Couldn't undo while Stand is reconnecting. Try again in a moment." });
-                  },
+                  run: undoing(() => send({ type: "upnext.undismiss", key: s.key })),
                 },
               });
             }}

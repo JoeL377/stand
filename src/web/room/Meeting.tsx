@@ -153,6 +153,18 @@ export function Meeting(props: {
   }, [state?.roomName, focusItem, micOn]);
   useEffect(() => () => macApp?.meeting?.(null), []);
   useEffect(() => macApp?.onCommand?.((c) => c === "mic" && void toggleMic()), [toggleMic]);
+  // Mute and unmute from the keyboard, as in other meeting apps (Command or Ctrl + D).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "d") return;
+      // On a Mac, Control + D in a text box deletes a character; leave that alone.
+      if (IS_MAC && e.ctrlKey && (e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
+      e.preventDefault();
+      void toggleMic();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleMic]);
 
   if (!state) {
     return <div className="loading">{room.trouble ? <ConnectionPill room={room} /> : room.connected ? "Joining…" : "Connecting…"}</div>;
@@ -268,7 +280,12 @@ export function Meeting(props: {
 
       <footer className="controls">
         <div className="controls-group">
-          <button className={media.micOn ? "control" : "control off"} onClick={() => void media.toggleMic()} disabled={media.micStarting}>
+          <button
+            className={media.micOn ? "control" : "control off"}
+            onClick={() => void media.toggleMic()}
+            disabled={media.micStarting}
+            title={`${media.micOn ? "Mute" : "Unmute"} (${MOD.cmd} + D)`}
+          >
             {media.micOn ? <MicIcon /> : <MicOffIcon />}
             <span>{media.micStarting ? "Starting…" : media.micOn ? "Mute" : "Unmute"}</span>
           </button>
@@ -299,6 +316,9 @@ export function Meeting(props: {
         <button
           className="control pill"
           onClick={() => {
+            // Waiting changes live only in this tab, so leaving now would drop them.
+            const n = room.waiting;
+            if (n && !confirm(`${n === 1 ? "1 change hasn't" : `${n} changes haven't`} reached Stand yet and will be lost. Leave anyway?`)) return;
             media.leave();
             props.onLeave();
           }}
@@ -399,7 +419,8 @@ function DemoMode({ parts }: { parts: string[] }) {
 }
 
 // Key names written out: ⇧ alone reads as an arrow.
-const MOD = /Mac/.test(navigator.platform) ? { ctrl: "Control", alt: "Option" } : { ctrl: "Ctrl", alt: "Alt" };
+const IS_MAC = /Mac/.test(navigator.platform);
+const MOD = IS_MAC ? { ctrl: "Control", alt: "Option", cmd: "Command" } : { ctrl: "Ctrl", alt: "Alt", cmd: "Ctrl" };
 
 function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => void }) {
   const ref = useDismiss<HTMLDivElement>(true, onClose);
@@ -410,6 +431,7 @@ function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => vo
           ["←  /  →", "Flip slides while a deck is open"],
         ] as Array<[string, string]>)
       : []),
+    [`${MOD.cmd} + D`, "Mute or unmute"],
     [`${MOD.ctrl} + Shift + S`, "Snap the shared screen into the meeting"],
     ["Paste or drop an image", "Add a screenshot to the item in focus"],
     ["Esc", "Close a menu or form"],

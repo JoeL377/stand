@@ -7,7 +7,7 @@ import { Slide } from "../slides.tsx";
 import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, addImageSnap, deleteSnap, takeSnap } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
-import { errorToast, toast } from "../Toasts.tsx";
+import { errorToast, toast, undoing } from "../Toasts.tsx";
 
 /** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
 const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
@@ -49,13 +49,11 @@ export function Stage(props: {
       text: `Moved ${ids.length} remark${ids.length === 1 ? "" : "s"} to ${keyOf(to) ?? to.title}`,
       action: {
         label: "Undo",
-        run: () => {
-          if (!send({ type: "focus", itemId: from })) {
-            toast({ tone: "error", text: "Couldn't undo while Stand is reconnecting. Try again in a moment." });
-            return;
-          }
+        run: undoing(() => {
+          if (!send({ type: "focus", itemId: from })) return false;
           for (const segmentId of ids) send({ type: "segment.move", segmentId, itemId: from });
-        },
+          return true;
+        }),
       },
     });
   };
@@ -245,7 +243,7 @@ export function Stage(props: {
             ✦
           </span>
           <span className="nudge-text">
-            {state.suggestion.source === "talk" ? "Sounds like " : "Your screen shows "}
+            {state.suggestion.source === "talk" ? "Sounds like " : sharer && sharer.id !== props.participantId ? "The shared screen shows " : "Your screen shows "}
             <strong>
               {keyOf(suggested) ? `${keyOf(suggested)} · ` : ""}
               {suggested.title}

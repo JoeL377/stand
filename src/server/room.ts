@@ -130,7 +130,7 @@ export class RoomSession implements SpeechSink {
   private removedNotes = new Map<string, Note>();
   private dismissedKeys = new Map<string, string[]>();
   /** Recent talk on the item in focus that names another item instead (see checkDrift). */
-  private drift: { itemId: string; since: number; score: number; remarks: Set<string> } | null = null;
+  private drift: { itemId: string; since: number; score: number; remarks: Set<string>; unnamed: Set<string> } | null = null;
   private transcriber: Transcriber | null = null;
   private transcriptionDown = false;
   /** The last notes run failed; people are told once, not on every retry. */
@@ -865,11 +865,24 @@ export class RoomSession implements SpeechSink {
       }
       return;
     }
-    if (!best) return;
+    if (!best) {
+      // Two remarks in a row that name neither item: the talk has likely settled back here, and
+      // accepting the nudge now would carry that on-topic talk away with it.
+      if (this.drift && this.suggestion?.source === "talk") {
+        this.drift.unnamed.add(seg.id);
+        if (this.drift.unnamed.size >= 2) {
+          this.drift = null;
+          this.suggestion = null;
+          this.broadcastState();
+        }
+      }
+      return;
+    }
     // A long gap means the earlier mentions were a passing remark, not a change of subject.
     if (this.drift?.itemId === best.item.id && seg.ts - this.drift.since < 5 * 60_000) this.drift.score += best.score;
-    else this.drift = { itemId: best.item.id, since: seg.ts, score: best.score, remarks: new Set() };
+    else this.drift = { itemId: best.item.id, since: seg.ts, score: best.score, remarks: new Set(), unnamed: new Set() };
     this.drift.remarks.add(seg.id);
+    this.drift.unnamed.clear();
     // One remark, however pointed, is a passing mention; it takes the talk coming back to it.
     if (this.drift.score < DRIFT_NUDGE_SCORE || this.drift.remarks.size < 2) return;
     const quiet = this.dismissed.get(best.item.id);

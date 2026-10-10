@@ -22,12 +22,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   // Only the latest attempt counts: a slow answer from an earlier one mustn't undo a later success.
   const attempt = useRef(0);
+  // A retry keeps the offline page up until it gets an answer, rather than flashing "Loading…".
   const load = () => {
     const n = ++attempt.current;
     const latest = () => n === attempt.current;
-    setOffline(false);
     api.config().then(
-      (c) => latest() && setCaps(c),
+      (c) => latest() && (setCaps(c), setOffline(false)),
       () => latest() && setOffline(true),
     );
     api.me().then(
@@ -36,6 +36,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   };
   useEffect(load, []);
+  // A click says it's trying, so a second click isn't needed to find out.
+  const [retrying, setRetrying] = useState(false);
+  const retry = () => {
+    setRetrying(true);
+    load();
+    setTimeout(() => setRetrying(false), 1_500);
+  };
   // While it's unreachable, keep trying, so it comes back without a click.
   useEffect(() => {
     if (!offline) return;
@@ -47,7 +54,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return (
       <div className="loading offline">
         <p>Can't reach Stand. Check your connection; this page keeps trying.</p>
-        <button onClick={load}>Try again</button>
+        <button onClick={retry} disabled={retrying}>
+          {retrying ? "Trying…" : "Try again"}
+        </button>
       </div>
     );
   if (user === undefined || !caps) return <div className="loading">Loading…</div>;

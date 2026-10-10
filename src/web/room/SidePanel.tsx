@@ -5,7 +5,7 @@ import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
 import { LiveItemNotes, type NoteEditing } from "../Discussions.tsx";
 import { SnapsPill } from "../Snaps.tsx";
-import { toast } from "../Toasts.tsx";
+import { toast, undoing } from "../Toasts.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -51,10 +51,7 @@ export function SidePanel(props: {
             text: "Note deleted",
             action: {
               label: "Undo",
-              run: () => {
-                if (!send({ type: "note.restore", noteId: n.id }))
-                  toast({ tone: "error", text: "Couldn't undo while Stand is reconnecting. Try again in a moment." });
-              },
+              run: undoing(() => send({ type: "note.restore", noteId: n.id })),
             },
           });
         },

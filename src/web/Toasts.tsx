@@ -71,6 +71,14 @@ export function errorToast(what: string, retry?: () => void) {
     });
 }
 
+/** An Undo that needs the connection: when it's down, the message keeps a button to try again. */
+export function undoing(run: () => boolean) {
+  const attempt = () => {
+    if (!run()) toast({ tone: "error", text: "Couldn't undo while Stand is reconnecting.", action: { label: "Try again", run: attempt } });
+  };
+  return attempt;
+}
+
 export function Toasts() {
   const [list, setList] = useState(shown);
   useEffect(() => {

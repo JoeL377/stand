@@ -106,6 +106,14 @@ test("talk that keeps naming another item nudges the host, and switching moves t
   assert.equal(session.state().suggestion?.itemId, items[1].id, "a second remark makes it a change of subject");
   session.addSpeech("p1", "Sam", "Back to the onboarding checklist drop-off.", later + 5_000);
   assert.equal(session.state().suggestion, null, "talk back on the item in focus withdraws the nudge");
+  // Talk that comes back without naming the item in focus withdraws it too, after two remarks.
+  session.addSpeech("p3", "Ann", "One more on the webhooks retry backoff.", later + 8_000);
+  session.addSpeech("p1", "Sam", "Yes, the webhooks retry cap.", later + 11_000);
+  assert.equal(session.state().suggestion?.itemId, items[1].id);
+  session.addSpeech("p3", "Ann", "Right, so step three loses most people.", later + 14_000);
+  assert.equal(session.state().suggestion?.itemId, items[1].id, "one remark naming neither is not enough");
+  session.addSpeech("p1", "Sam", "We should shorten it to two steps.", later + 17_000);
+  assert.equal(session.state().suggestion, null, "two in a row means the talk settled back");
   assert.equal(mentionScore("eng-1 again", items[0]), 2);
   assert.equal(mentionScore("so eng 1 again", items[0]), 2, "a key said aloud");
   assert.equal(mentionScore("Обновление платежей сломалось", { title: "Обновление платежей", externalId: null }), 2);
