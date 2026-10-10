@@ -47,7 +47,6 @@ export const api = {
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   addAgenda: (roomId: string, titles: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items`, { titles }),
   importLinear: (roomId: string, input: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/linear`, { input }),
-  loadSample: (roomId: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/sample`),
   renameItem: (roomId: string, itemId: string, title: string) =>
     call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { title }),
   removeItem: (roomId: string, itemId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/items/${itemId}`),
