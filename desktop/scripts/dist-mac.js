@@ -58,6 +58,10 @@ if (!UNSIGNED) {
   }
 }
 
+// The floating bar's native code goes in the app, so here a failed build stops the .dmg.
+const native = spawnSync(process.execPath, [path.join(__dirname, "build-native.js"), "--required"], { stdio: "inherit" });
+if (native.status !== 0) process.exit(1);
+
 const { build, Platform, Arch } = require("electron-builder");
 
 const unsignedConfig = {

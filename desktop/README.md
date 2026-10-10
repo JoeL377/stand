@@ -9,7 +9,7 @@ The Stand app in its own window, plus **Snap from anywhere**: press **⌃⇧S** 
 
 Esc or ⌃⇧S again closes it. Snapping from another app never brings Stand forward: the app you're in stays in front, full screen or on another desktop included. The toolbar remembers its mode and options in `snap.json` in the app's data folder.
 
-**The floating bar.** In a meeting, whenever Stand isn't the app in front (you're presenting a web page, say), a small bar floats at the top of the screen, over every app and Space: the Stand logo (click it to go back to Stand), what's in focus in the meeting, your mic, and **Snap**. Snap opens the same toolbar; the bar steps out of the picture while it reads the screen, and the snap goes on everyone's middle screen. The bar never takes focus from the app you're in. Drag it anywhere and it stays there (`bar.json` in the app's data folder). It asks macOS to keep it out of screen sharing and screenshots, which some macOS versions ignore.
+**The floating bar.** In a meeting, whenever Stand isn't the app in front (you're presenting a web page, say), a small bar floats at the top of the screen, over every app and Space: the Stand logo (click it to go back to Stand), what's in focus in the meeting, your mic, and **Snap**. Snap opens the same toolbar; the bar steps out of the picture while it reads the screen, and the snap goes on everyone's middle screen. Clicking the bar never takes focus from the app you're in, or brings Stand forward (that part is native Mac code, `native/stand-native.mm`). Drag it anywhere and it stays there (`bar.json` in the app's data folder). It asks macOS to keep it out of screen sharing and screenshots, which some macOS versions ignore.
 
 Guests still join in the browser. The app loads the live Stand site, so web changes show up without a new build.
 
@@ -23,6 +23,8 @@ open dist/mac*/Stand.app
 ```
 
 Drag it to Applications to keep it. `npm start` runs it straight from the source.
+
+Both build the floating bar's bit of native Mac code first, which needs Apple's command line tools (`xcode-select --install`). Run from source without them, the app still starts, the bar just brings Stand forward for a moment when clicked, and `native/build.log` says what went wrong.
 
 To point it at another Stand: `STAND_URL=http://localhost:5173 npm start`.
 

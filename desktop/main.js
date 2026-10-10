@@ -454,6 +454,7 @@ function openToolbar(me, display, still, windows, { prefs, inMeeting }) {
     overlay.setAlwaysOnTop(true, "screen-saver");
     overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     overlay.setBounds(display.bounds);
+    staysInBackground(overlay, "toolbar");
 
     let done = false;
     const finish = (choice) => {
@@ -673,6 +674,8 @@ function makeBar() {
   });
   bar.setAlwaysOnTop(true, "floating");
   bar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  // If this doesn't take, giveBack() undoes what a click on the bar does.
+  staysInBackground(bar, "bar");
   bar.setContentProtection(true);
   bar.on("moved", () => {
     const [x, y] = bar.getPosition();
@@ -690,6 +693,34 @@ function makeBar() {
     setMeeting(meeting);
   });
   void bar.loadFile(`${__dirname}/bar.html`);
+}
+
+/** Clicks on this window leave Stand in the background, the app the person is in stays in
+ *  front. Electron's panels don't fully opt out of macOS making the clicked app active;
+ *  native/stand-native.mm does. */
+function staysInBackground(w, name) {
+  if (!mac) return;
+  let prevents = false;
+  try {
+    prevents = Boolean(native()?.preventActivation(w.getNativeWindowHandle()));
+  } catch (err) {
+    trace("native", { error: String(err?.message || err) });
+  }
+  trace("window", { name, prevents });
+}
+
+/** Stand's native Mac code (native/stand-native.mm), when scripts/build-native.js built it. */
+let nativeCode;
+function native() {
+  if (nativeCode === undefined) {
+    try {
+      nativeCode = require("./native/stand-native.node");
+    } catch (err) {
+      nativeCode = null;
+      trace("native", { error: String(err?.message || err).split("\n")[0] });
+    }
+  }
+  return nativeCode;
 }
 
 /** Up while in a meeting with no Stand window in front; down otherwise. */
@@ -740,8 +771,9 @@ let barHold = false;
 let dragged;
 
 /** macOS makes an app active when one of its windows is clicked, and Electron's panels
- *  don't fully opt out of that: a click on the bar can make Stand the active app and bring
- *  its window up over the app the person is in. Bring that app back to the front. */
+ *  don't fully opt out of that: without the native code (see makeBar), a click on the bar
+ *  makes Stand the active app and brings its window up over the app the person is in.
+ *  Bring that app back to the front. */
 async function giveBack(why) {
   if (!mac || !theirApp) return;
   const front = await frontInfo();
