@@ -1338,7 +1338,7 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .snap-mark { color: var(--accent); margin-right: 6px; }
 .snap-meta { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .snap-tools { flex: none; display: flex; align-items: center; gap: 4px; }
-.snap-tools .icon-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; }
+.snap-tools .icon-btn { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .snap-thumbs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
 .snap-thumbs button { flex: none; padding: 0; border: 2px solid transparent; border-radius: 6px; background: none; cursor: pointer; opacity: 0.65; }
 .snap-thumbs button.on, .snap-thumbs button:hover { border-color: var(--accent); opacity: 1; }
