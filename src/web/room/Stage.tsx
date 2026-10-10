@@ -11,8 +11,10 @@ type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "de
 
 /** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
 const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
-/** Stand for Mac, when the page runs inside it: its snap toolbar (screen, window or part of it). */
-const macApp = (window as { standApp?: { snap(): void } }).standApp;
+/** Stand for Mac, when the page runs inside it: its snap toolbar (screen, window or part of it).
+ *  snap() resolves to what to tell the person once the snap is done, or nothing if they cancelled. */
+type SnapReport = { title: string; body: string; snapId?: string } | null | undefined;
+const macApp = (window as { standApp?: { snap(): Promise<SnapReport> } }).standApp;
 
 export function Stage(props: {
   state: RoomState;
@@ -70,10 +72,10 @@ export function Stage(props: {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState(0);
   const [cropId, setCropId] = useState<string | null>(null);
-  const toast = (t: Omit<Toast, "key">) => {
+  const toast = (t: Omit<Toast, "key">, ms = 5000) => {
     const key = Date.now() + Math.random();
     setToasts((ts) => [...ts.slice(-2), { ...t, key }]);
-    setTimeout(() => setToasts((ts) => ts.filter((x) => x.key !== key)), 5000);
+    setTimeout(() => setToasts((ts) => ts.filter((x) => x.key !== key)), ms);
   };
   const snap = async () => {
     const video = screenRef.current?.querySelector("video");
@@ -84,6 +86,17 @@ export function Stage(props: {
       toast({ text: "Snapped", snapId: id, action: "crop" });
     } catch (err) {
       toast({ text: String((err as Error).message ?? err) });
+    }
+  };
+  // The Mac app's toolbar. Whatever comes of it, including why it couldn't, shows here.
+  const snapInApp = async () => {
+    try {
+      const r = await macApp?.snap();
+      const text = r && `${r.title}. ${r.body}`;
+      // Long ones say what to fix (a permission, say), so they stay up long enough to read.
+      if (text) toast({ text, ...(r.snapId ? { snapId: r.snapId, action: "crop" as const } : {}) }, Math.max(5000, text.length * 60));
+    } catch {
+      toast({ text: "Quit the Stand app and open it again to use Snap." });
     }
   };
   const snapRef = useRef(snap);
@@ -208,7 +221,7 @@ export function Stage(props: {
 
       <div className="screen" ref={screenRef}>
         {macApp ? (
-          <button className="app-snap" title={`Snap the screen, a window or part of it (${SNAP_KEYS})`} onClick={() => macApp.snap()}>
+          <button className="app-snap" title={`Snap the screen, a window or part of it (${SNAP_KEYS})`} onClick={() => void snapInApp()}>
             <CameraIcon />
             Snap
           </button>

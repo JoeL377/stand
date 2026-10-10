@@ -5,7 +5,8 @@
 // it stay clickable.
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("standApp", { snap: () => ipcRenderer.send("app:snap") });
+// snap() resolves to what to tell the person: { title, body, snapId? }, or nothing if they cancelled.
+contextBridge.exposeInMainWorld("standApp", { snap: () => ipcRenderer.invoke("app:snap") });
 
 if (process.platform === "darwin")
   window.addEventListener("DOMContentLoaded", () => {
