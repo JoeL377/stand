@@ -56,7 +56,7 @@ function showWindow(path) {
       title: "Stand",
       backgroundColor: "#191919",
       ...chrome,
-      webPreferences: { partition: PARTITION, preload: mac ? `${__dirname}/preload.js` : undefined, contextIsolation: true, sandbox: true },
+      webPreferences: { partition: PARTITION, preload: `${__dirname}/preload.js`, contextIsolation: true, sandbox: true },
     });
     win.on("closed", () => (win = null));
     if (!path) void win.loadURL(STAND_URL);
@@ -152,19 +152,20 @@ async function finishSignIn(code, verifier, land) {
 
 // ---- microphone and screen sharing inside the window ----------------------------
 
+function isStand(url) {
+  try {
+    return new URL(url).origin === STAND_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
 function allowMediaAndSharing(ses) {
   const allowed = new Set(["media", "display-capture", "notifications", "clipboard-sanitized-write", "fullscreen"]);
-  const fromStand = (url) => {
-    try {
-      return new URL(url).origin === STAND_ORIGIN;
-    } catch {
-      return false;
-    }
-  };
   ses.setPermissionRequestHandler((wc, permission, done, details) =>
-    done(allowed.has(permission) && fromStand(details.requestingUrl || wc.getURL())),
+    done(allowed.has(permission) && isStand(details.requestingUrl || wc.getURL())),
   );
-  ses.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && fromStand(origin));
+  ses.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && isStand(origin));
   // Where macOS has its own window-and-screen picker (15 and later) it's used; otherwise the screen.
   ses.setDisplayMediaRequestHandler(
     async (_req, done) => {
@@ -507,6 +508,10 @@ app.whenReady().then(() => {
   if (!primary) return;
   allowMediaAndSharing(session.fromPartition(PARTITION));
   showWindow();
+  // The Snap button on Stand's meeting page.
+  ipcMain.on("app:snap", (e) => {
+    if (isStand(e.senderFrame?.url)) void snap();
+  });
   if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap()))
     notify("Snap shortcut is taken", `Another app already uses ${SNAP_SHORTCUT}, so Snap from anywhere is off.`);
   app.on("activate", () => showWindow());
