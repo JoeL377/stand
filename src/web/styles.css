@@ -1315,3 +1315,25 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .rc-next { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .rc-next li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .rc-next-title { font-weight: 500; }
+
+/* Synthesis instructions: the space's line and pop-up, the Manage spaces field, the recap section */
+.synth-line { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; margin-top: -6px; font-size: 13px; text-align: left; }
+.synth-line .agent-mark { font-size: 12px; }
+button.link.synth-line.set { color: var(--muted); }
+button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
+.synth-line-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.synth-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.synth-field textarea, .synth-dialog textarea { font: inherit; font-size: 14px; line-height: 1.45; color: var(--text); padding: 8px 12px; resize: vertical; min-height: 84px; }
+.synth-hint { margin: -6px 0 0; }
+.synth-dialog { width: min(520px, 100%); }
+.synth-dialog p { margin: 0; }
+.rc-h.synth .agent-mark { font-size: 16px; }
+.md { font-size: 15px; line-height: 1.55; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 10px; }
+.md h4 { font-size: 15px; font-weight: 600; margin: 14px 0 6px; }
+.md ul, .md ol { margin: 0 0 10px; padding-left: 22px; }
+.md li + li { margin-top: 3px; }
+.md blockquote { margin: 0 0 10px; padding: 2px 0 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.md code { font-size: 13px; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }

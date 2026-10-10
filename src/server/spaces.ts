@@ -23,6 +23,7 @@ export function toSpaceSummary(row: Row, user: { id: string; name: string }, liv
     id: row.id,
     name: row.name,
     purpose: row.purpose,
+    synthesisInstructions: row.synthesisInstructions,
     mine: row.createdBy === user.id,
     following: row.following,
     activeAt: live ? Date.now() : row.activeAt,

@@ -625,7 +625,8 @@ export class RoomSession implements SpeechSink {
               .map((d) => ({ id: d.id, topic: d.topic, meetingStartedAt: d.meetingStartedAt }))
           : [];
         const keys = capturedFor(this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId));
-        const draft = await this.agent.notesFor(item, segments, earlier, keys);
+        const instructions = this.db.getRoom(this.roomId)?.synthesisInstructions;
+        const draft = await this.agent.notesFor(item, segments, earlier, keys, { instructions });
         const discussions = this.db.replaceDiscussions(
           this.meetingId,
           itemId,
@@ -708,13 +709,28 @@ export class RoomSession implements SpeechSink {
     for (const id of itemIds) {
       perItem.push({ item: id ? this.db.getItem(id) : null, notes: await this.refreshNotes(id) });
     }
-    let summary = "";
-    try {
-      summary = await this.agent.summarizeMeeting(perItem);
-    } catch (err) {
-      console.error("[agent] summary failed:", err);
-    }
-    this.db.endMeeting(this.meetingId, summary || null);
+    // The summary, and the Synthesis when the space has instructions for one, side by side.
+    const room = this.db.getRoom(this.roomId);
+    const instructions = room?.synthesisInstructions.trim() ?? "";
+    const [summary, synthesis] = await Promise.all([
+      this.agent.summarizeMeeting(perItem).catch((err) => {
+        console.error("[agent] summary failed:", err);
+        return "";
+      }),
+      instructions
+        ? this.agent
+            .synthesizeMeeting({
+              spaceName: room!.name,
+              instructions,
+              items: perItem.map((p) => ({ ...p, segments: segments.filter((s) => s.itemId === (p.item?.id ?? null)) })),
+            })
+            .catch((err) => {
+              console.error("[agent] synthesis failed:", err);
+              return null;
+            })
+        : null,
+    ]);
+    this.db.endMeeting(this.meetingId, summary || null, synthesis);
     this.polisher?.schedule(this.roomId, 0);
     this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
     for (const ws of this.conns.keys()) ws.close();

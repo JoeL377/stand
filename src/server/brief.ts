@@ -4,7 +4,7 @@
 
 import type { Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment } from "../shared/protocol.ts";
 
-type Meeting = { id: string; roomId: string; startedAt: number; endedAt: number | null; summary: string | null };
+type Meeting = { id: string; roomId: string; startedAt: number; endedAt: number | null; summary: string | null; synthesis?: string | null };
 
 export const BRIEF_SCHEMA = "stand.meeting-brief/v1";
 export const FOLLOW_UPS_SCHEMA = "stand.follow-ups/v1";
@@ -64,6 +64,10 @@ export interface MeetingBrief {
     recapUrl: string;
   };
   summary: string | null;
+  /** The space, and what it asks the agent to pull out of every meeting (null when nothing). */
+  space: { id: string; name: string; synthesisInstructions: string | null };
+  /** What those instructions produced for this meeting, as Markdown; null without instructions. */
+  synthesis: string | null;
   /** Every action item, across the agenda: the follow-up to-do list. */
   actions: BriefAction[];
   /** Action items from the room's earlier meetings that are still open. */
@@ -122,6 +126,8 @@ function toAction(n: Note, item: BriefItemRef, discussionById?: DiscussionLookup
 export function buildBrief(input: {
   meeting: Meeting;
   roomName: string;
+  /** The space's synthesis instructions, if it has any. */
+  synthesisInstructions?: string;
   groups: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions?: Discussion[] }>;
   decks: Deck[];
   baseUrl: string;
@@ -147,6 +153,8 @@ export function buildBrief(input: {
       recapUrl: `${baseUrl}/meetings/${m.id}`,
     },
     summary: m.summary,
+    space: { id: m.roomId, name: input.roomName, synthesisInstructions: input.synthesisInstructions?.trim() || null },
+    synthesis: m.synthesis ?? null,
     actions: [],
     carriedOver: (input.followUps ?? [])
       .filter((f) => f.meetingId !== m.id && f.meetingStartedAt < m.startedAt && !f.doneAt)
@@ -218,12 +226,14 @@ export function briefToMarkdown(b: MeetingBrief): string {
     ...(b.meeting.durationMinutes ? [`duration_minutes: ${b.meeting.durationMinutes}`] : []),
     `attendees: [${b.meeting.attendees.map((a) => JSON.stringify(a)).join(", ")}]`,
     `recap: ${b.meeting.recapUrl}`,
+    ...(b.space.synthesisInstructions ? [`synthesis_instructions: ${JSON.stringify(b.space.synthesisInstructions)}`] : []),
     "---",
     "",
     `# ${b.meeting.room.name} · ${date}`,
     "",
   ];
   if (b.summary) out.push(b.summary, "");
+  if (b.synthesis) out.push("## Synthesis", "", b.synthesis.trim(), "");
 
   out.push("## Action items", "");
   if (b.actions.length) for (const a of b.actions) out.push(actionLine(a));

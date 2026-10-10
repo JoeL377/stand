@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
+import { SYNTHESIS_HINT, SynthesisField } from "../Synthesis.tsx";
 import { SpacesShell, spaceHref } from "./SpacesShell.tsx";
 
-/** The spaces you created: rename them and keep their purpose current. */
+/** The spaces you created: rename them, keep their purpose current, and say what to synthesize from each meeting. */
 export function ManageSpaces() {
   const [all, setAll] = useState<SpaceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,16 +36,17 @@ export function ManageSpaces() {
 function SpaceEditor({ s }: { s: SpaceSummary }) {
   const [name, setName] = useState(s.name);
   const [purpose, setPurpose] = useState(s.purpose);
-  const [saved, setSaved] = useState({ name: s.name, purpose: s.purpose });
+  const [synthesis, setSynthesis] = useState(s.synthesisInstructions);
+  const [saved, setSaved] = useState({ name: s.name, purpose: s.purpose, synthesis: s.synthesisInstructions });
   const [state, setState] = useState<"idle" | "saving" | "saved" | string>("idle");
-  const dirty = name.trim() !== saved.name || purpose.trim() !== saved.purpose;
+  const dirty = name.trim() !== saved.name || purpose.trim() !== saved.purpose || synthesis.trim() !== saved.synthesis;
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setState("saving");
     try {
-      const r = await api.updateSpace(s.id, { name: name.trim(), purpose: purpose.trim() });
-      setSaved({ name: r.name, purpose: r.purpose });
+      const r = await api.updateSpace(s.id, { name: name.trim(), purpose: purpose.trim(), synthesisInstructions: synthesis.trim() });
+      setSaved({ name: r.name, purpose: r.purpose, synthesis: r.synthesisInstructions });
       setState("saved");
     } catch (err) {
       setState((err as Error).message);
@@ -66,6 +68,8 @@ function SpaceEditor({ s }: { s: SpaceSummary }) {
           maxLength={200}
         />
       </label>
+      <SynthesisField value={synthesis} onChange={setSynthesis} />
+      <p className="muted small synth-hint">{SYNTHESIS_HINT}</p>
       <div className="sp-manage-foot">
         <button className="primary" disabled={!dirty || state === "saving"}>
           Save
