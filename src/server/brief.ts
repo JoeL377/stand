@@ -37,6 +37,16 @@ export interface BriefAction {
   item: BriefItemRef;
   /** The discussion it came out of: why this needs doing, and who said what. */
   discussion: { id: string; topic: string; positions: Discussion["positions"] } | null;
+  /** Screenshots that show what this is about (this meeting's brief only). */
+  images?: BriefImage[];
+}
+
+/** A screenshot placed under a note or topic, with what it shows and why it mattered. */
+export interface BriefImage {
+  snapId: string;
+  /** Agents fetch it with the same token they use for the MCP. */
+  imageUrl: string;
+  caption: string | null;
 }
 
 export interface BriefDiscussion {
@@ -47,6 +57,8 @@ export interface BriefDiscussion {
   decisions: string[];
   actionIds: string[];
   openQuestions: string[];
+  /** Screenshots discussed under this topic that back no single note. */
+  images: BriefImage[];
   /** The same question discussed in an earlier meeting. */
   continues: { id: string; meetingId: string; startedAt: string; topic: string; recapUrl: string } | null;
   transcript?: Array<{ speaker: string; kind: "speech" | "chat"; at: string; text: string }>;
@@ -68,8 +80,8 @@ export interface MeetingBrief {
   actions: BriefAction[];
   /** Action items from the room's earlier meetings that are still open. */
   carriedOver: BriefAction[];
-  decisions: Array<{ id: string; text: string; item: BriefItemRef }>;
-  openQuestions: Array<{ id: string; text: string; item: BriefItemRef }>;
+  decisions: Array<{ id: string; text: string; item: BriefItemRef; images: BriefImage[] }>;
+  openQuestions: Array<{ id: string; text: string; item: BriefItemRef; images: BriefImage[] }>;
   /** The same notes grouped by agenda item, in agenda order. */
   items: Array<{
     item: BriefItemRef;
@@ -96,7 +108,7 @@ export interface BriefSnap {
   source: "person" | "agent";
   caption: string | null;
   topic: string | null;
-  /** The note it backs, for agent snaps. */
+  /** The to-do, decision or open question it backs, if any. */
   noteId: string | null;
   /** What was said around it. */
   said: Array<{ speaker: string; text: string }>;
@@ -175,15 +187,21 @@ export function buildBrief(input: {
   };
 
   const turn = (s: Segment) => ({ speaker: s.speakerName, kind: s.kind, at: iso(s.ts), text: s.text });
+  // Each snap has one home: the note it backs, else the topic it was discussed in.
+  const noteIds = new Set(input.groups.flatMap((g) => g.notes.map((n) => n.id)));
+  const allSnaps = input.groups.flatMap((g) => g.snaps ?? []);
+  const image = (p: Snap): BriefImage => ({ snapId: p.id, imageUrl: p.url.startsWith("/") ? `${baseUrl}${p.url}` : p.url, caption: p.caption });
+  const imagesOfNote = (id: string) => allSnaps.filter((p) => p.noteId === id).map(image);
+  const imagesOfTopic = (id: string) => allSnaps.filter((p) => !(p.noteId && noteIds.has(p.noteId)) && p.discussionId === id).map(image);
   for (const g of input.groups) {
     const r = ref(g.item);
     const discussions = g.discussions ?? [];
     const here = new Map(discussions.map((d) => [d.id, d]));
     const of = (kind: Note["kind"]) => g.notes.filter((n) => n.kind === kind);
-    const actions = of("action").map((n) => toAction(n, r, (id) => here.get(id)));
+    const actions = of("action").map((n) => ({ ...toAction(n, r, (id) => here.get(id)), images: imagesOfNote(n.id) }));
     brief.actions.push(...actions);
-    brief.decisions.push(...of("decision").map((n) => ({ id: n.id, text: n.text, item: r })));
-    brief.openQuestions.push(...of("question").map((n) => ({ id: n.id, text: n.text, item: r })));
+    brief.decisions.push(...of("decision").map((n) => ({ id: n.id, text: n.text, item: r, images: imagesOfNote(n.id) })));
+    brief.openQuestions.push(...of("question").map((n) => ({ id: n.id, text: n.text, item: r, images: imagesOfNote(n.id) })));
     brief.items.push({
       item: r,
       summary: of("summary")[0]?.text ?? null,
@@ -201,6 +219,7 @@ export function buildBrief(input: {
           decisions: mine("decision").map((n) => n.text),
           actionIds: mine("action").map((n) => n.id),
           openQuestions: mine("question").map((n) => n.text),
+          images: imagesOfTopic(d.id),
           continues: d.continues
             ? { ...d.continues, startedAt: iso(d.continues.startedAt), recapUrl: `${baseUrl}/meetings/${d.continues.meetingId}` }
             : null,
@@ -211,7 +230,7 @@ export function buildBrief(input: {
       }),
       snaps: (g.snaps ?? []).map((p) => ({
         id: p.id,
-        imageUrl: p.url.startsWith("/") ? `${baseUrl}${p.url}` : p.url,
+        imageUrl: image(p).imageUrl,
         at: iso(p.ts),
         takenBy: p.takenBy,
         source: p.source,
@@ -234,6 +253,9 @@ const actionLine = (a: BriefAction) =>
   `- [${a.status === "done" ? "x" : " "}] ${a.text} (owner: ${a.owner ?? "unassigned"}${a.doneBy ? `, done by ${a.doneBy}` : ""}) · ${link(a.item)}${
     a.discussion ? ` · from "${a.discussion.topic}"` : ""
   }`;
+/** Screenshots as Markdown images, indented under the line they belong to. */
+const imageLines = (images: BriefImage[] | undefined, indent = "  ") =>
+  (images ?? []).map((p) => `${indent}![${(p.caption ?? "Screenshot").replace(/[[\]]/g, "")}](${p.imageUrl})`);
 
 /** The brief as Markdown with YAML front matter: easy to paste into an agent or a doc. */
 export function briefToMarkdown(b: MeetingBrief): string {
@@ -255,7 +277,7 @@ export function briefToMarkdown(b: MeetingBrief): string {
   if (b.summary) out.push(b.summary, "");
 
   out.push("## Action items", "");
-  if (b.actions.length) for (const a of b.actions) out.push(actionLine(a));
+  if (b.actions.length) for (const a of b.actions) out.push(actionLine(a), ...imageLines(a.images));
   else out.push("None.");
   out.push("");
   if (b.carriedOver.length) {
@@ -265,12 +287,12 @@ export function briefToMarkdown(b: MeetingBrief): string {
   }
   if (b.decisions.length) {
     out.push("## Decisions", "");
-    for (const d of b.decisions) out.push(`- ${d.text} · ${link(d.item)}`);
+    for (const d of b.decisions) out.push(`- ${d.text} · ${link(d.item)}`, ...imageLines(d.images));
     out.push("");
   }
   if (b.openQuestions.length) {
     out.push("## Open questions", "");
-    for (const q of b.openQuestions) out.push(`- ${q.text} · ${link(q.item)}`);
+    for (const q of b.openQuestions) out.push(`- ${q.text} · ${link(q.item)}`, ...imageLines(q.images));
     out.push("");
   }
 
@@ -293,7 +315,8 @@ export function briefToMarkdown(b: MeetingBrief): string {
       for (const t of d.decisions) out.push(`- Decision: ${t}`);
       for (const id of d.actionIds) out.push(actionLine2(id));
       for (const q of d.openQuestions) out.push(`- Question: ${q}`);
-      if (d.decisions.length || d.actionIds.length || d.openQuestions.length) out.push("");
+      if (d.images.length) out.push(...imageLines(d.images, ""));
+      if (d.decisions.length || d.actionIds.length || d.openQuestions.length || d.images.length) out.push("");
     }
     // Notes from before discussions existed, or that belong to none.
     const inAny = new Set(g.discussions.flatMap((d) => [...d.decisions, ...d.openQuestions]));

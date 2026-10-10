@@ -141,7 +141,9 @@ CREATE TABLE IF NOT EXISTS snaps (
   sharer_id TEXT,
   sharer_name TEXT,
   caption TEXT,
-  note_id TEXT
+  note_id TEXT,
+  -- The topic the end-of-meeting recap placed it under, when it backs no note.
+  discussion_id TEXT
 );
 CREATE INDEX IF NOT EXISTS snaps_meeting ON snaps(meeting_id, ts);
 CREATE INDEX IF NOT EXISTS snaps_item ON snaps(item_id, ts);
@@ -287,6 +289,7 @@ const toSnapRow = (r: Row): SnapRow => ({
   sharerName: (r.sharer_name as string) ?? null,
   caption: (r.caption as string) ?? null,
   noteId: (r.note_id as string) ?? null,
+  topicId: (r.discussion_id as string) ?? null,
 });
 
 const toNote = (r: Row): Note => ({
@@ -363,6 +366,8 @@ export function openDb(file?: string) {
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
+  const snapCols = (db.prepare("PRAGMA table_info(snaps)").all() as Row[]).map((c) => c.name);
+  if (!snapCols.includes("discussion_id")) db.exec("ALTER TABLE snaps ADD COLUMN discussion_id TEXT;");
   if (!deckCols.includes("kind"))
     db.exec(
       "ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';",
@@ -1074,6 +1079,15 @@ export function openDb(file?: string) {
           )
           .all(itemId, limit) as Row[]
       ).map(toSnapRow);
+    },
+    /** Where the recap put a snap: under the note it backs, or the topic it was discussed in. */
+    placeSnap(id: string, place: { noteId: string | null; discussionId: string | null; caption: string }) {
+      db.prepare("UPDATE snaps SET note_id = ?, discussion_id = ?, caption = ? WHERE id = ?").run(
+        place.noteId,
+        place.discussionId,
+        place.caption,
+        id,
+      );
     },
     setSnapCaption(id: string, caption: string) {
       db.prepare("UPDATE snaps SET caption = ? WHERE id = ?").run(caption, id);

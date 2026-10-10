@@ -33,6 +33,34 @@ export type EarlierDiscussion = { id: string; topic: string; meetingStartedAt: n
  *  rerun can say which of its notes restate them instead of starting over. */
 export type CapturedNote = { key: string; kind: "action" | "decision"; text: string; owner: string | null };
 
+/** A snap taken while an item was in focus, as the live notes see it: words only, never the image. */
+export type ScreenNote = { at: number; by: string; caption: string };
+
+/** What the end-of-meeting recap is given: every item's notes and topics, and
+ *  the snaps people kept, with the images themselves. */
+export interface RecapInput {
+  items: Array<{ item: Item | null; notes: Note[]; topics: Array<{ id: string; topic: string }> }>;
+  snaps: Array<{
+    id: string;
+    itemId: string | null;
+    at: number;
+    by: string;
+    /** The line written when it was taken, if any. */
+    caption: string | null;
+    /** What was said around it, "Name: text". */
+    said: string[];
+    image: { data: string; mediaType: SnapMedia };
+  }>;
+}
+
+/** The recap: a few sentences, and where each snap belongs. A snap that backs a
+ *  to-do, decision or open question sits under it; otherwise under the topic it
+ *  was discussed in. The caption says what it shows and why it mattered. */
+export interface RecapDraft {
+  summary: string;
+  snaps: Array<{ id: string; noteId: string | null; discussionId: string | null; caption: string }>;
+}
+
 export interface ScreenMatch {
   itemId: string | null;
   confidence: number;
@@ -41,9 +69,17 @@ export interface ScreenMatch {
 
 export interface Agent {
   /** Groups an item's talk into discussions and writes the notes that came out of each. */
-  notesFor(item: Item | null, segments: Segment[], earlier?: EarlierDiscussion[], captured?: CapturedNote[]): Promise<ItemNotesDraft>;
+  notesFor(
+    item: Item | null,
+    segments: Segment[],
+    earlier?: EarlierDiscussion[],
+    captured?: CapturedNote[],
+    screens?: ScreenNote[],
+  ): Promise<ItemNotesDraft>;
   matchScreen(jpegDataUrl: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch>;
   summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
+  /** The recap with the meeting's snaps in view: the summary, plus a home and a caption for each snap. */
+  recapMeeting(input: RecapInput): Promise<RecapDraft>;
   /** Slides from a brief: an outline, rough notes or a one-line ask. */
   draftDeck(brief: string): Promise<DraftSlide[]>;
   /** One line on what a snap of the shared screen shows. Null without a model. */
@@ -147,6 +183,22 @@ const BacksSchema = z.object({
   caption: z.string().describe("What's on screen, in one short line under 110 characters"),
 });
 
+const RecapSchema = z.object({
+  summary: z.string().describe("A 2-4 sentence recap of the meeting. Plain prose, no headings, lead with what matters most."),
+  screenshots: z
+    .array(
+      z.object({
+        key: z.string().describe("The screenshot's key, exactly as given (S1, S2...)"),
+        note: z.string().nullable().describe("The key (N1, N2...) of the to-do, decision or open question this screenshot backs, or null"),
+        topic: z.string().nullable().describe("The key (T1, T2...) of the topic it was discussed in, or null"),
+        caption: z
+          .string()
+          .describe("One line under 140 characters: what the image shows and why it mattered to the conversation"),
+      }),
+    )
+    .describe("One entry per screenshot given"),
+});
+
 const AgendaSchema = z.object({
   agenda: z
     .array(
@@ -192,7 +244,13 @@ class ClaudeAgent implements Agent {
     return (res.parsed_output as T | null) ?? null;
   }
 
-  async notesFor(item: Item | null, segments: Segment[], earlier: EarlierDiscussion[] = [], captured: CapturedNote[] = []): Promise<ItemNotesDraft> {
+  async notesFor(
+    item: Item | null,
+    segments: Segment[],
+    earlier: EarlierDiscussion[] = [],
+    captured: CapturedNote[] = [],
+    screens: ScreenNote[] = [],
+  ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
     const numbered = segments
       .map((s, i) => `[${i + 1}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
@@ -208,9 +266,15 @@ class ClaudeAgent implements Agent {
           .map((c) => `- ${c.key} ${c.kind === "action" ? "action item" : "decision"}: ${c.text}${c.owner ? ` (owner: ${c.owner})` : ""}`)
           .join("\n")}`
       : "";
+    const shown = screens.length
+      ? `\n\nScreens people saved while this item was in focus (what was on each, as text):\n${screens
+          .slice(-10)
+          .map((s) => `- ${new Date(s.at).toISOString().slice(11, 16)} ${s.by}: ${s.caption}`)
+          .join("\n")}`
+      : "";
     const out = await this.parse(
       NotesSchema,
-      `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${already}
+      `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${already}${shown}
 
 What was said while this item was in focus (speech transcript and in-room chat, in order):
 ${numbered}`,
@@ -366,6 +430,80 @@ Order: things blocked or waiting on a decision first, then open questions, then 
     return rows;
   }
 
+  async recapMeeting(input: RecapInput): Promise<RecapDraft> {
+    const perItem = input.items.map((g) => ({ item: g.item, notes: g.notes }));
+    if (!input.snaps.length) return { summary: await this.summarizeMeeting(perItem), snaps: [] };
+    // Short keys for notes, topics and snaps, so the answer can point at them.
+    const noteKey = new Map<string, Note>();
+    const topicKey = new Map<string, { id: string; itemId: string | null }>();
+    const lines: string[] = [];
+    for (const g of input.items) {
+      if (!g.notes.length && !g.topics.length) continue;
+      lines.push(`## ${itemLabel(g.item)}`);
+      const gist = g.notes.find((n) => n.kind === "summary");
+      if (gist) lines.push(gist.text);
+      const tKey = new Map<string, string>();
+      for (const t of g.topics) {
+        const k = `T${topicKey.size + 1}`;
+        topicKey.set(k, { id: t.id, itemId: g.item?.id ?? null });
+        tKey.set(t.id, k);
+        lines.push(`- ${k} topic: ${t.topic}`);
+      }
+      for (const n of g.notes) {
+        if (n.kind === "summary") continue;
+        const k = `N${noteKey.size + 1}`;
+        noteKey.set(k, n);
+        const kind = n.kind === "action" ? "to-do" : n.kind === "decision" ? "decision" : "open question";
+        const under = n.discussionId && tKey.get(n.discussionId) ? ` (under ${tKey.get(n.discussionId)})` : "";
+        lines.push(`- ${k} ${kind}: ${n.text}${n.owner ? ` (owner: ${n.owner})` : ""}${under}`);
+      }
+      lines.push("");
+    }
+    const label = (itemId: string | null) => itemLabel(input.items.find((g) => (g.item?.id ?? null) === itemId)?.item ?? null);
+    const content: Anthropic.Beta.BetaContentBlockParam[] = [
+      { type: "text", text: `The meeting's notes, by agenda item:\n\n${lines.join("\n").trim() || "(no notes)"}\n\nScreenshots people saved during it, in order:` },
+    ];
+    input.snaps.forEach((s, i) => {
+      content.push(
+        {
+          type: "text",
+          text: `S${i + 1}: saved by ${s.by} at ${new Date(s.at).toISOString().slice(11, 16)} while on ${label(s.itemId)}.${
+            s.caption ? ` First look: ${s.caption}` : ""
+          }${s.said.length ? `\nSaid around then:\n${s.said.slice(0, 6).join("\n")}` : ""}`,
+        },
+        { type: "image", source: { type: "base64", media_type: s.image.mediaType, data: s.image.data } },
+      );
+    });
+    content.push({ type: "text", text: "Write the recap, and place and caption every screenshot." });
+    const out = await this.parse(
+      RecapSchema,
+      content,
+      `You write the recap of a team meeting from its notes, and place the screenshots people saved during it.
+
+Summary: 2-4 sentences, plain prose, no headings, lead with what matters most.
+
+Screenshots: each gets one home. If it backs a to-do, decision or open question (it shows the thing decided on, the work to do, or what the question is about, so someone acting on that note would want to see it), give that note's key. Otherwise give the topic it was discussed in. Prefer notes and topics from the item it was saved on. Give neither only when it relates to nothing in the notes.
+
+Caption: one line saying what the image shows and why it mattered to the conversation. Name the specific thing on screen (the chart, error, design, number or page) and what the team said or decided about it. It may be a problem, but it may just as well be a design under review, a number someone pointed at, or context for the talk. Don't invent anything that isn't in the image or the notes.`,
+      "medium",
+    );
+    if (!out) return { summary: await this.summarizeMeeting(perItem), snaps: [] };
+    const snaps: RecapDraft["snaps"] = [];
+    for (const r of out.screenshots) {
+      const snap = input.snaps[Number(r.key.replace(/^S/i, "")) - 1];
+      if (!snap || snaps.some((x) => x.id === snap.id)) continue;
+      const note = r.note ? noteKey.get(r.note) : undefined;
+      const topic = r.topic ? topicKey.get(r.topic) : undefined;
+      snaps.push({
+        id: snap.id,
+        noteId: note?.id ?? null,
+        discussionId: note?.discussionId ?? topic?.id ?? null,
+        caption: r.caption.trim().slice(0, 200),
+      });
+    }
+    return { summary: out.summary.trim(), snaps };
+  }
+
   async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {
     const body = perItem
       .filter((p) => p.notes.length)
@@ -462,6 +600,10 @@ export class HeuristicAgent implements Agent {
 
   async frameBacks(): Promise<{ key: string; caption: string } | null> {
     return null;
+  }
+
+  async recapMeeting(input: RecapInput): Promise<RecapDraft> {
+    return { summary: await this.summarizeMeeting(input.items), snaps: [] };
   }
 
   async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {

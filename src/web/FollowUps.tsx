@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import type { Deck, Item, Note } from "../shared/protocol.ts";
@@ -30,6 +30,8 @@ export function FollowUpList(props: {
   source?: (n: FollowUpNote) => { label: string; href: string | null } | null;
   showDate?: boolean;
   compact?: boolean;
+  /** Anything to show under an action's line, like the screenshots it backs. */
+  below?: (n: FollowUpNote) => ReactNode;
 }) {
   const [saved, setSaved] = useState<Record<string, Note>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -70,6 +72,7 @@ export function FollowUpList(props: {
                 {props.showDate && n.meetingStartedAt && <span>{fmtDate(n.meetingStartedAt)}</span>}
                 {done && n.doneBy && <span>Done by {n.doneBy}</span>}
               </span>
+              {props.below?.(n)}
             </span>
             <CopyForAgent kind="action" id={n.id} />
           </li>

@@ -3,7 +3,7 @@
 // the frame as shared, and any cropping happens later in the gallery.
 
 import { useEffect, useRef, useState } from "react";
-import type { Snap } from "../shared/protocol.ts";
+import type { Segment, Snap } from "../shared/protocol.ts";
 import { CameraIcon, CloseIcon, CropIcon, TrashIcon } from "./icons.tsx";
 import { fmtTime } from "./util.ts";
 
@@ -17,10 +17,36 @@ export async function takeSnap(video: HTMLVideoElement, roomId: string): Promise
   canvas.width = w;
   canvas.height = h;
   canvas.getContext("2d")!.drawImage(video, 0, 0, w, h);
+  return uploadSnap(canvas, roomId, at, false);
+}
+
+/** A screenshot someone pasted or dropped in: kept on the item in focus, like a snap. */
+export async function addImageSnap(file: Blob, roomId: string): Promise<string> {
+  const at = Date.now();
+  const bmp = await createImageBitmap(file).catch(() => {
+    throw new Error("That image couldn't be read.");
+  });
+  // Huge images are scaled down to what the agent can read.
+  const scale = Math.min(1, 4000 / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#fff"; // transparent PNGs on white, not black
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  return uploadSnap(canvas, roomId, at, true);
+}
+
+async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number, pasted: boolean): Promise<string> {
   const blob = await new Promise<Blob>((ok, fail) =>
-    canvas.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't read the frame"))), "image/jpeg", 0.92),
+    canvas.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't read the image"))), "image/jpeg", 0.92),
   );
-  const res = await fetch(`/api/rooms/${roomId}/snaps?at=${at}&w=${w}&h=${h}`, { method: "POST", body: blob });
+  const res = await fetch(`/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}${pasted ? "&pasted=1" : ""}`, {
+    method: "POST",
+    body: blob,
+  });
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Couldn't save the snap");
   return ((await res.json()) as { id: string }).id;
 }
@@ -197,6 +223,46 @@ function CropView(props: { snap: Snap; onDone: () => void }) {
         </div>
       </div>
     </>
+  );
+}
+
+/** Snaps in the recap, each in its home (under a note or a topic): the image,
+ *  what it shows and why it mattered, and, under a topic, what was said around it. */
+export function SnapFigures(props: { snaps: Snap[]; segments?: Segment[] }) {
+  const [at, setAt] = useState<number | null>(null);
+  if (!props.snaps.length) return null;
+  return (
+    <div className="rc-shots">
+      {props.snaps.map((s, k) => {
+        const said = (props.segments ? s.segmentIds.flatMap((id) => props.segments!.filter((g) => g.id === id)) : []).slice(0, 2);
+        return (
+          <figure key={s.id} className="rc-shot">
+            <button className="rc-shot-img" onClick={() => setAt(k)} title="Open full size">
+              <img src={s.url} alt={s.caption ?? "Screenshot"} loading="lazy" />
+            </button>
+            <figcaption>
+              {s.caption && (
+                <span className="rc-shot-caption">
+                  <span className="snap-mark" aria-hidden>
+                    ✦
+                  </span>
+                  {s.caption}
+                </span>
+              )}
+              {said.map((g) => (
+                <span key={g.id} className="rc-shot-said">
+                  <b>{g.speakerName}</b> {g.text}
+                </span>
+              ))}
+              <span className="rc-shot-meta">
+                {s.source === "agent" ? "Kept by the agent" : s.takenBy} · {fmtTime(s.ts)}
+              </span>
+            </figcaption>
+          </figure>
+        );
+      })}
+      {at !== null && <SnapGallery snaps={props.snaps} me="" isHost={false} start={at} onClose={() => setAt(null)} />}
+    </div>
   );
 }
 

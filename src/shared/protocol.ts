@@ -127,9 +127,10 @@ export interface Snap {
   sharerName: string | null;
   /** The agent's one line on what's on screen; null until it has looked. */
   caption: string | null;
-  /** The decision or to-do an agent snap backs. */
+  /** The to-do, decision or open question it backs: the agent's own snaps when
+   *  kept, and any snap once the end-of-meeting recap has looked at it. */
   noteId: string | null;
-  /** The topic being talked about when it was taken, from the remarks around it. */
+  /** The topic it was discussed in: the recap's pick, or else the topic of the remarks around it. */
   discussionId: string | null;
   /** The remarks spoken around it. */
   segmentIds: string[];
