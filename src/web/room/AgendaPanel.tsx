@@ -314,9 +314,6 @@ export function AgendaPanel(props: {
               {o.label}
             </button>
           ))}
-          <button className="link" onClick={() => void api.loadSample(roomId)}>
-            Or load a sample sprint
-          </button>
         </div>
       ) : (
         <ol className="items">

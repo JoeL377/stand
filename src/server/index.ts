@@ -25,7 +25,7 @@ import {
   saveDeckImage,
 } from "./decks.ts";
 import { newId } from "./ids.ts";
-import { importFromLinear, sampleSprint } from "./linear.ts";
+import { importFromLinear } from "./linear.ts";
 import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
@@ -409,16 +409,6 @@ app.post(
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
-  }),
-);
-
-app.post(
-  "/api/rooms/:id/items/sample",
-  route((req, res) => {
-    const room = db.getRoom(req.params.id);
-    if (!room) return notFound(res);
-    db.addItems(room.id, sampleSprint());
-    res.json(afterItemsChange(room.id));
   }),
 );
 
