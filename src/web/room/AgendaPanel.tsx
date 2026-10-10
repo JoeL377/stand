@@ -238,6 +238,13 @@ export function AgendaPanel(props: {
     }
   };
   const empty = state.items.length === 0;
+  // Once something's been said or noted, an empty agenda shows where it went instead of saying it's empty.
+  const talked = segments.length > 0 || notes.length > 0;
+  const addButtons = addMenu.map((o) => (
+    <button key={o.mode} className={o.mode === "slides" ? "primary" : ""} onClick={() => pick(o.mode)}>
+      {o.label}
+    </button>
+  ));
 
   const deckRow = (b: DeckBlock) => {
     const open = deckOpen(b);
@@ -430,14 +437,10 @@ export function AgendaPanel(props: {
 
       {state.upNext && <Suggested upNext={state.upNext} canSteer={canSteer} send={send} emptyAgenda={empty} offline={offline} />}
 
-      {empty && !add ? (
+      {empty && !add && !talked ? (
         <div className="agenda-empty">
           <p>Nothing on the agenda yet.</p>
-          {addMenu.map((o) => (
-            <button key={o.mode} className={o.mode === "slides" ? "primary" : ""} onClick={() => pick(o.mode)}>
-              {o.label}
-            </button>
-          ))}
+          {addButtons}
         </div>
       ) : (
         <ol className="items">
@@ -449,12 +452,17 @@ export function AgendaPanel(props: {
               </span>
               <span className="item-text">
                 <span className="item-title muted">General / off-agenda</span>
-                {(counts.get(null) ?? 0) > 0 && <span className="item-meta">{counts.get(null)} remarks</span>}
+                {(counts.get(null) ?? 0) > 0 && (
+                  <span className="item-meta">
+                    {counts.get(null)} remark{counts.get(null) === 1 ? "" : "s"}
+                  </span>
+                )}
               </span>
             </button>
           </li>
         </ol>
       )}
+      {empty && !add && talked && <div className="agenda-empty">{addButtons}</div>}
 
       {dropping && <div className="drop-hint">Drop a PDF to add it as slides</div>}
     </aside>
