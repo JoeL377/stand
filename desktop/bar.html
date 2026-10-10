@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Stand</title>
+<style>
+  :root { color-scheme: dark; font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; cursor: default; }
+  /* The pill drags the bar around; its buttons stay clickable. */
+  .pill { position: absolute; inset: 4px; display: flex; align-items: center; gap: 6px; padding: 0 5px; border-radius: 999px; background: rgb(28 28 32 / 0.96); box-shadow: 0 0 0 1px rgb(255 255 255 / 0.14), 0 6px 18px rgb(0 0 0 / 0.45); color: #e8e8ee; -webkit-app-region: drag; }
+  button { -webkit-app-region: no-drag; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 30px; padding: 0; border: 0; border-radius: 999px; background: none; color: inherit; font: inherit; cursor: pointer; }
+  button:hover { background: rgb(255 255 255 / 0.1); }
+  svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .open { width: 30px; }
+  .open svg { width: 22px; height: 22px; stroke: none; }
+  .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d7d7e0; font-size: 12.5px; }
+  .what .key { margin-right: 6px; padding: 1px 5px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2); color: #a5a5b3; font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .what.said { color: #86efac; }
+  .what.said.bad { color: #fcd34d; }
+  .mic { width: 30px; }
+  .mic.off { color: #ff7b7b; }
+  .snap { padding: 0 12px 0 10px; background: rgb(255 255 255 / 0.12); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14); font-size: 12.5px; font-weight: 500; }
+  .snap:hover { background: rgb(255 255 255 / 0.2); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="pill">
+    <button class="open" id="open" title="Open Stand" aria-label="Open Stand">
+      <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#2d6cdf" /><path d="M9 20v-8M14 23V9M19 19v-6M24 17v-2" stroke="white" stroke-width="3" stroke-linecap="round" /></svg>
+    </button>
+    <div class="what" id="what"></div>
+    <button class="mic" id="mic" aria-label="Mute">
+      <svg id="mic-on" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+      <svg id="mic-off" viewBox="0 0 24 24" hidden><path d="M15 9.5V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.6 2.5M5 11a7 7 0 0 0 11.3 5.5M19 11a7 7 0 0 1-.6 2.8M12 18v3M4 4l16 16" /></svg>
+    </button>
+    <button class="snap" id="snap" title="Snap the screen, a window or part of it, for everyone in the meeting (Control + Shift + S)">
+      <svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" /><circle cx="12" cy="13" r="3.5" /></svg>
+      Snap
+    </button>
+  </div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let state = null;
+  let saying = null;
+
+  function render() {
+    const what = $("what");
+    if (saying) {
+      what.className = saying.ok ? "what said" : "what said bad";
+      what.textContent = saying.text;
+      what.title = saying.body ?? "";
+      return;
+    }
+    what.className = "what";
+    what.textContent = "";
+    what.title = "";
+    if (!state) return;
+    if (state.itemKey) {
+      const key = document.createElement("span");
+      key.className = "key";
+      key.textContent = state.itemKey;
+      what.append(key);
+    }
+    what.append(state.item ?? state.space);
+    what.title = state.item ? `${state.space}: ${state.item}` : state.space;
+    $("mic").className = state.micOn ? "mic" : "mic off";
+    $("mic").title = $("mic").ariaLabel = state.micOn ? "Mute" : "Unmute";
+    // SVGs have no .hidden property, so set the attribute.
+    $("mic-on").toggleAttribute("hidden", !state.micOn);
+    $("mic-off").toggleAttribute("hidden", state.micOn);
+  }
+
+  window.bar.onState((s) => {
+    state = s;
+    render();
+  });
+  // How the snap went, in place of the title for a few seconds.
+  window.bar.onReport((r) => {
+    clearTimeout(saying?.timer);
+    const ok = Boolean(r.snapId) || r.title === "Snapped";
+    saying = {
+      ok,
+      text: r.snapId ? "✓ Snapped for everyone" : ok ? "✓ Snapped to your clipboard" : r.title,
+      body: r.body,
+      timer: setTimeout(() => {
+        saying = null;
+        render();
+      }, ok ? 3500 : 6000),
+    };
+    render();
+  });
+  for (const button of ["open", "mic", "snap"]) $(button).onclick = () => window.bar.press(button);
+</script>
+</body>
+</html>

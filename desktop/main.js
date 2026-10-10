@@ -2,6 +2,8 @@
 // (Google won't sign people in inside an app's own window), and Snap from
 // anywhere: a global shortcut opens a capture toolbar like macOS's ⌘⇧5, and the
 // snap lands in the meeting you're in, pinned to whatever is in focus, and on the clipboard.
+// In a meeting with Stand in the background, a small floating bar keeps Snap and the mic
+// one click away.
 
 const {
   app,
@@ -76,7 +78,15 @@ function showWindow(path) {
       ...chrome,
       webPreferences: { partition: PARTITION, preload: `${__dirname}/preload.js`, contextIsolation: true, sandbox: true },
     });
-    win.on("closed", () => (win = null));
+    win.on("closed", () => {
+      win = null;
+      meeting = null;
+      // The bar is a window too: gone with the main one, so closing it still quits off the Mac.
+      bar?.destroy();
+    });
+    // A reload or a crash leaves the meeting page; it says so again when it's back.
+    win.webContents.on("did-navigate", () => setMeeting(null));
+    win.webContents.on("render-process-gone", () => setMeeting(null));
     if (!path) void win.loadURL(STAND_URL);
   }
   if (path) void win.loadURL(`${STAND_URL}${path}`);
@@ -252,6 +262,12 @@ async function snap() {
     },
   };
   picking = me;
+  // The bar is up when Stand is in the background, which is when people snap: keep it out of the picture.
+  barAway = true;
+  if (bar?.isVisible()) {
+    bar.hide();
+    await new Promise((r) => setTimeout(r, 150));
+  }
   const wasInStand = BrowserWindow.getFocusedWindow() != null;
   try {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
@@ -289,11 +305,17 @@ async function snap() {
     return { title: "Snap didn't work", body: String(err?.message ?? err) };
   } finally {
     if (picking === me) picking = null;
+    barAway = false;
+    updateBar();
   }
 }
 
-/** Shows what snap() came back with as a notification. */
-const tell = (report) => report && notify(report.title, report.body);
+/** Shows what snap() came back with: on the floating bar when it's up, else as a notification. */
+function tell(report) {
+  if (!report) return;
+  if (bar?.isVisible()) bar.webContents.send("bar:report", report);
+  else notify(report.title, report.body);
+}
 
 /** Run from source, each Snap step goes to desktop/snap-debug.log, so a snap that
  *  does nothing on someone's Mac can be read back afterwards. */
@@ -555,6 +577,94 @@ function notify(title, body) {
   if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
 }
 
+// ---- the floating bar -------------------------------------------------------------
+//
+// In a meeting, when no Stand window is in front (you're presenting a web page, say),
+// a small bar floats over every app and Space: what's in focus, your mic, and Snap. It
+// never takes focus from the app you're in, stays out of snaps (and, where macOS allows,
+// out of screen sharing), and goes wherever you drag it, which it remembers.
+
+/** The meeting the main window is in, as its page last described it, or null. */
+let meeting = null;
+let bar = null;
+let barLoaded = false;
+/** True while a snap reads the screen. */
+let barAway = false;
+const BAR = { width: 380, height: 48 };
+const barFile = () => path.join(app.getPath("userData"), "bar.json");
+const short = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
+
+function setMeeting(m) {
+  meeting = m && typeof m === "object" ? { space: short(m.space), itemKey: short(m.itemKey) || null, item: short(m.item) || null, micOn: m.micOn !== false } : null;
+  if (meeting && barLoaded) bar.webContents.send("bar:state", meeting);
+  updateBar();
+}
+
+/** Where the bar goes: where it was left, or the top middle of the screen Stand is on. */
+function barPlace() {
+  try {
+    const { x, y } = JSON.parse(fs.readFileSync(barFile(), "utf8"));
+    const fits = screen
+      .getAllDisplays()
+      .some(({ workArea: a }) => x >= a.x && y >= a.y && x + BAR.width <= a.x + a.width && y + BAR.height <= a.y + a.height);
+    if (fits) return { x, y };
+  } catch {}
+  const a = (win ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay()).workArea;
+  return { x: Math.round(a.x + (a.width - BAR.width) / 2), y: a.y + 8 };
+}
+
+function makeBar() {
+  bar = new BrowserWindow({
+    ...BAR,
+    ...barPlace(),
+    ...(mac ? { type: "panel" } : {}),
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: false,
+    acceptFirstMouse: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    webPreferences: { preload: `${__dirname}/bar-preload.js`, contextIsolation: true, sandbox: true },
+  });
+  bar.setAlwaysOnTop(true, "floating");
+  bar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  bar.setContentProtection(true);
+  bar.on("moved", () => {
+    const [x, y] = bar.getPosition();
+    fs.promises.writeFile(barFile(), JSON.stringify({ x, y })).catch(() => {});
+  });
+  bar.on("closed", () => {
+    bar = null;
+    barLoaded = false;
+  });
+  bar.webContents.once("did-finish-load", () => {
+    barLoaded = true;
+    setMeeting(meeting);
+  });
+  void bar.loadFile(`${__dirname}/bar.html`);
+}
+
+/** Up while in a meeting with no Stand window in front; down otherwise. */
+function updateBar() {
+  const want = Boolean(meeting && win && !barAway && !BrowserWindow.getAllWindows().some((w) => w !== bar && w.isFocused()));
+  if (want && !bar) makeBar();
+  if (!barLoaded) return;
+  if (want && !bar.isVisible()) bar.showInactive();
+  else if (!want && bar.isVisible()) bar.hide();
+}
+
+function pressOnBar(button) {
+  if (button === "open") showWindow();
+  else if (button === "mic") win?.webContents.send("app:command", "mic");
+  else if (button === "snap") void snap().then(tell);
+}
+
 // ---- start ----------------------------------------------------------------------
 
 if (mac) app.on("browser-window-created", (_e, w) => w.setWindowButtonVisibility(false));
@@ -571,6 +681,11 @@ app.whenReady().then(async () => {
   showWindow();
   // The Snap button on Stand's meeting page.
   ipcMain.handle("app:snap", (e) => (isStand(e.senderFrame?.url) ? snap() : null));
+  // The meeting page, and the floating bar's buttons.
+  ipcMain.on("app:meeting", (e, m) => e.sender === win?.webContents && isStand(e.senderFrame?.url) && setMeeting(m));
+  ipcMain.on("bar:press", (e, button) => e.sender === bar?.webContents && pressOnBar(button));
+  // Focus moving between apps: a blur comes just before the next focus, so look once both have landed.
+  for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));
   if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap().then(tell)))
     notify("Snap shortcut is taken", `Another app already uses ${SNAP_SHORTCUT}, so Snap from anywhere is off.`);
   app.on("activate", () => showWindow());

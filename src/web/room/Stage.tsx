@@ -6,15 +6,12 @@ import { colorFor, initials, keyOf } from "../util.ts";
 import { Slide } from "../slides.tsx";
 import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, addImageSnap, deleteSnap, takeSnap } from "../Snaps.tsx";
+import { macApp } from "../macApp.ts";
 
 type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "delete" };
 
 /** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
 const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
-/** Stand for Mac, when the page runs inside it: its snap toolbar (screen, window or part of it).
- *  snap() resolves to what to tell the person once the snap is done, or nothing if they cancelled. */
-type SnapReport = { title: string; body: string; snapId?: string } | null | undefined;
-const macApp = (window as { standApp?: { snap(): Promise<SnapReport> } }).standApp;
 
 export function Stage(props: {
   state: RoomState;
