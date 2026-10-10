@@ -412,7 +412,13 @@ export function LiveItemNotes(props: {
         edited
       </span>
     ) : null;
-  const editBtn = (n: Note) => (editing ? <EditButton onClick={() => setEditingId(n.id)} /> : null);
+  /** Edit and Copy for agent float over the end of the row on hover, so the text keeps the full width. */
+  const tools = (n: Note, kind: "action" | "decision" | "question") => (
+    <span className="tk-tools">
+      {editing && <EditButton onClick={() => setEditingId(n.id)} />}
+      <CopyForAgent kind={kind} id={n.id} />
+    </span>
+  );
 
   const action = (n: Note) =>
     editRow(n) ?? (
@@ -429,8 +435,7 @@ export function LiveItemNotes(props: {
           {edited(n)}
         </span>
         {n.owner && <span className="owner">{n.owner}</span>}
-        {editBtn(n)}
-        <CopyForAgent kind="action" id={n.id} />
+        {tools(n, "action")}
       </li>
     );
 
@@ -495,8 +500,7 @@ export function LiveItemNotes(props: {
                       {n.text}
                       {edited(n)}
                     </span>
-                    {editBtn(n)}
-                    <CopyForAgent kind="decision" id={n.id} />
+                    {tools(n, "decision")}
                   </li>
                 ),
             )}
@@ -516,8 +520,7 @@ export function LiveItemNotes(props: {
                       {n.text}
                       {edited(n)}
                     </span>
-                    {editBtn(n)}
-                    <CopyForAgent kind="question" id={n.id} />
+                    {tools(n, "question")}
                   </li>
                 ),
             )}

@@ -4,7 +4,7 @@ import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
 import { Slide } from "../slides.tsx";
-import { CameraIcon } from "../icons.tsx";
+import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, deleteSnap, takeSnap } from "../Snaps.tsx";
 
 type Toast = { key: number; text: string; snapId?: string; action?: "crop" | "delete" };
@@ -251,7 +251,8 @@ export function Stage(props: {
             name={p.name}
             picture={p.picture}
             talking={talkingIds.has(p.id)}
-            tag={p.isHost ? (p.isSharing ? "Host · sharing" : "Host") : p.isSharing ? "Sharing" : undefined}
+            tag={p.isHost ? "Host" : undefined}
+            sharing={p.isSharing}
             onMakeHost={canSteer && p.id !== props.participantId ? () => send({ type: "host.give", participantId: p.id }) : undefined}
           />
         ))}
@@ -269,15 +270,25 @@ function Person(props: {
   picture?: string | null;
   talking: boolean;
   tag?: string;
+  sharing?: boolean;
   onMakeHost?: () => void;
 }) {
-  const { id, name, picture, talking, tag, onMakeHost } = props;
+  const { id, name, picture, talking, tag, sharing, onMakeHost } = props;
   return (
     <div className={talking ? "person talking" : "person"}>
       <Avatar id={id} name={name} picture={picture} />
       <div className="person-label">
         <span className="person-name">{name}</span>
-        {tag && <span className="person-tag">{tag}</span>}
+        {(tag || sharing) && (
+          <span className="person-tag">
+            {tag}
+            {sharing && (
+              <span title={`${name} is sharing their screen`} aria-label="sharing" role="img">
+                <ShareIcon />
+              </span>
+            )}
+          </span>
+        )}
       </div>
       {onMakeHost && (
         <button className="link person-action" onClick={onMakeHost} title={`Let ${name} drive the meeting`}>

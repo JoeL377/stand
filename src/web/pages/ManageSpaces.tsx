@@ -71,7 +71,7 @@ function SpaceEditor({ s }: { s: SpaceSummary }) {
           Save
         </button>
         <Link to={spaceHref(s.id)} className="small">
-          Enter
+          Go to space
         </Link>
         <span className="muted small">
           {state === "saved" && !dirty ? "Saved" : state !== "idle" && state !== "saving" && state !== "saved" ? state : ""}

@@ -186,7 +186,7 @@ export function AgendaPanel(props: {
               {b.deck.kind === "native" ? <DeckIcon /> : <PdfIcon />}
             </span>
             <span className="item-title">{b.deck.title}</span>
-            <span className="deck-count">{b.items.length} slides</span>
+            <span className="deck-count">{b.items.length === 1 ? "1 slide" : `${b.items.length} slides`}</span>
             {(() => {
               const e = b.items.reduce((sum, i) => sum + (earlier.get(i.id) ?? 0), 0);
               return e > 0 ? (
@@ -391,7 +391,7 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
           <span className={upNext.polishing ? "upnext-mark pulsing" : "upnext-mark"} aria-hidden>
             ✦
           </span>
-          <span>Suggested · {suggestions.length}</span>
+          <span>{suggestions.length ? `Suggested · ${suggestions.length}` : "Suggested"}</span>
           {upNext.total > 0 && (
             <span className="upnext-progress" title="To-dos from earlier meetings closed since the last one">
               {upNext.closed}/{upNext.total} closed

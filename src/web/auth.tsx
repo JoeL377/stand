@@ -49,7 +49,7 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
           Stand
         </div>
         <h1>Meetings that remember what each ticket was about.</h1>
-        <p className="muted">Sign in to join the room. Your name shows next to what you say, and action items are assigned to you.</p>
+        <p className="muted">Sign in to join your spaces. Your name shows next to what you say, and to-dos are assigned to you.</p>
         {caps.googleSignIn ? (
           <a className="google-btn" href={`/api/auth/google?next=${encodeURIComponent(next)}`}>
             <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden>

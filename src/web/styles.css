@@ -1358,3 +1358,26 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 html.mac-app :is(.topbar, .editor-top) { padding-left: 84px; }
 html.mac-app .lobby-bar { padding: 16px 24px 12px 84px; }
 html.mac-app .sp-side-brand { margin: -3px 0 0 64px; }
+
+/* ---- visual pass 2026-10-10 ---- */
+/* Note rows: Edit and Copy for agent float over the row's end on hover, so the text gets the card's full width. */
+.tk { position: relative; }
+.tk-tools { position: absolute; top: -2px; right: -4px; display: flex; gap: 2px; padding: 1px; border-radius: 7px; background: var(--panel-2); box-shadow: 0 0 0 1px var(--line), -10px 0 8px var(--panel-2); opacity: 0; pointer-events: none; transition: opacity 0.1s; }
+.tk:hover > .tk-tools, .tk:focus-within > .tk-tools, .tk-tools:has(.cfa-pop) { opacity: 1; pointer-events: auto; }
+.tk-tools .note-edit-btn, .tk-tools .cfa-btn { opacity: 1; }
+@media (hover: none) { .tk-tools { position: static; opacity: 1; pointer-events: auto; background: none; box-shadow: none; } }
+/* No lone last word on titles that wrap. */
+.disc-topic, .side-head-title, .tk-text { text-wrap: pretty; }
+/* The Snapped toast sits above the screen's caption line, not on it. */
+.screen:has(figcaption) .snap-toasts { bottom: 40px; }
+/* "From earlier meetings" is a card like To do and Decided below it. */
+.side-notes-tab .focus-notes.earlier { margin: 10px 16px 0; border: 1px solid var(--line); }
+.focus-notes.earlier .focus-notes-head { padding: 10px 12px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.focus-notes.earlier .focus-notes-head .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.focus-notes.earlier .followups .check { width: 15px; height: 15px; border-radius: 4px; margin-top: 2px; }
+/* Participant tiles: sharing is an icon, so the name keeps its room. */
+.person-tag { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.person-tag svg { width: 12px; height: 12px; color: #3ecf8e; }
+.person-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A deck's icon and title line up with the task rows above it. */
+.agenda .deck-toggle .kind { margin-left: 0; }
