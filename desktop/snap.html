@@ -294,6 +294,7 @@
         render();
       });
       $("shot").onload = () => window.snap.ready();
+      $("shot").onerror = () => window.snap.done({ failed: "The picture of your screen didn't load." });
 
       const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
       function fit() {

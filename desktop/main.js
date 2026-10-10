@@ -234,10 +234,16 @@ function spaceId() {
 /** The toolbar or the timer, while either is up: the shortcut again closes it. */
 let picking = null;
 
+/** Snaps, and resolves to what to tell the person ({ title, body }), or nothing when they
+ *  cancelled. The shortcut shows it as a notification; the page's Snap button shows it in
+ *  the page, where it can't be missed. */
 async function snap() {
-  if (picking) return picking.cancel();
   // Pressed again while the screen is still being read (macOS asking for permission, say):
   // give up on this one and free the shortcut, so it can never get stuck.
+  if (picking) {
+    trace("cancel");
+    return picking.cancel();
+  }
   const me = {
     cancelled: false,
     cancel: () => {
@@ -249,12 +255,16 @@ async function snap() {
   const wasInStand = BrowserWindow.getFocusedWindow() != null;
   try {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    trace("start", { display: display.bounds, scale: display.scaleFactor, permission: screenStatus() });
     const [still, windows] = (await within(Promise.all([grabDisplay(display), windowsOn(display)]), 8000)) ?? [null, []];
+    trace("grabbed", { still: still?.getSize() ?? null, windows: windows.length, permission: screenStatus(), cancelled: me.cancelled });
     if (me.cancelled) return;
     if (!still || !screenAllowed()) return cantSee();
     const at = Date.now();
     const roomId = spaceId();
     const choice = await openToolbar(me, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId) });
+    trace("toolbar", { choice: choice && (choice.failed ?? (choice.cancel ? "cancel" : choice.mode)) });
+    if (choice?.failed) return { title: "Snap's toolbar didn't open", body: choice.failed };
     if (choice?.prefs) fs.promises.writeFile(prefsFile(), JSON.stringify(cleanPrefs(choice.prefs))).catch(() => {});
     // Hand the screen back to whatever the person was in.
     if (mac && !wasInStand) app.hide();
@@ -270,27 +280,46 @@ async function snap() {
       if (!shot) return cantSee();
     }
     const image = await cut(choice, display, shot, windows);
-    await deliver(image, shotAt, prefs, roomId);
+    trace("cut", { size: image.getSize() });
+    return await deliver(image, shotAt, prefs, roomId);
   } catch (err) {
-    notify("Snap didn't work", String(err?.message ?? err));
+    trace("error", { error: String(err?.stack ?? err), permission: screenStatus() });
+    // Without the permission, reading the screen can fail outright instead of coming back blank.
+    if (mac && screenStatus() !== "granted") return cantSee();
+    return { title: "Snap didn't work", body: String(err?.message ?? err) };
   } finally {
     if (picking === me) picking = null;
   }
 }
 
+/** Shows what snap() came back with as a notification. */
+const tell = (report) => report && notify(report.title, report.body);
+
+/** Run from source, each Snap step goes to desktop/snap-debug.log, so a snap that
+ *  does nothing on someone's Mac can be read back afterwards. */
+function trace(step, data = {}) {
+  if (app.isPackaged) return;
+  const line = `${new Date().toISOString()} ${step} ${JSON.stringify(data)}\n`;
+  fs.promises.appendFile(path.join(__dirname, "snap-debug.log"), line).catch(() => {});
+}
+
 /** Null if it takes longer than ms. */
 const within = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
 
+const screenStatus = () => (mac ? systemPreferences.getMediaAccessStatus("screen") : "granted");
 /** Without the permission, macOS hands back a still of just the wallpaper, so ask it directly. */
-const screenAllowed = () => !mac || !["denied", "restricted"].includes(systemPreferences.getMediaAccessStatus("screen"));
+const screenAllowed = () => !["denied", "restricted"].includes(screenStatus());
 
-/** Says what's missing and opens the right page of System Settings. */
+/** Opens the right page of System Settings, and says what's missing. Run from source,
+ *  macOS asks on behalf of the terminal app it was started from, not Stand. */
 function cantSee() {
-  notify(
-    "Stand can't see your screen",
-    "Turn on Stand in Screen & System Audio Recording (Terminal, if you started it from there), then reopen it.",
-  );
   if (mac) void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+  return {
+    title: "Stand can't see your screen",
+    body: app.isPackaged
+      ? "Turn on Stand in Screen & System Audio Recording, then quit and reopen Stand."
+      : "Turn on the terminal app you ran npm run try:mac in (Terminal, Warp…) in Screen & System Audio Recording, then quit that app, reopen it and run npm run try:mac again.",
+  };
 }
 
 /** The display at full resolution. */
@@ -366,13 +395,14 @@ function openToolbar(me, display, still, windows, { prefs, inMeeting }) {
       webPreferences: { preload: `${__dirname}/snap-preload.js`, contextIsolation: true, sandbox: true },
     });
     overlay.setAlwaysOnTop(true, "screen-saver");
-    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     overlay.setBounds(display.bounds);
 
     let done = false;
     const finish = (choice) => {
       if (done) return;
       done = true;
+      clearTimeout(slow);
       ipcMain.removeListener("snap:done", onDone);
       ipcMain.removeListener("snap:ready", onReady);
       globalShortcut.unregister("Escape");
@@ -382,10 +412,18 @@ function openToolbar(me, display, still, windows, { prefs, inMeeting }) {
     const onDone = (e, choice) => e.sender === overlay.webContents && finish(choice);
     const onReady = (e) => {
       if (e.sender !== overlay.webContents || overlay.isDestroyed()) return;
+      clearTimeout(slow);
       if (mac) app.focus({ steal: true });
       overlay.show();
       overlay.focus();
+      trace("shown", { visible: overlay.isVisible(), bounds: overlay.getBounds() });
     };
+    // The toolbar shows once its still has loaded. If that never happens, say so rather
+    // than leave an invisible toolbar holding Snap.
+    const slow = setTimeout(() => finish({ failed: "It didn't finish loading. Try again, or quit and reopen Stand." }), 10_000);
+    overlay.webContents.on("did-fail-load", (_e, code, why) => finish({ failed: `It couldn't load (${why || code}).` }));
+    overlay.webContents.on("render-process-gone", (_e, d) => finish({ failed: `It stopped (${d.reason}).` }));
+    overlay.webContents.on("console-message", (e, ...old) => trace("toolbar-console", { message: e.message ?? old[1] }));
     me.cancel = () => finish(null);
     ipcMain.on("snap:done", onDone);
     ipcMain.on("snap:ready", onReady);
@@ -428,7 +466,7 @@ function countdown(me, display, seconds) {
       webPreferences: { contextIsolation: true, sandbox: true },
     });
     tick.setAlwaysOnTop(true, "screen-saver");
-    tick.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    tick.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     let left = seconds;
     let timer = null;
     const page = (n) =>
@@ -491,7 +529,7 @@ async function deliver(image, at, prefs, roomId) {
   const toMeeting = Boolean(roomId) && prefs.toMeeting;
   const copy = prefs.toClipboard || !toMeeting;
   if (copy) await clipboard.write([new ClipboardItem({ "image/png": new Blob([image.toPNG()], { type: "image/png" }) })]);
-  if (!toMeeting) return notify("Snapped", "It's on your clipboard.");
+  if (!toMeeting) return { title: "Snapped", body: "It's on your clipboard." };
   const { width: w, height: h } = image.getSize();
   const res = await session
     .fromPartition(PARTITION)
@@ -504,9 +542,13 @@ async function deliver(image, at, prefs, roomId) {
     .catch(() => null);
   if (!res?.ok) {
     const why = (await res?.json().catch(() => null))?.error ?? (res ? `Stand said ${res.status}.` : "Stand didn't answer.");
-    return notify(copy ? "Copied, but not added to the meeting" : "Snap didn't save", why);
+    return { title: copy ? "Copied, but not added to the meeting" : "Snap didn't save", body: why };
   }
-  notify("Snapped", copy ? "It's on your clipboard and in the meeting, on the item in focus." : "It's in the meeting, on the item in focus. Crop or delete it in Stand.");
+  return {
+    title: "Snapped",
+    body: copy ? "It's on your clipboard and in the meeting, on the item in focus." : "It's in the meeting, on the item in focus. Crop or delete it in Stand.",
+    snapId: (await res.json().catch(() => null))?.id,
+  };
 }
 
 function notify(title, body) {
@@ -528,10 +570,8 @@ app.whenReady().then(async () => {
   allowMediaAndSharing(session.fromPartition(PARTITION));
   showWindow();
   // The Snap button on Stand's meeting page.
-  ipcMain.on("app:snap", (e) => {
-    if (isStand(e.senderFrame?.url)) void snap();
-  });
-  if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap()))
+  ipcMain.handle("app:snap", (e) => (isStand(e.senderFrame?.url) ? snap() : null));
+  if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap().then(tell)))
     notify("Snap shortcut is taken", `Another app already uses ${SNAP_SHORTCUT}, so Snap from anywhere is off.`);
   app.on("activate", () => showWindow());
 });
