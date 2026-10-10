@@ -419,7 +419,7 @@ function StageSnap(props: { snap: Snap; me: string; canClose: boolean; small?: b
       {!props.small && (
         <figcaption>
           <CameraIcon />
-          <span>{who} snapped this</span>
+          <span className="stage-snap-who">{who} snapped this</span>
           {snap.caption && (
             <span className="stage-snap-cap" title={snap.caption}>
               <span className="agent-mark">✦</span> {snap.caption}

@@ -799,6 +799,8 @@ export class RoomSession implements SpeechSink {
           ),
         );
         this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
+        // A snap belongs to the topic its remarks are in, and the topics were just redrafted.
+        if (this.snaps().some((p) => p.itemId === itemId)) this.broadcastState();
         const before = new Set(current.map((n) => n.id));
         const fresh = notes.filter((n) => !before.has(n.id) && (n.kind === "action" || n.kind === "decision"));
         if (fresh.length) void this.keepBackingFrame(itemId, fresh);

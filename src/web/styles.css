@@ -1401,12 +1401,13 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .app-snap svg { width: 16px; height: 16px; }
 
 /* ---- the snap on the middle screen ---- */
-.stage-snap { position: relative; margin: 0; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.stage-snap { position: relative; margin: 0; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .stage-snap-img { flex: 1; min-height: 0; display: flex; padding: 12px 12px 0; border: 0; border-radius: 0; background: none; box-shadow: none; cursor: zoom-in; }
 .stage-snap-img img { width: 100%; height: 100%; min-height: 0; object-fit: contain; border-radius: 6px; }
 .stage-snap figcaption { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 10px 8px; color: #a5a5b3; font-size: 12px; }
 .screen:has(.app-snap) .stage-snap figcaption { padding-right: 100px; }
 .stage-snap figcaption svg { flex: none; width: 14px; height: 14px; }
+.stage-snap-who { flex: none; white-space: nowrap; }
 .stage-snap-cap { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d7d7e0; }
 .stage-snap-cap::before { content: "·"; margin-right: 6px; color: #a5a5b3; }
 .stage-snap-close { position: absolute; top: 18px; right: 18px; z-index: 2; width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 999px; background: rgb(0 0 0 / 0.6); color: #fff; font-size: 13px; box-shadow: 0 0 0 1px rgb(255 255 255 / 0.15); cursor: pointer; }
