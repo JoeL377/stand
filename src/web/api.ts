@@ -10,23 +10,33 @@ export class OfflineError extends Error {
 
 /** Long enough for a slow network, short enough that a dead one doesn't look like a hang. */
 const REQUEST_TIMEOUT_MS = 20_000;
+/** Claude drafting a deck, or a Linear import, takes a while; that isn't the network being down. */
+const SLOW_REQUEST_MS = 120_000;
 
-async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
+/** fetch, with a dead network, a timeout or a gateway answering for a server that's down
+ *  turned into a plain message. For uploads and other calls that don't go through `call`. */
+export async function request(url: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(url, {
-      method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-  } catch {
+    // Older Safari has no AbortSignal.timeout; it just waits.
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout?.(timeoutMs) });
+  } catch (err) {
+    if ((err as Error).name === "TimeoutError") throw new Error("Stand is taking too long to answer. Try again in a moment.");
     throw new OfflineError();
   }
   const json = res.headers.get("content-type")?.includes("json");
-  const data = json ? await res.json().catch(() => ({})) : {};
-  // A gateway (or the dev proxy) answering for a server that's down isn't the server saying no.
   if ([502, 503, 504].includes(res.status) || (res.status === 500 && !json)) throw new OfflineError();
+  return res;
+}
+
+async function call<T>(method: string, url: string, body?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  const res = await request(
+    url,
+    { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined },
+    timeoutMs,
+  );
+  const json = res.headers.get("content-type")?.includes("json");
+  const data = json ? await res.json().catch(() => ({})) : {};
   if (res.status === 401 && !url.startsWith("/api/auth/")) {
     // Session expired: send them through sign-in and back here.
     location.reload();
@@ -65,7 +75,7 @@ export const api = {
     call<{ id: string; name: string; purpose: string }>("PATCH", `/api/rooms/${id}`, patch),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   addAgenda: (roomId: string, titles: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items`, { titles }),
-  importLinear: (roomId: string, input: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/linear`, { input }),
+  importLinear: (roomId: string, input: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/linear`, { input }, SLOW_REQUEST_MS),
   renameItem: (roomId: string, itemId: string, title: string) =>
     call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { title }),
   removeItem: (roomId: string, itemId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/items/${itemId}`),
@@ -73,11 +83,12 @@ export const api = {
   reorder: (roomId: string, ids: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items/reorder`, { ids }),
   removeDeck: (roomId: string, deckId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/decks/${deckId}`),
   newDeck: (roomId: string, title: string, brief: string, parentItemId: string | null = null) =>
-    call<{ deck: Deck; slides: Item[] }>("POST", `/api/rooms/${roomId}/decks/new`, { title, brief, parentItemId }),
+    call<{ deck: Deck; slides: Item[] }>("POST", `/api/rooms/${roomId}/decks/new`, { title, brief, parentItemId }, SLOW_REQUEST_MS),
   moveDeck: (deckId: string, parentItemId: string | null) => call<Item[]>("PATCH", `/api/decks/${deckId}`, { parentItemId }),
   deck: (deckId: string) => call<{ deck: Deck; room: { id: string; name: string } | null; slides: Item[] }>("GET", `/api/decks/${deckId}`),
   saveDeck: (deckId: string, draft: DeckDraft) => call<{ deck: Deck; slides: Item[] }>("PUT", `/api/decks/${deckId}`, draft),
-  draftSlides: (deckId: string, brief: string) => call<{ slides: DraftSlide[] }>("POST", `/api/decks/${deckId}/draft`, { brief }),
+  draftSlides: (deckId: string, brief: string) =>
+    call<{ slides: DraftSlide[] }>("POST", `/api/decks/${deckId}/draft`, { brief }, SLOW_REQUEST_MS),
   deckHistory: (deckId: string) => call<DeckHistory>("GET", `/api/decks/${deckId}/history`),
   itemHistory: (itemId: string) =>
     call<ItemHistory & { room: { id: string; name: string } }>("GET", `/api/items/${itemId}/history`),

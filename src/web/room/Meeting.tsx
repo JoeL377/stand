@@ -103,9 +103,19 @@ export function Meeting(props: {
     if (room.waiting > 0) hadWaiting.current = true;
     else if (room.connected && hadWaiting.current) {
       hadWaiting.current = false;
-      toast({ text: "Back online · your changes went through" });
+      toast({ text: "Back online · your changes were sent" });
     }
   }, [room.waiting, room.connected]);
+  // Changes still waiting live only in this tab: closing or reloading it now would lose them.
+  useEffect(() => {
+    if (!room.waiting) return;
+    const onLeave = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [room.waiting]);
 
   // Everyone hears about it when the host changes, not just the two people involved.
   const lastHost = useRef<string | null | undefined>(undefined);
@@ -119,13 +129,14 @@ export function Meeting(props: {
 
   const [copied, setCopied] = useState(false);
   const copyInvite = () => {
-    navigator.clipboard?.writeText(`${location.origin}/r/${roomId}`).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      },
-      () => toast({ tone: "error", text: `Couldn't copy. The link is ${location.origin}/r/${roomId}` }),
-    );
+    const link = `${location.origin}/r/${roomId}`;
+    // Plain http on a local network has no clipboard: show the link to copy by hand.
+    const show = () => toast({ text: `Copy this link: ${link}`, ms: 15_000 });
+    if (!navigator.clipboard) return show();
+    navigator.clipboard.writeText(link).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }, show);
   };
   const [showKeys, setShowKeys] = useState(false);
   useEffect(() => {
@@ -182,8 +193,13 @@ export function Meeting(props: {
           <ConnectionPill room={room} />
           {state.ending && !canSteer && <span className="badge">Writing notes…</span>}
           {!media.micOn && (
-            <button className="badge muted-pill" onClick={() => void media.toggleMic()} title="Nothing you say is recorded while you're muted. Click to unmute.">
-              <MicOffIcon /> Muted
+            <button
+              className={media.micError ? "badge muted-pill blocked" : "badge muted-pill"}
+              onClick={() => void media.toggleMic()}
+              disabled={media.micStarting}
+              title={media.micError ?? "Nothing you say is recorded while you're muted. Click to unmute."}
+            >
+              <MicOffIcon /> {media.micStarting ? "Asking for the mic…" : media.micError ? "Mic blocked" : "Muted"}
             </button>
           )}
         </div>

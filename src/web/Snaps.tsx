@@ -7,6 +7,7 @@ import type { Segment, Snap } from "../shared/protocol.ts";
 import { CameraIcon, CloseIcon, CropIcon, TrashIcon } from "./icons.tsx";
 import { fmtTime } from "./util.ts";
 import { errorToast } from "./Toasts.tsx";
+import { request } from "./api.ts";
 
 /** Grabs the frame a video is showing, at the size it's shared, and uploads it. */
 export async function takeSnap(video: HTMLVideoElement, roomId: string): Promise<string> {
@@ -58,8 +59,9 @@ async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number,
 }
 
 export const deleteSnap = async (id: string) => {
-  const r = await fetch(`/api/snaps/${id}`, { method: "DELETE" }).catch(() => null);
-  if (!r?.ok) throw new Error(r ? "You can't delete this snap" : "Can't reach Stand. Check your connection and try again.");
+  const r = await request(`/api/snaps/${id}`, { method: "DELETE" });
+  if (r.status === 403) throw new Error("Only whoever took it, whoever's screen it is, or the host can delete it.");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? "Try again in a moment.");
 };
 
 /** Who may crop or delete a snap: whoever took it, whoever's screen it is, and the host. */
@@ -183,15 +185,24 @@ function CropView(props: { snap: Snap; onDone: () => void }) {
     const el = img.current;
     if (!el || !box || box.w < 0.02 || box.h < 0.02) return;
     setSaving(true);
-    const nw = el.naturalWidth;
-    const nh = el.naturalHeight;
-    const c = document.createElement("canvas");
-    c.width = Math.round(box.w * nw);
-    c.height = Math.round(box.h * nh);
-    c.getContext("2d")!.drawImage(el, box.x * nw, box.y * nh, c.width, c.height, 0, 0, c.width, c.height);
-    const blob = await new Promise<Blob | null>((ok) => c.toBlob(ok, "image/jpeg", 0.92));
-    if (blob) await fetch(`/api/snaps/${props.snap.id}/image?w=${c.width}&h=${c.height}`, { method: "PUT", body: blob });
-    props.onDone();
+    try {
+      const nw = el.naturalWidth;
+      const nh = el.naturalHeight;
+      const c = document.createElement("canvas");
+      c.width = Math.round(box.w * nw);
+      c.height = Math.round(box.h * nh);
+      c.getContext("2d")!.drawImage(el, box.x * nw, box.y * nh, c.width, c.height, 0, 0, c.width, c.height);
+      const blob = await new Promise<Blob | null>((ok) => c.toBlob(ok, "image/jpeg", 0.92));
+      if (blob) {
+        const r = await request(`/api/snaps/${props.snap.id}/image?w=${c.width}&h=${c.height}`, { method: "PUT", body: blob });
+        if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? "Try again in a moment.");
+      }
+      props.onDone();
+    } catch (err) {
+      // The box stays where it was, so Save can simply be clicked again.
+      errorToast("Couldn't save the crop")(err);
+      setSaving(false);
+    }
   };
   return (
     <>

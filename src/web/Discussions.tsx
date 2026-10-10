@@ -452,7 +452,7 @@ export function LiveItemNotes(props: {
           onChange={(e) => onToggle?.(n, e.target.checked)}
           aria-label={n.doneAt ? "Mark not done" : "Mark done"}
         />
-        <span className="tk-text">
+        <span className="tk-text" dir="auto">
           {n.text}
           {edited(n)}
         </span>
@@ -518,7 +518,7 @@ export function LiveItemNotes(props: {
                 editRow(n) ?? (
                   <li key={n.id} data-note-id={n.id} className={`tk decision${isFresh(n)}`}>
                     <span className="tk-icon">✓</span>
-                    <span className="tk-text">
+                    <span className="tk-text" dir="auto">
                       {n.text}
                       {edited(n)}
                     </span>
@@ -538,7 +538,7 @@ export function LiveItemNotes(props: {
                 editRow(n) ?? (
                   <li key={n.id} data-note-id={n.id} className={`tk question${isFresh(n)}`}>
                     <span className="tk-icon">?</span>
-                    <span className="tk-text">
+                    <span className="tk-text" dir="auto">
                       {n.text}
                       {edited(n)}
                     </span>

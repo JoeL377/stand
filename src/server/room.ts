@@ -130,7 +130,7 @@ export class RoomSession implements SpeechSink {
   private removedNotes = new Map<string, Note>();
   private dismissedKeys = new Map<string, string[]>();
   /** Recent talk on the item in focus that names another item instead (see checkDrift). */
-  private drift: { itemId: string; since: number; score: number } | null = null;
+  private drift: { itemId: string; since: number; score: number; remarks: Set<string> } | null = null;
   private transcriber: Transcriber | null = null;
   private transcriptionDown = false;
   /** The last notes run failed; people are told once, not on every retry. */
@@ -868,8 +868,10 @@ export class RoomSession implements SpeechSink {
     if (!best) return;
     // A long gap means the earlier mentions were a passing remark, not a change of subject.
     if (this.drift?.itemId === best.item.id && seg.ts - this.drift.since < 5 * 60_000) this.drift.score += best.score;
-    else this.drift = { itemId: best.item.id, since: seg.ts, score: best.score };
-    if (this.drift.score < DRIFT_NUDGE_SCORE) return;
+    else this.drift = { itemId: best.item.id, since: seg.ts, score: best.score, remarks: new Set() };
+    this.drift.remarks.add(seg.id);
+    // One remark, however pointed, is a passing mention; it takes the talk coming back to it.
+    if (this.drift.score < DRIFT_NUDGE_SCORE || this.drift.remarks.size < 2) return;
     const quiet = this.dismissed.get(best.item.id);
     if ((quiet && Date.now() - quiet < DISMISS_QUIET_MS) || this.suggestion?.itemId === best.item.id) return;
     const label = best.item.externalId ?? best.item.title;
@@ -1105,18 +1107,25 @@ export class RoomSession implements SpeechSink {
 const DRIFT_STOPWORDS = new Set(
   "about after again agenda being could every first issue issues other review meeting should their there these thing things those through update which while would".split(" "),
 );
+/** Scripts written without spaces between words: matched on pairs of characters instead. */
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const driftWords = (t: string) =>
   t
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s-]+/gu, " ")
     .split(/\s+/)
-    .map((w) => w.replace(/s$/, ""))
-    .filter((w) => w.length >= 5 && !DRIFT_STOPWORDS.has(w));
+    .flatMap((w) => {
+      if (!UNSPACED.test(w)) return [w.replace(/s$/, "")].filter((x) => [...x].length >= 5 && !DRIFT_STOPWORDS.has(x));
+      const cs = [...w];
+      return cs.slice(1).map((c, i) => cs[i] + c);
+    });
 
 /** How strongly a remark is about an agenda item: its ticket key counts 2, each distinctive title word 1. */
 export function mentionScore(text: string, item: Pick<Item, "title" | "externalId">): number {
   let score = 0;
-  if (item.externalId && new RegExp(`\\b${item.externalId.replace(/[^A-Za-z0-9-]/g, "")}\\b`, "i").test(text)) score += 2;
+  // Speech-to-text writes a key the way it's said: "demo 103" as well as "DEMO-103".
+  const key = item.externalId?.replace(/[^A-Za-z0-9-]/g, "").split("-").filter(Boolean).join("[-\\s]?");
+  if (key && new RegExp(`\\b${key}\\b`, "i").test(text)) score += 2;
   const said = new Set(driftWords(text));
   for (const w of new Set(driftWords(item.title))) if (said.has(w)) score++;
   return score;

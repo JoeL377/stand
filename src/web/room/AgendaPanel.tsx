@@ -131,7 +131,7 @@ export function AgendaPanel(props: {
             </span>
           )}
           <span className="item-text">
-            <span className="item-title" title={it.title}>
+            <span className="item-title" title={it.title} dir="auto">
               {it.slideNo && <span className="slide-no">{it.slideNo}</span>}
               {it.title}
             </span>
@@ -242,7 +242,7 @@ export function AgendaPanel(props: {
             >
               {b.deck.kind === "native" ? <DeckIcon /> : <PdfIcon />}
             </span>
-            <span className="item-title">{b.deck.title}</span>
+            <span className="item-title" dir="auto">{b.deck.title}</span>
             <span className="deck-count">{b.items.length === 1 ? "1 slide" : `${b.items.length} slides`}</span>
             {(() => {
               const e = b.items.reduce((sum, i) => sum + (earlier.get(i.id) ?? 0), 0);

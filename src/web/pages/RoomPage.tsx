@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { Capabilities } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
+import { toast } from "../Toasts.tsx";
 import { useAuth, UserMenu } from "../auth.tsx";
 import { fmtDate, fmtTime } from "../util.ts";
 import { Meeting } from "../room/Meeting.tsx";
@@ -43,7 +44,17 @@ export function RoomPage() {
       <div className="home">
         <div className="home-card">
           <p className="error">{error}</p>
-          <Link to="/">Back</Link>
+          <div className="row">
+            <button
+              onClick={() => {
+                setError(null);
+                load();
+              }}
+            >
+              Try again
+            </button>
+            <Link to="/">Back to spaces</Link>
+          </div>
         </div>
       </div>
     );
@@ -97,9 +108,14 @@ export function RoomPage() {
   const kindIcon = { task: <TaskIcon />, linear: <TicketIcon />, deck: <DeckIcon />, pdf: <PdfIcon /> };
 
   const copy = () => {
-    void navigator.clipboard?.writeText(location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+    const done = () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    };
+    // Plain http on a local network has no clipboard: show the link to copy by hand.
+    const show = () => toast({ text: `Copy this link: ${location.href}`, ms: 15_000 });
+    if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(done, show);
+    else show();
   };
 
   return (

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Capabilities, User } from "../shared/protocol.ts";
 import { OfflineError, api } from "./api.ts";
 import { Avatar } from "./room/Stage.tsx";
@@ -20,17 +20,33 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // Can't reach the server: say so, rather than loading forever or asking a signed-in person to sign in again.
   const [offline, setOffline] = useState(false);
 
+  // Only the latest attempt counts: a slow answer from an earlier one mustn't undo a later success.
+  const attempt = useRef(0);
   const load = () => {
+    const n = ++attempt.current;
+    const latest = () => n === attempt.current;
     setOffline(false);
-    api.config().then(setCaps, () => setOffline(true));
-    api.me().then(setUser, (e) => (e instanceof OfflineError ? setOffline(true) : setUser(null)));
+    api.config().then(
+      (c) => latest() && setCaps(c),
+      () => latest() && setOffline(true),
+    );
+    api.me().then(
+      (u) => latest() && setUser(u),
+      (e) => latest() && (e instanceof OfflineError ? setOffline(true) : setUser(null)),
+    );
   };
   useEffect(load, []);
+  // While it's unreachable, keep trying, so it comes back without a click.
+  useEffect(() => {
+    if (!offline) return;
+    const t = setInterval(load, 5_000);
+    return () => clearInterval(t);
+  }, [offline]);
 
   if (offline)
     return (
       <div className="loading offline">
-        <p>Can't reach Stand. Check your connection.</p>
+        <p>Can't reach Stand. Check your connection; this page keeps trying.</p>
         <button onClick={load}>Try again</button>
       </div>
     );

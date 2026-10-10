@@ -101,10 +101,15 @@ test("talk that keeps naming another item nudges the host, and switching moves t
   session.addSpeech("p3", "Ann", "Quick one, the webhooks", later);
   session.addSpeech("p3", "Ann", "retry needs a cap on the backoff.", later + 500);
   assert.equal(db.meetingSegments(session.meetingId).length, 4, "the two fragments are one remark");
-  assert.equal(session.state().suggestion?.itemId, items[1].id, "fragments of one turn count together");
+  assert.equal(session.state().suggestion, null, "one remark, however pointed, is a passing mention");
+  session.addSpeech("p1", "Sam", "Agreed, and the backoff should double.", later + 1_500);
+  assert.equal(session.state().suggestion?.itemId, items[1].id, "a second remark makes it a change of subject");
   session.addSpeech("p1", "Sam", "Back to the onboarding checklist drop-off.", later + 5_000);
   assert.equal(session.state().suggestion, null, "talk back on the item in focus withdraws the nudge");
   assert.equal(mentionScore("eng-1 again", items[0]), 2);
+  assert.equal(mentionScore("so eng 1 again", items[0]), 2, "a key said aloud");
+  assert.equal(mentionScore("Обновление платежей сломалось", { title: "Обновление платежей", externalId: null }), 2);
+  assert.equal(mentionScore("结账页面又出错了", { title: "结账页面", externalId: null }), 3);
 });
 
 test("a deleted note and removed agenda items come back with Undo", () => {

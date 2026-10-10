@@ -1519,3 +1519,10 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .meeting .agenda { scroll-padding-top: 52px; }
 /* No hover on touch screens: Make host shows without it. */
 @media (hover: none) { .person-action { opacity: 1; } }
+/* A long URL in a note or a message wraps instead of running out of its box. */
+.tk-text, .toast-text, .note-text { overflow-wrap: anywhere; }
+/* A long name can't squeeze "Now discussing" to nothing. */
+.host-note { max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.topbar .muted-pill.blocked { color: #fff; background: #b42318; }
+.topbar .muted-pill:disabled { cursor: progress; opacity: 0.8; }
+.home-card .row { align-items: center; gap: 14px; margin-top: 6px; }

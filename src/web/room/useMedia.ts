@@ -107,6 +107,18 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
 
   // ---- mic ----------------------------------------------------------------
   const mockMicStream = useRef<MediaStream | null>(null);
+  // Leaving the page (Back, say) must let go of the mic, even if it was still being asked for.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      mockMicStream.current?.getTracks().forEach((t) => t.stop());
+      mockMicStream.current = null;
+    };
+  }, []);
+  /** Why the mic couldn't start, until it does: the Muted pill says so instead of "click to unmute". */
+  const [micError, setMicError] = useState<string | null>(null);
   // One permission prompt at a time: a second click while the first is open would open a second mic.
   const micBusy = useRef(false);
   // Shown on the button while the browser asks for the mic, so a click there isn't a mystery.
@@ -129,12 +141,20 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           setMicOn(false);
         } else {
           // Ask for mic permission up front so speech recognition can use it.
-          mockMicStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          if (!alive.current) {
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          mockMicStream.current = stream;
           setMicOn(true);
         }
       }
+      setMicError(null);
     } catch (err) {
-      setMediaError(mediaMessage("mic", err));
+      const msg = mediaMessage("mic", err);
+      setMediaError(msg);
+      setMicError(msg);
     } finally {
       micBusy.current = false;
       setMicStarting(false);
@@ -149,7 +169,11 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   }, [livekit, enabled]);
 
   // ---- screen share ---------------------------------------------------------
+  // One screen picker at a time.
+  const shareBusy = useRef(false);
   const startShare = useCallback(async () => {
+    if (shareBusy.current) return;
+    shareBusy.current = true;
     setMediaError(null);
     try {
       if (livekit) {
@@ -167,6 +191,8 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
       // Cancelling the picker is a choice, not an error; the computer refusing is.
       const e = err as Error;
       if (e.name !== "NotAllowedError" || /system/i.test(e.message)) setMediaError(mediaMessage("screen", err));
+    } finally {
+      shareBusy.current = false;
     }
   }, [livekit]);
 
@@ -190,6 +216,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   return {
     micOn,
     micStarting,
+    micError,
     toggleMic,
     localScreen,
     remoteScreen,

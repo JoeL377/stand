@@ -16,17 +16,47 @@ let shown: Shown[] = [];
 const listeners = new Set<(list: Shown[]) => void>();
 const emit = () => listeners.forEach((l) => l(shown));
 
+// Each toast's time left; it stops running while the pointer or keyboard focus is on the toast.
+const timers = new Map<number, { left: number; started: number; t?: ReturnType<typeof setTimeout> }>();
+function runTimer(key: number) {
+  const x = timers.get(key);
+  if (!x || x.t) return;
+  x.started = Date.now();
+  x.t = setTimeout(() => dismissToast(key), x.left);
+}
+function holdTimer(key: number) {
+  const x = timers.get(key);
+  if (!x?.t) return;
+  clearTimeout(x.t);
+  x.t = undefined;
+  x.left = Math.max(1500, x.left - (Date.now() - x.started));
+}
+
 export function toast(t: ToastSpec): number {
   const key = Date.now() + Math.random();
-  shown = [...shown.slice(-2), { ...t, key }];
+  const item = { ...t, key };
+  // Three at a time, but a newer message never pushes out one that can still be undone.
+  let list = [...shown, item];
+  while (list.length > 3) {
+    const i = list.findIndex((x) => !x.action && x !== item);
+    if (i < 0 && list.length <= 5) break;
+    const drop = list[i < 0 ? 0 : i];
+    clearTimeout(timers.get(drop.key)?.t);
+    timers.delete(drop.key);
+    list = list.filter((x) => x !== drop);
+  }
+  shown = list;
   emit();
   // Undo stays long enough to reach; errors long enough to read.
   const ms = t.ms ?? (t.action ? 7000 : t.tone === "error" ? Math.max(6000, t.text.length * 70) : 3500);
-  setTimeout(() => dismissToast(key), ms);
+  timers.set(key, { left: ms, started: Date.now() });
+  runTimer(key);
   return key;
 }
 
 export function dismissToast(key: number) {
+  clearTimeout(timers.get(key)?.t);
+  timers.delete(key);
   shown = shown.filter((t) => t.key !== key);
   emit();
 }
@@ -53,8 +83,18 @@ export function Toasts() {
   return (
     <div className="toasts" aria-live="polite">
       {list.map((t) => (
-        <div key={t.key} className={t.tone === "error" ? "toast error" : "toast"} role={t.tone === "error" ? "alert" : "status"}>
-          <span className="toast-text">{t.text}</span>
+        <div
+          key={t.key}
+          className={t.tone === "error" ? "toast error" : "toast"}
+          role={t.tone === "error" ? "alert" : "status"}
+          onMouseEnter={() => holdTimer(t.key)}
+          onMouseLeave={() => runTimer(t.key)}
+          onFocus={() => holdTimer(t.key)}
+          onBlur={() => runTimer(t.key)}
+        >
+          <span className="toast-text" dir="auto">
+            {t.text}
+          </span>
           {t.action && (
             <button
               className="toast-action"

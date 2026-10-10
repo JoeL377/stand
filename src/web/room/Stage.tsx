@@ -226,7 +226,7 @@ export function Stage(props: {
     <main className="stage">
       <div className="now">
         <span className="now-label">Now discussing</span>
-        <span className="now-title" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
+        <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}
         </span>
