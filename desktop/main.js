@@ -40,9 +40,27 @@ let signingIn = null;
 
 // ---- one instance -----------------------------------------------------------------
 
-const primary = app.requestSingleInstanceLock();
-if (!primary) app.quit();
+// A second launch brings up the window that's already open. Run from source (npm
+// start, npm run try:mac) it replaces the running copy instead, so the app always runs
+// the code you just pulled rather than quietly handing over to the old one.
+let primary = app.requestSingleInstanceLock();
+const replacing = !primary && !app.isPackaged ? replaceRunningCopy() : null;
+if (!primary && !replacing) app.quit();
 app.on("second-instance", () => showWindow());
+
+/** Stops the copy holding the lock and takes the lock over. */
+async function replaceRunningCopy() {
+  try {
+    // Chromium's lock is a symlink in the app's data folder that points at "<host>-<pid>".
+    const pid = Number(fs.readlinkSync(path.join(app.getPath("userData"), "SingletonLock")).split("-").pop());
+    if (pid > 0 && pid !== process.pid) process.kill(pid);
+  } catch {}
+  for (let i = 0; i < 50; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (app.requestSingleInstanceLock()) return true;
+  }
+  return false;
+}
 
 // ---- the window -----------------------------------------------------------------
 
@@ -504,8 +522,9 @@ app.on("web-contents-created", (_e, wc) => {
   else wc.setWindowOpenHandler(() => ({ action: "deny" }));
 });
 
-app.whenReady().then(() => {
-  if (!primary) return;
+app.whenReady().then(async () => {
+  if (replacing) primary = await replacing;
+  if (!primary) return app.quit();
   allowMediaAndSharing(session.fromPartition(PARTITION));
   showWindow();
   // The Snap button on Stand's meeting page.

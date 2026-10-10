@@ -35,6 +35,8 @@ npm run try:mac
 
 This starts a local Stand with your `.env` and opens the app on it. Quitting the app or pressing Ctrl-C stops both. The first launch downloads Electron, so it takes a minute.
 
+Run it again after a `git pull` and it replaces whatever is still running: an older Stand server on ports 5173 or 3001 (from this copy or another) is stopped first, and an app window that's still open is closed for the new one. If another program holds one of those ports, it says which and stops.
+
 Google sign-in on the local Stand needs `http://localhost:5173/api/auth/google/callback` among the authorized redirect URIs of your Google OAuth client (Google Cloud console › APIs & Services › Credentials). Without Google keys in `.env`, you sign in with a name and email instead.
 
 ## First run
