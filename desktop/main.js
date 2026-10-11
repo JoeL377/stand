@@ -389,10 +389,12 @@ function allowMediaAndSharing(ses) {
 // ⌃⇧S puts a capture toolbar like macOS's ⌘⇧5 over the display under the pointer:
 // the entire screen, one window, or a box you move and resize (it's where you left
 // it last time). The snap goes to the meeting you're in, on whatever is in focus,
-// and to the clipboard; Options turns either off and sets a 5 or 10 second timer.
+// and to the clipboard; Options turns either off and sets a 5 or 10 second timer. Out of a
+// meeting it goes to a space, picked on the save card that comes up after the cut.
 
-/** What the toolbar remembers between snaps. */
-const SNAP_DEFAULTS = { mode: "portion", toMeeting: true, toClipboard: true, timer: 0, box: null };
+/** What the toolbar remembers between snaps. toMeeting is "to Stand": the meeting you're in,
+ *  or out of a meeting the space you pick on the save card; space is the last one picked. */
+const SNAP_DEFAULTS = { mode: "portion", toMeeting: true, toClipboard: true, timer: 0, box: null, space: null };
 const prefsFile = () => path.join(app.getPath("userData"), "snap.json");
 
 function snapPrefs() {
@@ -412,8 +414,11 @@ function cleanPrefs(p) {
     toClipboard: p?.toClipboard !== false || p?.toMeeting === false,
     timer: [5, 10].includes(p?.timer) ? p.timer : 0,
     box,
+    space: typeof p?.space === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(p.space) ? p.space : null,
   };
 }
+
+const savePrefs = (p) => fs.promises.writeFile(prefsFile(), JSON.stringify(cleanPrefs(p))).catch(() => {});
 
 /** The space whose meeting the main window is in, if any. The page says which; an older page
  *  doesn't, so then it's read from the address (/s/ and /r/ both open a space). */
@@ -496,7 +501,7 @@ async function snapOn(from, onDisplay) {
     // The other displays were only dimmed for choosing one: give them back now, not after saving.
     for (const o of others) if (!o.isDestroyed()) o.close();
     if (choice?.failed) return { title: "Snap's toolbar didn't open", body: choice.failed };
-    if (choice?.prefs) fs.promises.writeFile(prefsFile(), JSON.stringify(cleanPrefs(choice.prefs))).catch(() => {});
+    if (choice?.prefs) void savePrefs(choice.prefs);
     // Snapping from another app leaves Stand in the background (the toolbar never makes it
     // the active app). Should Stand have come forward anyway, give the screen back.
     if (mac && !wasInStand) await handBack();
@@ -513,9 +518,13 @@ async function snapOn(from, onDisplay) {
     }
     const image = await cut(choice, display, shot, await windows);
     trace("cut", { size: image.getSize() });
+    // The text in it, read on this Mac while it saves (or while you pick where it goes).
+    const reading = readText(image);
     // The screen's been read: the bar can come back while the snap saves, and say that it is.
     barAway = false;
     updateBar();
+    // Out of a meeting, a card in the corner asks which space it goes to before anything leaves the Mac.
+    if (!roomId && prefs.toMeeting) return await saveToSpace(me, display, image, shotAt, prefs, reading);
     me.saving = true;
     // Where it began says where it's reported: from the page's Snap button, in the page;
     // otherwise on the bar while it's up, else in the page if Stand is in front.
@@ -524,6 +533,7 @@ async function snapOn(from, onDisplay) {
     const inPage = Boolean(roomId && prefs.toMeeting && !onBar && win?.isVisible());
     if (inPage) win.webContents.send("app:command", "saving");
     const report = await deliver(image, shotAt, prefs, roomId).finally(() => inPage && !win.isDestroyed() && win.webContents.send("app:command", "saved"));
+    void addText(report.snapId, reading);
     // The bar said it was saving, so the bar says how it went, wherever the snap began.
     if (onBar && bar && !bar.isDestroyed()) {
       bar.webContents.send("bar:report", report);
@@ -548,7 +558,8 @@ async function snapOn(from, onDisplay) {
  *  shows as a thumbnail in the corner for a moment, as macOS's own screenshots do, and a
  *  problem as a notification. */
 function tell(report) {
-  if (!report) return;
+  // The save card already showed how it went.
+  if (!report || report.quiet) return;
   if (bar?.isVisible()) {
     if (!report.onBar) bar.webContents.send("bar:report", report);
   } else if (report.thumb) thumbnail(report);
@@ -906,54 +917,252 @@ async function grabWindow(w, display) {
   return source && !source.thumbnail.isEmpty() ? source.thumbnail : null;
 }
 
-/** To the clipboard and the meeting, as the options say. Out of a meeting it's copied. */
 /** How long saving a snap may take, all tries together. */
 const SAVE_WITHIN_MS = 90_000;
 
-async function deliver(image, at, prefs, roomId) {
-  const toMeeting = Boolean(roomId) && prefs.toMeeting;
-  const copy = prefs.toClipboard || !toMeeting;
-  if (copy) await clipboard.write([new ClipboardItem({ "image/png": new Blob([image.toPNG()], { type: "image/png" }) })]);
-  const thumb = image.resize({ height: 152 }).toDataURL();
-  if (!toMeeting) return { title: "Snapped", body: "It's on your clipboard.", thumb };
+/** A request to Stand as the person signed in to the app, with its cookies. */
+const standFetch = (p, opts = {}) => session.fromPartition(PARTITION).fetch(`${STAND_URL}${p}`, { credentials: "include", ...opts });
+
+const copyImage = (image) => clipboard.write([new ClipboardItem({ "image/png": new Blob([image.toPNG()], { type: "image/png" }) })]);
+
+/** Sends a snap to a space: to its meeting, or with to=space straight to the space. A blip in
+ *  the connection shouldn't lose it: a few tries, each with a time limit, as in the page.
+ *  Resolves to {ok, id} or {ok: false, why}. */
+async function postSnap(image, at, roomId, extra = {}, line = "") {
   const { width: w, height: h } = image.getSize();
   const body = image.toJPEG(90);
   // One key for every try, so a try that got through before timing out isn't saved twice.
-  const key = crypto.randomUUID();
+  const query = new URLSearchParams({ at: String(at), w: String(w), h: String(h), key: crypto.randomUUID(), ...extra });
   // Longer for a bigger picture: at least 15 s, and as long as a slow (50 KB/s) line needs,
   // but all the tries together get 90 s, so Snap is never held up for long.
   const limit = Math.min(SAVE_WITHIN_MS, Math.max(15_000, body.length / 50));
   const deadline = Date.now() + SAVE_WITHIN_MS;
-  // A blip in the connection shouldn't lose it: a few tries, each with a time limit, as in the page.
   let res = null;
   for (const wait of [0, 1000, 3000]) {
     if (wait) await new Promise((r) => setTimeout(r, wait));
     const left = deadline - Date.now();
     if (left < 2000) break;
-    res = await session
-      .fromPartition(PARTITION)
-      .fetch(`${STAND_URL}/api/rooms/${roomId}/snaps?at=${at}&w=${w}&h=${h}&key=${key}`, {
-        method: "POST",
-        headers: { "content-type": "image/jpeg" },
-        body,
-        credentials: "include",
-        signal: AbortSignal.timeout(Math.min(limit, left)),
-      })
-      .catch(() => null);
+    res = await standFetch(`/api/rooms/${encodeURIComponent(roomId)}/snaps?${query}`, {
+      method: "POST",
+      headers: { "content-type": "image/jpeg", ...(line ? { "x-stand-line": encodeURIComponent(line) } : {}) },
+      body,
+      signal: AbortSignal.timeout(Math.min(limit, left)),
+    }).catch(() => null);
     if (res && res.status < 502) break;
   }
-  if (!res?.ok) {
-    const why = (await res?.json().catch(() => null))?.error ?? (res ? `Stand said ${res.status}.` : "Stand didn't answer.");
+  if (!res?.ok) return { ok: false, why: (await res?.json().catch(() => null))?.error ?? (res ? `Stand said ${res.status}.` : "Stand didn't answer.") };
+  return { ok: true, id: (await res.json().catch(() => null))?.id ?? null };
+}
+
+/** To the clipboard and the meeting, as the options say. */
+async function deliver(image, at, prefs, roomId) {
+  const toMeeting = Boolean(roomId) && prefs.toMeeting;
+  const copy = prefs.toClipboard || !toMeeting;
+  if (copy) await copyImage(image);
+  const thumb = image.resize({ height: 152 }).toDataURL();
+  if (!toMeeting) return { title: "Snapped", body: "It's on your clipboard.", thumb };
+  const saved = await postSnap(image, at, roomId);
+  if (!saved.ok) {
     return copy
-      ? { title: "Copied, but not added to the meeting", body: `${why} Paste it into Stand to add it.` }
-      : { title: "Snap didn't save", body: why };
+      ? { title: "Copied, but not added to the meeting", body: `${saved.why} Paste it into Stand to add it.` }
+      : { title: "Snap didn't save", body: saved.why };
   }
   return {
     title: "Snapped",
     body: copy ? "It's on your clipboard and in the meeting, on the item in focus." : "It's in the meeting, on the item in focus. Crop or delete it in Stand.",
-    snapId: (await res.json().catch(() => null))?.id,
+    snapId: saved.id,
     thumb,
   };
+}
+
+// ---- out of a meeting: the save card ------------------------------------------------
+//
+// A snap taken with no meeting on goes to a space, which everyone in it sees once it's saved.
+// Before anything leaves the Mac, a small card in the corner says where: the space (the last
+// one picked), the item (or Stand picks one, marked ✦ until someone confirms it) and a line,
+// all optional but the space. Enter saves, Esc doesn't. It stays up while it saves, shows a
+// check, and goes.
+
+/** The spaces you're in, most recently active first, or why there are none to pick from. */
+async function spacesToSaveTo() {
+  const res = await standFetch("/api/spaces", { signal: AbortSignal.timeout(8000) }).catch(() => null);
+  if (!res) return { why: "Stand didn't answer, so it isn't saved to a space." };
+  if (res.status === 401) return { why: "Sign in to Stand to save snaps to a space." };
+  if (!res.ok) return { why: `Stand said ${res.status}, so it isn't saved to a space.` };
+  const list = (await res.json().catch(() => null)) ?? [];
+  if (!list.length) return { why: "Make a space in Stand first; then snaps can go there." };
+  return {
+    spaces: list
+      .map((s) => ({ id: String(s.id), name: short(s.name) || "Untitled space", at: Number(s.activeAt) || 0 }))
+      .sort((a, b) => b.at - a.at)
+      .map(({ id, name }) => ({ id, name })),
+  };
+}
+
+/** A space's agenda items a snap can be about (not single slides). */
+async function itemsOf(spaceId) {
+  const res = await standFetch(`/api/rooms/${encodeURIComponent(spaceId)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+  const room = res?.ok ? await res.json().catch(() => null) : null;
+  return (room?.items ?? []).filter((i) => !i.deckId).map((i) => ({ id: String(i.id), title: short(i.title) }));
+}
+
+/** The Mac's accent color, and black or white text on it, whichever reads. */
+function accentColors() {
+  const a = mac ? systemPreferences.getAccentColor?.() : null;
+  if (!a) return {};
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(a.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return { accent: `#${a.slice(0, 6)}`, onAccent: 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.3 ? "#000" : "#fff" };
+}
+
+async function saveToSpace(me, display, image, at, prefs, reading) {
+  const thumb = image.resize({ height: 152 }).toDataURL();
+  if (prefs.toClipboard) await copyImage(image);
+  const found = await spacesToSaveTo();
+  if (!found.spaces) {
+    if (!prefs.toClipboard) await copyImage(image);
+    return { title: "Copied, not saved to a space", body: found.why, thumb };
+  }
+  const { spaces } = found;
+  const space = spaces.find((s) => s.id === prefs.space)?.id ?? spaces[0].id;
+  const upload = async ({ spaceId, itemId, itemTitle, line }) => {
+    const to = spaces.find((s) => s.id === spaceId) ?? spaces[0];
+    const saved = await postSnap(image, at, to.id, { to: "space", ...(itemId ? { item: String(itemId) } : {}) }, short(line).slice(0, 300));
+    trace("space", { ok: saved.ok, item: Boolean(itemId), line: Boolean(line) });
+    if (!saved.ok) {
+      if (!prefs.toClipboard) await copyImage(image);
+      return { result: { ok: false, why: `${saved.why} It's on your clipboard.` } };
+    }
+    void savePrefs({ ...prefs, space: to.id });
+    void addText(saved.id, reading);
+    const item = itemId ? short(itemTitle) || null : null;
+    return {
+      result: { ok: true, space: to.name, item },
+      report: { title: `Saved to ${to.name}`, body: item ?? "Stand suggests the item it's about.", snapId: saved.id, thumb, quiet: true },
+    };
+  };
+  return saveCard(me, display, { thumb, spaces, space, items: null, ...accentColors() }, upload);
+}
+
+/** The card itself, in the corner of the display that was snapped. Resolves to the report
+ *  once it's saved, or null when it's closed without saving. */
+let saveCardWin = null;
+function saveCard(me, display, data, upload) {
+  return new Promise((resolve) => {
+    const d = display.workArea;
+    const [width, height] = [440, 150];
+    const card = new BrowserWindow({
+      x: d.x + d.width - width - 10,
+      y: d.y + d.height - height - 10,
+      width,
+      height,
+      ...(mac ? { type: "panel" } : {}),
+      show: false,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      hasShadow: false,
+      acceptFirstMouse: true,
+      webPreferences: { preload: `${__dirname}/save-preload.js`, contextIsolation: true, sandbox: true },
+    });
+    saveCardWin = card;
+    card.setAlwaysOnTop(true, "floating");
+    card.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    staysInBackground(card, "save card");
+    let done = false;
+    let saving = false;
+    const mine = (e) => e.sender === card.webContents;
+    // Esc is caught for the card only while it has the keyboard, never from the app you're in.
+    const esc = () => !card.isDestroyed() && card.webContents.send("save:escape");
+    const finish = (report) => {
+      if (done) return;
+      done = true;
+      ipcMain.removeListener("save:ready", onReady);
+      ipcMain.removeListener("save:go", onGo);
+      ipcMain.removeListener("save:cancel", onCancel);
+      if (globalShortcut.isRegistered("Escape")) globalShortcut.unregister("Escape");
+      if (!card.isDestroyed()) card.close();
+      if (saveCardWin === card) saveCardWin = null;
+      resolve(report);
+    };
+    const onReady = (e) => {
+      if (!mine(e) || card.isDestroyed()) return;
+      card.show();
+      card.focus();
+    };
+    const onCancel = (e) => mine(e) && !saving && finish(null);
+    const onGo = async (e, choice) => {
+      if (!mine(e) || saving || typeof choice?.spaceId !== "string") return;
+      saving = true;
+      me.saving = true;
+      const r = await upload(choice).catch((err) => ({ result: { ok: false, why: String(err?.message ?? err) } }));
+      me.saving = false;
+      saving = false;
+      if (done) return;
+      if (card.isDestroyed()) return finish(r.report ?? null);
+      card.webContents.send("save:result", r.result);
+      if (r.result.ok) setTimeout(() => finish(r.report), 1300);
+    };
+    // The snap shortcut again, or the app quitting, closes it unsaved.
+    me.cancel = () => !saving && finish(null);
+    ipcMain.on("save:ready", onReady);
+    ipcMain.on("save:go", onGo);
+    ipcMain.on("save:cancel", onCancel);
+    card.on("focus", () => !globalShortcut.isRegistered("Escape") && globalShortcut.register("Escape", esc));
+    card.on("blur", () => globalShortcut.isRegistered("Escape") && globalShortcut.unregister("Escape"));
+    card.on("closed", () => finish(null));
+    card.webContents.once("did-finish-load", () => {
+      card.webContents.send("save:open", data);
+      // The items for the space it starts on follow when they come.
+      void itemsOf(data.space).then((items) => !card.isDestroyed() && card.webContents.send("save:first-items", { space: data.space, items }));
+    });
+    void card.loadFile(`${__dirname}/save.html`);
+  });
+}
+
+// ---- the text in a snap ----------------------------------------------------------------
+
+/** native/stand-ocr, built by scripts/build-native.js; in the built app it's unpacked from the asar. */
+const OCR = path.join(__dirname, "native", "stand-ocr").replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+
+/** The text in a snap, read on this Mac by Apple's Vision. Null when there's none, or it
+ *  can't be read here (stand-ocr didn't build, say): the snap saves without it. */
+async function readText(image) {
+  if (!mac || !fs.existsSync(OCR)) return null;
+  const t0 = Date.now();
+  const file = path.join(app.getPath("temp"), `stand-snap-${crypto.randomUUID()}.png`);
+  try {
+    await fs.promises.writeFile(file, image.toPNG());
+    const out = await new Promise((resolve) =>
+      execFile(OCR, [file], { timeout: 20_000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) trace("text", { error: String(stderr || err.message).trim().slice(0, 200) });
+        resolve(err ? null : stdout);
+      }),
+    );
+    trace("text", { chars: out?.trim().length ?? null, ms: Date.now() - t0 });
+    return out?.trim() || null;
+  } catch (err) {
+    trace("text", { error: String(err?.message ?? err) });
+    return null;
+  } finally {
+    fs.promises.rm(file, { force: true }).catch(() => {});
+  }
+}
+
+/** Once it's read, the text goes on the saved snap, for search and for agents. */
+async function addText(snapId, reading) {
+  const text = await reading;
+  if (!snapId || !text) return;
+  await standFetch(`/api/snaps/${encodeURIComponent(snapId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ screenText: text }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => null);
 }
 
 /** A notification, for problems. With `settings`, a click opens that page of System Settings. */
@@ -1441,6 +1650,8 @@ app.whenReady().then(async () => {
     (e, extra, ask) => e.sender === bar?.webContents && sizeBar(Math.max(0, Math.min(600, Math.round(Number(extra) || 0))), Boolean(ask)),
   );
   ipcMain.handle("bar:copy", (e, id, plain) => e.sender === bar?.webContents && copyTodo(String(id), Boolean(plain)));
+  // The save card's item pill, when another space is picked.
+  ipcMain.handle("save:items", (e, id) => (e.sender === saveCardWin?.webContents && typeof id === "string" ? itemsOf(id) : []));
   // The page's way to the right page of System Settings (a blocked mic, say).
   ipcMain.on("app:settings", (e, which) => isStand(e.senderFrame?.url) && openSettings(which));
   buildMenus();

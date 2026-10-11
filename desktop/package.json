@@ -26,10 +26,14 @@
       "snap-preload.js",
       "bar.html",
       "bar-preload.js",
-      "native/stand-native.node"
+      "save.html",
+      "save-preload.js",
+      "native/stand-native.node",
+      "native/stand-ocr"
     ],
     "asarUnpack": [
-      "native/stand-native.node"
+      "native/stand-native.node",
+      "native/stand-ocr"
     ],
     "mac": {
       "category": "public.app-category.productivity",

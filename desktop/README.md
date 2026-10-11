@@ -5,7 +5,11 @@ The Stand app in its own window, plus **Snap from anywhere**: press **⌃⇧S** 
 - **Entire screen**: click anywhere.
 - **Window**: hover a window to highlight it, click to snap it.
 - **Selected portion**: a box you drag to move and pull by its handles to resize; it's where you left it last time. Capture, Enter or a double-click snaps it.
-- **Options**: save to the meeting (on whatever is being discussed) and/or the clipboard, both on by default, and a 5 or 10 second timer. Out of a meeting, a snap goes to the clipboard.
+- **Options**: save to Stand and/or the clipboard, both on by default, and a 5 or 10 second timer. In a meeting, Stand means the meeting, on whatever is being discussed. Out of a meeting, a small card comes up in the corner after the cut: the space it goes to (the last one you picked), the item it's about (or ✦ Stand picks one) and a line about it. Enter saves, Esc doesn't. Everyone in the space sees it once it's saved.
+
+Each snap's text is read on the Mac with Apple's Vision framework (`native/stand-ocr`) and saved with it, so it's searchable and agents can read it without looking at the picture.
+
+Snapping happens here only: the web page shows snaps but doesn't take them.
 
 Esc or ⌃⇧S again closes it. Snapping from another app never brings Stand forward: the app you're in stays in front, full screen or on another desktop included. The toolbar remembers its mode and options in `snap.json` in the app's data folder.
 
@@ -24,7 +28,7 @@ open dist/mac*/Stand.app
 
 Drag it to Applications to keep it. `npm start` runs it straight from the source.
 
-Both build the floating bar's bit of native Mac code first, which needs Apple's command line tools (`xcode-select --install`). Run from source without them, the app still starts, the bar just brings Stand forward for a moment when clicked, and `native/build.log` says what went wrong.
+Both build the native Mac code first (the floating bar's, and the text reading), which needs Apple's command line tools (`xcode-select --install`). Run from source without them, the app still starts: the bar just brings Stand forward for a moment when clicked, snaps save without their text, and `native/build.log` and `native/build-ocr.log` say what went wrong.
 
 To point it at another Stand: `STAND_URL=http://localhost:5173 npm start`.
 
