@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { SYNTHESIS_HINT, SynthesisField } from "../Synthesis.tsx";
+import { ConxtPanel } from "../ConxtPanel.tsx";
 import { SpacesShell, spaceHref } from "./SpacesShell.tsx";
 
 /** The spaces you created: rename them, keep their purpose current, and say what to synthesize from each meeting. */
@@ -70,6 +71,7 @@ function SpaceEditor({ s }: { s: SpaceSummary }) {
       </label>
       <SynthesisField value={synthesis} onChange={setSynthesis} />
       <p className="muted small synth-hint">{SYNTHESIS_HINT}</p>
+      <ConxtPanel roomId={s.id} />
       <div className="sp-manage-foot">
         <button className="primary" disabled={!dirty || state === "saving"}>
           Save

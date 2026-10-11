@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
@@ -139,6 +140,8 @@ export function RecapPage() {
           </div>
         )}
       </header>
+
+      <ConxtPanel roomId={data.roomId} meetingId={data.meetingId} />
 
       {groups.length === 0 && <p className="muted">Nothing was recorded in this meeting.</p>}
 
