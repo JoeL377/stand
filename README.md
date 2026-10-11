@@ -83,3 +83,14 @@ Code map: `src/server` (Express + ws + SQLite), `src/web` (React + Vite), `src/s
 - Google Docs / Notion outlines as agenda sources.
 - Google Slides links that stay in sync, and .pptx upload (export to PDF for now).
 - Asking the agent things mid-meeting ("what did we decide about this last week?").
+
+## Conxt shared memory
+
+Stand can submit completed transcripts to a Conxt hosted team/project. Configure
+`CONXT_DESTINATIONS` in server secrets, then the room owner explicitly connects it
+in **Manage spaces**. A durable SQLite outbox retries delivery across failures and
+restarts; recap pages show processing status. Conxt prepares a review queue and team
+members publish accepted knowledge there.
+
+See [Conxt integration](docs/conxt-integration.md) for setup, source limits, privacy
+and rollout status. This integration has not been deployed by this change.
