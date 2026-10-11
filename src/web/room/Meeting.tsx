@@ -148,9 +148,16 @@ export function Meeting(props: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  // The space's open to-dos for the bar's list: this meeting's, then earlier ones still open.
+  const barTodos = useMemo(() => {
+    if (!state) return [];
+    const key = (itemId: string | null) => keyOf(state.items.find((i) => i.id === itemId));
+    const open = [...room.notes.filter((n) => n.kind === "action").reverse(), ...state.followUps].filter((n) => !n.doneAt);
+    return open.map((n) => ({ id: n.id, text: n.text, owner: n.owner, itemKey: key(n.itemId) }));
+  }, [state?.items, state?.followUps, room.notes]);
   useEffect(() => {
-    if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn });
-  }, [state?.roomName, focusItem, micOn]);
+    if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn, todos: barTodos });
+  }, [state?.roomName, focusItem, micOn, barTodos]);
   useEffect(() => () => macApp?.meeting?.(null), []);
   useEffect(() => macApp?.onCommand?.((c) => c === "mic" && void toggleMic()), [toggleMic]);
   // Mute and unmute from the keyboard, as in other meeting apps (Command or Ctrl + D).

@@ -4,8 +4,11 @@
 /** What to tell the person once a snap is done, or nothing if they cancelled. */
 export type SnapReport = { title: string; body: string; snapId?: string } | null | undefined;
 
-/** What the app's floating bar shows while Stand is in the background. */
-export type MeetingBar = { space: string; itemKey: string | null; item: string | null; micOn: boolean };
+/** An open to-do in the space, for the floating bar's list. */
+export type BarTodo = { id: string; text: string; owner: string | null; itemKey: string | null };
+
+/** What the app's floating bar shows during a meeting. */
+export type MeetingBar = { space: string; itemKey: string | null; item: string | null; micOn: boolean; todos: BarTodo[] };
 
 type Bridge = {
   /** The snap toolbar: the screen, a window or part of it. */

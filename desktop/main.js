@@ -278,6 +278,7 @@ async function snap(from) {
   // the picture. macOS takes it off the screen within a frame or two.
   barAway = true;
   if (bar?.isVisible()) {
+    closeBarList();
     bar.hide();
     barSnapped = true;
     await new Promise((r) => setTimeout(r, 50));
@@ -671,9 +672,62 @@ const barFile = () => path.join(app.getPath("userData"), "bar.json");
 const short = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
 
 function setMeeting(m) {
-  meeting = m && typeof m === "object" ? { space: short(m.space), itemKey: short(m.itemKey) || null, item: short(m.item) || null, micOn: m.micOn !== false } : null;
+  meeting =
+    m && typeof m === "object"
+      ? { space: short(m.space), itemKey: short(m.itemKey) || null, item: short(m.item) || null, micOn: m.micOn !== false, todos: todosOf(m.todos) }
+      : null;
   if (meeting && barLoaded) bar.webContents.send("bar:state", meeting);
   updateBar();
+}
+
+/** The space's open to-dos, as the meeting page lists them for the bar. */
+const todosOf = (list) =>
+  (Array.isArray(list) ? list : [])
+    .filter((t) => t && typeof t.id === "string" && /^[a-z0-9]{4,40}$/.test(t.id))
+    .slice(0, 60)
+    .map((t) => ({ id: t.id, text: short(t.text), owner: short(t.owner) || null, itemKey: short(t.itemKey) || null }));
+
+/** The bar's to-do list makes the window taller: down from the bar, or up when the bar is
+ *  near the bottom of the screen. Returns whether it goes up; `ask` only says which, so the
+ *  page can lay itself out first and the bar doesn't jump. 0 folds the list away. */
+let barList = null;
+let barResizing = false;
+function sizeBar(extra, ask) {
+  if (!bar) return false;
+  const [x, y] = bar.getPosition();
+  const top = barList?.up ? y + barList.h : y; // where the bar itself is
+  const a = screen.getDisplayMatching({ x, y: top, ...BAR }).workArea;
+  const up = Boolean(extra) && top + BAR.height + extra > a.y + a.height && top - extra >= a.y;
+  if (ask) return up;
+  barList = extra ? { up, h: extra } : null;
+  barResizing = true;
+  bar.setBounds({ x, y: up ? top - extra : top, width: BAR.width, height: BAR.height + (extra || 0) });
+  setTimeout(() => (barResizing = false), 150);
+  return up;
+}
+
+function closeBarList() {
+  if (!barList) return;
+  sizeBar(0);
+  bar?.webContents.send("bar:close-list");
+}
+
+/** Puts one of the space's to-dos on the clipboard: the prompt Stand's Copy for agent
+ *  makes (its words plus its Stand reference, for Claude Code, Cursor or Codex), or just its words. */
+async function copyTodo(id, plain) {
+  const todo = meeting?.todos.find((t) => t.id === id);
+  if (!todo) return false;
+  let text = todo.text;
+  if (!plain && win) {
+    // Fetched by the page, signed in as you, the way its own Copy for agent button does.
+    const prompt = await win.webContents
+      .executeJavaScript(`fetch("/api/refs/action/${id}/prompt").then((r) => (r.ok ? r.json() : null)).then((j) => j && j.text, () => null)`)
+      .catch(() => null);
+    if (typeof prompt === "string" && prompt) text = prompt;
+  }
+  await clipboard.writeText(text);
+  trace("copied", { plain: Boolean(plain), agent: text !== todo.text });
+  return true;
 }
 
 /** Where the bar goes: where it was left, or the top middle of the screen Stand is on. */
@@ -714,8 +768,9 @@ function makeBar() {
   barPrevents = staysInBackground(bar, "bar");
   bar.setContentProtection(true);
   bar.on("moved", () => {
+    if (barResizing) return;
     const [x, y] = bar.getPosition();
-    fs.promises.writeFile(barFile(), JSON.stringify({ x, y })).catch(() => {});
+    fs.promises.writeFile(barFile(), JSON.stringify({ x, y: barList?.up ? y + barList.h : y })).catch(() => {});
     // Dragging the bar is a click on it too. On the Mac this fires all through the drag.
     clearTimeout(dragged);
     dragged = setTimeout(() => void giveBack("drag"), 300);
@@ -723,6 +778,7 @@ function makeBar() {
   bar.on("closed", () => {
     bar = null;
     barLoaded = false;
+    barList = null;
   });
   bar.webContents.once("did-finish-load", () => {
     barLoaded = true;
@@ -772,7 +828,10 @@ function updateBar() {
     bar.webContents.send("bar:shown", { pulse: !barSnapped });
     barSnapped = false;
     void noteTheirApp();
-  } else if (!want && bar.isVisible()) bar.hide();
+  } else if (!want && bar.isVisible()) {
+    closeBarList();
+    bar.hide();
+  }
 }
 
 async function pressOnBar(button) {
@@ -874,6 +933,11 @@ app.whenReady().then(async () => {
   // The meeting page, and the floating bar's buttons.
   ipcMain.on("app:meeting", (e, m) => e.sender === win?.webContents && isStand(e.senderFrame?.url) && setMeeting(m));
   ipcMain.on("bar:press", (e, button) => e.sender === bar?.webContents && void pressOnBar(button));
+  ipcMain.handle(
+    "bar:size",
+    (e, extra, ask) => e.sender === bar?.webContents && sizeBar(Math.max(0, Math.min(600, Math.round(Number(extra) || 0))), Boolean(ask)),
+  );
+  ipcMain.handle("bar:copy", (e, id, plain) => e.sender === bar?.webContents && copyTodo(String(id), Boolean(plain)));
   // Focus moving between apps: a blur comes just before the next focus, so look once both have landed.
   for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));
   if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap("shortcut").then(tell)))
