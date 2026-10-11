@@ -214,10 +214,52 @@ const AgendaSchema = z.object({
     .describe("Every suggestion given, once each, in the order the meeting should take them"),
 });
 
-/** A notes run that hangs keeps "Updating" up; past this it fails and the next pause tries again. */
-const NOTES_TIMEOUT_MS = 60_000;
+/** A notes run that hangs keeps "Updating" up; past this it fails and the next pause tries
+ *  again. Long enough for the whole transcript of an item talked about for two hours. */
+const NOTES_TIMEOUT_MS = 120_000;
+/** The notes list every transcript line under its topic, so they grow with a long item, and
+ *  the model thinks first within the same limit. Only what it writes is billed. */
+const NOTES_MAX_TOKENS = 16_000;
+/** Transcript lines per block of the notes prompt; see notesPrompt. */
+const NOTES_CHUNK_LINES = 50;
 
-class ClaudeAgent implements Agent {
+/** A notes run that failed for a reason worth saying: the account's rate limit (wait it out)
+ *  or its credit running out (someone has to top it up). */
+export class NotesTrouble extends Error {
+  constructor(
+    readonly reason: "busy" | "credit",
+    /** busy: how long the API asked us to wait, when it said. */
+    readonly retryAfterMs = 0,
+    options?: { cause?: unknown },
+  ) {
+    super(reason === "busy" ? "the model's rate limit was hit" : "the Anthropic account is out of credit", options);
+  }
+}
+
+export function notesTrouble(err: unknown): NotesTrouble | null {
+  if (err instanceof Anthropic.RateLimitError || (err instanceof Anthropic.APIError && err.status === 529)) {
+    const s = Number(err.headers?.get("retry-after"));
+    return new NotesTrouble("busy", Number.isFinite(s) && s > 0 ? s * 1000 : 0, { cause: err });
+  }
+  if (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message)) return new NotesTrouble("credit", 0, { cause: err });
+  return null;
+}
+
+/** The notes prompt as blocks. Every run sends the item's whole transcript, which only grows,
+ *  so it goes in fixed chunks of lines with the last whole chunk marked for the prompt cache:
+ *  the next run reads all of that back at a tenth of the price, and it doesn't count against
+ *  the account's per-minute input limit. What changes run to run comes after it. */
+export function notesPrompt(head: string, lines: string[], tail: string): Anthropic.Beta.BetaTextBlockParam[] {
+  const whole = lines.length - (lines.length % NOTES_CHUNK_LINES);
+  const blocks: Anthropic.Beta.BetaTextBlockParam[] = [{ type: "text", text: head }];
+  for (let i = 0; i < whole; i += NOTES_CHUNK_LINES) blocks.push({ type: "text", text: lines.slice(i, i + NOTES_CHUNK_LINES).join("\n") });
+  if (whole) blocks[blocks.length - 1].cache_control = { type: "ephemeral" };
+  if (whole < lines.length) blocks.push({ type: "text", text: lines.slice(whole).join("\n") });
+  if (tail.trim()) blocks.push({ type: "text", text: tail.trim() });
+  return blocks;
+}
+
+export class ClaudeAgent implements Agent {
   private client: Anthropic;
   constructor(apiKey: string) {
     this.client = new Anthropic({ apiKey });
@@ -229,8 +271,8 @@ class ClaudeAgent implements Agent {
     system: string,
     effort: "low" | "medium",
     model = config.anthropicModel,
-    /** For calls a person is waiting on mid-meeting: give up and let the next run try. */
-    timeout?: number,
+    /** timeout: for calls a person is waiting on mid-meeting, give up and let the next run try. */
+    { timeout, maxTokens = 4000 }: { timeout?: number; maxTokens?: number } = {},
   ): Promise<T | null> {
     // If a safety classifier declines, let the API retry on its recommended
     // fallback model. Haiku has no server-side fallback.
@@ -239,12 +281,16 @@ class ClaudeAgent implements Agent {
       : { betas: ["server-side-fallback-2026-07-01"] as Anthropic.AnthropicBeta[], fallbacks: "default" as const };
     const res = await this.client.beta.messages.parse({
       model,
-      max_tokens: 4000,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content }],
       output_config: { effort, format: betaZodOutputFormat(schema) },
       ...fallback,
     }, timeout ? { timeout, maxRetries: 1 } : undefined);
+    const u = res.usage;
+    console.log(
+      `[agent] ${model} in=${u.input_tokens} cached=${u.cache_read_input_tokens ?? 0} wrote=${u.cache_creation_input_tokens ?? 0} out=${u.output_tokens} stop=${res.stop_reason}`,
+    );
     if (res.stop_reason === "refusal") return null;
     return (res.parsed_output as T | null) ?? null;
   }
@@ -257,9 +303,7 @@ class ClaudeAgent implements Agent {
     screens: ScreenNote[] = [],
   ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
-    const numbered = segments
-      .map((s, i) => `[${i + 1}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
-      .join("\n");
+    const numbered = segments.map((s, i) => `[${i + 1}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`);
     const before = earlier.length
       ? `\n\nDiscussions of this item in earlier meetings (newest first):\n${earlier
           .slice(0, 15)
@@ -279,10 +323,13 @@ class ClaudeAgent implements Agent {
       : "";
     const out = await this.parse(
       NotesSchema,
-      `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${already}${shown}
+      notesPrompt(
+        `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}
 
-What was said while this item was in focus (speech transcript and in-room chat, in order):
-${numbered}`,
+What was said while this item was in focus (speech transcript and in-room chat, in order):`,
+        numbered,
+        `${already}${shown}`,
+      ),
       `You take notes in a team meeting. You are given what was said while one agenda item (a ticket, task or slide) was in focus.
 
 Group the talk into discussions: a discussion is a stretch of back-and-forth about one question or subject. Most items have one to three. A status update with no back-and-forth is one discussion with outcome "info". Every line belongs to at most one discussion; skip small talk.
@@ -294,9 +341,12 @@ Notes are rewritten as the meeting goes on. Every already-captured action item a
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
       "low",
       config.notesModel,
-      NOTES_TIMEOUT_MS,
-    );
-    if (!out) return { notes: [], discussions: [] };
+      { timeout: NOTES_TIMEOUT_MS, maxTokens: NOTES_MAX_TOKENS },
+    ).catch((err) => {
+      throw notesTrouble(err) ?? err;
+    });
+    // Declined: keep the notes and topics as they are rather than writing none.
+    if (!out) throw new Error("the model declined to write notes");
     const known = new Set(earlier.map((d) => d.id));
     const notes: ItemNotesDraft["notes"] = out.summary.trim() ? [{ kind: "summary", text: out.summary.trim(), owner: null, discussion: null }] : [];
     out.discussions.forEach((d, i) => {

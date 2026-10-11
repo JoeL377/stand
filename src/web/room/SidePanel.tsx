@@ -128,12 +128,18 @@ export function SidePanel(props: {
           {!hasNotes && !talkStarted && (
             <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>
           )}
-          {notesFailed && !notesUpdating && (
+          {notesFailed && (
             <p className="notes-paused" role="status">
-              The agent couldn't update these notes. Everything said is kept.
-              <button className="link" onClick={() => send({ type: "notes.retry", itemId: state.focusItemId })}>
-                Try again
-              </button>
+              {state.notesTrouble === "credit"
+                ? "Notes stopped: the Anthropic account Stand uses is out of credit. Everything said is kept."
+                : state.notesTrouble === "busy"
+                  ? "Notes are behind: the model's rate limit was hit. They catch up by themselves."
+                  : "The agent couldn't update these notes. Everything said is kept."}
+              {!notesUpdating && state.notesTrouble !== "busy" && (
+                <button className="link" onClick={() => send({ type: "notes.retry", itemId: state.focusItemId })}>
+                  Try again
+                </button>
+              )}
             </p>
           )}
           {since.length > 0 && <SinceLastTime updates={since} />}

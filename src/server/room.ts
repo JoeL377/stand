@@ -16,7 +16,7 @@ import type {
 } from "../shared/protocol.ts";
 import { capabilities } from "./config.ts";
 import type { DB, OpenMeeting } from "./db.ts";
-import type { Agent, RecapInput, SnapMedia } from "./llm.ts";
+import { type Agent, NotesTrouble, type RecapInput, type SnapMedia } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes } from "./notesMerge.ts";
@@ -38,6 +38,12 @@ const RECAP_MAX_SNAPS = 20;
 const RECAP_MAX_BYTES = 18 * 1024 * 1024;
 /** Notes for the item in focus refresh this long after the last new remark. */
 const NOTES_DEBOUNCE_MS = 3_000;
+/** What people are told when notes stop, by why. */
+const NOTES_TROUBLE = {
+  busy: "Notes are behind: the model's rate limit was hit. They catch up by themselves, and everything said is kept.",
+  credit: "Notes stopped: the Anthropic account Stand uses is out of credit. Top it up, then press Try again in the notes. Everything said is kept.",
+  other: "The agent couldn't write notes just now. It tries again after the next pause, and everything said is kept.",
+};
 /** While talk keeps going, refresh notes at least this often instead of waiting for a pause. */
 const NOTES_MAX_WAIT_MS = 12_000;
 /** A speaker's next words join their last entry when they pause for less than this. */
@@ -140,6 +146,10 @@ export class RoomSession implements SpeechSink {
   private transcriberRestarting = false;
   /** Items whose last notes run failed. People are told once, then it shows in the notes. */
   private notesFailing = new Set<string | null>();
+  /** Why, when it's the Anthropic account rather than one run: its rate limit or its credit. */
+  private notesWhy: NotesTrouble["reason"] | null = null;
+  /** Rate limited: no notes run starts before this, so retries don't keep it hit. */
+  private notesHoldUntil = 0;
   private hostAwayUntil = 0;
   /** The last nudge the host took, until the focus moves again: Undo puts it all back. */
   private accepted: { from: string | null; to: string; since: number } | null = null;
@@ -288,6 +298,7 @@ export class RoomSession implements SpeechSink {
       hostAway: this.hostAwayTimer && this.hostId && !this.participants.has(this.hostId) ? (this.names.get(this.hostId) ?? "The host") : null,
       hostAwayMs: this.hostAwayTimer ? Math.max(0, this.hostAwayUntil - Date.now()) : null,
       notesFailing: [...this.notesFailing],
+      notesTrouble: this.notesFailing.size ? this.notesWhy : null,
       suggestion: this.suggestion,
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
@@ -1008,7 +1019,7 @@ export class RoomSession implements SpeechSink {
           this.notePendingSince.delete(itemId);
           void this.refreshNotes(itemId);
         },
-        Math.max(0, Math.min(delay, since + NOTES_MAX_WAIT_MS - Date.now())),
+        Math.max(0, Math.min(delay, since + NOTES_MAX_WAIT_MS - Date.now()), this.notesHoldUntil - Date.now()),
       ),
     );
   }
@@ -1074,13 +1085,24 @@ export class RoomSession implements SpeechSink {
         console.log(
           `[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
         );
-        if (this.notesFailing.delete(itemId)) this.broadcastState();
+        if (this.notesFailing.delete(itemId)) {
+          if (!this.notesFailing.size) this.notesWhy = null;
+          this.broadcastState();
+        }
       } catch (err) {
         console.error("[agent] notes failed:", err);
-        const first = this.notesFailing.size === 0;
+        // The notes stay as the last run left them, and the recap still gets those.
+        notes = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
+        const why = err instanceof NotesTrouble ? err.reason : null;
+        const told = this.notesFailing.size > 0 && why === this.notesWhy;
         this.notesFailing.add(itemId);
-        if (first)
-          this.broadcast({ type: "error", message: "The agent couldn't write notes just now. It tries again after the next pause, and everything said is kept." });
+        this.notesWhy = why;
+        if (why === "busy") {
+          // Wait out the rate limit, then catch up in one run; talk meanwhile rides along.
+          this.notesHoldUntil = Date.now() + Math.min(60_000, Math.max(15_000, (err as NotesTrouble).retryAfterMs));
+          this.scheduleNotes(itemId, 0);
+        }
+        if (!told) this.broadcast({ type: "error", message: NOTES_TROUBLE[why ?? "other"] });
         this.broadcastState();
       } finally {
         if (this.noteRuns.get(itemId) === run) this.broadcast({ type: "notes.busy", itemId, busy: false });

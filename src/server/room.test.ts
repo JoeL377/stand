@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps } from "./brief.ts";
 import { looksLikePdf, parseDeck } from "./decks.ts";
-import { type CapturedNote, HeuristicAgent, type ItemNotesDraft } from "./llm.ts";
+import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, NotesTrouble } from "./llm.ts";
 import type { ClientMessage, Note, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
@@ -660,6 +660,26 @@ test("notes that fail stay marked on their item until a try works, and anyone ca
   await say(ann, { type: "notes.retry", itemId: items[0].id });
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(session.state().notesFailing, []);
+  await session.end();
+});
+
+test("a rate-limited notes run waits it out instead of trying again at every pause", async () => {
+  const { session, items } = setup();
+  const agent = (session as unknown as { agent: HeuristicAgent }).agent;
+  let tries = 0;
+  agent.notesFor = () => (tries++, Promise.reject(new NotesTrouble("busy", 30_000)));
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  await say(ann, { type: "notes.retry", itemId: items[0].id });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(tries, 1);
+  assert.equal(session.state().notesTrouble, "busy");
+  const told = ann.got.filter((m) => m.type === "error").map((m) => (m.type === "error" ? m.message : ""));
+  assert.match(told.join(" "), /rate limit/);
+  // More talk while it's held: no new run until the wait is over.
+  session.addSpeech("u2", "Ann", "Let's ship the checklist on Friday", Date.now());
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(tries, 1);
+  agent.notesFor = HeuristicAgent.prototype.notesFor.bind(agent);
   await session.end();
 });
 
