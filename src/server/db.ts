@@ -13,6 +13,7 @@ import type {
   Item,
   ItemSource,
   ItemUpdate,
+  Jot,
   Note,
   NoteKind,
   Segment,
@@ -167,6 +168,19 @@ CREATE TABLE IF NOT EXISTS snaps (
   screen_text TEXT
 );
 CREATE INDEX IF NOT EXISTS snaps_meeting ON snaps(meeting_id, ts);
+-- Notes saved straight to a space from the Mac's bar (captures.ts): a line of text, typed or dictated.
+CREATE TABLE IF NOT EXISTS jots (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL,
+  item_id TEXT,
+  -- The agent picked item_id and nobody has confirmed it yet.
+  item_suggested INTEGER NOT NULL DEFAULT 0,
+  text TEXT NOT NULL,
+  by_id TEXT,
+  by_name TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS jots_room ON jots(room_id, ts);
 CREATE INDEX IF NOT EXISTS snaps_item ON snaps(item_id, ts);
 -- Claude's last pass over a space's suggested agenda (upNext.ts Polish), as JSON.
 CREATE TABLE IF NOT EXISTS upnext_polish (
@@ -315,6 +329,17 @@ const toSnapRow = (r: Row): SnapRow => ({
   topicId: (r.discussion_id as string) ?? null,
   line: (r.line as string) ?? null,
   screenText: (r.screen_text as string) ?? null,
+});
+
+const toJot = (r: Row): Jot => ({
+  id: r.id as string,
+  roomId: r.room_id as string,
+  itemId: (r.item_id as string) ?? null,
+  itemSuggested: !!r.item_suggested,
+  text: r.text as string,
+  byId: (r.by_id as string) ?? null,
+  by: r.by_name as string,
+  ts: r.ts as number,
 });
 
 const toNote = (r: Row): Note => ({
@@ -1109,15 +1134,28 @@ export function openDb(file?: string) {
         updates: this.roomUpdates(roomId, 0, 500),
         dismissed,
         otherSpaces: meetings.some((m) => m.endedAt !== null) ? [] : this.sharedSpacesWithOpenWork(roomId),
-        captures: this.spaceSnaps(roomId, 0, 50).map((s) => ({
-          id: s.id,
-          ts: s.ts,
-          itemId: s.itemId,
-          by: s.takenBy,
-          line: s.line,
-          caption: s.caption,
-          screenText: s.screenText,
-        })),
+        captures: [
+          ...this.spaceSnaps(roomId, 0, 50).map((s) => ({
+            kind: "snap" as const,
+            id: s.id,
+            ts: s.ts,
+            itemId: s.itemId,
+            by: s.takenBy,
+            line: s.line,
+            caption: s.caption,
+            screenText: s.screenText,
+          })),
+          ...this.spaceJots(roomId, 0, 50).map((j) => ({
+            kind: "jot" as const,
+            id: j.id,
+            ts: j.ts,
+            itemId: j.itemId,
+            by: j.by,
+            line: j.text,
+            caption: null,
+            screenText: null,
+          })),
+        ].sort((a, b) => b.ts - a.ts),
       };
     },
     /** Other spaces with open to-dos that everyone in this space is also in,
@@ -1260,6 +1298,36 @@ export function openDb(file?: string) {
     },
     deleteSnap(id: string) {
       db.prepare("DELETE FROM snaps WHERE id = ?").run(id);
+    },
+    addJot(j: Omit<Jot, "itemSuggested"> & { itemSuggested?: boolean }): void {
+      db.prepare("INSERT INTO jots (id, room_id, item_id, item_suggested, text, by_id, by_name, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+        j.id,
+        j.roomId,
+        j.itemId,
+        j.itemSuggested ? 1 : 0,
+        j.text,
+        j.byId,
+        j.by,
+        j.ts,
+      );
+    },
+    getJot(id: string): Jot | null {
+      const r = db.prepare("SELECT * FROM jots WHERE id = ?").get(id) as Row | undefined;
+      return r ? toJot(r) : null;
+    },
+    /** Notes saved to a space, newest first. */
+    spaceJots(roomId: string, since = 0, limit = 100): Jot[] {
+      return (db.prepare("SELECT * FROM jots WHERE room_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?").all(roomId, since, limit) as Row[]).map(toJot);
+    },
+    /** A person picked the item (or none), or the agent suggested one (suggested). */
+    setJotItem(id: string, itemId: string | null, suggested = false) {
+      db.prepare("UPDATE jots SET item_id = ?, item_suggested = ? WHERE id = ?").run(itemId, suggested ? 1 : 0, id);
+    },
+    setJotText(id: string, text: string) {
+      db.prepare("UPDATE jots SET text = ? WHERE id = ?").run(text, id);
+    },
+    deleteJot(id: string) {
+      db.prepare("DELETE FROM jots WHERE id = ?").run(id);
     },
     getPolish(roomId: string): Polish | null {
       const r = db.prepare("SELECT at, rows_json FROM upnext_polish WHERE room_id = ?").get(roomId) as Row | undefined;

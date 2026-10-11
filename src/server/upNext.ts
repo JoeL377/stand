@@ -20,14 +20,25 @@ export interface UpNextInput {
   dismissed: Map<string, number>;
   /** For a space with no meetings yet: other spaces its people share that still have open to-dos. */
   otherSpaces: Array<{ id: string; name: string; open: number; lastAt: number }>;
-  /** Snaps saved straight to the space, newest first. */
-  captures: Array<{ id: string; ts: number; itemId: string | null; by: string; line: string | null; caption: string | null; screenText: string | null }>;
+  /** Snaps and notes saved straight to the space, newest first. A note's text is its line. */
+  captures: Array<{
+    kind?: "snap" | "jot";
+    id: string;
+    ts: number;
+    itemId: string | null;
+    by: string;
+    line: string | null;
+    caption: string | null;
+    screenText: string | null;
+  }>;
 }
 
 /** What a capture is about, in a line: what they typed, else what the agent saw, else the first line of its text. */
 export function captureTitle(c: { by: string; line: string | null; caption: string | null; screenText: string | null }): string {
+  const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
   const first = c.screenText?.split("\n").find((l) => l.trim())?.trim();
-  const t = c.line ?? c.caption ?? (first ? (first.length > 80 ? `${first.slice(0, 79)}…` : first) : null);
+  const said = c.line?.split("\n").find((l) => l.trim())?.trim();
+  const t = said ? cut(said, 140) : (c.caption ?? (first ? cut(first, 80) : null));
   return t ?? `Snap from ${c.by.split(" ")[0]}`;
 }
 
@@ -195,18 +206,19 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
     });
   }
 
-  // Snaps people saved to the space since the last meeting started, unless their item is on the agenda already.
+  // Snaps and notes people saved to the space since the last meeting started, unless their item is on the agenda already.
   const fresh = input.captures.filter((c) => c.ts >= (since ?? -Infinity)).filter((c) => {
     const it = c.itemId ? items.get(c.itemId) : undefined;
     return !it || it.archived || it.deck;
   });
   for (const c of fresh.slice(0, MAX_CAPTURES)) {
     const it = c.itemId ? items.get(c.itemId) : undefined;
-    drafts.set(`snap:${c.id}`, {
-      key: `snap:${c.id}`,
+    const kind = c.kind ?? "snap";
+    drafts.set(`${kind}:${c.id}`, {
+      key: `${kind}:${c.id}`,
       kind: "capture",
       title: captureTitle(c),
-      reason: `Snap saved by ${c.by}${it ? ` · ${it.title}` : ""}`,
+      reason: `${kind === "jot" ? "Note" : "Snap"} saved by ${c.by}${it ? ` · ${it.title}` : ""}`,
       noteId: null,
       itemId: c.itemId,
       owner: null,
@@ -329,6 +341,7 @@ function addOne(db: DB, roomId: string, key: string, meeting: { id: string }): s
   if (kind === "item") return db.restoreItem(roomId, id) ? id : null;
   if (kind === "space") return carrySpace(db, roomId, id, meeting);
   if (kind === "snap") return addCapture(db, roomId, id);
+  if (kind === "jot") return addJot(db, roomId, id);
   if (kind !== "note") return null;
   const note = db.getNote(id);
   if (!note || note.roomId !== roomId) return null;
@@ -354,6 +367,21 @@ function addCapture(db: DB, roomId: string, id: string): string | null {
   const title = captureTitle({ by: snap.takenBy, line: snap.line, caption: snap.caption, screenText: snap.screenText });
   const created = newAgendaLine(db, roomId, title.length > 140 ? `${title.slice(0, 139)}…` : title, `From a snap ${snap.takenBy} saved`);
   if (created) db.setSnapItem(id, created);
+  return created;
+}
+
+/** A note saved to the space goes on the agenda the same way. */
+function addJot(db: DB, roomId: string, id: string): string | null {
+  const jot = db.getJot(id);
+  if (!jot || jot.roomId !== roomId) return null;
+  const from = jot.itemId ? db.getItem(jot.itemId) : null;
+  if (from && from.roomId === roomId && !from.deckId && db.restoreItem(roomId, from.id)) {
+    db.setJotItem(id, from.id);
+    return from.id;
+  }
+  const title = captureTitle({ by: jot.by, line: jot.text, caption: null, screenText: null });
+  const created = newAgendaLine(db, roomId, title, `From a note ${jot.by} saved`);
+  if (created) db.setJotItem(id, created);
   return created;
 }
 

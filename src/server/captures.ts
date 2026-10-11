@@ -1,7 +1,8 @@
-// Captures: what people save straight to a space between meetings. For now that's a snap of a
-// screen, with the line they typed and the text their Mac read off it. Everyone in the space
-// sees it once it's saved. The agent captions it and, when nobody picked an item, suggests one,
-// marked ✦ until someone confirms it. A capture never becomes a to-do or decision by itself.
+// Captures: what people save straight to a space between meetings, from the Mac's bar. A snap
+// of a screen, with the line they typed and the text their Mac read off it; or a note, typed or
+// dictated. Everyone in the space sees it once it's saved. The agent captions a snap and, when
+// nobody picked an item, suggests one, marked ✦ until someone confirms it. A capture never
+// becomes a to-do or decision by itself.
 
 import type { SpaceFeed } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
@@ -14,10 +15,16 @@ const FEED_CAPTURES = 100;
 const FEED_UPDATES = 60;
 /** The typed line, and the text read off a screen: enough for a paragraph of an error, not a novel. */
 export const MAX_LINE = 300;
+/** A note: a few sentences said or typed in one go. */
+export const MAX_JOT = 2000;
 export const MAX_SCREEN_TEXT = 8000;
 
 export const cleanLine = (v: unknown) => {
   const t = typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, MAX_LINE) : "";
+  return t || null;
+};
+export const cleanJot = (v: unknown) => {
+  const t = typeof v === "string" ? v.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_JOT) : "";
   return t || null;
 };
 export const cleanScreenText = (v: unknown) => {
@@ -73,6 +80,38 @@ export function saveCapture(
   return id;
 }
 
+/** Saves a note to the space; the agent suggests its item afterwards when nobody picked one. */
+export function saveJot(
+  db: DB,
+  agent: Agent,
+  j: { roomId: string; text: string; at: number; byId: string; by: string; itemId: string | null },
+  /** Called once the agent has picked an item. */
+  changed: () => void = () => {},
+): string {
+  const id = newId(12);
+  db.addJot({ id, roomId: j.roomId, itemId: j.itemId, text: j.text, byId: j.byId, by: j.by, ts: Math.min(j.at || Date.now(), Date.now()) });
+  if (!j.itemId) void fileJot(db, agent, id).then((did) => did && changed());
+  return id;
+}
+
+async function fileJot(db: DB, agent: Agent, id: string): Promise<boolean> {
+  try {
+    const jot = db.getJot(id);
+    const room = jot && db.getRoom(jot.roomId);
+    if (!jot || !room) return false;
+    const items = db.listItems(room.id).filter((i) => !i.deckId);
+    const itemId = await agent.pickItem(room, items, jot.text);
+    // Someone may have deleted it, or picked an item, while the agent was reading.
+    const now = db.getJot(id);
+    if (!itemId || !now || now.itemId) return false;
+    db.setJotItem(id, itemId, true);
+    return true;
+  } catch (err) {
+    console.error("[agent] note filing failed:", err);
+    return false;
+  }
+}
+
 async function describe(db: DB, agent: Agent, id: string, buf: Buffer, ext: string): Promise<boolean> {
   if (buf.length > 5 * 1024 * 1024) return false;
   try {
@@ -99,6 +138,7 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
   const latest = meetings.find((m) => m.todos + m.decided + m.open > 0);
   return {
     captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES), [], [], baseUrl),
+    jots: db.spaceJots(roomId, 0, FEED_CAPTURES),
     meetings,
     updates: db.roomUpdates(roomId, 0, FEED_UPDATES),
     decided: db.spaceNotes(roomId, "decision", 20),

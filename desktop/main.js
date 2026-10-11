@@ -3,7 +3,8 @@
 // anywhere: a global shortcut opens a capture toolbar like macOS's ⌘⇧5, and the
 // snap lands in the meeting you're in, pinned to whatever is in focus, and on the clipboard.
 // A small floating bar is up whenever the app runs: out of a meeting it holds the space you're
-// in (pick another from it), its to-dos and Snap; in a meeting, the item in focus and your mic.
+// in (pick another from it), a note field, its to-dos and Snap; in a meeting, the item in focus
+// and your mic.
 
 const {
   app,
@@ -32,6 +33,8 @@ const STAND_URL = (process.env.STAND_URL || "https://stand-production-3d3f.up.ra
 const STAND_ORIGIN = new URL(STAND_URL).origin;
 /** ⌃⇧S: ⌘⇧S is Save As in most apps, and a global shortcut would take it from them. */
 const SNAP_SHORTCUT = process.env.STAND_SNAP_SHORTCUT || "Control+Shift+S";
+/** A note to the space the bar holds, from any app. */
+const NOTE_SHORTCUT = process.env.STAND_NOTE_SHORTCUT || "Control+Shift+N";
 /** Mute and unmute from any app, during a meeting only. In Stand's window ⌘D does it too. */
 const MUTE_SHORTCUT = process.env.STAND_MUTE_SHORTCUT || "Control+Shift+M";
 const PARTITION = "persist:stand";
@@ -1139,6 +1142,152 @@ function saveCard(me, display, data, upload) {
   });
 }
 
+// ---- a note to the space -----------------------------------------------------------------
+//
+// From the bar's note field, or the note shortcut in any app: a small card just under the bar
+// (over it, when the bar is low on the screen) where you type the note or say it with the Mac's
+// dictation, and Enter saves it to the space the bar holds (the meeting's, in one). It takes the
+// keyboard without bringing Stand forward (it's a panel), and closing it hands the keyboard back.
+
+let noteWin = null;
+/** What was written when the card was put away unsaved: it's there again next time. */
+let noteDraft = "";
+
+/** Where the card goes for a given height: under the bar, over it, or at the top of the screen
+ *  the pointer is on when the bar is down. */
+function notePlace(height) {
+  if (bar?.isVisible()) {
+    const [x, y] = bar.getPosition();
+    const a = screen.getDisplayMatching({ x, y, ...BAR }).workArea;
+    const above = y + BAR.height + height > a.y + a.height;
+    return { x, y: above ? y - height + 4 : y + BAR.height - 4, above };
+  }
+  const a = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  return { x: Math.round(a.x + (a.width - BAR.width) / 2), y: a.y + 8, above: false };
+}
+
+async function openNote() {
+  if (noteWin && !noteWin.isDestroyed()) {
+    noteWin.focus();
+    return noteWin.webContents.send("note:focus");
+  }
+  if (!meeting && !resting) await refreshRest("note");
+  const to = meeting ? spaceId() : resting?.spaceId;
+  const space = meeting ? meeting.space : resting?.space;
+  if (!to) return notify(resting ? "No space to save it to" : "Sign in to Stand", resting ? "Make a space in Stand first." : "Then notes can go to your spaces.");
+  closeBarList();
+  let height = 96;
+  let place = notePlace(height);
+  const card = new BrowserWindow({
+    x: place.x,
+    y: place.y,
+    width: BAR.width,
+    height,
+    ...(mac ? { type: "panel" } : {}),
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    acceptFirstMouse: true,
+    webPreferences: { preload: `${__dirname}/note-preload.js`, contextIsolation: true, sandbox: true },
+  });
+  noteWin = card;
+  card.setAlwaysOnTop(true, "floating");
+  card.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  card.setContentProtection(true);
+  staysInBackground(card, "note");
+  const mine = (e) => e.sender === card.webContents;
+  let saving = false;
+  let done = false;
+  // Esc is caught for the card only while it has the keyboard, never from the app you're in.
+  const esc = () => !card.isDestroyed() && card.webContents.send("note:escape");
+  const finish = () => {
+    if (done) return;
+    done = true;
+    for (const [name, fn] of handlers) ipcMain.removeListener(name, fn);
+    if (globalShortcut.isRegistered("Escape")) globalShortcut.unregister("Escape");
+    if (!card.isDestroyed()) card.close();
+    if (noteWin === card) noteWin = null;
+  };
+  const handlers = [
+    [
+      "note:ready",
+      (e) => {
+        if (!mine(e) || card.isDestroyed()) return;
+        card.showInactive();
+        card.focus();
+      },
+    ],
+    [
+      "note:size",
+      (e, h) => {
+        if (!mine(e) || card.isDestroyed()) return;
+        height = Math.max(40, Math.min(300, Math.round(Number(h) || 0)));
+        place = notePlace(height);
+        card.setBounds({ x: place.x, y: place.y, width: BAR.width, height });
+      },
+    ],
+    [
+      "note:cancel",
+      (e, draft) => {
+        if (!mine(e) || saving) return;
+        noteDraft = typeof draft === "string" ? draft.slice(0, 2000) : "";
+        finish();
+      },
+    ],
+    [
+      "note:go",
+      async (e, text) => {
+        if (!mine(e) || saving || typeof text !== "string" || !text.trim()) return;
+        saving = true;
+        const saved = await saveNote(to, text.slice(0, 2000));
+        saving = false;
+        trace("note", { ok: saved.ok, chars: text.length });
+        if (card.isDestroyed()) return;
+        card.webContents.send("note:result", saved.ok ? { ok: true, space } : { ok: false, why: saved.why });
+        if (!saved.ok) return;
+        noteDraft = "";
+        setTimeout(finish, 1200);
+      },
+    ],
+  ];
+  for (const [name, fn] of handlers) ipcMain.on(name, fn);
+  card.on("focus", () => !globalShortcut.isRegistered("Escape") && globalShortcut.register("Escape", esc));
+  card.on("blur", () => globalShortcut.isRegistered("Escape") && globalShortcut.unregister("Escape"));
+  card.on("closed", finish);
+  card.webContents.once("did-finish-load", () =>
+    card.webContents.send("note:open", { space, draft: noteDraft, above: place.above, dictateKey: "🎤, or Fn twice", ...accentColors() }),
+  );
+  void card.loadFile(`${__dirname}/note.html`);
+}
+
+/** Saves a note to a space, with a retry for a blip in the connection (the key makes a retry
+ *  of one that got through come back as the same note). Resolves to {ok} or {ok: false, why}. */
+async function saveNote(to, text) {
+  const body = JSON.stringify({ text, at: Date.now(), key: crypto.randomUUID() });
+  let why = "Stand didn't answer. Try again.";
+  for (let i = 0; i < 2; i++) {
+    const res = await standFetch(`/api/rooms/${encodeURIComponent(to)}/jots`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+    if (res?.ok) return { ok: true };
+    if (res) {
+      why = res.status === 401 ? "Sign in to Stand again, then try again." : ((await res.json().catch(() => null))?.error ?? `Stand said ${res.status}.`);
+      if (res.status < 500) break;
+    }
+  }
+  return { ok: false, why: `${why} Your note is still here.` };
+}
+
 // ---- the text in a snap ----------------------------------------------------------------
 
 /** native/stand-ocr, built by scripts/build-native.js; in the built app it's unpacked from the asar. */
@@ -1230,8 +1379,8 @@ a{position:absolute;inset:0;display:grid;place-items:center;text-decoration:none
 // ---- the floating bar -------------------------------------------------------------
 //
 // A small bar floats over every app and Space whenever the app runs and you're signed in.
-// Out of a meeting it holds the space you're in: its name (click to pick another), its
-// to-dos, a way to start talking there, and Snap, which goes to it. In a meeting: what's in
+// Out of a meeting it holds the space you're in: its name (click to pick another), a field
+// for a note to it, its to-dos, a way to start talking there, and Snap, which goes to it. In a meeting: what's in
 // focus, your mic, and Snap. It never takes focus from the app you're in, stays out of snaps
 // (and, where macOS allows, out of screen sharing), and goes wherever you drag it, which it
 // remembers.
@@ -1245,7 +1394,7 @@ let barAway = false;
 /** Put away from the bar's own menu: "meeting" until the meeting ends, "always" until it's
  *  shown again from the View menu (or the app starts again). */
 let barOff = null;
-const BAR = { width: 380, height: 48 };
+const BAR = { width: 400, height: 48 };
 const barFile = () => path.join(app.getPath("userData"), "bar.json");
 const short = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
 
@@ -1291,7 +1440,7 @@ function sendBarState() {
   const state = meeting
     ? { ...meeting, muteKey: muteKeyOn ? MUTE_SHORTCUT : null }
     : resting
-      ? { rest: true, ...resting, snapKey: SNAP_SHORTCUT.replace(/\+/g, " + ") }
+      ? { rest: true, ...resting, snapKey: SNAP_SHORTCUT.replace(/\+/g, " + "), noteKey: NOTE_SHORTCUT.replace(/\+/g, " + ") }
       : null;
   bar.webContents.send("bar:state", state);
 }
@@ -1507,6 +1656,7 @@ function buildMenus() {
   const inMeeting = Boolean(meeting);
   const mic = { label: meeting?.micOn === false ? "Unmute" : "Mute", enabled: inMeeting, click: () => win?.webContents.send("app:command", "mic") };
   const snapItem = { label: "Snap…", click: () => void snap("menu").then(tell) };
+  const noteItem = { label: "Note…", accelerator: NOTE_SHORTCUT, registerAccelerator: false, click: () => void openNote() };
   const history = () => win?.webContents.navigationHistory;
   const dev = app.isPackaged ? [] : [{ type: "separator" }, { role: "reload" }, { role: "forceReload" }, { role: "toggleDevTools" }];
   const template = [
@@ -1546,6 +1696,7 @@ function buildMenus() {
         // Shown, not registered: the mute shortcut is global (it works in Stand too), else the page handles ⌘D.
         { ...mic, accelerator: muteKeyOn ? MUTE_SHORTCUT : "Command+D", registerAccelerator: false },
         { ...snapItem, accelerator: SNAP_SHORTCUT, registerAccelerator: false },
+        noteItem,
         { type: "separator" },
         { label: "Meeting Shortcuts", accelerator: "Command+/", enabled: inMeeting, click: () => (showWindow(), win?.webContents.send("app:command", "shortcuts")) },
       ],
@@ -1558,7 +1709,7 @@ function buildMenus() {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-  app.dock?.setMenu(Menu.buildFromTemplate([snapItem, mic]));
+  app.dock?.setMenu(Menu.buildFromTemplate([snapItem, noteItem, mic]));
 }
 
 /** Where the bar goes: where it was left, or the top middle of the screen Stand is on. */
@@ -1725,6 +1876,7 @@ async function pressOnBar(button) {
         },
       },
     ]).popup({ window: bar ?? undefined });
+  if (button === "note") return void openNote();
   // Out of a meeting: the space menu, or straight into talking there. Both are meant to bring Stand up.
   if (button === "spaces") return void (resting?.none ? goTo("/") : spaceMenu());
   if (button === "talk") return void (resting?.spaceId && goTo(`/s/${resting.spaceId}?join`));
@@ -1830,6 +1982,8 @@ app.whenReady().then(async () => {
     (e, extra, ask) => e.sender === bar?.webContents && sizeBar(Math.max(0, Math.min(600, Math.round(Number(extra) || 0))), Boolean(ask)),
   );
   ipcMain.handle("bar:copy", (e, id, plain) => e.sender === bar?.webContents && copyTodo(String(id), Boolean(plain)));
+  // The note card's mic: the Mac's dictation, started into its text field.
+  ipcMain.handle("note:dictate", (e) => e.sender === noteWin?.webContents && Boolean(native()?.startDictation?.()));
   // The save card's item pill, when another space is picked.
   ipcMain.handle("save:items", (e, id) => (e.sender === saveCardWin?.webContents && typeof id === "string" ? itemsOf(id) : []));
   // The page's way to the right page of System Settings (a blocked mic, say).
@@ -1850,6 +2004,10 @@ app.whenReady().then(async () => {
   for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));
   if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap("shortcut").then(tell)))
     notify("Snap shortcut is taken", `Another app already uses ${SNAP_SHORTCUT}, so Snap from anywhere is off.`);
+  // Again while the card has the keyboard: it's put away, what's written kept.
+  const noteKey = () => (noteWin && !noteWin.isDestroyed() && noteWin.isFocused() ? noteWin.webContents.send("note:escape") : void openNote());
+  if (!globalShortcut.register(NOTE_SHORTCUT, noteKey))
+    notify("Note shortcut is taken", `Another app already uses ${NOTE_SHORTCUT}; the bar's note field still works.`);
   app.on("activate", () => showWindow());
   // ⌘Tab back to Stand while the window is put away in a call: bring it back, as the Dock does.
   // Not for a click on the bar or a snap, which can make Stand active for a moment.

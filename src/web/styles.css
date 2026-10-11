@@ -1687,6 +1687,12 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .sh-who { flex: none; font-weight: 600; }
 .sh-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sh-what.agent { color: var(--muted); }
+.sh-jot, .sh-jot:hover:not(:disabled), .sh-jot:focus { padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.sh-jot.open { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sh-row-del { flex: none; display: inline-flex; padding: 5px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; opacity: 0; }
+.sh-row:hover .sh-row-del, .sh-row-del:focus-visible { opacity: 1; }
+.sh-row-del:hover { color: var(--danger); background: var(--hover); }
+.sh-row-del svg { width: 14px; height: 14px; }
 .sh-status { flex: none; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--hover); color: var(--muted); }
 .sh-status.blocked { color: var(--warn-text); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .sh-status.needs_decision { color: var(--accent-text); background: var(--accent-soft); }

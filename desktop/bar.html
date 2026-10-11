@@ -54,12 +54,20 @@
   .mic { width: 30px; }
   .mic.off { color: #ff7b7b; }
   /* Out of a meeting: the space the bar holds, and a way to start talking there. */
-  .space { min-width: 0; max-width: 200px; margin-right: auto; padding: 0 8px 0 10px; gap: 6px; background: rgb(255 255 255 / 0.08); color: #e8e8ee; font-size: 12.5px; font-weight: 500; }
+  .space { flex: none; min-width: 0; max-width: 130px; margin-right: auto; padding: 0 8px 0 10px; gap: 6px; background: rgb(255 255 255 / 0.08); color: #e8e8ee; font-size: 12.5px; font-weight: 500; }
   .space:hover { background: rgb(255 255 255 / 0.14); }
   .space .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .space svg { flex: none; width: 10px; height: 10px; color: #a5a5b3; }
   .space .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #34d399; }
   .mic.live { color: #34d399; }
+  /* Looks like a field; a click opens the note card under the bar, where the typing happens. */
+  .note { flex: 1; min-width: 0; justify-content: flex-start; gap: 6px; padding: 0 10px; border-radius: 8px; background: rgb(255 255 255 / 0.05); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08); color: rgb(255 255 255 / 0.5); font-size: 12.5px; }
+  .note:hover { background: rgb(255 255 255 / 0.09); color: rgb(255 255 255 / 0.7); }
+  .note svg { flex: none; width: 13px; height: 13px; }
+  .note span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Out of a meeting Snap is just its camera, so the note field has the room. */
+  body.rest .snap { width: 30px; padding: 0; }
+  body.rest .snap .label { display: none; }
   .snap { padding: 0 12px 0 10px; background: #2d6cdf; color: #fff; font-size: 12.5px; font-weight: 500; }
   .snap:hover { background: #3d7cf0; }
   .todos { padding: 0 8px; gap: 4px; color: #a5a5b3; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -112,6 +120,10 @@
       <span class="name" id="space-name"></span>
       <svg viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" /></svg>
     </button>
+    <button class="note" id="note" hidden>
+      <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16Z" /><path d="m13.5 6.5 4 4" /></svg>
+      <span>Write a note…</span>
+    </button>
     <div class="what" id="what"></div>
     <button class="todos" id="todos" title="To-dos in this space: click one to copy it" aria-expanded="false" hidden>
       <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4" /><path d="M8.5 12.5l2.5 2.5 4.5-5.5" /></svg>
@@ -124,7 +136,7 @@
     </button>
     <button class="snap" id="snap" title="Snap the screen, a window or part of it, for everyone in the meeting (Control + Shift + S)">
       <svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" /><circle cx="12" cy="13" r="3.5" /></svg>
-      Snap
+      <span class="label">Snap</span>
     </button>
   </div>
   <div class="list" id="list" hidden>
@@ -172,8 +184,10 @@
     speak();
     const what = $("what");
     const rest = Boolean(state?.rest);
-    // Out of a meeting the space takes the middle, unless a snap's result is showing there.
+    // Out of a meeting the space and the note field take the middle, unless a snap's result is showing there.
+    document.body.classList.toggle("rest", rest);
     $("space").hidden = !rest || Boolean(saying);
+    $("note").hidden = !rest || Boolean(saying) || Boolean(state?.none);
     what.hidden = rest && !saying;
     if (rest) renderRest();
     // The mic first: it can be pressed while a snap's result shows, and has to show the change.
@@ -188,6 +202,7 @@
       // Once the meeting has ended there's nothing to snap into.
       $("snap").hidden = Boolean(state.ending);
       $("snap").title = "Snap the screen, a window or part of it, for everyone in the meeting (Control + Shift + S)";
+      $("snap").removeAttribute("aria-label");
       const todos = state.todos ?? [];
       // For the few seconds the bar says where Switch went, the count steps aside so it fits.
       const switching = Boolean(state.switched && !state.offline && !state.notRecording);
@@ -314,6 +329,9 @@
     $("mic-off").setAttribute("hidden", "");
     $("snap").hidden = false;
     $("snap").title = s.none ? `Snap the screen, a window or part of it (${s.snapKey})` : `Snap the screen, a window or part of it, to ${s.space} (${s.snapKey})`;
+    $("snap").ariaLabel = s.none ? "Snap" : `Snap to ${s.space}`;
+    $("note").title = `Write or say a note for ${s.space} (${s.noteKey}, from any app)`;
+    $("note").ariaLabel = `Write a note for ${s.space}`;
     const todos = s.todos ?? [];
     $("todos").hidden = todos.length === 0;
     $("todo-count").textContent = todos.length;
@@ -522,6 +540,7 @@
   // In a meeting the mic mutes; out of one it starts talking in the space (or joins whoever is).
   press($("mic"), () => (state?.rest ? "talk" : "mic"));
   press($("space"), "spaces");
+  press($("note"), "note");
   // Presses are taken over on pointerdown, so :active never applies: the give is set by hand.
   const up = () => document.querySelectorAll("button.down").forEach((b) => b.classList.remove("down"));
   document.addEventListener("pointerdown", (e) => e.button === 0 && e.target.closest?.("button")?.classList.add("down"), true);

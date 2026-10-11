@@ -28,6 +28,8 @@
       "bar-preload.js",
       "save.html",
       "save-preload.js",
+      "note.html",
+      "note-preload.js",
       "native/stand-native.node",
       "native/stand-ocr"
     ],

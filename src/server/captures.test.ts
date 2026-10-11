@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { saveCapture, spaceFeed } from "./captures.ts";
+import { cleanJot, saveCapture, saveJot, spaceFeed } from "./captures.ts";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { HeuristicAgent } from "./llm.ts";
@@ -120,4 +120,31 @@ test("adding a capture from Up next puts it on the agenda as its own line, pinne
   assert.deepEqual([db.getSnap(id)?.itemId, db.getSnap(id)?.itemSuggested], [itemId, false]);
   // On the agenda now, so it's not suggested again.
   assert.ok(!computeUpNext(db.upNextInput(room.id, live.startedAt)).upNext.suggestions.some((x) => x.key === `snap:${id}`));
+});
+
+test("a note saved to the space shows in its feed, filed under the item it's about until someone picks another", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Growth");
+  const [, sso] = db.addItems(
+    room.id,
+    ["Signup chart", "SSO for the first team"].map((title) => ({ source: "agenda" as const, externalId: null, title, url: null, description: null })),
+  );
+  let told = 0;
+  const text = cleanJot("  Okta wants   a call about SSO for the first team\r\n\r\n\r\nbefore Friday ")!;
+  assert.equal(text, "Okta wants a call about SSO for the first team\n\nbefore Friday");
+  assert.equal(cleanJot("   "), null);
+  const id = saveJot(db, new HeuristicAgent(), { roomId: room.id, text, at: Date.now(), byId: "u1", by: "Joe Liang", itemId: null }, () => told++);
+  await settle();
+  assert.equal(told, 1);
+  const [jot] = spaceFeed(db, room.id).jots;
+  assert.deepEqual([jot.id, jot.itemId, jot.itemSuggested, jot.by], [id, sso.id, true, "Joe Liang"]);
+  db.setJotItem(id, null);
+  assert.deepEqual([db.getJot(id)?.itemId, db.getJot(id)?.itemSuggested], [null, false]);
+  // Up next offers it once a meeting starts, and adding it gives it its own agenda line.
+  const live = db.startMeeting(room.id);
+  const s = computeUpNext(db.upNextInput(room.id, live.startedAt - 60_000)).upNext.suggestions.find((x) => x.key === `jot:${id}`)!;
+  assert.deepEqual([s.title, s.reason], ["Okta wants a call about SSO for the first team", "Note saved by Joe Liang"]);
+  const itemId = addUpNext(db, room.id, s, live)!;
+  assert.equal(db.getItem(itemId)?.title, "Okta wants a call about SSO for the first team");
+  assert.equal(db.getJot(id)?.itemId, itemId);
 });

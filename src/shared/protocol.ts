@@ -401,9 +401,24 @@ export interface MeetingRecap {
 
 /** One space (a room) as the home page lists it. */
 /** The space page's feed: what came into the space, newest first, and where it stands. */
+/** A note someone saved straight to the space between meetings, typed or dictated on the
+ *  Mac's bar. Like a snap, the agent suggests its item (✦) when nobody picked one. */
+export interface Jot {
+  id: string;
+  roomId: string;
+  itemId: string | null;
+  itemSuggested: boolean;
+  text: string;
+  byId: string | null;
+  by: string;
+  ts: number;
+}
+
 export interface SpaceFeed {
   /** Snaps saved straight to the space, newest first. */
   captures: Snap[];
+  /** Notes saved straight to the space, newest first. */
+  jots: Jot[];
   /** Meetings that ended, newest first, each as one row. */
   meetings: Array<{
     id: string;

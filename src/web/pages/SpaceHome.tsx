@@ -1,15 +1,15 @@
 // A space's own page, the one people open between meetings: what came into the space since
-// last time (snaps people saved, meetings, agents' updates), and where the space stands (to-dos,
-// decisions, open questions and the suggested agenda). Start talking turns it into the meeting.
-// It shows captures but doesn't make them: snaps come from the Stand bar.
+// last time (snaps and notes people saved, meetings, agents' updates), and where the space stands
+// (to-dos, decisions, open questions and the suggested agenda). Start talking turns it into the
+// meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ItemUpdate, Note, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ItemUpdate, Jot, Note, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
-import { CameraIcon, CloseIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { CameraIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
@@ -25,6 +25,7 @@ const SUGGESTED_ROWS = 3;
 
 type Entry =
   | { kind: "snap"; at: number; snap: Snap }
+  | { kind: "jot"; at: number; jot: Jot }
   | { kind: "meeting"; at: number; meeting: SpaceFeed["meetings"][number] }
   | { kind: "update"; at: number; update: ItemUpdate };
 
@@ -70,6 +71,32 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     });
   };
 
+  const pickJotItem = (jot: Jot, itemId: string | null) => {
+    setFeed((f) => f && { ...f, jots: f.jots.map((j) => (j.id === jot.id ? { ...j, itemId, itemSuggested: false } : j)) });
+    api.updateJot(jot.id, { itemId }).then(load, (err) => {
+      load();
+      errorToast("Couldn't move it")(err);
+    });
+  };
+  // Deleted at once; Undo saves it again as it was.
+  const deleteJot = (jot: Jot) => {
+    setFeed((f) => f && { ...f, jots: f.jots.filter((j) => j.id !== jot.id) });
+    api.deleteJot(jot.id).then(
+      () =>
+        toast({
+          text: "Note deleted",
+          action: {
+            label: "Undo",
+            run: () => void api.saveJot(room.id, { text: jot.text, itemId: jot.itemSuggested ? null : jot.itemId, at: jot.ts }).then(load, errorToast("Couldn't bring the note back")),
+          },
+        }),
+      (err) => {
+        load();
+        errorToast("Couldn't delete the note")(err);
+      },
+    );
+  };
+
   const live = !!room.liveMeetingId;
   const wrapping = live && room.people.length === 0;
   const members = spaces?.find((s) => s.id === room.id)?.people ?? [];
@@ -103,6 +130,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const entries: Entry[] = feed
     ? [
         ...feed.captures.map((snap) => ({ kind: "snap" as const, at: snap.ts, snap })),
+        ...(feed.jots ?? []).map((jot) => ({ kind: "jot" as const, at: jot.ts, jot })),
         ...feed.meetings.map((meeting) => ({ kind: "meeting" as const, at: meeting.endedAt, meeting })),
         ...feed.updates.map((update) => ({ kind: "update" as const, at: update.ts, update })),
       ].sort((a, b) => b.at - a.at)
@@ -165,8 +193,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               <div className="sh-empty">
                 <CameraIcon size={18} />
                 <p>
-                  Nothing here yet. Snaps you take from the Stand bar in the Mac app (<strong>Control + Shift + S</strong>) land here, and so
-                  do meetings once they end and what agents report.
+                  Nothing here yet. Snaps and notes you save from the Stand bar in the Mac app land here (<strong>Control + Shift + S</strong>{" "}
+                  snaps, <strong>Control + Shift + N</strong> writes a note), and so do meetings once they end and what agents report.
                 </p>
               </div>
             )}
@@ -177,6 +205,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                   {d.entries.map((e) =>
                     e.kind === "snap" ? (
                       <SnapRow key={e.snap.id} snap={e.snap} room={room} me={user.id} onOpen={() => setViewing(e.snap)} onPick={(id) => pickItem(e.snap, id)} />
+                    ) : e.kind === "jot" ? (
+                      <JotRow key={e.jot.id} jot={e.jot} room={room} me={user.id} onPick={(id) => pickJotItem(e.jot, id)} onDelete={() => deleteJot(e.jot)} />
                     ) : e.kind === "meeting" ? (
                       <MeetingRow key={e.meeting.id} m={e.meeting} />
                     ) : (
@@ -224,7 +254,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                       <ul className="sh-list suggested">
                         {(all ? suggested : suggested.slice(0, SUGGESTED_ROWS)).map((s) => (
                           <li key={s.key} title={s.reason}>
-                            {s.kind === "capture" && <CameraIcon size={12} />}
+                            {s.kind === "capture" && (s.key.startsWith("jot:") ? <EditIcon size={12} /> : <CameraIcon size={12} />)}
                             <span>{s.title}</span>
                           </li>
                         ))}
@@ -269,18 +299,50 @@ function SnapRow(props: { snap: Snap; room: RoomInfo; me: string; onOpen: () => 
           <span className="sh-what muted">Snap</span>
         )}
       </span>
-      <ItemPill snap={snap} room={props.room} onPick={props.onPick} />
+      <ItemPill of={snap} room={props.room} onPick={props.onPick} />
       <time className="sh-time">{fmtTime(snap.ts)}</time>
     </li>
   );
 }
 
-function ItemPill(props: { snap: Snap; room: RoomInfo; onPick: (itemId: string | null) => void }) {
+/** A note saved from the bar: its first line, all of it when clicked. Whoever wrote it can delete it. */
+function JotRow(props: { jot: Jot; room: RoomInfo; me: string; onPick: (itemId: string | null) => void; onDelete: () => void }) {
+  const { jot } = props;
+  const [open, setOpen] = useState(false);
+  const mine = jot.byId === props.me;
+  const long = jot.text.length > 90 || jot.text.includes("\n");
+  return (
+    <li className="sh-row">
+      <span className="sh-icon" aria-hidden>
+        <EditIcon size={16} />
+      </span>
+      <span className="sh-row-text">
+        <span className="sh-who">{mine ? "You" : firstName(jot.by)}</span>
+        {long ? (
+          <button className={`sh-what sh-jot${open ? " open" : ""}`} aria-expanded={open} onClick={() => setOpen((o) => !o)} title={open ? undefined : jot.text}>
+            {jot.text}
+          </button>
+        ) : (
+          <span className="sh-what">{jot.text}</span>
+        )}
+      </span>
+      {mine && (
+        <button className="sh-row-del" onClick={props.onDelete} aria-label="Delete the note" title="Delete the note">
+          <TrashIcon />
+        </button>
+      )}
+      <ItemPill of={jot} room={props.room} onPick={props.onPick} />
+      <time className="sh-time">{fmtTime(jot.ts)}</time>
+    </li>
+  );
+}
+
+function ItemPill(props: { of: { itemId: string | null; itemSuggested: boolean }; room: RoomInfo; onPick: (itemId: string | null) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
   const items = props.room.items.filter((i) => !i.deckId);
-  const item = props.room.items.find((i) => i.id === props.snap.itemId);
-  const suggested = props.snap.itemSuggested && !!item;
+  const item = props.room.items.find((i) => i.id === props.of.itemId);
+  const suggested = props.of.itemSuggested && !!item;
   const pick = (id: string | null) => {
     setOpen(false);
     props.onPick(id);
@@ -288,13 +350,13 @@ function ItemPill(props: { snap: Snap; room: RoomInfo; onPick: (itemId: string |
   return (
     <span className="sh-pill-wrap" ref={ref}>
       <button
-        className={`sh-pill${suggested ? " suggested" : ""}${props.snap.itemId ? "" : " none"}`}
+        className={`sh-pill${suggested ? " suggested" : ""}${props.of.itemId ? "" : " none"}`}
         aria-expanded={open}
         title={suggested ? "The agent's pick. Click to confirm it or choose another item." : "Choose the item it's about"}
         onClick={() => setOpen((o) => !o)}
       >
         {suggested && "✦ "}
-        {item ? item.title : props.snap.itemId ? "An earlier item" : "No item"}
+        {item ? item.title : props.of.itemId ? "An earlier item" : "No item"}
       </button>
       {open && (
         <span className="sh-menu" role="menu">
@@ -304,11 +366,11 @@ function ItemPill(props: { snap: Snap; room: RoomInfo; onPick: (itemId: string |
             </button>
           )}
           {items.map((it) => (
-            <button key={it.id} role="menuitem" className={it.id === props.snap.itemId && !suggested ? "on" : undefined} onClick={() => pick(it.id)}>
+            <button key={it.id} role="menuitem" className={it.id === props.of.itemId && !suggested ? "on" : undefined} onClick={() => pick(it.id)}>
               {it.title}
             </button>
           ))}
-          <button role="menuitem" className={!props.snap.itemId ? "on" : undefined} onClick={() => pick(null)}>
+          <button role="menuitem" className={!props.of.itemId ? "on" : undefined} onClick={() => pick(null)}>
             No item
           </button>
           {item && (
