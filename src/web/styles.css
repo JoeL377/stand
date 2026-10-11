@@ -687,6 +687,8 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .control.off svg { color: var(--danger); }
 .control.share svg { color: #3ecf8e; }
 .control.sharing { color: #3ecf8e; }
+/* The bar is popped out. */
+.control.on { color: #8fb5fa; }
 .control.pill { flex-direction: row; min-width: 0; padding: 9px 18px; border-radius: 10px; font-size: 13px; background: var(--panel-2); }
 .control.pill.danger { background: #dc2626; color: #fff; }
 .control.pill.danger:hover:not(:disabled) { background: #c81e1e; }
