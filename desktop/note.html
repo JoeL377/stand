@@ -39,6 +39,7 @@
       }
       #card {
         position: relative;
+        overflow: hidden;
         margin: 4px;
         padding: 8px;
         border-radius: 14px;
@@ -114,55 +115,79 @@
         display: flex;
         flex-direction: column;
       }
+      /* The snap, big: as wide as the bar, edge to edge, on the outside of the bar and the card
+         together (on top when the card opens over the bar, at the bottom when it opens under
+         it). The text stays by the bar. More than one: the one showing, and the others as small
+         pictures along its lower edge to switch to. */
       #pins {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin: 0 0 8px;
+        position: relative;
+        margin: -8px -8px 8px;
+        background: rgb(0 0 0 / 0.35);
       }
-      /* The snaps go on the outside of the bar and the card together: on top when the card
-         opens over the bar, at the bottom when it opens under it. The text stays by the bar. */
       body.fused:not(.above) #pins {
         order: 1;
-        margin: 8px 0 0;
+        margin: 8px -8px -8px;
       }
-      .pin {
-        position: relative;
-        width: 84px;
-        height: 56px;
-        border-radius: 6px;
-        overflow: hidden;
-        background: rgb(255 255 255 / 0.06);
-        box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
-      }
-      .pin img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
+      #pins .big {
         display: block;
+        width: 100%;
+        height: auto;
+        max-height: 240px;
+        object-fit: contain;
       }
-      .pin .x {
+      #pins .x {
         position: absolute;
-        top: 3px;
-        right: 3px;
-        width: 18px;
-        height: 18px;
+        top: 8px;
+        right: 8px;
+        width: 22px;
+        height: 22px;
         padding: 0;
         border-radius: 50%;
         display: grid;
         place-items: center;
-        background: rgb(0 0 0 / 0.7);
+        background: rgb(0 0 0 / 0.66);
         color: #fff;
-        font-size: 10px;
+        font-size: 11px;
         line-height: 1;
         opacity: 0;
+        transition: opacity 0.12s;
       }
-      .pin:hover .x,
-      .pin .x:focus-visible {
+      #pins:hover .x,
+      #pins .x:focus-visible {
         opacity: 1;
       }
-      .pin .x:hover {
-        background: rgb(0 0 0 / 0.9);
+      #pins .x:hover {
+        background: rgb(0 0 0 / 0.88);
+      }
+      #pins .strip {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        display: flex;
+        gap: 4px;
+      }
+      #pins .strip button {
+        width: 44px;
+        height: 28px;
+        padding: 0;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #000;
+        box-shadow: 0 0 0 1px rgb(255 255 255 / 0.35);
+        opacity: 0.75;
+      }
+      #pins .strip button:hover {
+        opacity: 1;
+      }
+      #pins .strip button.on {
+        box-shadow: 0 0 0 2px #fff;
+        opacity: 1;
+      }
+      #pins .strip img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
       }
       .row {
         display: flex;
@@ -288,7 +313,7 @@
   <body>
     <div id="card" role="dialog" aria-label="Note">
       <div id="form">
-        <div id="pins" role="list" aria-label="Snaps pinned to the note" hidden></div>
+        <div id="pins" role="group" aria-label="Snaps pinned to the note" hidden></div>
         <div class="row">
           <textarea id="text" rows="1" maxlength="2000" placeholder="Write or say a note…" aria-label="The note"></textarea>
           <button id="say" title="Say it (dictation)" aria-label="Say it with dictation">
@@ -308,8 +333,9 @@
       const $ = (id) => document.getElementById(id);
       let saving = false;
       let st = null;
-      /** The snaps pinned to the note: [{id, thumb}]. */
+      /** The snaps pinned to the note: [{id, thumb}], and the one shown big (the newest, unless picked). */
       let pins = [];
+      let showing = null;
 
       // The window is as tall as the card, so the rest of the screen stays clickable. Hanging
       // from the bar it has no margin on the bar's side.
@@ -333,24 +359,47 @@
       function renderPins() {
         const box = $("pins");
         box.hidden = !pins.length;
-        box.replaceChildren(
-          ...pins.map((p, i) => {
-            const pin = document.createElement("div");
-            pin.className = "pin";
-            pin.setAttribute("role", "listitem");
-            const img = document.createElement("img");
-            img.src = p.thumb;
-            img.alt = `Snap ${i + 1}`;
-            const x = document.createElement("button");
-            x.className = "x";
-            x.textContent = "✕";
-            x.title = "Take it off the note";
-            x.ariaLabel = `Take snap ${i + 1} off the note`;
-            x.onclick = () => window.note.unpin(p.id);
-            pin.append(img, x);
-            return pin;
-          }),
-        );
+        box.dataset.n = pins.length;
+        if (!pins.some((p) => p.id === showing)) showing = pins.at(-1)?.id ?? null;
+        const at = pins.findIndex((p) => p.id === showing);
+        const kids = [];
+        if (at >= 0) {
+          const big = document.createElement("img");
+          big.className = "big";
+          big.src = pins[at].thumb;
+          big.alt = pins.length > 1 ? `Snap ${at + 1} of ${pins.length}` : "The snap";
+          const x = document.createElement("button");
+          x.className = "x";
+          x.textContent = "✕";
+          x.title = "Take it off the note";
+          x.ariaLabel = pins.length > 1 ? `Take snap ${at + 1} off the note` : "Take the snap off the note";
+          x.onclick = () => window.note.unpin(pins[at].id);
+          kids.push(big, x);
+        }
+        if (pins.length > 1) {
+          const strip = document.createElement("div");
+          strip.className = "strip";
+          strip.append(
+            ...pins.map((p, i) => {
+              const b = document.createElement("button");
+              b.className = p.id === showing ? "on" : "";
+              b.ariaLabel = `Show snap ${i + 1}`;
+              b.setAttribute("aria-pressed", String(p.id === showing));
+              const img = document.createElement("img");
+              img.src = p.thumb;
+              img.alt = "";
+              b.append(img);
+              b.onclick = () => {
+                showing = p.id;
+                renderPins();
+                $("text").focus();
+              };
+              return b;
+            }),
+          );
+          kids.push(strip);
+        }
+        box.replaceChildren(...kids);
         const n = pins.length;
         // The bar says which space and the keys; away from the bar, the placeholder says the space.
         const to = st && !document.body.classList.contains("fused") ? ` for ${st.space}` : "";
@@ -383,6 +432,8 @@
         report();
       });
       window.note.onPins((list) => {
+        // A snap just pinned is the one shown.
+        if (list.length > pins.length) showing = list.at(-1).id;
         pins = list;
         $("why").hidden = true;
         renderPins();

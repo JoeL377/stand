@@ -1037,7 +1037,10 @@ async function pinSnap(image, at, prefs, reading) {
     if (!prefs.toClipboard) await copyImage(image);
     return { title: `${MAX_PINS} snaps are pinned already`, body: "Save the note, or take one off it, then snap again. This one is on your clipboard.", thumb };
   }
-  notePins.push({ id: crypto.randomUUID(), image, at, thumb: image.resize({ height: 112 }).toDataURL(), reading, key: crypto.randomUUID() });
+  // Shown as wide as the bar on a Retina screen.
+  const { width: w } = image.getSize();
+  const shown = w > 800 ? image.resize({ width: 800 }) : image;
+  notePins.push({ id: crypto.randomUUID(), image, at, thumb: `data:image/jpeg;base64,${shown.toJPEG(82).toString("base64")}`, reading, key: crypto.randomUUID() });
   trace("pin", { pins: notePins.length });
   sendBarState();
   if (noteWin && !noteWin.isDestroyed()) {
@@ -1057,8 +1060,8 @@ async function pinSnap(image, at, prefs, reading) {
 
 const sendPins = () => noteWin && !noteWin.isDestroyed() && noteWin.webContents.send("note:pins", notePins.map(({ id, thumb }) => ({ id, thumb })));
 
-/** Room the card wants over the bar before it opens that way: a row of snaps and a few lines. */
-const NOTE_ROOM = 220;
+/** Room the card wants over the bar before it opens that way: a snap shown big and a few lines. */
+const NOTE_ROOM = 340;
 
 /** Where the card goes for a given height: joined to the bar's upper edge when there's room over
  *  it, else its lower edge (the bar at the top of the screen, where it starts), so the two read as
@@ -1120,7 +1123,7 @@ async function openNote() {
     return false;
   }
   closeBarList();
-  noteHeight = notePins.length ? 170 : 96;
+  noteHeight = notePins.length ? 320 : 96;
   notePlaced = null;
   const place = notePlace(noteHeight);
   notePlaced = { above: place.above, fused: place.fused };
@@ -1176,7 +1179,7 @@ async function openNote() {
       "note:size",
       (e, h) => {
         if (!mine(e) || card.isDestroyed()) return;
-        noteHeight = Math.max(40, Math.min(300, Math.round(Number(h) || 0)));
+        noteHeight = Math.max(40, Math.min(520, Math.round(Number(h) || 0)));
         placeNote();
       },
     ],
