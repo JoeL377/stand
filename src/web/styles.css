@@ -1686,3 +1686,10 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
    registers. The host's own switches stay instant. */
 .focus-card.arrive, .slide-stage.arrive { animation: fade-up 150ms var(--ease-out); }
 @keyframes fade-up { from { opacity: 0.4; } }
+
+/* A long meeting as a timeline: when each topic came up, in the topics card and the transcript. */
+.disc-at { flex: 0 0 auto; min-width: 34px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.6; }
+.seg-chapter { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 6px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 600; }
+.seg-chapter:first-child { margin-top: 0; border-top: 0; padding-top: 0; }
+.seg-chapter-at { font-weight: 400; font-variant-numeric: tabular-nums; }
+.disc-now-pill { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 17px; vertical-align: 1px; }

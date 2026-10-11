@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { ClientMessage, Discussion, Item, ItemUpdate, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
@@ -184,7 +184,7 @@ export function SidePanel(props: {
           )}
         </div>
       ) : (
-        <Transcript segments={shown} items={state.items} interims={interims} send={send} />
+        <Transcript segments={shown} discussions={focusDiscussions} items={state.items} interims={interims} send={send} />
       )}
       <div className="side-foot">
         <a
@@ -233,8 +233,21 @@ function LiveSliver(props: { segments: Segment[]; interims: Record<string, Inter
   );
 }
 
-function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => boolean }) {
+function Transcript(props: {
+  segments: Segment[];
+  discussions: Discussion[];
+  items: Item[];
+  interims: Record<string, Interim>;
+  send: (m: ClientMessage) => boolean;
+}) {
   const { segments, items, interims, send } = props;
+  // Where each topic first came up, marked in the transcript like a chapter.
+  const startsAt = new Map<string, Discussion>();
+  for (const d of props.discussions) {
+    const ids = new Set(d.segmentIds);
+    const first = segments.find((s) => ids.has(s.id));
+    if (first && !startsAt.has(first.id)) startsAt.set(first.id, d);
+  }
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const interimList = Object.values(interims);
@@ -257,7 +270,15 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
         <p className="muted empty">Nothing said about this yet. Speech and chat show up here, pinned to the item in focus.</p>
       )}
       {segments.map((s) => (
-        <SegmentRow key={s.id} segment={s} items={items} send={send} />
+        <Fragment key={s.id}>
+          {startsAt.has(s.id) && (
+            <div className="seg-chapter">
+              <span className="seg-chapter-at">{fmtTime(s.ts).replace(/\s?[AP]M$/i, "")}</span>
+              {startsAt.get(s.id)!.topic}
+            </div>
+          )}
+          <SegmentRow segment={s} items={items} send={send} />
+        </Fragment>
       ))}
       {interimList.map((i) => (
         <div key={i.speakerId} className="seg interim">
