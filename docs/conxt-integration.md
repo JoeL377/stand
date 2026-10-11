@@ -170,3 +170,23 @@ turns and refreshes every two seconds; MCP can read them separately from accepte
 knowledge. The final synthesis delivery remains the existing governed path. Only
 meetings bound to a connected room are shared; connecting mid-meeting applies to its
 next meeting. Speech generation depends on the existing Stand speech provider.
+
+
+## App-level default
+
+Set `CONXT_DEFAULT_DESTINATION` to a configured destination key and
+`CONXT_DEFAULT_OPERATOR_EMAIL` to an existing Stand operator's email. This is an
+explicit app-wide sharing choice: future meetings in existing and new rooms inherit
+the destination, with transcripts visible to everyone in its Conxt team. No room-by-
+room connection is needed. The operator is recorded as the default's connection actor.
+
+Existing explicit room destinations and prior disconnects remain overrides. Owners
+can turn sharing off persistently or explicitly Use app default again. The panel
+shows the app policy and room mode. Changes apply to future meeting bindings and
+never adopt historical meetings or redirect an already bound meeting. Removing the
+app default pauses inherited connections but preserves explicit room connections.
+Reapplying the same configuration is idempotent across restarts.
+
+Tests cover old/new rooms, live/final delivery, room opt-out and restart, default
+changes and explicit overrides, old preference migration, invalid configuration,
+owner/origin/consent checks, and credential non-disclosure.

@@ -32,12 +32,14 @@ import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { toSpaceSummary } from "./spaces.ts";
+import { configureAppDefault } from "./conxtDefault.ts";
 import { ConxtLiveDelivery } from "./conxtLive.ts";
 import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 const conxtDestinations = parseDestinations(process.env.CONXT_DESTINATIONS);
 const db = openDb(path.join(config.dataDir, "standup.db"));
+configureAppDefault(db.raw, conxtDestinations, process.env.CONXT_DEFAULT_DESTINATION, process.env.CONXT_DEFAULT_OPERATOR_EMAIL);
 const agent = createAgent();
 const sessions = new Map<string, RoomSession>();
 const live = (roomId: string) => {

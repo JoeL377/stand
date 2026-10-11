@@ -1,4 +1,5 @@
 // Shared transcripts travel through a durable SQLite outbox; credentials stay in env.
+import { initConxtDefault, inheritAppDefault } from "./conxtDefault.ts";
 import { initConxtLive } from "./conxtLive.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
@@ -61,6 +62,7 @@ export function initConxt(sql: DatabaseSync) {
   `);
   sql.prepare("INSERT OR IGNORE INTO conxt_settings VALUES ('instance_id', ?)").run(randomUUID());
   initConxtLive(sql);
+  initConxtDefault(sql);
 }
 
 /** Called inside the same transaction that ends a meeting. No network or model call. */
@@ -261,7 +263,9 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
       WHERE c.room_id=? ORDER BY d.created_at DESC LIMIT 50`).all(id);
     const liveDeliveries = db.raw.prepare(`SELECT d.meeting_id AS meetingId,d.state,d.error,d.sequence,d.stream_id AS streamId,c.enabled
       FROM conxt_live_deliveries d JOIN conxt_connections c ON c.id=d.connection_id WHERE c.room_id=? ORDER BY d.rowid DESC LIMIT 50`).all(id);
-    res.json({ liveDeliveries, destinations: destinations.map(({ key, label }) => ({ key, label })), connection: connection ?? null,
+    const defaultDestination=db.raw.prepare("SELECT destination_key AS key,label FROM conxt_app_default WHERE singleton=1").get() ?? null;
+    const mode=db.raw.prepare("SELECT mode FROM conxt_room_preferences WHERE room_id=?").get(id)?.mode ?? "inherit";
+    res.json({ defaultDestination, mode, liveDeliveries, destinations: destinations.map(({ key, label }) => ({ key, label })), connection: connection ?? null,
                deliveries, canManage: owner(req) });
   });
   router.post("/", (req, res) => {
@@ -269,10 +273,13 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
     const destination = destinations.find(d => d.key === req.body?.destinationKey);
     if (!destination || req.body?.confirmedTeamAccess !== true) return void res.status(400).json({ error: "Choose a configured destination and confirm team access" });
     const active = db.raw.prepare("SELECT destination_key,submission_url FROM conxt_connections WHERE room_id=? AND enabled=1").get(roomId(req));
-    if (active?.destination_key === destination.key && active.submission_url === destination.submissionUrl)
+    if (active?.destination_key === destination.key && active.submission_url === destination.submissionUrl) {
+      db.raw.prepare("INSERT INTO conxt_room_preferences VALUES (?,'custom') ON CONFLICT(room_id) DO UPDATE SET mode='custom'").run(roomId(req));
       return void res.json({ ok: true });
+    }
     db.raw.exec("BEGIN IMMEDIATE");
     try {
+      db.raw.prepare("INSERT INTO conxt_room_preferences VALUES (?,'custom') ON CONFLICT(room_id) DO UPDATE SET mode='custom'").run(roomId(req));
       db.raw.prepare("UPDATE conxt_connections SET enabled=0 WHERE room_id=?").run(roomId(req));
       db.raw.prepare("INSERT INTO conxt_connections VALUES (?,?,?,?,?,?,?,1)")
         .run(randomUUID(), roomId(req), destination.key, destination.submissionUrl,
@@ -282,8 +289,24 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
   });
   router.delete("/", (req, res) => {
     if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can disconnect from this app" });
-    db.raw.prepare("UPDATE conxt_connections SET enabled=0 WHERE room_id=?").run(roomId(req));
-    res.json({ ok: true });
+    db.raw.exec("BEGIN IMMEDIATE");
+    try {
+      db.raw.prepare("INSERT INTO conxt_room_preferences VALUES (?,'off') ON CONFLICT(room_id) DO UPDATE SET mode='off'").run(roomId(req));
+      db.raw.prepare("UPDATE conxt_connections SET enabled=0 WHERE room_id=?").run(roomId(req));
+      db.raw.exec("COMMIT"); res.json({ ok: true });
+    } catch(err) { db.raw.exec("ROLLBACK"); throw err; }
+  });
+  router.post("/default", (req,res) => {
+    if (!mutation(req)) return void res.status(403).json({error:"Only the space owner can change sharing"});
+    if(req.body?.confirmedTeamAccess!==true || !db.raw.prepare("SELECT 1 FROM conxt_app_default").get())
+      return void res.status(400).json({error:"Confirm team access and configure an app default first"});
+    db.raw.exec("BEGIN IMMEDIATE");
+    try {
+      db.raw.prepare("INSERT INTO conxt_room_preferences VALUES (?,'inherit') ON CONFLICT(room_id) DO UPDATE SET mode='inherit'").run(roomId(req));
+      db.raw.prepare("UPDATE conxt_connections SET enabled=0 WHERE room_id=?").run(roomId(req));
+      inheritAppDefault(db.raw,roomId(req));
+      db.raw.exec("COMMIT");res.json({ok:true});
+    }catch(err){db.raw.exec("ROLLBACK");throw err;}
   });
   router.post("/live/:meetingId/retry", (req, res) => {
     if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can retry live delivery" });

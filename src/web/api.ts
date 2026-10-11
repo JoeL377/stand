@@ -77,6 +77,8 @@ export interface RoomInfo {
 }
 
 export interface ConxtStatus {
+  defaultDestination: { key: string; label: string } | null;
+  mode: "inherit" | "custom" | "off";
   liveDeliveries: Array<{ meetingId: string; state: string; error: string | null; sequence: number; streamId: string | null; enabled: number }>;
   destinations: Array<{ key: string; label: string }>;
   connection: { id: string; label: string; destinationKey: string; enabled: number } | null;
@@ -86,6 +88,7 @@ export interface ConxtStatus {
 
 export const api = {
   conxtStatus: (roomId: string) => call<ConxtStatus>("GET", `/api/rooms/${roomId}/conxt`),
+  useConxtDefault: (roomId: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/conxt/default`, { confirmedTeamAccess: true }),
   connectConxt: (roomId: string, destinationKey: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/conxt`, { destinationKey, confirmedTeamAccess: true }),
   disconnectConxt: (roomId: string) => call<{ ok: true }>("DELETE", `/api/rooms/${roomId}/conxt`),
   retryLiveConxt: (roomId: string, meetingId: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/conxt/live/${meetingId}/retry`, {}),

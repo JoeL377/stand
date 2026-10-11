@@ -7,6 +7,7 @@ import path from "node:path";
 import http from "node:http";
 import express from "express";
 import { openDb, type DB } from "./db.ts";
+import { configureAppDefault } from "./conxtDefault.ts";
 import { ConxtDelivery, conxtRoutes, parseDestinations, type ConxtDestination } from "./conxt.ts";
 import { requireUser } from "./auth.ts";
 
@@ -151,7 +152,7 @@ test("room routes require membership, owner consent and same-origin writes; neve
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const cookies = [owner, guest, outsider].map(u => `standup_session=${db.createSession(u.id).id}`);
-  const request = (cookie: string, method = "GET", body?: unknown, reqOrigin = base) => fetch(`${base}/api/rooms/${room.id}/conxt`, {
+  const request = (cookie: string, method = "GET", body?: unknown, reqOrigin = base, suffix = "") => fetch(`${base}/api/rooms/${room.id}/conxt${suffix}`, {
     method, headers: { cookie, origin: reqOrigin, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined,
   });
   try {
@@ -172,6 +173,16 @@ test("room routes require membership, owner consent and same-origin writes; neve
     let calls = 0;
     await new ConxtDelivery(db, [destination], (async () => { calls++; throw new Error(); }) as typeof fetch).tick();
     assert.equal(calls, 0);
+    configureAppDefault(db.raw,[destination],destination.key,owner.email);
+    assert.equal((await (await request(cookies[0])).json()).mode,"off");
+    assert.equal((await request(cookies[1],"POST",{confirmedTeamAccess:true},base,"/default")).status,403);
+    assert.equal((await request(cookies[0],"POST",{confirmedTeamAccess:true},"https://evil.test","/default")).status,403);
+    assert.equal((await request(cookies[0],"POST",{confirmedTeamAccess:false},base,"/default")).status,400);
+    assert.equal((await request(cookies[0],"POST",{confirmedTeamAccess:true},base,"/default")).status,200);
+    const inherited=await (await request(cookies[0])).json();
+    assert.equal(inherited.mode,"inherit");assert.equal(inherited.defaultDestination.key,destination.key);
+    assert.equal(inherited.connection.enabled,1);
+    assert.doesNotMatch(JSON.stringify(inherited),/secret-integration-token|submissionUrl|payload/);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); db.raw.close(); }
 });
 

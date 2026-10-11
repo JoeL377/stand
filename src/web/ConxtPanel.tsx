@@ -26,10 +26,11 @@ export function ConxtPanel({ roomId, meetingId }: { roomId: string; meetingId?: 
     <p className="muted small">Share live transcripts and finalized meeting synthesis with your team’s project. Review and publication happen in Conxt.</p>
     {error && <p className="error" role="alert">{error}</p>}
     {status && <>
-      <p>{status.connection?.enabled ? `Connected to ${status.connection.label}` : "Not connected"}</p>
+      {status.defaultDestination && <p className="muted small">App default: {status.defaultDestination.label}. Future meetings in existing and new rooms share automatically unless the room opts out or chooses another destination.</p>}
+      <p>{status.mode === "off" ? "Sharing turned off for this room" : status.mode === "inherit" && status.connection?.enabled ? `Using app default · ${status.connection.label}` : status.connection?.enabled ? `Connected to ${status.connection.label}` : "Not connected"}</p>
       {status.canManage && !meetingId && <>
-        <label>Conxt destination<select value={destination} onChange={e => { setDestination(e.target.value); setConfirmed(false); }}>
-          <option value="">Choose team and project</option>
+        <label>Room destination override<select value={destination} onChange={e => { setDestination(e.target.value); setConfirmed(false); }}>
+          <option value="">Choose a room override</option>
           {status.destinations.map(d => <option key={d.key} value={d.key}>{d.label}</option>)}
         </select></label>
         {!status.destinations.length && <p className="muted small">Your server operator needs to configure a Conxt connection before you can select it here.</p>}
@@ -39,7 +40,8 @@ export function ConxtPanel({ roomId, meetingId }: { roomId: string; meetingId?: 
         <p className="muted small">Past meetings and meetings already in progress are excluded. Disconnecting pauses pending deliveries; reconnecting applies to new meetings.</p>
         <div className="sp-manage-foot">
           <button type="button" disabled={busy || !confirmed || !destination} onClick={() => void change(() => api.connectConxt(roomId, destination))}>Connect Conxt</button>
-          {Boolean(status.connection?.enabled) && <button type="button" disabled={busy} onClick={() => void change(() => api.disconnectConxt(roomId))}>Disconnect Conxt</button>}
+          {status.defaultDestination && status.mode !== "inherit" && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Share future meetings with everyone in ${status.defaultDestination!.label}?`)) void change(() => api.useConxtDefault(roomId)); }}>Use app default</button>}
+          {Boolean(status.connection?.enabled) && <button type="button" disabled={busy} onClick={() => void change(() => api.disconnectConxt(roomId))}>Turn off for this room</button>}
           <button type="button" disabled={busy} onClick={() => void change(async () => {})}>Refresh delivery status</button>
         </div>
       </>}
