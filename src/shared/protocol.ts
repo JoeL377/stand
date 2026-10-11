@@ -264,7 +264,71 @@ export interface User {
   picture: string | null;
 }
 
+/** What a meeting is for, which decides what Stand shows and writes as it goes: "notes" for
+ *  to-dos, decisions and topics per item; "alignment" for getting people to agree on one question. */
+export type MeetingKind = "notes" | "alignment";
+
+/** An alignment meeting as it stands: the question, where each person stands, what they
+ *  differ on and already agree on. The agent keeps it up to date as people talk. */
+export interface AlignmentState {
+  question: {
+    text: string;
+    askedBy: string | null;
+    at: number | null;
+    whyNow: string | null;
+    /** The agent's guess from the talk (✦), until someone sets or keeps it. */
+    suggested: boolean;
+  } | null;
+  positions: Array<{
+    person: string;
+    stance: string;
+    reasons: string[];
+    /** When their stance last shifted, and what moved them. */
+    movedAt: number | null;
+    movedBecause: string | null;
+  }>;
+  /** The real disagreements, each as a question, with each side in a few words. */
+  differ: Array<{ question: string; sides: Array<{ person: string; gist: string }> }>;
+  /** A test someone proposed that would settle it. */
+  settleTest: { text: string; proposedBy: string | null; at: number | null; answered: boolean } | null;
+  /** What everyone affirmed (or nobody objected to once said). */
+  agreed: Array<{ text: string; at: number | null; by: string[] }>;
+  /** Questions asked and not answered yet. */
+  unanswered: Array<{ asker: string; question: string; at: number | null }>;
+  /** Side ideas, recorded so they aren't lost. */
+  parked: string[];
+  /** Where it landed, once the meeting wraps up. */
+  landing: {
+    outcome: "decided" | "held" | "not_aligned";
+    text: string;
+    /** Held: when it comes back, what would change it, and what's still open. */
+    reopens: string | null;
+    changesIf: string | null;
+    stillOpen: string | null;
+    nextSteps: Array<{ owner: string | null; text: string }>;
+  } | null;
+}
+
+export type AlignmentVote = "aligned" | "commit" | "not_aligned";
+
+export interface AlignmentView {
+  state: AlignmentState;
+  /** When the agent last brought it up to date. */
+  updatedAt: number | null;
+  /** The agent is reading what was said since. */
+  busy: boolean;
+  /** The host asked to wrap up: the agent is writing where it landed. */
+  wrapping: boolean;
+  /** The agent's last try failed; what's shown is as of the try before. */
+  failing: boolean;
+  /** Each person's answer to "Are you aligned with this?". */
+  votes: Array<{ userId: string; name: string; vote: AlignmentVote; at: number }>;
+}
+
 export interface RoomState {
+  /** What this meeting is for; alignment meetings carry `alignment`. */
+  kind: MeetingKind;
+  alignment: AlignmentView | null;
   /** This meeting's snaps. */
   snaps: Snap[];
   /** The snap on everyone's middle screen: the latest one someone took of the item in
@@ -339,6 +403,13 @@ export type ClientMessage = (
   /** Take back the last "Switch and move": the focus and the remarks go back, with what was said since. */
   | { type: "suggestion.undo" }
   | { type: "chat"; text: string }
+  /** Alignment meetings, anyone: set the question (empty clears it, and the agent suggests one), or keep the agent's suggestion. */
+  | { type: "align.question"; text: string }
+  | { type: "align.keep" }
+  /** Host: write where it landed now, before ending. */
+  | { type: "align.wrap" }
+  /** Anyone, once it has landed: "Are you aligned with this?" */
+  | { type: "align.vote"; vote: AlignmentVote }
   /** Browser transcription: a finished utterance from this participant's mic. */
   | { type: "speech"; text: string; startedAt: number }
   | { type: "speech.interim"; text: string }
@@ -401,6 +472,9 @@ export interface MeetingRecap {
   /** The space's synthesis instructions applied to this meeting, as Markdown; null when it had none. */
   synthesis: string | null;
   items: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions: Discussion[]; snaps: Snap[] }>;
+  kind: MeetingKind;
+  /** Alignment meetings: the board as it ended, and who said they're aligned with where it landed. */
+  alignment: { state: AlignmentState; votes: AlignmentView["votes"] } | null;
 }
 
 /** Synthesis instructions are a paragraph or a short list, not a document. */

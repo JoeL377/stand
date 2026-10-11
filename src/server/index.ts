@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { type WebSocket, WebSocketServer } from "ws";
-import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, Jot, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
+import type { AlignmentVote, DeckDraft, DeckHistory, DeckTheme, ItemHistory, Jot, MeetingKind, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
 import { MAX_SYNTHESIS_INSTRUCTIONS } from "../shared/protocol.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } from "./auth.ts";
@@ -29,6 +29,7 @@ import { importFromLinear } from "./linear.ts";
 import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
+import { emptyAlignment } from "./alignment.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { toSpaceSummary } from "./spaces.ts";
@@ -152,6 +153,7 @@ const agents = agentApi({
       meeting: m,
       roomName: db.getRoom(m.roomId)!.name,
       synthesisInstructions: db.getRoom(m.roomId)!.synthesisInstructions,
+      alignment: alignmentOf(m),
       groups: meetingGroups(m, baseUrl),
       decks: db.listDecks(m.roomId),
       baseUrl,
@@ -593,9 +595,41 @@ app.get(
       meetings: db.listMeetings(room.id),
       followUps: db.roomFollowUps(room.id).filter((f) => !f.doneAt),
       liveMeetingId: live && !live.ended ? live.meetingId : null,
+      // The last alignment meeting's question when it wasn't decided: the start dialog offers it again.
+      openAlignment: ((o) =>
+        o
+          ? {
+              meetingId: o.meetingId,
+              startedAt: o.startedAt,
+              question: o.state.question!.text,
+              positions: o.state.positions.length,
+              agreed: o.state.agreed.length,
+              test: Boolean(o.state.settleTest && !o.state.settleTest.answered),
+            }
+          : null)(db.openAlignment(room.id)),
       // Who is in the call now, for the lobby's avatars.
       people: live && !live.ended ? live.state().participants.map(({ name, picture }) => ({ name, picture })) : [],
     });
+  }),
+);
+
+/** Start pressed: what kind of meeting this is, and for alignment, the question. The space's
+ *  meetings start as that kind from now on. Applies to a meeting already open if nobody has talked. */
+app.post(
+  "/api/rooms/:id/meeting-setup",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    const kind: MeetingKind = req.body?.kind === "alignment" ? "alignment" : "notes";
+    const question = kind === "alignment" ? String(req.body?.question ?? "").trim().replace(/\s+/g, " ").slice(0, 300) : "";
+    // Picking up from the last meeting on this question: only that space's own.
+    const prev = req.body?.carry ? db.openAlignment(room.id) : null;
+    const setup = question ? { text: question, by: req.user!.name, carry: prev?.meetingId === req.body.carry ? prev!.meetingId : null } : null;
+    const open = live(room.id);
+    if (open?.hasTalk) return void res.json({ ok: true, applied: false });
+    db.setMeetingSetup(room.id, kind, open ? null : setup);
+    if (open) open.setup(kind, setup);
+    res.json({ ok: true, applied: true });
   }),
 );
 
@@ -897,6 +931,11 @@ app.get(
   }),
 );
 
+/** An alignment meeting's board and votes, for the recap and the brief. */
+function alignmentOf(m: { id: string; kind: MeetingKind }) {
+  return m.kind === "alignment" ? { state: db.getAlignment(m.id)?.state ?? emptyAlignment(), votes: db.alignmentVotes(m.id) } : null;
+}
+
 /** A meeting's segments and notes grouped by agenda item, in agenda order. */
 function meetingGroups(m: { id: string; roomId: string }, baseUrl = "") {
   const segments = db.meetingSegments(m.id);
@@ -930,8 +969,26 @@ app.get(
       summary: m.summary,
       synthesis: m.synthesis,
       items: meetingGroups(m),
+      kind: m.kind,
+      alignment: alignmentOf(m),
     };
     res.json(body);
+  }),
+);
+
+/** "Are you aligned with this?", answered from the recap after the meeting. */
+app.post(
+  "/api/meetings/:id/alignment/vote",
+  route((req, res) => {
+    const m = db.getMeeting(req.params.id);
+    if (!m || !db.isMember(m.roomId, req.user!.id)) return notFound(res);
+    const vote = req.body?.vote as AlignmentVote;
+    if (!["aligned", "commit", "not_aligned"].includes(vote)) return void res.status(400).json({ error: "Pick one of the three answers" });
+    if (m.kind !== "alignment" || !db.getAlignment(m.id)?.state.landing) return void res.status(400).json({ error: "This meeting hasn't landed anywhere yet" });
+    db.setAlignmentVote(m.id, req.user!.id, req.user!.name, vote);
+    const open = live(m.roomId);
+    if (open?.meetingId === m.id) open.votesChanged();
+    res.json({ votes: db.alignmentVotes(m.id) });
   }),
 );
 
@@ -946,6 +1003,7 @@ app.get(
       meeting: m,
       roomName: db.getRoom(m.roomId)!.name,
       synthesisInstructions: db.getRoom(m.roomId)!.synthesisInstructions,
+      alignment: alignmentOf(m),
       groups: meetingGroups(m, `${req.protocol}://${req.get("host")}`),
       decks: db.listDecks(m.roomId),
       baseUrl: `${req.protocol}://${req.get("host")}`,

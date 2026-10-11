@@ -140,7 +140,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Get a Stand meeting brief",
       description:
-        "The follow-up brief for one meeting (schema stand.meeting-brief/v1): summary, to-dos, decisions, open questions and topics per item. Give meeting_id, or space_id for that space's latest meeting.",
+        "The follow-up brief for one meeting (schema stand.meeting-brief/v1): summary, to-dos, decisions, open questions and topics per item; for alignment meetings also `alignment` (the question, positions, what was agreed, where it landed and who is aligned with it). Give meeting_id, or space_id for that space's latest meeting.",
       inputSchema: {
         meeting_id: z.string().optional(),
         space_id: z.string().optional().describe("Use the latest meeting in this space"),

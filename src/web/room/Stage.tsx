@@ -8,6 +8,7 @@ import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
+import { AlignmentBoard } from "./AlignmentBoard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
@@ -109,12 +110,24 @@ export function Stage(props: {
   // the gallery so nobody is pulled out of the talk.
   const screenRef = useRef<HTMLDivElement>(null);
   const showingScreen = Boolean(localScreen || remoteScreen);
+  const aligning = state.kind === "alignment" && state.alignment !== null;
   const [flash, setFlash] = useState(0);
   const [cropId, setCropId] = useState<string | null>(null);
   // Snaps you've expanded, each a tab on the main screen beside the screen itself, and the
   // one you're on (null: the main screen). Yours alone: nobody else's screen changes.
+  // Alignment meetings have one more: the board ("align"), on when nobody is sharing.
   const [tabs, setTabs] = useState<string[]>([]);
-  const [tab, setTab] = useState<string | null>(null);
+  const [tab, setTab] = useState<string | null>(() => (aligning && !showingScreen ? ALIGN_TAB : null));
+  // A share starting takes the middle; when it stops, the board comes back.
+  const hadScreen = useRef(showingScreen);
+  useEffect(() => {
+    if (!aligning || hadScreen.current === showingScreen) return;
+    hadScreen.current = showingScreen;
+    setTab((t) => (showingScreen ? null : t === null ? ALIGN_TAB : t));
+  }, [showingScreen, aligning]);
+  useEffect(() => {
+    if (aligning) setTab((t) => (t === null && !showingScreen ? ALIGN_TAB : t));
+  }, [aligning]);
   const crop = (id: string) => ({ label: "Crop", run: () => setCropId(id) });
   const itemsRef = useRef(state.items);
   itemsRef.current = state.items;
@@ -187,13 +200,14 @@ export function Stage(props: {
   const cropSnap = cropId ? state.snaps.find((s) => s.id === cropId) : undefined;
   const tabSnaps = tabs.map((id) => state.snaps.find((s) => s.id === id)).filter((s): s is Snap => Boolean(s));
   const openSnap = tab ? tabSnaps.find((s) => s.id === tab) : undefined;
+  const onBoard = aligning && tab === ALIGN_TAB;
   const openTab = (id: string) => {
     setTabs((t) => (t.includes(id) ? t : [...t, id].slice(-6)));
     setTab(id);
   };
   const closeTab = (id: string) => {
     setTabs((t) => t.filter((x) => x !== id));
-    setTab((t) => (t === id ? null : t));
+    setTab((t) => (t === id ? (aligning && !showingScreen ? ALIGN_TAB : null) : t));
   };
   const mainLabel = localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : "Main screen";
   // The latest snap, small in the corner of everyone's middle screen. Each person can expand
@@ -211,8 +225,34 @@ export function Stage(props: {
   const talkingIds = new Set([...speaking, ...Object.keys(interims)]);
   const ghosts = Object.values(interims).filter((i) => !state.participants.some((p) => p.id === i.speakerId));
 
+  const align = state.alignment;
   return (
     <main className="stage">
+      {aligning && align ? (
+        <div className="now align-now">
+          <span className="stage-tabs" role="tablist" aria-label="The board, the main screen and the snaps you opened">
+            <button role="tab" aria-selected={onBoard} className={onBoard ? "stage-tab on" : "stage-tab"} onClick={() => setTab(ALIGN_TAB)}>
+              <span className="agent-mark small">✦</span> Alignment
+            </button>
+            <button role="tab" aria-selected={!onBoard && !openSnap} className={!onBoard && !openSnap ? "stage-tab on" : "stage-tab"} onClick={() => setTab(null)}>
+              {mainLabel}
+            </button>
+            {tabSnaps.map((s) => (
+              <span key={s.id} className={s === openSnap ? "stage-tab snap on" : "stage-tab snap"} title={s.caption ?? undefined}>
+                <button role="tab" aria-selected={s === openSnap} onClick={() => setTab(s.id)}>
+                  <CameraIcon />
+                  {snapLabel(s, props.participantId)}
+                </button>
+                <button className="stage-tab-x" onClick={() => closeTab(s.id)} title="Close this tab" aria-label="Close this tab">
+                  ✕
+                </button>
+              </span>
+            ))}
+          </span>
+          <span className="spacer" />
+          <BoardFreshness view={align} talk={props.segments.length > 0} />
+        </div>
+      ) : (
       <div className="now">
         <span className="now-label">Now discussing</span>
         <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
@@ -270,10 +310,26 @@ export function Stage(props: {
           )
         )}
       </div>
+      )}
 
       <div className="screen" ref={screenRef}>
-        {/* A quiet nudge for the host only: their click is what moves the meeting. */}
-        {canSteer && !props.ending && suggested && state.suggestion && (
+        {onBoard && align && (
+          <div className="align-tab" role="tabpanel">
+            <AlignmentBoard
+              state={align.state}
+              votes={align.votes}
+              people={state.participants}
+              me={props.participantId}
+              now={Date.now()}
+              onQuestion={props.ending ? undefined : (text) => void send({ type: "align.question", text })}
+              onKeep={() => void send({ type: "align.keep" })}
+              onVote={(vote) => void send({ type: "align.vote", vote })}
+            />
+          </div>
+        )}
+        {/* A quiet nudge for the host only: their click is what moves the meeting. Not in
+            alignment meetings, where the agenda isn't what steers the talk. */}
+        {canSteer && !props.ending && !aligning && suggested && state.suggestion && (
           <div className="nudge" role="status" title={state.suggestion.reason}>
             <span className="agent-mark" aria-hidden>
               ✦
@@ -480,6 +536,23 @@ export function Avatar({ id, name, picture, size = 44 }: { id: string; name: str
       {initials(name)}
     </div>
   );
+}
+
+const ALIGN_TAB = "align";
+
+/** "Updated 4s ago" beside the tabs, so nobody has to ask whether the board is keeping up. */
+function BoardFreshness({ view, talk }: { view: NonNullable<RoomState["alignment"]>; talk: boolean }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 5_000);
+    return () => clearInterval(t);
+  }, []);
+  if (view.wrapping) return <span className="align-fresh">Writing where you landed…</span>;
+  if (view.failing) return <span className="align-fresh warn">Couldn't update just now · trying again as you talk</span>;
+  if (view.busy) return <span className="align-fresh">Updating…</span>;
+  if (!view.updatedAt) return talk ? <span className="align-fresh">Listening…</span> : null;
+  const s = Math.max(0, Math.round((Date.now() - view.updatedAt) / 1000));
+  return <span className="align-fresh">Updated {s < 5 ? "just now" : s < 60 ? `${Math.round(s / 5) * 5}s ago` : `${Math.round(s / 60)} min ago`}</span>;
 }
 
 /** "Joe 2:44": who took a snap and when, for its tab. */

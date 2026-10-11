@@ -4,6 +4,10 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import type {
   AgentToken,
+  AlignmentState,
+  AlignmentView,
+  AlignmentVote,
+  MeetingKind,
   Deck,
   DeckDraft,
   DeckTheme,
@@ -236,6 +240,15 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
   scope TEXT NOT NULL,
   expires_at INTEGER NOT NULL
 );
+-- Alignment meetings: each person's answer to "Are you aligned with this?", once it landed.
+CREATE TABLE IF NOT EXISTS alignment_votes (
+  meeting_id TEXT NOT NULL REFERENCES meetings(id),
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  vote TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (meeting_id, user_id)
+);
 -- What agents and people report back on an item between meetings. Append only.
 CREATE TABLE IF NOT EXISTS updates (
   id TEXT PRIMARY KEY,
@@ -399,6 +412,14 @@ const toDiscussion = (r: Row): Discussion => ({
   ts: r.ts as number,
 });
 
+/** What Start set for the next alignment meeting: the question, who set it, and the earlier
+ *  meeting on the same question it starts from (null: a fresh board). */
+export interface MeetingSetup {
+  text: string;
+  by: string | null;
+  carry: string | null;
+}
+
 export function openDb(file?: string) {
   if (file && file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file ?? ":memory:");
@@ -457,6 +478,19 @@ export function openDb(file?: string) {
   if (!deckCols.includes("kind"))
     db.exec(
       "ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';",
+    );
+
+  // Meeting kinds: what the space starts meetings as, the question the next one aligns on (set
+  // on Start), and per meeting its kind and the alignment state the agent keeps.
+  if (!roomCols.includes("default_kind"))
+    db.exec(
+      "ALTER TABLE rooms ADD COLUMN default_kind TEXT NOT NULL DEFAULT 'notes'; ALTER TABLE rooms ADD COLUMN next_question TEXT; ALTER TABLE rooms ADD COLUMN next_question_by TEXT; ALTER TABLE rooms ADD COLUMN next_question_at INTEGER;",
+    );
+  // The last alignment meeting the next one picks up from, when Start kept its question.
+  if (!roomCols.includes("next_carry")) db.exec("ALTER TABLE rooms ADD COLUMN next_carry TEXT;");
+  if (!meetingCols.includes("kind"))
+    db.exec(
+      "ALTER TABLE meetings ADD COLUMN kind TEXT NOT NULL DEFAULT 'notes'; ALTER TABLE meetings ADD COLUMN alignment TEXT; ALTER TABLE meetings ADD COLUMN alignment_at INTEGER;",
     );
 
   initConxt(db);
@@ -537,7 +571,7 @@ export function openDb(file?: string) {
       return { id, name, createdBy, purpose };
     },
     getRoom(id: string) {
-      const r = db.prepare("SELECT id, name, created_by, purpose, synthesis_instructions FROM rooms WHERE id = ?").get(id) as
+      const r = db.prepare("SELECT id, name, created_by, purpose, synthesis_instructions, default_kind FROM rooms WHERE id = ?").get(id) as
         | Row
         | undefined;
       return r
@@ -547,8 +581,76 @@ export function openDb(file?: string) {
             createdBy: (r.created_by as string) ?? null,
             purpose: (r.purpose as string) ?? "",
             synthesisInstructions: (r.synthesis_instructions as string) ?? "",
+            defaultKind: (r.default_kind === "alignment" ? "alignment" : "notes") as MeetingKind,
           }
         : null;
+    },
+    /** Start pressed with a kind (and for alignment, a question, and the meeting it picks up
+     *  from): the space's meetings start as that kind from now on, and the next one takes the question. */
+    setMeetingSetup(roomId: string, kind: MeetingKind, setup: MeetingSetup | null) {
+      db.prepare("UPDATE rooms SET default_kind = ?, next_question = ?, next_question_by = ?, next_question_at = ?, next_carry = ? WHERE id = ?").run(
+        kind,
+        setup?.text || null,
+        setup?.text ? setup.by : null,
+        setup?.text ? Date.now() : null,
+        setup?.text ? setup.carry : null,
+        roomId,
+      );
+    },
+    /** The question set on Start, who set it and what it picks up from, if that was lately; it's used once. */
+    takeNextQuestion(roomId: string, within = 30 * 60_000): MeetingSetup | null {
+      const r = db.prepare("SELECT next_question, next_question_by, next_question_at, next_carry FROM rooms WHERE id = ?").get(roomId) as Row | undefined;
+      if (!r?.next_question) return null;
+      db.prepare("UPDATE rooms SET next_question = NULL, next_question_by = NULL, next_question_at = NULL, next_carry = NULL WHERE id = ?").run(roomId);
+      return Date.now() - Number(r.next_question_at ?? 0) < within
+        ? { text: r.next_question as string, by: (r.next_question_by as string) ?? null, carry: (r.next_carry as string) ?? null }
+        : null;
+    },
+    setMeetingKind(id: string, kind: MeetingKind) {
+      db.prepare("UPDATE meetings SET kind = ? WHERE id = ?").run(kind, id);
+    },
+    saveAlignment(meetingId: string, state: AlignmentState, at = Date.now()) {
+      db.prepare("UPDATE meetings SET alignment = ?, alignment_at = ? WHERE id = ?").run(JSON.stringify(state), at, meetingId);
+    },
+    getAlignment(meetingId: string): { state: AlignmentState; at: number | null } | null {
+      const r = db.prepare("SELECT alignment, alignment_at FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
+      if (!r?.alignment) return null;
+      try {
+        return { state: JSON.parse(r.alignment as string) as AlignmentState, at: (r.alignment_at as number) ?? null };
+      } catch {
+        return null;
+      }
+    },
+    setAlignmentVote(meetingId: string, userId: string, name: string, vote: AlignmentVote) {
+      db.prepare(
+        "INSERT INTO alignment_votes (meeting_id, user_id, name, vote, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (meeting_id, user_id) DO UPDATE SET name = excluded.name, vote = excluded.vote, at = excluded.at",
+      ).run(meetingId, userId, name, vote, Date.now());
+    },
+    /** Where it landed was written again: earlier answers were to something else. */
+    clearAlignmentVotes(meetingId: string) {
+      db.prepare("DELETE FROM alignment_votes WHERE meeting_id = ?").run(meetingId);
+    },
+    alignmentVotes(meetingId: string): AlignmentView["votes"] {
+      return (db.prepare("SELECT user_id, name, vote, at FROM alignment_votes WHERE meeting_id = ? ORDER BY at").all(meetingId) as Row[]).map((r) => ({
+        userId: r.user_id as string,
+        name: r.name as string,
+        vote: r.vote as AlignmentVote,
+        at: r.at as number,
+      }));
+    },
+    /** The space's last alignment meeting that ended without a decision: what the next one can pick up. */
+    openAlignment(roomId: string): { meetingId: string; startedAt: number; state: AlignmentState } | null {
+      const r = db
+        .prepare("SELECT id, started_at, alignment FROM meetings WHERE room_id = ? AND kind = 'alignment' AND ended_at IS NOT NULL AND alignment IS NOT NULL ORDER BY started_at DESC LIMIT 1")
+        .get(roomId) as Row | undefined;
+      if (!r) return null;
+      try {
+        const state = JSON.parse(r.alignment as string) as AlignmentState;
+        if (!state.question?.text || state.landing?.outcome === "decided") return null;
+        return { meetingId: r.id as string, startedAt: r.started_at as number, state };
+      } catch {
+        return null;
+      }
     },
     updateRoom(id: string, patch: { name?: string; purpose?: string; synthesisInstructions?: string }) {
       if (patch.name !== undefined) db.prepare("UPDATE rooms SET name = ? WHERE id = ?").run(patch.name, id);
@@ -840,6 +942,7 @@ export function openDb(file?: string) {
         summary: (r.summary as string) ?? null,
         /** What the space's synthesis instructions asked for, as Markdown; null without instructions. */
         synthesis: (r.synthesis as string) ?? null,
+        kind: (r.kind === "alignment" ? "alignment" : "notes") as MeetingKind,
       };
     },
     listMeetings(roomId: string) {

@@ -115,6 +115,10 @@ export function Meeting(props: {
   // Stand for Mac keeps a small bar on screen while Stand is in the background
   // (presenting another app, say): what's in focus, the mic, and Snap.
   const { micOn, toggleMic } = media;
+  // Alignment meetings show the question where others show the item in focus.
+  const aligning = state?.kind === "alignment";
+  const barItem = aligning ? (state?.alignment?.state.question?.text ?? null) : (focusItem?.title ?? null);
+  const barKey = aligning ? null : keyOf(focusItem);
 
   // Problems with the connection, the mic or the screen show up as a message that goes away, not a row.
   const lastErrorAt = useRef(0);
@@ -229,8 +233,8 @@ export function Meeting(props: {
       macApp?.meeting?.({
         roomId,
         space: state.roomName,
-        itemKey: keyOf(focusItem),
-        item: focusItem?.title ?? null,
+        itemKey: barKey,
+        item: barItem,
         micOn,
         sharing,
         todos: barTodos,
@@ -241,7 +245,7 @@ export function Meeting(props: {
         offline: !room.connected,
         ending: barEnding,
       });
-  }, [state?.roomName, focusItem, micOn, sharing, barTodos, nudge, barSwitched, Boolean(notRecording), room.connected, barEnding]);
+  }, [state?.roomName, barKey, barItem, micOn, sharing, barTodos, nudge, barSwitched, Boolean(notRecording), room.connected, barEnding]);
   useEffect(() => () => macApp?.meeting?.(null), []);
   // In a browser, the bar pops out into a little always-on-top window (Chrome and Edge).
   const popOut = usePopOut();
@@ -303,6 +307,13 @@ export function Meeting(props: {
       }
       return !f;
     });
+  // The agenda isn't what an alignment meeting is about: it starts folded, without changing what this browser remembers.
+  const foldedForAlignment = useRef(false);
+  useEffect(() => {
+    if (!aligning || foldedForAlignment.current) return;
+    foldedForAlignment.current = true;
+    setAgendaFolded(true);
+  }, [aligning]);
   const foldRef = useRef(foldAgenda);
   foldRef.current = foldAgenda;
   useEffect(() => {
@@ -357,6 +368,7 @@ export function Meeting(props: {
         <div className="topbar-left">
           <Logo size={20} />
           <strong className="room-name">{state.roomName}</strong>
+          {aligning && <span className="kind-pill">Alignment</span>}
           <span className="timer">
             <span className={notRecording ? "rec-dot off" : "rec-dot"} aria-hidden /> {fmtDuration(now - state.meetingStartedAt)}
           </span>
@@ -554,13 +566,27 @@ export function Meeting(props: {
         >
           Leave
         </button>
+        {canSteer && aligning && (
+          <button
+            className="control pill"
+            disabled={writingUp || !room.connected || Boolean(state.alignment?.wrapping)}
+            title={
+              state.alignment?.state.landing
+                ? "Write where you landed again, with what was said since"
+                : "Stand writes where you landed, and everyone says whether they're aligned with it. The meeting keeps going."
+            }
+            onClick={() => send({ type: "align.wrap" })}
+          >
+            {state.alignment?.wrapping ? "Wrapping up…" : state.alignment?.state.landing ? "Wrap up again" : "Wrap up"}
+          </button>
+        )}
         {canSteer && (
         <button
           className="control pill danger"
           disabled={writingUp || !room.connected}
           title={writingUp ? writingTitle : room.connected ? undefined : "You can end the meeting once Stand reconnects"}
           onClick={() => {
-            if (!confirm("End the meeting for everyone and write up the notes?")) return;
+            if (!confirm(aligning ? "End the meeting for everyone? Stand writes where you landed and the recap." : "End the meeting for everyone and write up the notes?")) return;
             if (send({ type: "meeting.end" })) setEnding(true);
           }}
         >
@@ -572,8 +598,8 @@ export function Meeting(props: {
         <PopOutBar
           win={popOut.win}
           space={state.roomName}
-          itemKey={keyOf(focusItem)}
-          item={focusItem?.title ?? null}
+          itemKey={barKey}
+          item={barItem}
           micOn={micOn}
           onMic={() => void toggleMic()}
           onSnap={media.localScreen || media.remoteScreen ? () => stageSnap.current?.() ?? Promise.resolve(false) : null}
@@ -608,6 +634,7 @@ const REFUSED: Partial<Record<string, string>> = {
   "host.give": "handing over hosting waits for the connection",
   "stage.snap.close": "couldn't take the snap down yet",
   "meeting.end": "ending the meeting waits for the connection",
+  "align.wrap": "wrapping up waits for the connection",
 };
 
 /** Only while something's wrong with the connection: what's happening to your changes, or what to do. */

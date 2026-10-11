@@ -35,10 +35,26 @@ const LASTING = new Set<ClientMessage["type"]>([
   "note.add",
   "stage.snap.close",
   "meeting.end",
+  "align.question",
+  "align.keep",
+  "align.wrap",
+  "align.vote",
 ]);
 /** Of those, what can wait for the connection to come back. The rest steer the
  *  meeting as it happens, so they need the connection now. */
-const CAN_WAIT = new Set<ClientMessage["type"]>(["chat", "speech", "segment.move", "followup.done", "note.edit", "note.remove", "note.restore", "note.add"]);
+const CAN_WAIT = new Set<ClientMessage["type"]>([
+  "chat",
+  "speech",
+  "segment.move",
+  "followup.done",
+  "note.edit",
+  "note.remove",
+  "note.restore",
+  "note.add",
+  "align.question",
+  "align.keep",
+  "align.vote",
+]);
 /** Sent on their own as things happen; nobody clicked anything. */
 const BACKGROUND = new Set<ClientMessage["type"]>(["hello", "ping", "speech.interim", "frame", "sharing", "recording"]);
 /** No ack or pong this long after sending: the connection is dead, even if the browser hasn't noticed yet. */

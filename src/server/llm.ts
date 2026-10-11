@@ -8,6 +8,7 @@ import { z } from "zod";
 import { type DraftSlide, outlineToSlides } from "../shared/outline.ts";
 import type { DiscussionOutcome, Item, Note, NoteKind, Segment } from "../shared/protocol.ts";
 import { config } from "./config.ts";
+import { type AlignmentDraft, type AlignmentInput, boardText, heuristicAlignment } from "./alignment.ts";
 
 export type DraftNote = Pick<Note, "kind" | "text" | "owner">;
 
@@ -138,6 +139,8 @@ export interface Agent {
   /** Tidies the space's suggested agenda: folds duplicates, writes short agenda
    *  lines and reasons, and orders it. Null when there's no model to ask. */
   polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null>;
+  /** Alignment meetings: what changed on the board since it was last brought up to date. */
+  alignmentFor(input: AlignmentInput): Promise<AlignmentDraft>;
 }
 
 export type SnapMedia = "image/jpeg" | "image/png" | "image/webp";
@@ -286,6 +289,62 @@ const AgendaSchema = z.object({
     )
     .describe("Every suggestion given, once each, in the order the meeting should take them"),
 });
+
+const AlignSchema = z.object({
+  question: z
+    .object({
+      text: z.string(),
+      asked_by: z.string().nullable(),
+      why_now: z.string().nullable().describe("One line on why it has to be settled now, from what was said; null if nobody said"),
+      line: z.number().int().nullable().describe("The line it was asked on"),
+    })
+    .nullable()
+    .describe("Only when the board has no question yet (the one people are trying to settle, if it's clear), or to add why_now. Otherwise null."),
+  positions: z
+    .array(
+      z.object({
+        person: z.string().describe("An attendee's name, exactly as listed"),
+        stance: z.string().describe("Where they stand on the question, in one sentence"),
+        reasons: z.array(z.string()).describe("Up to 3 of their own arguments, most important first, a short line each"),
+        moved: z.boolean().describe("True only if their stance itself shifted since the board"),
+        moved_because: z.string().nullable().describe("When moved: what changed their mind, in their terms"),
+        line: z.number().int().nullable().describe("The line where they took or changed this stance"),
+      }),
+    )
+    .describe("Only people whose position is new or changed. Leave out everyone else."),
+  differ: z
+    .array(z.object({ question: z.string(), sides: z.array(z.object({ person: z.string(), gist: z.string().describe("A few words") })) }))
+    .nullable()
+    .describe("The 1 or 2 real disagreements still open, each as a question. The whole list when it changed; null when it didn't."),
+  settle_test: z
+    .object({ text: z.string(), proposed_by: z.string().nullable(), answered: z.boolean(), line: z.number().int().nullable() })
+    .nullable()
+    .describe("A concrete test someone proposed that would settle the disagreement, and whether the talk has answered it. Null when unchanged."),
+  agreed_add: z
+    .array(z.object({ text: z.string(), by: z.array(z.string()).describe("Who affirmed it"), line: z.number().int().nullable() }))
+    .describe("New points of agreement only"),
+  agreed_remove: z.array(z.string()).describe("Keys (A1, A2...) of agreed points someone has since disputed"),
+  unanswered_add: z.array(z.object({ asker: z.string(), question: z.string(), line: z.number().int().nullable() })),
+  answered: z.array(z.string()).describe("Keys (U1, U2...) of waiting questions the talk has now answered"),
+  parked_add: z.array(z.string()).describe("Side ideas raised off the question, a few words each"),
+  landing: z
+    .object({
+      outcome: z.enum(["decided", "held", "not_aligned"]),
+      text: z.string().describe("Decided: the answer. Held: the position they're keeping for now. Not aligned: where it stands. One sentence."),
+      reopens: z.string().nullable().describe("Held: when or where it comes back"),
+      changes_if: z.string().nullable().describe("Held: what would change it"),
+      still_open: z.string().nullable().describe("The main question still open"),
+      next_steps: z.array(z.object({ owner: z.string().nullable(), text: z.string() })).describe("What people said they'd do before it reopens"),
+    })
+    .nullable()
+    .describe("Only when asked to wrap up; otherwise null"),
+});
+
+/** Names speech-to-text gets wrong in this team's calls. */
+const NAME_HINTS = "Duke or Hui is Huy, Annie is Andy, and Stan is Stand (the product).";
+
+/** An alignment run that hangs: give up and let the next pause try again. */
+const ALIGN_TIMEOUT_MS = 60_000;
 
 /** A notes run that hangs keeps "Updating" up; past this it fails and the next pause tries
  *  again. Long enough for the whole transcript of an item talked about for two hours. */
@@ -469,6 +528,66 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
         continuesId: d.continues && known.has(d.continues) ? d.continues : null,
         picksUp: d.picks_up && keys.has(d.picks_up) ? d.picks_up : null,
       })),
+    };
+  }
+
+  async alignmentFor(input: AlignmentInput): Promise<AlignmentDraft> {
+    const line = (s: Segment) => `${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`;
+    const before = input.context.length ? `\n\nSaid just before (already reflected on the board, for context):\n${input.context.map(line).join("\n")}` : "";
+    const lines = input.lines.map((s, i) => `[${i + 1}] ${line(s)}`).join("\n");
+    const out = await this.parse(
+      AlignSchema,
+      `Space: ${input.space.name}${input.space.purpose ? ` (${input.space.purpose})` : ""}
+Attendees: ${input.attendees.join(", ")}
+
+The board as it stands:
+${boardText(input.state)}${before}
+
+${input.lines.length ? `Said since the board was last updated:\n${lines}` : "Nothing new was said."}${
+        input.closing
+          ? "\n\nThe meeting is wrapping up. Bring the board up to date, then write where it landed: decided (they agreed on an answer), held (they chose to keep a position for now; say when it reopens and what would change it), or not_aligned. Next steps are what people said they'd do before it reopens, with owners."
+          : ""
+      }`,
+      `You keep the board for an alignment meeting: people trying to agree on one question. The board shows the question, where each person stands, where they differ, what would settle it, what they agree on so far, questions waiting on an answer, and parked side ideas. You get the board and what was said since it was last updated; return only what changed.
+
+Positions: one per attendee who has taken a side, the stance in one sentence and up to three reasons in their own terms. Mark moved only when the stance itself shifts, not when they add a reason, and say what moved them. Say it the way they would; don't soften or merge two people's views.
+Where they differ: the one or two real disagreements still open, each phrased as a question, with each side in a few words.
+Agreed so far: add a point only when everyone who spoke to it affirmed it, or it was stated and nobody objected. Never on one person's say-so. Don't add what's already on the board.
+Waiting on an answer: questions someone asked that nobody answered. When a later line answers one, list its key.
+Parked: side ideas raised off the question, so nobody worries they're lost.
+The question: if the board has none, suggest the one people are trying to settle, or null if it isn't clear yet. If it's set, never rewrite it.
+
+Names: write people only as the attendees listed. Speech-to-text mishears names: ${NAME_HINTS}
+Don't invent anything that wasn't said; read through transcription errors. Keep every line short. Most runs change little: when nothing changed, return empty lists and nulls.`,
+      "low",
+      config.alignModel,
+      { timeout: ALIGN_TIMEOUT_MS, maxTokens: 6000 },
+    ).catch((err) => {
+      throw notesTrouble(err) ?? err;
+    });
+    if (!out) throw new Error("the model declined to update the board");
+    return {
+      question: out.question ? { text: out.question.text, askedBy: out.question.asked_by, whyNow: out.question.why_now, line: out.question.line } : null,
+      positions: out.positions.map((p) => ({ person: p.person, stance: p.stance, reasons: p.reasons, moved: p.moved, movedBecause: p.moved_because, line: p.line })),
+      differ: out.differ,
+      settleTest: out.settle_test
+        ? { text: out.settle_test.text, proposedBy: out.settle_test.proposed_by, answered: out.settle_test.answered, line: out.settle_test.line }
+        : null,
+      agreedAdd: out.agreed_add,
+      agreedRemove: out.agreed_remove,
+      unansweredAdd: out.unanswered_add,
+      answered: out.answered,
+      parkedAdd: out.parked_add,
+      landing: out.landing
+        ? {
+            outcome: out.landing.outcome,
+            text: out.landing.text,
+            reopens: out.landing.reopens,
+            changesIf: out.landing.changes_if,
+            stillOpen: out.landing.still_open,
+            nextSteps: out.landing.next_steps,
+          }
+        : null,
     };
   }
 
@@ -842,6 +961,9 @@ export class HeuristicAgent implements Agent {
     return outlineToSlides(brief);
   }
 
+  async alignmentFor(input: AlignmentInput): Promise<AlignmentDraft> {
+    return heuristicAlignment(input);
+  }
   async polishAgenda(): Promise<AgendaPolishRow[] | null> {
     return null;
   }

@@ -18,6 +18,7 @@ import { fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { SynthesisLine } from "../Synthesis.tsx";
+import { StartMeeting } from "./StartMeeting.tsx";
 
 /** Rows each right-hand card shows before folding the rest into "N more". */
 const CARD_ROWS = 4;
@@ -169,10 +170,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               <LinkIcon />
               {copied ? "Copied" : "Invite"}
             </button>
-            <button className="primary sh-join" onClick={props.onJoin}>
-              <MicIcon />
-              {wrapping ? "Join" : live ? "Join them" : "Start talking"}
-            </button>
+            {live ? (
+              <button className="primary sh-join" onClick={props.onJoin}>
+                <MicIcon />
+                {wrapping ? "Join" : "Join them"}
+              </button>
+            ) : (
+              <StartMeeting room={room} onJoin={props.onJoin} />
+            )}
           </span>
         </header>
         <div className="sh-synth">

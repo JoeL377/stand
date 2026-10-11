@@ -24,6 +24,10 @@ export const config = {
   /** For the calls that run once per meeting and merge things: the notes' tidy run as
    *  the meeting ends (it feeds the recap) and the suggested agenda. */
   notesTidyModel: env("NOTES_TIDY_MODEL") ?? "claude-sonnet-5-5",
+  /** For alignment meetings' board, kept up to date as people talk: tracking where each person
+   *  stands and when they shift is the hard part, and each run is small (the board plus what
+   *  was said since). */
+  alignModel: env("ALIGN_MODEL") ?? "claude-sonnet-5-5",
   linearKey: env("LINEAR_API_KEY"),
   google: {
     clientId: env("GOOGLE_CLIENT_ID"),

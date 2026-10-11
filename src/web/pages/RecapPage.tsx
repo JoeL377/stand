@@ -10,6 +10,8 @@ import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.
 import { Markdown } from "../Synthesis.tsx";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
 import { colorFor, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
+import { AlignmentBoard } from "../room/AlignmentBoard.tsx";
+import { useAuth } from "../auth.tsx";
 
 export function RecapPage() {
   const { meetingId = "" } = useParams();
@@ -19,6 +21,7 @@ export function RecapPage() {
   const [copied, setCopied] = useState(false);
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [upNext, setUpNext] = useState<UpNext | null>(null);
+  const { user } = useAuth();
 
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -100,6 +103,40 @@ export function RecapPage() {
   const topicIds = new Set(groups.flatMap((g) => (g.discussions ?? []).map((d) => d.id)));
   const shots = (n: Note) => <SnapFigures snaps={onNote(n.id)} />;
 
+  // An alignment meeting's recap opens with where it landed and who's aligned with it; the
+  // summary and the notes follow.
+  const align = data.alignment;
+  const alignFirst = Boolean(align && (align.state.question || align.state.positions.length > 0 || align.state.landing));
+  const overview = (
+    <>
+      {data.summary && <p className="lede">{data.summary}</p>}
+      {(actions.length > 0 || decided.length > 0 || questions.length > 0 || topicCount > 0) && (
+        <div className="glance">
+          {actions.length > 0 && (
+            <a href="#todo" className="glance-chip todo">
+              <TodoIcon /> <b>{open}</b> to do{open < actions.length && <span className="muted"> · {actions.length - open} done</span>}
+            </a>
+          )}
+          {decided.length > 0 && (
+            <a href="#decided" className="glance-chip decided">
+              <DecidedIcon /> <b>{decided.length}</b> decided
+            </a>
+          )}
+          {questions.length > 0 && (
+            <a href="#open" className="glance-chip question">
+              <QuestionIcon /> <b>{questions.length}</b> open
+            </a>
+          )}
+          {topicCount > 0 && (
+            <a href="#topics" className="glance-chip topic">
+              <TopicIcon /> <b>{topicCount}</b> topic{topicCount === 1 ? "" : "s"}
+            </a>
+          )}
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="doc recap">
       <nav className="crumbs">
@@ -114,32 +151,29 @@ export function RecapPage() {
           {data.endedAt ? ` · ${fmtDuration(data.endedAt - data.startedAt)}` : " · in progress"}
           {people.length > 0 && ` · ${people.join(", ")}`}
         </p>
-        {data.summary && <p className="lede">{data.summary}</p>}
-        {(actions.length > 0 || decided.length > 0 || questions.length > 0 || topicCount > 0) && (
-          <div className="glance">
-            {actions.length > 0 && (
-              <a href="#todo" className="glance-chip todo">
-                <TodoIcon /> <b>{open}</b> to do{open < actions.length && <span className="muted"> · {actions.length - open} done</span>}
-              </a>
-            )}
-            {decided.length > 0 && (
-              <a href="#decided" className="glance-chip decided">
-                <DecidedIcon /> <b>{decided.length}</b> decided
-              </a>
-            )}
-            {questions.length > 0 && (
-              <a href="#open" className="glance-chip question">
-                <QuestionIcon /> <b>{questions.length}</b> open
-              </a>
-            )}
-            {topicCount > 0 && (
-              <a href="#topics" className="glance-chip topic">
-                <TopicIcon /> <b>{topicCount}</b> topic{topicCount === 1 ? "" : "s"}
-              </a>
-            )}
-          </div>
-        )}
+        {!alignFirst && overview}
       </header>
+
+      {alignFirst && data.alignment && (
+        <section id="alignment" className="doc-section rc-section rc-alignment">
+          <AlignmentBoard
+            state={data.alignment.state}
+            votes={data.alignment.votes}
+            people={[...new Map(groups.flatMap((g) => g.segments).map((s) => [s.speakerId, { id: s.speakerId, name: s.speakerName }])).values()]}
+            me={user.id}
+            onVote={
+              data.alignment.state.landing
+                ? (vote) =>
+                    void api.alignmentVote(data.meetingId, vote).then(
+                      (r) => setData((d) => d && d.alignment && { ...d, alignment: { ...d.alignment, votes: r.votes } }),
+                      errorToast("Couldn't save your answer"),
+                    )
+                : undefined
+            }
+          />
+        </section>
+      )}
+      {alignFirst && <div className="rc-overview">{overview}</div>}
 
       <ConxtPanel roomId={data.roomId} meetingId={data.meetingId} />
 

@@ -4,6 +4,9 @@
 import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
+  AlignmentState,
+  AlignmentVote,
+  MeetingKind,
   User,
   ClientMessage,
   Discussion,
@@ -16,7 +19,7 @@ import type {
   Suggestion,
 } from "../shared/protocol.ts";
 import { capabilities } from "./config.ts";
-import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
+import type { DB, DraftDiscussion, MeetingSetup, OpenMeeting } from "./db.ts";
 import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
@@ -25,6 +28,7 @@ import { settle } from "./settle.ts";
 import { newId } from "./ids.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
+import { type AlignmentDraft, applyAlignment, carryOver, emptyAlignment } from "./alignment.ts";
 import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 /** Below this the agent keeps its guess to itself. */
@@ -48,6 +52,11 @@ const NOTES_TROUBLE = {
 };
 /** While talk keeps going, refresh notes at least this often instead of waiting for a pause. */
 const NOTES_MAX_WAIT_MS = 12_000;
+/** Alignment runs see what was said just before the new lines, for context. */
+const ALIGN_CONTEXT_LINES = 12;
+/** And at most this many new lines in one run (a long silence of the agent catches up in steps). */
+const ALIGN_MAX_LINES = 120;
+const ALIGN_VOTES = new Set<AlignmentVote>(["aligned", "commit", "not_aligned"]);
 /** A speaker's next words join their last entry when they pause for less than this. */
 const SPEECH_JOIN_GAP_MS = 2_000;
 /** ...as long as the entry stays a readable size. */
@@ -160,6 +169,19 @@ export class RoomSession implements SpeechSink {
   /** The creator handed hosting to someone on purpose, so rejoining doesn't take it back. */
   private creatorHandedOver = false;
   private demoRunning = false;
+  /** What the meeting is for. Alignment meetings keep a board instead of live notes. */
+  private kind: MeetingKind = "notes";
+  private align: AlignmentState = emptyAlignment();
+  private alignAt: number | null = null;
+  private alignBusy = false;
+  private alignWrapping = false;
+  private alignFailing = false;
+  /** The last line the board has read, and how long it was then (a turn keeps growing). */
+  private alignRead: { id: string; ts: number; length: number } | null = null;
+  private alignTimer: NodeJS.Timeout | null = null;
+  private alignPendingSince: number | null = null;
+  private alignRun: Promise<void> = Promise.resolve();
+  private alignQueued: Promise<void> | null = null;
   ended = false;
   /** When End meeting started the write-up. */
   endingSince = 0;
@@ -187,6 +209,14 @@ export class RoomSession implements SpeechSink {
       if (last && (last.itemId === null || items.some((i) => i.id === last.itemId))) this.focusItemId = last.itemId;
       else this.setFocusInternal(items[0]?.id ?? null, "system", "start");
       this.hostId = resume.hostId;
+      this.kind = db.getMeeting(resume.id)?.kind ?? "notes";
+      const saved = db.getAlignment(resume.id);
+      if (saved) {
+        this.align = saved.state;
+        this.alignAt = saved.at;
+        const last = db.meetingSegments(resume.id).at(-1);
+        if (last && saved.at) this.alignRead = { id: last.id, ts: last.ts, length: last.text.length };
+      }
       // So the hold names who it's waiting for, though they haven't rejoined since the restart.
       const hostName = this.hostId ? db.userName(this.hostId) : null;
       if (this.hostId && hostName) this.names.set(this.hostId, hostName);
@@ -197,6 +227,8 @@ export class RoomSession implements SpeechSink {
       const m = db.startMeeting(room.id);
       this.meetingId = m.id;
       this.meetingStartedAt = m.startedAt;
+      // The space's kind, and the question set on Start for this one.
+      if (db.getRoom(room.id)?.defaultKind === "alignment") this.setKind("alignment", db.takeNextQuestion(room.id));
       this.setFocusInternal(items[0]?.id ?? null, "system", "start");
     }
     // Tidy the suggested agenda now, before anyone has started talking.
@@ -288,6 +320,18 @@ export class RoomSession implements SpeechSink {
   state(): RoomState {
     const snaps = this.snaps();
     return {
+      kind: this.kind,
+      alignment:
+        this.kind === "alignment"
+          ? {
+              state: this.align,
+              updatedAt: this.alignAt,
+              busy: this.alignBusy,
+              wrapping: this.alignWrapping,
+              failing: this.alignFailing,
+              votes: this.db.alignmentVotes(this.meetingId),
+            }
+          : null,
       snaps,
       stageSnapId: snaps.some((s) => s.id === this.stageSnapId) ? this.stageSnapId : null,
       roomId: this.roomId,
@@ -605,6 +649,34 @@ export class RoomSession implements SpeechSink {
         this.addSegment(conn.participantId, conn.name, "chat", text, Date.now());
         break;
       }
+      // Anyone can set what the meeting is aligning on.
+      case "align.question": {
+        if (this.kind !== "alignment" || this.ended) return;
+        const text = String(msg.text ?? "").trim().replace(/\s+/g, " ").slice(0, 300);
+        const same = this.align.question?.text === text;
+        this.align.question = text
+          ? { text, askedBy: same ? this.align.question!.askedBy : conn.name, at: same ? this.align.question!.at : Date.now(), whyNow: same ? this.align.question!.whyNow : null, suggested: false }
+          : null;
+        this.saveAlign();
+        // Without one, or without why it matters, the agent fills it in from what was said.
+        if (this.db.meetingSegments(this.meetingId).length) this.scheduleAlign(NOTES_DEBOUNCE_MS);
+        break;
+      }
+      case "align.keep":
+        if (this.kind !== "alignment" || !this.align.question?.suggested) return;
+        this.align.question.suggested = false;
+        this.saveAlign();
+        break;
+      case "align.wrap":
+        if (this.kind !== "alignment" || this.ended) return;
+        if (!isHost) return this.send(ws, { type: "error", message: "Only the host can wrap up the meeting." });
+        await this.wrapUp();
+        break;
+      case "align.vote":
+        if (this.kind !== "alignment" || !this.align.landing || !ALIGN_VOTES.has(msg.vote)) return;
+        this.db.setAlignmentVote(this.meetingId, conn.participantId, conn.name, msg.vote);
+        this.broadcastState();
+        break;
       case "speech":
         if (capabilities().transcription === "browser") {
           this.addSpeech(conn.participantId, conn.name, msg.text, Math.min(msg.startedAt || Date.now(), Date.now()));
@@ -1018,6 +1090,7 @@ export class RoomSession implements SpeechSink {
   /** Debounced: waits for a short pause in the talk, but never more than
    *  NOTES_MAX_WAIT_MS after the first change it hasn't covered yet. */
   private scheduleNotes(itemId: string | null, delay: number) {
+    if (this.kind === "alignment") return this.scheduleAlign(delay);
     if (this.ended) return;
     const since = this.notePendingSince.get(itemId) ?? Date.now();
     this.notePendingSince.set(itemId, since);
@@ -1234,6 +1307,147 @@ export class RoomSession implements SpeechSink {
     return this.ended;
   }
 
+  // ---- alignment ------------------------------------------------------------
+
+  /** Start pressed with a kind, or the space's default: before anyone has said anything. With
+   *  the question kept from an earlier meeting, the board starts from where that one stood. */
+  setKind(kind: MeetingKind, setup?: MeetingSetup | null) {
+    this.kind = kind;
+    this.db.setMeetingKind(this.meetingId, kind);
+    const text = setup?.text.trim().slice(0, 300);
+    if (kind !== "alignment" || !text) return;
+    const prev = setup!.carry ? this.db.getAlignment(setup!.carry)?.state : null;
+    const same = prev?.question?.text === text;
+    this.align = same ? carryOver(prev!) : emptyAlignment();
+    this.align.question = {
+      text,
+      askedBy: same ? (prev!.question!.askedBy ?? setup!.by) : setup!.by,
+      at: Date.now(),
+      whyNow: same ? prev!.question!.whyNow : null,
+      suggested: false,
+    };
+    this.saveAlign(false);
+  }
+
+  /** Someone answered "Are you aligned with this?" from outside the call. */
+  votesChanged() {
+    this.broadcastState();
+  }
+
+  get hasTalk() {
+    return this.db.meetingSegments(this.meetingId).length > 0;
+  }
+
+  /** Start pressed in a space whose meeting is already open but nobody has talked yet. */
+  setup(kind: MeetingKind, setup: MeetingSetup | null) {
+    if (this.ended || this.hasTalk) return false;
+    this.align = emptyAlignment();
+    this.setKind(kind, setup);
+    this.broadcastState();
+    return true;
+  }
+
+  private saveAlign(broadcast = true) {
+    this.db.saveAlignment(this.meetingId, this.align, this.alignAt ?? Date.now());
+    if (broadcast) this.broadcastState();
+  }
+
+  /** Same pacing as the notes: after a short pause in the talk, at most every few seconds. */
+  private scheduleAlign(delay: number) {
+    if (this.ended) return;
+    const since = this.alignPendingSince ?? Date.now();
+    this.alignPendingSince = since;
+    if (this.alignTimer) clearTimeout(this.alignTimer);
+    this.alignTimer = setTimeout(
+      () => {
+        this.alignTimer = null;
+        this.alignPendingSince = null;
+        void this.refreshAlign();
+      },
+      Math.max(0, Math.min(delay, since + NOTES_MAX_WAIT_MS - Date.now()), this.notesHoldUntil - Date.now()),
+    );
+  }
+
+  private refreshAlign() {
+    return (this.alignQueued ??= this.runAlign(false));
+  }
+
+  /** One run: the board plus what was said since it last read, back as the board brought up to
+   *  date. `closing`: also write where it landed. Runs one at a time; a request during a run
+   *  waits for it. */
+  private runAlign(closing: boolean): Promise<void> {
+    const run = this.alignRun.then(async () => {
+      if (!closing) this.alignQueued = null;
+      const segments = this.db.meetingSegments(this.meetingId);
+      const read = this.alignRead;
+      let from = read ? segments.findIndex((s) => s.ts > read.ts || (s.id === read.id && s.text.length > read.length)) : 0;
+      if (from < 0) from = segments.length;
+      const lines = segments.slice(from, from + ALIGN_MAX_LINES);
+      if (!lines.length && !closing) return;
+      const startedAt = Date.now();
+      this.alignBusy = true;
+      this.broadcastState();
+      const room = this.db.getRoom(this.roomId);
+      const attendees = [
+        ...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName), ...this.align.positions.map((p) => p.person)]),
+      ].filter(Boolean);
+      try {
+        const draft: AlignmentDraft = await this.agent.alignmentFor({
+          state: this.align,
+          context: segments.slice(Math.max(0, from - ALIGN_CONTEXT_LINES), from),
+          lines,
+          attendees,
+          closing,
+          space: { name: room?.name ?? this.roomName, purpose: room?.purpose ?? "" },
+        });
+        // Where it landed is written when the host wraps up, not along the way.
+        if (!closing) draft.landing = null;
+        // A person changed the question while the run read the old one: theirs stands.
+        const question = this.align.question;
+        const landed = JSON.stringify(this.align.landing);
+        this.align = applyAlignment(this.align, draft, lines, attendees);
+        if (landed !== "null" && JSON.stringify(this.align.landing) !== landed) this.db.clearAlignmentVotes(this.meetingId);
+        if (question && !question.suggested) this.align.question = { ...question, whyNow: question.whyNow ?? this.align.question?.whyNow ?? null };
+        const last = lines.at(-1);
+        if (last) this.alignRead = { id: last.id, ts: last.ts, length: last.text.length };
+        this.alignAt = Date.now();
+        this.alignFailing = false;
+        this.saveAlign(false);
+        console.log(`[agent] alignment: ${lines.length} new lines${closing ? ", wrapping up" : ""} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+        // More was said than one run reads: catch up.
+        if (from + lines.length < segments.length && !this.ended) this.scheduleAlign(0);
+      } catch (err) {
+        console.error("[agent] alignment failed:", err);
+        this.alignFailing = true;
+        if (err instanceof NotesTrouble && err.reason === "busy") {
+          this.notesHoldUntil = Date.now() + Math.min(60_000, Math.max(15_000, err.retryAfterMs));
+          this.scheduleAlign(0);
+        }
+      } finally {
+        this.alignBusy = false;
+        if (!this.ended || closing) this.broadcastState();
+      }
+    });
+    this.alignRun = run.catch(() => {});
+    return run;
+  }
+
+  /** The host is wrapping up: the board switches to where it landed, and people say whether they're aligned. */
+  private async wrapUp() {
+    if (this.alignWrapping) return;
+    this.alignWrapping = true;
+    if (this.alignTimer) clearTimeout(this.alignTimer);
+    this.alignTimer = null;
+    this.alignPendingSince = null;
+    this.broadcastState();
+    try {
+      await this.runAlign(true);
+    } finally {
+      this.alignWrapping = false;
+      this.broadcastState();
+    }
+  }
+
   // ---- end ----------------------------------------------------------------
 
   /** `endedAt`: when it really ended, for a meeting the server lost track of
@@ -1253,6 +1467,9 @@ export class RoomSession implements SpeechSink {
 
     let summary = "";
     let synthesizing: Promise<string | null> = Promise.resolve(null);
+    // An alignment meeting ended without wrapping up: where it landed is written alongside the notes.
+    if (this.alignTimer) clearTimeout(this.alignTimer);
+    const landing = this.kind === "alignment" && !this.align.landing ? this.runAlign(true) : Promise.resolve();
     try {
       const segments = this.db.meetingSegments(this.meetingId);
       const itemIds = [...new Set(segments.map((s) => s.itemId))];
@@ -1293,6 +1510,7 @@ export class RoomSession implements SpeechSink {
       console.error("[agent] summary failed:", err);
     } finally {
       // Whatever the agent managed, the meeting ends and the room is free again.
+      await landing.catch(() => {});
       this.db.endMeeting(this.meetingId, summary || null, await synthesizing, endedAt);
       this.polisher?.schedule(this.roomId, 0);
       this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });

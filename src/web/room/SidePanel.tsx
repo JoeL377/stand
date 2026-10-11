@@ -20,8 +20,13 @@ export function SidePanel(props: {
 }) {
   const [earlierOpen, setEarlierOpen] = useState(true);
   const { state, segments, notes, interims, send } = props;
-  // Two tabs: the agent's notes and topics first, the raw transcript second.
-  const [tab, setTab] = useState<"notes" | "transcript">("notes");
+  // Two tabs: the agent's notes and topics first, the raw transcript second. Alignment meetings
+  // keep their board in the middle, so here it's the transcript and the chat.
+  const aligning = state.kind === "alignment";
+  const [tab, setTab] = useState<"notes" | "transcript" | "chat">(aligning ? "transcript" : "notes");
+  useEffect(() => {
+    setTab((t) => (aligning ? (t === "notes" ? "transcript" : t) : "notes"));
+  }, [aligning]);
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId);
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
@@ -86,6 +91,8 @@ export function SidePanel(props: {
     freshTimer.current = setTimeout(() => setFresh([]), 2500);
   }, [notesKey, state.focusItemId]);
   useEffect(() => () => clearTimeout(freshTimer.current), []);
+
+  if (aligning) return <AlignSide segments={segments} interims={interims} send={send} tab={tab === "chat" ? "chat" : "transcript"} setTab={setTab} meetingId={state.meetingId} />;
 
   return (
     <aside className="panel side">
@@ -201,6 +208,77 @@ export function SidePanel(props: {
   );
 }
 
+/** The right panel in an alignment meeting: everything said, and the chat (which the board reads too). */
+function AlignSide(props: {
+  segments: Segment[];
+  interims: Record<string, Interim>;
+  send: (m: ClientMessage) => boolean;
+  tab: "transcript" | "chat";
+  setTab: (t: "transcript" | "chat") => void;
+  meetingId: string;
+}) {
+  const { segments, tab, setTab } = props;
+  const chat = segments.filter((s) => s.kind === "chat");
+  // New messages while the Chat tab isn't open.
+  const [seen, setSeen] = useState(chat.length);
+  useEffect(() => {
+    if (tab === "chat") setSeen(chat.length);
+  }, [tab, chat.length]);
+  const unseen = Math.max(0, chat.length - seen);
+  return (
+    <aside className="panel side align-side">
+      <div className="side-toggle" role="tablist" aria-label="Transcript and chat">
+        <button role="tab" aria-selected={tab === "transcript"} className={tab === "transcript" ? "on" : ""} onClick={() => setTab("transcript")}>
+          Transcript
+        </button>
+        <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
+          Chat
+          {tab !== "chat" && unseen > 0 && (
+            <span className="side-tab-badge" aria-label={`${unseen} new`}>
+              {unseen}
+            </span>
+          )}
+        </button>
+      </div>
+      {tab === "transcript" ? (
+        <Transcript segments={segments} items={[]} interims={props.interims} send={props.send} empty="Nothing said yet. What everyone says shows up here." />
+      ) : (
+        <Transcript segments={chat} items={[]} interims={{}} send={props.send} empty="No messages yet. Links and side notes go here; the board reads them too." />
+      )}
+      {tab === "chat" && <ChatBox send={props.send} />}
+      <div className="side-foot">
+        <a href={`/meetings/${props.meetingId}`} target="_blank" rel="noreferrer" title="Everything said in this meeting">
+          Meeting recap ↗
+        </a>
+      </div>
+    </aside>
+  );
+}
+
+function ChatBox({ send }: { send: (m: ClientMessage) => boolean }) {
+  const [text, setText] = useState("");
+  return (
+    <form
+      className="chatbox"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!text.trim()) return;
+        send({ type: "chat", text });
+        setText("");
+      }}
+    >
+      <input placeholder="Message everyone" value={text} onChange={(e) => setText(e.target.value)} />
+      {text.trim() && (
+        <button className="chat-send" aria-label="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+        </button>
+      )}
+    </form>
+  );
+}
+
 /** The last thing heard about this item, so people can tell at a glance that Stand is capturing. */
 /** The last few remarks about the item in focus, newest at the bottom; the live one has a red dot. */
 function LiveSliver(props: { segments: Segment[]; interims: Record<string, Interim>; onOpen: () => void }) {
@@ -233,7 +311,7 @@ function LiveSliver(props: { segments: Segment[]; interims: Record<string, Inter
   );
 }
 
-function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => boolean }) {
+function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => boolean; empty?: string }) {
   const { segments, items, interims, send } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -254,10 +332,10 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
       }}
     >
       {segments.length === 0 && interimList.length === 0 && (
-        <p className="muted empty">Nothing said about this yet. Speech and chat show up here, pinned to the item in focus.</p>
+        <p className="muted empty">{props.empty ?? "Nothing said about this yet. Speech and chat show up here, pinned to the item in focus."}</p>
       )}
       {segments.map((s) => (
-        <SegmentRow key={s.id} segment={s} items={items} send={send} />
+        <SegmentRow key={s.id} segment={s} items={items} send={send} movable={items.length > 0} />
       ))}
       {interimList.map((i) => (
         <div key={i.speakerId} className="seg interim">
@@ -271,7 +349,7 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
   );
 }
 
-function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => boolean }) {
+function SegmentRow({ segment: s, items, send, movable }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => boolean; movable: boolean }) {
   const [moving, setMoving] = useState(false);
   return (
     <div className={s.kind === "chat" ? "seg chat" : "seg"}>
@@ -281,9 +359,11 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
         </span>
         {s.kind === "chat" && <span className="seg-kind">chat</span>}
         <span className="seg-time">{fmtTime(s.ts)}</span>
-        <button className="seg-move" onClick={() => setMoving((m) => !m)} title="This was about a different item">
-          Move
-        </button>
+        {movable && (
+          <button className="seg-move" onClick={() => setMoving((m) => !m)} title="This was about a different item">
+            Move
+          </button>
+        )}
       </div>
       <div className="seg-text">{s.text}</div>
       {moving && (

@@ -2,7 +2,7 @@
 // follow-up. One JSON shape (versioned, stable ids, links back to the source
 // ticket or slide) and a Markdown rendering of the same thing.
 
-import type { Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment, Snap } from "../shared/protocol.ts";
+import type { AlignmentState, AlignmentVote, Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment, Snap } from "../shared/protocol.ts";
 
 type Meeting = { id: string; roomId: string; startedAt: number; endedAt: number | null; summary: string | null; synthesis?: string | null };
 
@@ -80,6 +80,9 @@ export interface MeetingBrief {
   space: { id: string; name: string; synthesisInstructions: string | null };
   /** What those instructions produced for this meeting, as Markdown; null without instructions. */
   synthesis: string | null;
+  /** Alignment meetings: the question, where each person stood, what they agreed and where it
+   *  landed, with each person's answer to "Are you aligned with this?". Null for other meetings. */
+  alignment: BriefAlignment | null;
   /** Every action item, across the agenda: the follow-up to-do list. */
   actions: BriefAction[];
   /** Action items from the room's earlier meetings that are still open. */
@@ -100,6 +103,71 @@ export interface MeetingBrief {
     snaps: BriefSnap[];
     transcript?: Array<{ speaker: string; kind: "speech" | "chat"; at: string; text: string }>;
   }>;
+}
+
+export interface BriefAlignment {
+  question: string | null;
+  whyNow: string | null;
+  landing: AlignmentState["landing"];
+  votes: Array<{ name: string; vote: AlignmentVote; at: string }>;
+  positions: Array<{ person: string; stance: string; reasons: string[]; movedAt: string | null; movedBecause: string | null }>;
+  differ: AlignmentState["differ"];
+  settleTest: { text: string; proposedBy: string | null; answered: boolean } | null;
+  agreed: Array<{ text: string; by: string[]; at: string | null }>;
+  unanswered: Array<{ asker: string; question: string; at: string | null }>;
+  parked: string[];
+}
+
+const VOTE_LABEL: Record<AlignmentVote, string> = { aligned: "Aligned", commit: "Disagree, but I'll commit", not_aligned: "Not aligned yet" };
+const LANDING_LABEL = { decided: "Decided", held: "Held, not decided", not_aligned: "Not aligned" } as const;
+
+function toBriefAlignment(a: { state: AlignmentState; votes: Array<{ name: string; vote: AlignmentVote; at: number }> }): BriefAlignment {
+  const s = a.state;
+  const when = (t: number | null) => (t ? iso(t) : null);
+  return {
+    question: s.question?.text ?? null,
+    whyNow: s.question?.whyNow ?? null,
+    landing: s.landing,
+    votes: a.votes.map((v) => ({ name: v.name, vote: v.vote, at: iso(v.at) })),
+    positions: s.positions.map((p) => ({ ...p, movedAt: when(p.movedAt) })),
+    differ: s.differ,
+    settleTest: s.settleTest ? { text: s.settleTest.text, proposedBy: s.settleTest.proposedBy, answered: s.settleTest.answered } : null,
+    agreed: s.agreed.map((x) => ({ text: x.text, by: x.by, at: when(x.at) })),
+    unanswered: s.unanswered.map((u) => ({ ...u, at: when(u.at) })),
+    parked: s.parked,
+  };
+}
+
+function alignmentLines(a: BriefAlignment): string[] {
+  const out = ["## Alignment", ""];
+  if (a.question) out.push(`**Aligning on:** ${a.question}`, ...(a.whyNow ? [`Why now: ${a.whyNow}`] : []), "");
+  if (a.landing) {
+    const l = a.landing;
+    out.push(`**Where we landed (${LANDING_LABEL[l.outcome]}):** ${l.text}`);
+    if (l.reopens) out.push(`- Reopens: ${l.reopens}`);
+    if (l.changesIf) out.push(`- Changes if: ${l.changesIf}`);
+    if (l.stillOpen) out.push(`- Still open: ${l.stillOpen}`);
+    for (const s of l.nextSteps) out.push(`- [ ] ${s.owner ? `${s.owner}: ` : ""}${s.text}`);
+    out.push("");
+  }
+  if (a.votes.length) out.push("**Are you aligned with this?**", ...a.votes.map((v) => `- ${v.name}: ${VOTE_LABEL[v.vote]}`), "");
+  if (a.positions.length) {
+    out.push("**Positions**");
+    for (const p of a.positions) {
+      out.push(`- ${p.person}: ${p.stance}${p.movedAt ? ` (moved${p.movedBecause ? `: ${p.movedBecause}` : ""})` : ""}`);
+      for (const r of p.reasons) out.push(`  - ${r}`);
+    }
+    out.push("");
+  }
+  if (a.differ.length) {
+    out.push("**Where they differ**", ...a.differ.map((d) => `- ${d.question} (${d.sides.map((x) => `${x.person}: ${x.gist}`).join("; ")})`));
+    if (a.settleTest) out.push(`- What would settle it: ${a.settleTest.text}${a.settleTest.proposedBy ? ` (${a.settleTest.proposedBy})` : ""}, ${a.settleTest.answered ? "answered" : "not answered yet"}`);
+    out.push("");
+  }
+  if (a.agreed.length) out.push("**Agreed so far**", ...a.agreed.map((x) => `- ${x.text}${x.by.length ? ` (${x.by.join(", ")})` : ""}`), "");
+  if (a.unanswered.length) out.push("**Still waiting on an answer**", ...a.unanswered.map((u) => `- ${u.asker}: ${u.question}`), "");
+  if (a.parked.length) out.push(`**Parked:** ${a.parked.join(", ")}`, "");
+  return out;
 }
 
 export interface BriefSnap {
@@ -158,6 +226,8 @@ export function buildBrief(input: {
   roomName: string;
   /** The space's synthesis instructions, if it has any. */
   synthesisInstructions?: string;
+  /** Alignment meetings: the board as it ended and the answers to "Are you aligned with this?". */
+  alignment?: { state: AlignmentState; votes: Array<{ name: string; vote: AlignmentVote; at: number }> } | null;
   groups: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions?: Discussion[]; snaps?: Snap[] }>;
   decks: Deck[];
   baseUrl: string;
@@ -185,6 +255,7 @@ export function buildBrief(input: {
     summary: m.summary,
     space: { id: m.roomId, name: input.roomName, synthesisInstructions: input.synthesisInstructions?.trim() || null },
     synthesis: m.synthesis ?? null,
+    alignment: input.alignment ? toBriefAlignment(input.alignment) : null,
     actions: [],
     carriedOver: (input.followUps ?? [])
       .filter((f) => f.meetingId !== m.id && f.meetingStartedAt < m.startedAt && !f.doneAt)
@@ -284,6 +355,7 @@ export function briefToMarkdown(b: MeetingBrief): string {
     "",
   ];
   if (b.summary) out.push(b.summary, "");
+  if (b.alignment) out.push(...alignmentLines(b.alignment));
   if (b.synthesis) out.push("## Synthesis", "", b.synthesis.trim(), "");
 
   out.push("## Action items", "");
