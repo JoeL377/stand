@@ -52,6 +52,8 @@ static napi_value PreventActivation(napi_env env, napi_callback_info info) {
   // What NSPanel uses for its non-activating style: it tags the window with the window server.
   SEL set = NSSelectorFromString(@"_setPreventsActivation:");
   SEL get = NSSelectorFromString(@"_preventsActivation");
+  // And it stays up when Stand is hidden (⌘H): the bar is what's left of Stand then.
+  if (window) [window setCanHide:NO];
   if (window && [window respondsToSelector:set]) {
     ((void (*)(id, SEL, BOOL))objc_msgSend)(window, set, YES);
     done = [window respondsToSelector:get] ? ((BOOL (*)(id, SEL))objc_msgSend)(window, get) : true;

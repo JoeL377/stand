@@ -2,6 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <title>Snap</title>
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
@@ -165,18 +166,22 @@
         width: 10px;
         height: 10px;
       }
+      :root {
+        /* The Mac's accent color, when the app sends it. */
+        --accent: #0a84ff;
+      }
       #go {
         height: 30px;
         margin-left: 4px;
         padding: 0 16px;
         border: 0;
         border-radius: 8px;
-        background: #0a84ff;
-        color: #fff;
+        background: var(--accent);
+        color: var(--on-accent, #fff);
         font-weight: 500;
       }
       #go:hover {
-        background: #2a95ff;
+        filter: brightness(1.12);
       }
       #go[hidden] {
         display: none;
@@ -210,8 +215,10 @@
         background: none;
         text-align: left;
       }
-      #menu .item:hover:not(:disabled) {
-        background: #0a84ff;
+      #menu .item:is(:hover, :focus-visible):not(:disabled) {
+        background: var(--accent);
+        color: var(--on-accent, #fff);
+        outline: none;
       }
       #menu .item:disabled {
         color: rgb(255 255 255 / 0.4);
@@ -224,6 +231,18 @@
         padding: 0 10px 5px 28px;
         color: rgb(255 255 255 / 0.5);
         font-size: 11.5px;
+      }
+      /* Increase Contrast in System Settings: solid panels and firmer edges. */
+      @media (prefers-contrast: more) {
+        #bar,
+        #menu,
+        #hint {
+          background: #1c1c1e;
+          box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.6);
+        }
+        .tb.on {
+          box-shadow: inset 0 0 0 1px #fff;
+        }
       }
       #menu hr {
         margin: 5px 6px;
@@ -251,29 +270,29 @@
         </svg>
       </button>
       <span class="sep"></span>
-      <button class="tb" data-mode="screen" title="Capture Entire Screen">
+      <button class="tb" data-mode="screen" title="Capture Entire Screen" aria-pressed="false">
         <svg viewBox="0 0 22 22"><rect x="2.5" y="4.5" width="17" height="13" rx="2" fill="currentColor" /></svg>
       </button>
-      <button class="tb" data-mode="window" title="Capture Selected Window">
+      <button class="tb" data-mode="window" title="Capture Selected Window" aria-pressed="false">
         <svg viewBox="0 0 22 22">
           <rect x="2.5" y="4.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" />
           <rect x="5.5" y="7.5" width="11" height="7" rx="1" fill="currentColor" />
         </svg>
       </button>
-      <button class="tb" data-mode="portion" title="Capture Selected Portion">
+      <button class="tb" data-mode="portion" title="Capture Selected Portion" aria-pressed="false">
         <svg viewBox="0 0 22 22">
           <rect x="2.5" y="4.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.4 2" />
           <rect x="7" y="8.5" width="8" height="5" rx="0.8" fill="currentColor" />
         </svg>
       </button>
       <span class="sep"></span>
-      <button class="tb" id="opts">
+      <button class="tb" id="opts" aria-haspopup="menu" aria-expanded="false" aria-controls="menu">
         Options
         <svg viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
       </button>
       <button id="go">Capture</button>
     </div>
-    <div id="menu"></div>
+    <div id="menu" role="menu" aria-label="Options"></div>
     <script>
       const $ = (id) => document.getElementById(id);
       const MIN = 8;
@@ -288,6 +307,13 @@
 
       window.snap.onOpen((o) => {
         st = o;
+        if (o.accent) {
+          document.documentElement.style.setProperty("--accent", o.accent);
+          // White on a light accent (yellow, green, graphite) is hard to read: black there instead.
+          const [r, g, b] = [1, 3, 5].map((i) => parseInt(o.accent.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+          const light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.3;
+          document.documentElement.style.setProperty("--on-accent", light ? "#000" : "#fff");
+        }
         mode = o.prefs.mode;
         const b = o.prefs.box;
         box = b
@@ -340,7 +366,10 @@
       function render() {
         if (!st) return;
         document.body.className = mode;
-        for (const b of document.querySelectorAll("[data-mode]")) b.classList.toggle("on", b.dataset.mode === mode);
+        for (const b of document.querySelectorAll("[data-mode]")) {
+          b.classList.toggle("on", b.dataset.mode === mode);
+          b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+        }
         $("go").hidden = mode === "window";
         $("hint").textContent = HINTS[mode];
         const showBox = mode === "portion";
@@ -359,28 +388,38 @@
       function renderMenu() {
         const p = st.prefs;
         const copyForced = !st.inMeeting;
-        const row = (label, on, act, disabled = false) =>
-          `<button class="item" data-act="${act}"${disabled ? " disabled" : ""}><span class="check">${on ? "✓" : ""}</span>${label}</button>`;
+        const kept = document.activeElement?.dataset?.act;
+        const row = (label, on, act, role, disabled = false) =>
+          `<button class="item" role="${role}" aria-checked="${on}" tabindex="-1" data-act="${act}"${disabled ? " disabled" : ""}><span class="check" aria-hidden="true">${on ? "✓" : ""}</span>${label}</button>`;
         $("menu").innerHTML =
-          `<div class="head">Save to</div>` +
-          row("The meeting, on the item in focus", st.inMeeting && p.toMeeting, "meeting", !st.inMeeting) +
-          row("Clipboard", copyForced || p.toClipboard, "clipboard", copyForced) +
+          `<div role="group" aria-label="Save to"><div class="head" aria-hidden="true">Save to</div>` +
+          row("The meeting, on the item in focus", st.inMeeting && p.toMeeting, "meeting", "menuitemcheckbox", !st.inMeeting) +
+          row("Clipboard", copyForced || p.toClipboard, "clipboard", "menuitemcheckbox", copyForced) +
           (copyForced ? `<div class="note">You're not in a meeting, so it's copied.</div>` : "") +
-          `<hr /><div class="head">Timer</div>` +
-          row("None", !p.timer, "t0") +
-          row("5 Seconds", p.timer === 5, "t5") +
-          row("10 Seconds", p.timer === 10, "t10");
+          `</div><hr /><div role="group" aria-label="Timer"><div class="head" aria-hidden="true">Timer</div>` +
+          row("None", !p.timer, "t0", "menuitemradio") +
+          row("5 Seconds", p.timer === 5, "t5", "menuitemradio") +
+          row("10 Seconds", p.timer === 10, "t10", "menuitemradio") +
+          `</div>`;
+        if (kept) $("menu").querySelector(`[data-act="${kept}"]`)?.focus();
       }
-      function openMenu() {
+      const menuItems = () => [...$("menu").querySelectorAll(".item:not(:disabled)")];
+      function openMenu(withKeys) {
         renderMenu();
         const m = $("menu");
         m.style.display = "block";
+        $("opts").setAttribute("aria-expanded", "true");
         const r = $("opts").getBoundingClientRect();
         Object.assign(m.style, { left: r.left + "px", top: r.top - m.offsetHeight - 10 + "px" });
+        // Opened from the keyboard, the first item takes focus, as in a Mac menu.
+        if (withKeys) menuItems()[0]?.focus();
       }
-      const closeMenu = () => ($("menu").style.display = "none");
+      function closeMenu() {
+        $("menu").style.display = "none";
+        $("opts").setAttribute("aria-expanded", "false");
+      }
       const menuOpen = () => $("menu").style.display === "block";
-      $("opts").onclick = () => (menuOpen() ? closeMenu() : openMenu());
+      $("opts").onclick = (e) => (menuOpen() ? closeMenu() : openMenu(e.detail === 0));
       $("menu").onclick = (e) => {
         const act = e.target.closest("[data-act]")?.dataset.act;
         if (!act) return;
@@ -405,9 +444,38 @@
         };
       $("close").onclick = cancel;
       $("go").onclick = capture;
+      /** Esc closes the innermost thing: Options if it's open, else the toolbar. */
+      function escape() {
+        if (!menuOpen()) return cancel();
+        closeMenu();
+        $("opts").focus();
+        window.snap.kept();
+      }
+      window.snap.onEscape(escape);
       addEventListener("keydown", (e) => {
-        if (e.key === "Escape") menuOpen() ? closeMenu() : cancel();
-        if (e.key === "Enter" && !menuOpen()) capture();
+        if (e.key === "Escape") return escape();
+        if (menuOpen()) {
+          // Up and down walk the menu, as in a Mac menu.
+          const items = menuItems();
+          const at = items.indexOf(document.activeElement);
+          const go = { ArrowDown: at + 1, ArrowUp: at < 0 ? items.length - 1 : at - 1, Home: 0, End: items.length - 1 }[e.key];
+          if (go !== undefined && items.length) {
+            e.preventDefault();
+            items[(go + items.length) % items.length].focus();
+          }
+          return;
+        }
+        // Enter on a toolbar button presses it; elsewhere it snaps.
+        if (e.key === "Enter" && !e.target.closest?.("button")) capture();
+        // The arrow keys nudge the box, by 10 points with Shift.
+        const step = e.shiftKey ? 10 : 1;
+        const nudge = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+        if (nudge && st && mode === "portion") {
+          e.preventDefault();
+          box = { ...box, x: box.x + nudge[0], y: box.y + nudge[1] };
+          fit();
+          render();
+        }
       });
 
       // ---- the screen ----
@@ -459,17 +527,32 @@
         const dx = e.clientX - drag.x;
         const dy = e.clientY - drag.y;
         const f = drag.from;
-        if (drag.kind === "move") box = { ...f, x: f.x + dx, y: f.y + dy };
+        // Shift keeps to one direction, as with ⌘⇧4.
+        const lock = e.shiftKey && (drag.kind === "move" || drag.kind.length === 2);
+        const [mx, my] = lock ? (Math.abs(dx) >= Math.abs(dy) ? [dx, 0] : [0, dy]) : [dx, dy];
+        if (drag.kind === "move") box = { ...f, x: f.x + mx, y: f.y + my };
         else if (drag.kind === "new") {
           // A click outside the box keeps it; a drag draws a new one.
           if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
           box = { x: Math.min(drag.x, e.clientX), y: Math.min(drag.y, e.clientY), w: Math.abs(dx), h: Math.abs(dy) };
         } else {
           let [l, t, r, b] = [f.x, f.y, f.x + f.w, f.y + f.h];
-          if (drag.kind.includes("w")) l = clamp(l + dx, 0, r - MIN);
-          if (drag.kind.includes("e")) r = clamp(r + dx, l + MIN, innerWidth);
-          if (drag.kind.includes("n")) t = clamp(t + dy, 0, b - MIN);
-          if (drag.kind.includes("s")) b = clamp(b + dy, t + MIN, innerHeight);
+          // Option resizes from the middle: the opposite edge moves the other way.
+          const mid = e.altKey;
+          if (drag.kind.includes("w")) [l, r] = [l + mx, mid ? r - mx : r];
+          if (drag.kind.includes("e")) [l, r] = [mid ? l - mx : l, r + mx];
+          if (drag.kind.includes("n")) [t, b] = [t + my, mid ? b - my : b];
+          if (drag.kind.includes("s")) [t, b] = [mid ? t - my : t, b + my];
+          // An edge stops short of the opposite one (or the middle), and at the screen's edge.
+          if (r - l < MIN) {
+            const c = f.x + f.w / 2;
+            [l, r] = mid ? [c - MIN / 2, c + MIN / 2] : drag.kind.includes("w") ? [r - MIN, r] : [l, l + MIN];
+          }
+          if (b - t < MIN) {
+            const c = f.y + f.h / 2;
+            [t, b] = mid ? [c - MIN / 2, c + MIN / 2] : drag.kind.includes("n") ? [b - MIN, b] : [t, t + MIN];
+          }
+          [l, t, r, b] = [Math.max(l, 0), Math.max(t, 0), Math.min(r, innerWidth), Math.min(b, innerHeight)];
           box = { x: l, y: t, w: r - l, h: b - t };
         }
         fit();
