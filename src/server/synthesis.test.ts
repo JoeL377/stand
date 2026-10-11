@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { Note, Segment } from "../shared/protocol.ts";
 import { briefToMarkdown, buildBrief } from "./brief.ts";
 import { openDb } from "./db.ts";
-import { type Agent, HeuristicAgent, type NotesContext, type SynthesisInput } from "./llm.ts";
+import { type Agent, HeuristicAgent, type NotesContext, type SynthesisInput, turnIndexes } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 
 const INSTRUCTIONS = "List blockers by person.\nPull out customer quotes verbatim.";
@@ -154,4 +154,9 @@ test("the brief carries the space's instructions and the Synthesis, and leaves b
   assert.equal(plain.synthesis, null);
   const plainMd = briefToMarkdown(plain);
   assert.doesNotMatch(plainMd, /synthesis/i);
+});
+
+test("live notes read a discussion's lines as ranges, clamped to the transcript", () => {
+  assert.deepEqual(turnIndexes([{ from: 1, to: 3 }, { from: 2, to: 4 }, { from: 9, to: 7 }], 8), [0, 1, 2, 3, 6, 7]);
+  assert.deepEqual(turnIndexes([{ from: 0, to: 0 }, { from: 20, to: 30 }], 8), []);
 });

@@ -158,12 +158,27 @@ const itemLabel = (item: Item | null) =>
 
 // ---------------------------------------------------------------------------
 
+const NOTES_MAX_TOKENS = 16000;
+
+/** 1-based inclusive line ranges to the 0-based segment indexes they cover. */
+export function turnIndexes(ranges: Array<{ from: number; to: number }>, count: number): number[] {
+  const out = new Set<number>();
+  for (const { from, to } of ranges) {
+    const lo = Math.max(1, Math.min(from, to));
+    const hi = Math.min(count, Math.max(from, to));
+    for (let n = lo; n <= hi; n++) out.add(n - 1);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 const NotesSchema = z.object({
   summary: z.string().describe("One or two sentences on where this item stands after the discussion. Empty if nothing substantive was said."),
   discussions: z.array(
     z.object({
       topic: z.string().describe("The question or subject discussed, as a short title under 70 characters"),
-      turns: z.array(z.number().int()).describe("The [numbers] of the transcript lines that belong to this discussion"),
+      turns: z
+        .array(z.object({ from: z.number().int(), to: z.number().int() }))
+        .describe("The [numbers] of the transcript lines that belong to this discussion, as inclusive ranges, e.g. [{from: 12, to: 40}]"),
       positions: z
         .array(z.object({ speaker: z.string(), position: z.string().describe("Their stance or contribution, in one short line") }))
         .describe("One per participant who contributed, in the order they first spoke"),
@@ -255,6 +270,7 @@ class ClaudeAgent implements Agent {
     system: string,
     effort: "low" | "medium",
     model = config.anthropicModel,
+    maxTokens = 4000,
   ): Promise<T | null> {
     // If a safety classifier declines, let the API retry on its recommended
     // fallback model. Haiku has no server-side fallback.
@@ -263,7 +279,7 @@ class ClaudeAgent implements Agent {
       : { betas: ["server-side-fallback-2026-07-01"] as Anthropic.AnthropicBeta[], fallbacks: "default" as const };
     const res = await this.client.beta.messages.parse({
       model,
-      max_tokens: 4000,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content }],
       output_config: { effort, format: betaZodOutputFormat(schema) },
@@ -319,6 +335,9 @@ Notes are rewritten as the meeting goes on. Every already-captured action item a
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
       "low",
       config.notesModel,
+      // The whole draft is rewritten on every pause, so it grows with the meeting: a cut-off
+      // reply is invalid JSON, and every later run fails the same way for the rest of the call.
+      NOTES_MAX_TOKENS,
     );
     if (!out) return { notes: [], discussions: [] };
     const known = new Set(earlier.map((d) => d.id));
@@ -336,7 +355,7 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
         topic: d.topic.trim().slice(0, 120),
         positions: d.positions.filter((p) => p.position.trim()),
         outcome: d.outcome,
-        segmentIndexes: [...new Set(d.turns.map((n) => n - 1).filter((n) => n >= 0 && n < segments.length))].sort((a, b) => a - b),
+        segmentIndexes: turnIndexes(d.turns, segments.length),
         continuesId: d.continues && known.has(d.continues) ? d.continues : null,
       })),
     };
