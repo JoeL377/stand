@@ -277,12 +277,14 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const MIN = 8;
-      /** {prefs, inMeeting, windows: [{id, x, y, w, h}] front to back, in this page's pixels} */
+      /** {prefs, inMeeting, windows: [{id, x, y, w, h}] front to back, in this page's pixels}.
+       *  The windows come a moment after the rest. */
       let st = null;
       let mode = "portion";
       let box = { x: 0, y: 0, w: 0, h: 0 };
       let hover = null;
       let drag = null;
+      let pointer = null;
 
       window.snap.onOpen((o) => {
         st = o;
@@ -294,6 +296,14 @@
         fit();
         $("shot").src = o.image;
         render();
+      });
+      window.snap.onWindows((list) => {
+        if (!st) return;
+        st.windows = list;
+        if (mode === "window" && pointer) {
+          hover = windowAt(pointer.x, pointer.y);
+          render();
+        }
       });
       $("shot").onload = () => window.snap.ready();
       $("shot").onerror = () => window.snap.done({ failed: "The picture of your screen didn't load." });
@@ -435,6 +445,7 @@
         drag = { kind: edge || (inBox(e.clientX, e.clientY) ? "move" : "new"), x: e.clientX, y: e.clientY, from: { ...box } };
       });
       addEventListener("mousemove", (e) => {
+        pointer = { x: e.clientX, y: e.clientY };
         if (!st) return;
         if (mode === "window") {
           const w = e.target.closest("#bar, #menu") ? null : windowAt(e.clientX, e.clientY);
