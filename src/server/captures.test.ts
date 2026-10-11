@@ -41,6 +41,21 @@ test("snaps from before the change keep their meeting and take its space", () =>
   assert.equal(again.spaceSnaps(room.id).length, 1);
 });
 
+test("a meeting snap an older build saves without a space takes its meeting's space on the next start", () => {
+  const file = path.join(tmp, "shared.db");
+  const db = openDb(file);
+  const room = db.createRoom("Growth");
+  const meeting = db.startMeeting(room.id);
+  db.raw.close();
+  // What the desktop branch writes: no room_id.
+  const older = new DatabaseSync(file);
+  older
+    .prepare("INSERT INTO snaps (id, meeting_id, ts, ext, width, height, source, taken_by) VALUES (?, ?, 1, 'jpg', 10, 10, 'person', 'Huy')")
+    .run("s2", meeting.id);
+  older.close();
+  assert.equal(openDb(file).getSnap("s2")!.roomId, room.id);
+});
+
 test("a snap saved to the space shows in its feed, with the item the agent suggested until someone picks one", async () => {
   const db = openDb(":memory:");
   const room = db.createRoom("Growth", null, "Win our first 10 teams");

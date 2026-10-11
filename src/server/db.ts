@@ -141,7 +141,9 @@ CREATE TABLE IF NOT EXISTS upnext_dismissed (
 -- saved straight to the space between meetings (no meeting_id).
 CREATE TABLE IF NOT EXISTS snaps (
   id TEXT PRIMARY KEY,
-  room_id TEXT NOT NULL,
+  -- Not NOT NULL so an older build sharing this database can still save meeting snaps;
+  -- those get their space from the meeting on the next start.
+  room_id TEXT,
   meeting_id TEXT REFERENCES meetings(id),
   item_id TEXT,
   -- The agent picked item_id and nobody has confirmed it yet.
@@ -399,7 +401,7 @@ export function openDb(file?: string) {
   if (!snapCols.includes("room_id")) {
     db.exec(`BEGIN;
       CREATE TABLE snaps_spaces (
-        id TEXT PRIMARY KEY, room_id TEXT NOT NULL, meeting_id TEXT REFERENCES meetings(id), item_id TEXT,
+        id TEXT PRIMARY KEY, room_id TEXT, meeting_id TEXT REFERENCES meetings(id), item_id TEXT,
         item_suggested INTEGER NOT NULL DEFAULT 0, ts INTEGER NOT NULL, ext TEXT NOT NULL, width INTEGER NOT NULL,
         height INTEGER NOT NULL, version INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL, taken_by_id TEXT,
         taken_by TEXT NOT NULL, sharer_id TEXT, sharer_name TEXT, caption TEXT, note_id TEXT, discussion_id TEXT,
@@ -417,6 +419,7 @@ export function openDb(file?: string) {
       COMMIT;`);
   }
   db.exec("CREATE INDEX IF NOT EXISTS snaps_room ON snaps(room_id, ts);");
+  db.exec("UPDATE snaps SET room_id = (SELECT room_id FROM meetings WHERE id = snaps.meeting_id) WHERE room_id IS NULL;");
   if (!deckCols.includes("kind"))
     db.exec(
       "ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';",
