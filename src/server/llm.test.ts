@@ -133,7 +133,7 @@ test("a long topic still going shows where it stood, positions and all, and is c
       notes: [{ kind: "question" as const, text: "Per seat or per space?", owner: null }],
     },
   ];
-  const draft = await agent.notesFor(null, said(3), [], [], [], { settled });
+  const draft = await agent.notesFor(null, said(3), [], [], {}, { settled });
   const blocks = calls[0].body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
   assert.match(blocks[0].text, /still going.*\n- T1 \(open\) Pricing\n  Huy: Per seat is simplest\n  Open: Per seat or per space\?\n\nWhat was said since/s);
   assert.doesNotMatch(blocks[0].text, /gone quiet/);
