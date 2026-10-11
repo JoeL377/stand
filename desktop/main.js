@@ -2,8 +2,7 @@
 // (Google won't sign people in inside an app's own window), and Snap from
 // anywhere: a global shortcut opens a capture toolbar like macOS's ⌘⇧5, and the
 // snap lands in the meeting you're in, pinned to whatever is in focus, and on the clipboard.
-// In a meeting with Stand in the background, a small floating bar keeps Snap and the mic
-// one click away.
+// In a meeting, a small floating bar keeps Snap and the mic one click away from any app.
 
 const {
   app,
@@ -761,15 +760,15 @@ function native() {
   return nativeCode;
 }
 
-/** Up while in a meeting with no Stand window in front; down otherwise. */
+/** Up for the whole meeting, Stand in front or not (joe's call); down while a snap reads the screen. */
 function updateBar() {
   if (barHold) return;
-  const want = Boolean(meeting && win && !barAway && !BrowserWindow.getAllWindows().some((w) => w !== bar && w.isFocused()));
+  const want = Boolean(meeting && win && !barAway);
   if (want && !bar) makeBar();
   if (!barLoaded) return;
   if (want && !bar.isVisible()) {
     bar.showInactive();
-    // It catches the eye when you've just left Stand, not when it's back after a snap.
+    // It catches the eye when a meeting starts, not when it's back after a snap.
     bar.webContents.send("bar:shown", { pulse: !barSnapped });
     barSnapped = false;
     void noteTheirApp();
