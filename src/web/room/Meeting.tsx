@@ -157,8 +157,8 @@ export function Meeting(props: {
     return open.map((n) => ({ id: n.id, text: n.text, owner: n.owner, itemKey: key(n.itemId) }));
   }, [state?.items, state?.followUps, room.notes]);
   useEffect(() => {
-    if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn, todos: barTodos });
-  }, [state?.roomName, focusItem, micOn, barTodos]);
+    if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn, sharing, todos: barTodos });
+  }, [state?.roomName, focusItem, micOn, sharing, barTodos]);
   useEffect(() => () => macApp?.meeting?.(null), []);
   useMicLevel(media.micTrack, macApp?.level);
   useEffect(() => macApp?.onCommand?.((c) => c === "mic" && void toggleMic()), [toggleMic]);

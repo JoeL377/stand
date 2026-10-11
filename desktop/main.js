@@ -199,6 +199,7 @@ function allowMediaAndSharing(ses) {
   ses.setDisplayMediaRequestHandler(
     async (_req, done) => {
       const [first] = await desktopCapturer.getSources({ types: ["screen"] });
+      trace("share", { picker: "fallback", source: first?.name ?? null });
       done(first ? { video: first } : {});
     },
     { useSystemPicker: true },
@@ -676,6 +677,9 @@ function setMeeting(m) {
     m && typeof m === "object"
       ? { space: short(m.space), itemKey: short(m.itemKey) || null, item: short(m.item) || null, micOn: m.micOn !== false, todos: todosOf(m.todos) }
       : null;
+  const sharing = Boolean(m?.sharing);
+  if (sharing !== wasSharing) trace("sharing", { on: sharing, barUp: Boolean(bar?.isVisible()) });
+  wasSharing = sharing;
   if (meeting && barLoaded) bar.webContents.send("bar:state", meeting);
   updateBar();
 }
@@ -691,6 +695,7 @@ const todosOf = (list) =>
  *  near the bottom of the screen. Returns whether it goes up; `ask` only says which, so the
  *  page can lay itself out first and the bar doesn't jump. 0 folds the list away. */
 let barList = null;
+let wasSharing = false;
 let barResizing = false;
 function sizeBar(extra, ask) {
   if (!bar) return false;
@@ -775,6 +780,9 @@ function makeBar() {
     clearTimeout(dragged);
     dragged = setTimeout(() => void giveBack("drag"), 300);
   });
+  // So the log says when the bar went away and whether Stand did it (bar-down) or macOS.
+  bar.on("hide", () => trace("bar-hidden", { meeting: Boolean(meeting), barAway, appHidden: mac && !win?.isVisible() }));
+  bar.on("show", () => trace("bar-shown", {}));
   bar.on("closed", () => {
     bar = null;
     barLoaded = false;
@@ -823,12 +831,14 @@ function updateBar() {
   if (want && !bar) makeBar();
   if (!barLoaded) return;
   if (want && !bar.isVisible()) {
+    trace("bar-up", {});
     bar.showInactive();
     // It catches the eye when a meeting starts, not when it's back after a snap.
     bar.webContents.send("bar:shown", { pulse: !barSnapped });
     barSnapped = false;
     void noteTheirApp();
   } else if (!want && bar.isVisible()) {
+    trace("bar-down", { meeting: Boolean(meeting), barAway });
     closeBarList();
     bar.hide();
   }
