@@ -214,6 +214,9 @@ const AgendaSchema = z.object({
     .describe("Every suggestion given, once each, in the order the meeting should take them"),
 });
 
+/** A notes run that hangs keeps "Updating" up; past this it fails and the next pause tries again. */
+const NOTES_TIMEOUT_MS = 60_000;
+
 class ClaudeAgent implements Agent {
   private client: Anthropic;
   constructor(apiKey: string) {
@@ -226,6 +229,8 @@ class ClaudeAgent implements Agent {
     system: string,
     effort: "low" | "medium",
     model = config.anthropicModel,
+    /** For calls a person is waiting on mid-meeting: give up and let the next run try. */
+    timeout?: number,
   ): Promise<T | null> {
     // If a safety classifier declines, let the API retry on its recommended
     // fallback model. Haiku has no server-side fallback.
@@ -239,7 +244,7 @@ class ClaudeAgent implements Agent {
       messages: [{ role: "user", content }],
       output_config: { effort, format: betaZodOutputFormat(schema) },
       ...fallback,
-    });
+    }, timeout ? { timeout, maxRetries: 1 } : undefined);
     if (res.stop_reason === "refusal") return null;
     return (res.parsed_output as T | null) ?? null;
   }
@@ -289,6 +294,7 @@ Notes are rewritten as the meeting goes on. Every already-captured action item a
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
       "low",
       config.notesModel,
+      NOTES_TIMEOUT_MS,
     );
     if (!out) return { notes: [], discussions: [] };
     const known = new Set(earlier.map((d) => d.id));

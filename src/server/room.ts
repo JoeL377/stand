@@ -50,6 +50,9 @@ const EMPTY_ROOM_GRACE_MS = 120_000;
 /** A host whose connection drops keeps the seat this long, so a blip or a
  *  server restart doesn't hand the meeting to someone else. */
 const HOST_AWAY_GRACE_MS = 30_000;
+/** After transcription stops, Stand starts it again by itself this much later, once per gap. */
+const TRANSCRIBER_RETRY_MS = 10_000;
+const TRANSCRIBER_RETRY_GAP_MS = 5 * 60_000;
 /** How many message ids (cids) the room remembers, to ignore ones sent again after a reconnect. */
 const HANDLED_CIDS = 2_000;
 /** How long a deleted note or a dismissed suggestion can still be brought back with Undo. */
@@ -133,8 +136,13 @@ export class RoomSession implements SpeechSink {
   private drift: { itemId: string; since: number; score: number; remarks: Set<string>; unnamed: Set<string> } | null = null;
   private transcriber: Transcriber | null = null;
   private transcriptionDown = false;
-  /** The last notes run failed; people are told once, not on every retry. */
-  private notesFailing = false;
+  private transcriberRetriedAt = 0;
+  private transcriberRestarting = false;
+  /** Items whose last notes run failed. People are told once, then it shows in the notes. */
+  private notesFailing = new Set<string | null>();
+  private hostAwayUntil = 0;
+  /** The last nudge the host took, until the focus moves again: Undo puts it all back. */
+  private accepted: { from: string | null; to: string; since: number } | null = null;
   /** The creator handed hosting to someone on purpose, so rejoining doesn't take it back. */
   private creatorHandedOver = false;
   private demoRunning = false;
@@ -165,6 +173,9 @@ export class RoomSession implements SpeechSink {
       if (last && (last.itemId === null || items.some((i) => i.id === last.itemId))) this.focusItemId = last.itemId;
       else this.setFocusInternal(items[0]?.id ?? null, "system", "start");
       this.hostId = resume.hostId;
+      // So the hold names who it's waiting for, though they haven't rejoined since the restart.
+      const hostName = this.hostId ? db.userName(this.hostId) : null;
+      if (this.hostId && hostName) this.names.set(this.hostId, hostName);
       if (this.hostId) this.hostLeft();
       // Nobody is here yet; it ends as usual if nobody comes back.
       this.emptyTimer = setTimeout(() => void this.end(), EMPTY_ROOM_GRACE_MS);
@@ -220,6 +231,7 @@ export class RoomSession implements SpeechSink {
   private setHost(id: string | null) {
     if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
     this.hostAwayTimer = null;
+    this.hostAwayUntil = 0;
     if (id === this.hostId) return;
     this.hostId = id;
     this.db.setMeetingHost(this.meetingId, id);
@@ -229,9 +241,12 @@ export class RoomSession implements SpeechSink {
    *  hand it to whoever has been here longest. */
   private hostLeft() {
     if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
+    this.hostAwayUntil = Date.now() + HOST_AWAY_GRACE_MS;
     this.hostAwayTimer = setTimeout(() => {
       this.hostAwayTimer = null;
       if (this.ended || (this.hostId && this.participants.has(this.hostId))) return;
+      // The nudge was for the host who left; the next one starts fresh.
+      this.suggestion = null;
       this.setHost(this.participants.keys().next().value ?? null);
       this.broadcastState();
     }, HOST_AWAY_GRACE_MS);
@@ -269,7 +284,10 @@ export class RoomSession implements SpeechSink {
       focusItemId: this.focusItemId,
       pinnedBy: this.pinnedBy,
       transcriptionDown: this.transcriptionDown,
+      transcriptionRestarting: this.transcriptionDown && this.transcriberRestarting,
       hostAway: this.hostAwayTimer && this.hostId && !this.participants.has(this.hostId) ? (this.names.get(this.hostId) ?? "The host") : null,
+      hostAwayMs: this.hostAwayTimer ? Math.max(0, this.hostAwayUntil - Date.now()) : null,
+      notesFailing: [...this.notesFailing],
       suggestion: this.suggestion,
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
@@ -411,8 +429,16 @@ export class RoomSession implements SpeechSink {
   /** Called by the REST API after the agenda changes. */
   itemsChanged() {
     const items = this.items();
-    if (this.focusItemId && !items.some((i) => i.id === this.focusItemId)) this.setFocusInternal(null, "system", "removed");
-    if (!this.focusItemId && items[0]) this.setFocusInternal(items[0].id, "system", "start");
+    const has = (id: string | null) => items.some((i) => i.id === id);
+    if (this.focusItemId && !has(this.focusItemId)) {
+      // The item in focus went: on to the first one, and a pin on it goes too.
+      this.pinnedBy = null;
+      this.setFocusInternal(items[0]?.id ?? null, "system", "removed");
+    } else if (!this.focusItemId && items[0] && !this.focusLog.some((f) => f.itemId)) {
+      // The first item of an agenda that was empty. A host who chose General stays there.
+      this.setFocusInternal(items[0].id, "system", "start");
+    }
+    if (this.suggestion && !has(this.suggestion.itemId)) this.suggestion = null;
     this.broadcastState();
   }
 
@@ -492,12 +518,12 @@ export class RoomSession implements SpeechSink {
     switch (msg.type) {
       // Only the host moves the meeting between items.
       case "focus":
-        if (!isHost) return;
+        if (!isHost || this.ended) return;
         this.pinnedBy = null;
         this.setFocus(msg.itemId, conn.name, "manual");
         break;
       case "pin":
-        if (!isHost) return;
+        if (!isHost || this.ended) return;
         this.setFocus(msg.itemId, conn.name, "pin");
         this.pinnedBy = conn.name;
         this.broadcastState();
@@ -508,7 +534,11 @@ export class RoomSession implements SpeechSink {
         this.broadcastState();
         break;
       case "suggestion.accept":
-        if (isHost) this.acceptSuggestion(conn.name);
+        // The suggestion can change between seeing it and pressing Switch; only the one seen is taken.
+        if (isHost && !this.ended && (!msg.itemId || msg.itemId === this.suggestion?.itemId)) this.acceptSuggestion(conn.name);
+        break;
+      case "suggestion.undo":
+        if (isHost && !this.ended) this.undoAccept(conn.name);
         break;
       case "suggestion.dismiss":
         if (this.suggestion && isHost) {
@@ -528,11 +558,27 @@ export class RoomSession implements SpeechSink {
         }
         break;
       }
-      case "sharing":
+      case "sharing": {
+        // One screen at a time: two people pressing Share together, the second is told.
+        const other = msg.on && [...this.participants.values()].find((p) => p.isSharing && p.id !== conn.participantId);
+        // Their browser stops the share it started when it sees someone else's counted instead.
+        if (other) return this.send(ws, { type: "error", message: `${other.name} is already sharing, so yours was stopped. Ask them to stop first.` });
+        // A share that ends takes the screen nudge with it; one Stand never counted doesn't.
+        const wasSharing = Boolean(me?.isSharing);
         if (me) me.isSharing = msg.on;
-        if (!msg.on && isHost) this.suggestion = null;
+        if (!msg.on && isHost && wasSharing) this.suggestion = null;
         this.broadcastState();
         break;
+      }
+      case "recording":
+        if (me) me.notRecording = !msg.on;
+        this.broadcastState();
+        break;
+      case "notes.retry": {
+        const itemId = msg.itemId && this.items().some((i) => i.id === msg.itemId) ? msg.itemId : null;
+        if (!this.ended) void this.refreshNotes(itemId);
+        break;
+      }
       case "chat": {
         const text = msg.text.trim().slice(0, 2000);
         if (!text) return;
@@ -583,9 +629,9 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "note.edit": {
-        if (!isHost || !this.meetingId) return;
-        const text = clean(msg.text, 500);
         const before = this.db.meetingNotes(this.meetingId).find((n) => n.id === msg.noteId);
+        if (!isHost) return this.refuse(ws, "save your edit", before?.itemId);
+        const text = clean(msg.text, 500);
         if (!before || !text) return;
         const owner = before.kind === "action" ? clean(msg.owner, 60) || null : null;
         this.db.editNote(before.id, { text, owner }, conn.name);
@@ -594,8 +640,8 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "note.remove": {
-        if (!isHost || !this.meetingId) return;
         const before = this.db.meetingNotes(this.meetingId).find((n) => n.id === msg.noteId);
+        if (!isHost) return this.refuse(ws, "delete that note", before?.itemId);
         if (!before) return;
         this.db.removeNote(before.id);
         this.keepForUndo(this.removedNotes, before.id, before);
@@ -605,7 +651,8 @@ export class RoomSession implements SpeechSink {
       }
       case "note.restore": {
         const note = this.removedNotes.get(msg.noteId);
-        if (!isHost || !note || note.meetingId !== this.meetingId) return;
+        if (!isHost) return this.refuse(ws, "bring that note back", note?.itemId);
+        if (!note || note.meetingId !== this.meetingId) return;
         this.removedNotes.delete(note.id);
         this.db.restoreNote(note);
         this.sendItemNotes(note.itemId);
@@ -613,7 +660,8 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "note.add": {
-        if (!isHost || !this.meetingId || !["action", "decision", "question"].includes(msg.kind)) return;
+        if (!["action", "decision", "question"].includes(msg.kind)) return;
+        if (!isHost) return this.refuse(ws, `save your ${msg.kind === "action" ? "to-do" : msg.kind}`, msg.itemId ?? null);
         const text = clean(msg.text, 500);
         if (!text) return;
         const itemId = msg.itemId && this.items().some((i) => i.id === msg.itemId) ? msg.itemId : null;
@@ -666,14 +714,25 @@ export class RoomSession implements SpeechSink {
 
   /** Resends one item's notes and topics in this meeting, after a hand change. */
   private sendItemNotes(itemId: string | null) {
-    if (!this.meetingId) return;
-    this.broadcast({
+    this.broadcast(this.itemNotes(itemId));
+  }
+
+  private itemNotes(itemId: string | null): ServerMessage {
+    return {
       type: "notes",
       meetingId: this.meetingId,
       itemId,
       notes: this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId),
       discussions: this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId),
-    });
+    };
+  }
+
+  /** A notes change from someone who isn't the host, usually sent while offline as the seat moved.
+   *  It's said plainly, and their screen goes back to what everyone else sees. */
+  private refuse(ws: WebSocket, what: string, itemId: string | null | undefined) {
+    const host = this.hostId ? this.names.get(this.hostId) : null;
+    this.send(ws, { type: "error", message: `Couldn't ${what}: only the host can change notes${host ? `, and ${host} is hosting now` : ""}.` });
+    if (itemId !== undefined) this.send(ws, this.itemNotes(itemId));
   }
 
   /** Whether this signed-in person is driving the meeting right now. */
@@ -700,6 +759,7 @@ export class RoomSession implements SpeechSink {
   private setFocusInternal(itemId: string | null, actor: string, reason: string, at = Date.now()) {
     const prev = this.focusItemId;
     this.focusItemId = itemId;
+    this.accepted = null;
     if (prev !== itemId) {
       this.stageSnapId = null;
       this.drift = null;
@@ -734,13 +794,28 @@ export class RoomSession implements SpeechSink {
     const prev = this.focusItemId;
     this.suggestion = null;
     this.setFocusInternal(s.itemId, actor, "suggestion", s.since);
-    // Talk since the screen changed was about the new item.
-    for (const seg of this.db.repinSince(this.meetingId, s.since, prev, s.itemId)) {
+    this.accepted = { from: prev, to: s.itemId, since: s.since };
+    this.repin(s.since, prev, s.itemId);
+    this.broadcastState();
+  }
+
+  /** Undo of a "Switch and move": as if it never happened, including what was said since. */
+  private undoAccept(actor: string) {
+    const a = this.accepted;
+    this.accepted = null;
+    if (!a || this.focusItemId !== a.to) return;
+    this.setFocusInternal(a.from, actor, "undo", a.since);
+    this.repin(a.since, a.to, a.from);
+    this.broadcastState();
+  }
+
+  /** Talk since then was about the other item. */
+  private repin(since: number, from: string | null, to: string | null) {
+    for (const seg of this.db.repinSince(this.meetingId, since, from, to)) {
       this.broadcast({ type: "segment.updated", segment: seg });
     }
-    this.scheduleNotes(prev, 1_000);
-    this.scheduleNotes(s.itemId, 1_000);
-    this.broadcastState();
+    this.scheduleNotes(from, 1_000);
+    this.scheduleNotes(to, 1_000);
   }
 
   // ---- the agent reading the screen ---------------------------------------
@@ -821,15 +896,39 @@ export class RoomSession implements SpeechSink {
   }
 
   transcriptionFailed(reason: string) {
+    // Several speakers' streams can fail together: say it once.
+    if (this.transcriptionDown || this.ended) return;
     console.error(`[agent] transcription unavailable in room ${this.roomId}: ${reason}`);
-    // Let the next person who joins try again.
+    // A fresh agent rather than a second one: Stand tries once by itself (at most every few
+    // minutes), and the next person who joins tries again.
+    void this.transcriber?.stop().catch(() => {});
     this.transcriber = null;
     this.transcriptionDown = true;
+    const retry = Boolean(this.startTranscriber) && Date.now() - this.transcriberRetriedAt > TRANSCRIBER_RETRY_GAP_MS;
+    this.transcriberRestarting = retry;
     this.broadcastState();
-    this.broadcast({ type: "error", message: "Stand stopped transcribing. Leave and rejoin to start it again; what was said before is saved." });
+    this.broadcast({
+      type: "error",
+      message: retry
+        ? "Stand stopped transcribing and is starting it again. What was said before is saved."
+        : "Stand stopped transcribing. Leave and rejoin to start it again; what was said before is saved.",
+    });
+    if (!retry) return;
+    this.transcriberRetriedAt = Date.now();
+    setTimeout(() => this.restartTranscriber(), TRANSCRIBER_RETRY_MS).unref?.();
+  }
+
+  private restartTranscriber() {
+    this.transcriberRestarting = false;
+    if (!this.transcriptionDown || this.transcriber || this.ended || !this.participants.size || !this.startTranscriber) return this.broadcastState();
+    this.transcriptionDown = false;
+    this.transcriber = this.startTranscriber(this);
+    this.broadcastState();
   }
 
   interim(speakerId: string, speakerName: string, text: string) {
+    // Nothing more is kept once the notes are being written, so nothing more is shown.
+    if (this.ended) return;
     this.broadcast({ type: "interim", speakerId, speakerName, text: text.slice(0, 500) });
   }
 
@@ -975,13 +1074,14 @@ export class RoomSession implements SpeechSink {
         console.log(
           `[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
         );
-        this.notesFailing = false;
+        if (this.notesFailing.delete(itemId)) this.broadcastState();
       } catch (err) {
         console.error("[agent] notes failed:", err);
-        if (!this.notesFailing) {
-          this.notesFailing = true;
+        const first = this.notesFailing.size === 0;
+        this.notesFailing.add(itemId);
+        if (first)
           this.broadcast({ type: "error", message: "The agent couldn't write notes just now. It tries again after the next pause, and everything said is kept." });
-        }
+        this.broadcastState();
       } finally {
         if (this.noteRuns.get(itemId) === run) this.broadcast({ type: "notes.busy", itemId, busy: false });
       }

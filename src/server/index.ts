@@ -9,7 +9,7 @@ import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } fr
 import { handleMcp } from "./mcp.ts";
 import { oauthRoutes } from "./oauth.ts";
 import { capabilities, config } from "./config.ts";
-import { type OpenMeeting, openDb } from "./db.ts";
+import { type DB, type OpenMeeting, openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "./brief.ts";
 import {
   MAX_DECK_BYTES,
@@ -193,6 +193,11 @@ app.use("/api", requireUser(db));
 
 // ---- snaps: stills of the shared screen ------------------------------------
 
+const SNAP_UNDO_MS = 60_000;
+/** Snaps by the key their upload carried, for a while: a retry of one that got through gets the same snap back. */
+const snapKeys = new Map<string, string>();
+const deletedSnaps = new Map<string, { snap: NonNullable<ReturnType<DB["getSnap"]>>; timer: ReturnType<typeof setTimeout> }>();
+
 /** Who can crop or delete a snap: whoever took it, whoever's screen it is, and the host. */
 const canChangeSnap = (userId: string, snap: { roomId: string; takenById: string | null; sharerId: string | null }) =>
   snap.takenById === userId || snap.sharerId === userId || Boolean(live(snap.roomId)?.hosts(userId));
@@ -209,6 +214,9 @@ app.post(
     const ext = Buffer.isBuffer(buf) ? imageType(buf) : null;
     if (!ext || ext === "gif") return res.status(400).json({ error: "Send a PNG, JPEG or WebP image." });
     const size = (v: unknown) => Math.max(0, Math.min(20000, Math.round(Number(v) || 0)));
+    const key = typeof req.query.key === "string" && /^[A-Za-z0-9-]{8,64}$/.test(req.query.key) ? `${req.user!.id}:${req.query.key}` : null;
+    const already = key ? snapKeys.get(key) : undefined;
+    if (already && db.getSnap(already)) return res.json({ id: already, itemId: db.getSnap(already)?.itemId ?? null });
     const id = s.addSnap({
       buf,
       ext,
@@ -219,7 +227,12 @@ app.post(
       takenBy: req.user!.name,
       pasted: req.query.pasted === "1",
     });
-    res.json({ id });
+    if (key) {
+      snapKeys.set(key, id);
+      setTimeout(() => snapKeys.delete(key), 10 * 60_000).unref?.();
+    }
+    // Which item it landed on: the one in focus when it was taken, which may not be the one now.
+    res.json({ id, itemId: db.getSnap(id)?.itemId ?? null });
   }),
 );
 
@@ -252,8 +265,29 @@ app.delete(
     if (!canChangeSnap(req.user!.id, snap))
       return res.status(403).json({ error: "Only whoever took it, the sharer or the host can delete it." });
     db.deleteSnap(snap.id);
-    removeSnapFile(snap.id, snap.ext);
+    // The image stays for a minute, so Undo can bring the snap back.
+    const timer = setTimeout(() => {
+      deletedSnaps.delete(snap.id);
+      removeSnapFile(snap.id, snap.ext);
+    }, SNAP_UNDO_MS);
+    timer.unref?.();
+    deletedSnaps.set(snap.id, { snap, timer });
     live(snap.roomId)?.snapsChanged();
+    res.json({ ok: true });
+  }),
+);
+
+app.post(
+  "/api/snaps/:id/restore",
+  route((req, res) => {
+    const deleted = deletedSnaps.get(req.params.id);
+    if (!deleted || !db.isMember(deleted.snap.roomId, req.user!.id)) return res.status(404).json({ error: "It's been too long to bring it back." });
+    clearTimeout(deleted.timer);
+    deletedSnaps.delete(req.params.id);
+    const { roomId, version: _version, caption, ...row } = deleted.snap;
+    db.addSnap(row);
+    if (caption) db.setSnapCaption(row.id, caption);
+    live(roomId)?.snapsChanged();
     res.json({ ok: true });
   }),
 );

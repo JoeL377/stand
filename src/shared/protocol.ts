@@ -218,6 +218,8 @@ export interface Participant {
   /** The host drives the meeting: whatever item they open is what's being discussed. */
   isHost: boolean;
   isSharing: boolean;
+  /** Browser transcription can't hear this person (blocked, or a browser without it). */
+  notRecording?: boolean;
 }
 
 export interface Suggestion {
@@ -268,8 +270,15 @@ export interface RoomState {
   pinnedBy: string | null;
   /** The host's name while their connection is down and they can still come back as host. */
   hostAway?: string | null;
+  /** How long until the seat held for that host goes to someone else, as of sending.
+   *  A duration, so a viewer's clock being off doesn't matter. */
+  hostAwayMs?: number | null;
+  /** Items whose notes the agent couldn't write on its last try (null: General). */
+  notesFailing?: Array<string | null>;
   /** The server's transcriber stopped: talk isn't being recorded until someone rejoins. */
   transcriptionDown?: boolean;
+  /** While down: Stand is about to start it again by itself. */
+  transcriptionRestarting?: boolean;
   suggestion: Suggestion | null;
   items: Item[];
   decks: Deck[];
@@ -298,7 +307,8 @@ export type ClientMessage = (
   | { type: "focus"; itemId: string | null }
   | { type: "pin"; itemId: string }
   | { type: "unpin" }
-  | { type: "suggestion.accept" }
+  /** `itemId`: the suggestion the host saw, so a newer one isn't accepted by mistake. */
+  | { type: "suggestion.accept"; itemId?: string }
   /** Host: put an agent suggestion on the agenda, all of them, or wave one off. */
   | { type: "upnext.add"; key: string }
   | { type: "upnext.addAll" }
@@ -310,6 +320,12 @@ export type ClientMessage = (
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */
   | { type: "host.give"; participantId: string }
   | { type: "sharing"; on: boolean }
+  /** Browser transcription: whether this person's words are being picked up. */
+  | { type: "recording"; on: boolean }
+  /** Try the notes for an item again now, after the agent failed. */
+  | { type: "notes.retry"; itemId: string | null }
+  /** Take back the last "Switch and move": the focus and the remarks go back, with what was said since. */
+  | { type: "suggestion.undo" }
   | { type: "chat"; text: string }
   /** Browser transcription: a finished utterance from this participant's mic. */
   | { type: "speech"; text: string; startedAt: number }

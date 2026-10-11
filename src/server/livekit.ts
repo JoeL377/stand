@@ -59,6 +59,10 @@ export function startLiveKitTranscriber(roomId: string, sink: SpeechSink): Trans
     listeners.get(p.identity)?.close();
     listeners.delete(p.identity);
   });
+  // The agent's own link to the call dropped for good (LiveKit gave up reconnecting).
+  room.on(RoomEvent.Disconnected, () => {
+    if (!stopped) sink.transcriptionFailed("the notes agent lost the call");
+  });
 
   (async () => {
     try {
@@ -92,6 +96,8 @@ interface Recognizer {
   onFinal?: (text: string, startSec: number) => void;
   /** The speaker paused: commit what has been said so far as one utterance. */
   onEndOfUtterance?: () => void;
+  /** The speech-to-text stream stopped for good while still wanted. */
+  onFailed?: (why: string) => void;
 }
 
 let loggerReady = false;
@@ -117,29 +123,56 @@ class SpeakerStream {
   private audioSec = 0;
   private lastSendMs = 0;
   private pending: { text: string[]; start: number } | null = null;
+  /** Audio already sent when this recognizer started: its word offsets count from there. */
+  private recStartSec = 0;
+  private rebuiltAt = 0;
 
   constructor(
     track: RemoteTrack,
     private speakerId: string,
     private speakerName: () => string,
     private sink: SpeechSink,
-    makeRecognizer: () => Recognizer,
+    private makeRecognizer: () => Recognizer,
   ) {
-    this.rec = makeRecognizer();
-    this.rec.onInterim = (text) => {
-      const sofar = [...(this.pending?.text ?? []), text].join(" ").trim();
-      if (sofar) this.sink.interim(this.speakerId, this.speakerName(), sofar);
-    };
-    this.rec.onFinal = (text, startSec) => {
-      if (!text.trim()) return;
-      if (!this.pending) this.pending = { text: [], start: this.wallAt(startSec) };
-      this.pending.text.push(text.trim());
-    };
-    this.rec.onEndOfUtterance = () => this.flush();
+    this.rec = this.startRecognizer();
     this.keepAliveTimer = setInterval(() => {
       if (Date.now() - this.lastSendMs > 5_000) this.rec.keepAlive();
     }, 5_000);
     void this.pump(track);
+  }
+
+  private startRecognizer() {
+    const rec = this.makeRecognizer();
+    this.recStartSec = this.audioSec;
+    rec.onInterim = (text) => {
+      const sofar = [...(this.pending?.text ?? []), text].join(" ").trim();
+      if (sofar) this.sink.interim(this.speakerId, this.speakerName(), sofar);
+    };
+    rec.onFinal = (text, startSec) => {
+      if (!text.trim()) return;
+      if (!this.pending) this.pending = { text: [], start: this.wallAt(this.recStartSec + startSec) };
+      this.pending.text.push(text.trim());
+    };
+    rec.onEndOfUtterance = () => this.flush();
+    rec.onFailed = (why) => rec === this.rec && this.failed(why);
+    return rec;
+  }
+
+  /** One person's stream dropping shouldn't stop everyone's transcript: start theirs again,
+   *  at most once a minute. Past that, talk isn't being kept and everyone needs to know. */
+  private failed(why: string) {
+    if (this.closed) return;
+    if (Date.now() - this.rebuiltAt < 60_000) return this.sink.transcriptionFailed(why);
+    console.warn(`[agent] speech-to-text for ${this.speakerId} stopped (${why}); starting it again`);
+    this.rebuiltAt = Date.now();
+    this.flush();
+    const old = this.rec;
+    this.rec = this.startRecognizer();
+    try {
+      old.close();
+    } catch {
+      // already gone
+    }
   }
 
   private async pump(track: RemoteTrack) {
@@ -159,7 +192,10 @@ class SpeakerStream {
         this.rec.push(frame);
       }
     } catch (err) {
-      if (!this.closed) console.error(`[agent] audio read failed for ${this.speakerId}:`, err);
+      if (!this.closed) {
+        console.error(`[agent] audio read failed for ${this.speakerId}:`, err);
+        this.sink.transcriptionFailed("the notes agent stopped hearing the call");
+      }
     } finally {
       reader.releaseLock();
     }
@@ -195,6 +231,7 @@ class LiveKitInferenceRecognizer implements Recognizer {
   onInterim?: (text: string) => void;
   onFinal?: (text: string, startSec: number) => void;
   onEndOfUtterance?: () => void;
+  onFailed?: (why: string) => void;
   private stream: stt.SpeechStream;
   private closed = false;
 
@@ -227,7 +264,10 @@ class LiveKitInferenceRecognizer implements Recognizer {
         }
       }
     } catch (err) {
-      if (!this.closed) console.error("[livekit-inference] transcription stopped:", err);
+      if (!this.closed) {
+        console.error("[livekit-inference] transcription stopped:", err);
+        this.onFailed?.("speech-to-text stopped");
+      }
     }
   }
 
@@ -249,6 +289,7 @@ class DeepgramRecognizer implements Recognizer {
   onInterim?: (text: string) => void;
   onFinal?: (text: string, startSec: number) => void;
   onEndOfUtterance?: () => void;
+  onFailed?: (why: string) => void;
   private ws: WebSocket;
   private closed = false;
 
@@ -270,7 +311,9 @@ class DeepgramRecognizer implements Recognizer {
     this.ws.on("message", (raw) => this.onResult(String(raw)));
     this.ws.on("error", (err) => console.error("[deepgram]", err.message));
     this.ws.on("close", () => {
-      if (!this.closed) console.warn("[deepgram] stream closed");
+      if (this.closed) return;
+      console.warn("[deepgram] stream closed");
+      this.onFailed?.("speech-to-text stopped");
     });
   }
 

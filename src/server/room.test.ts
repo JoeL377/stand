@@ -573,3 +573,141 @@ test("End meeting shows everyone it's ending, and the meeting ends even when the
   assert.ok(db.getMeeting(s.meetingId)?.endedAt);
   assert.ok(db.getMeeting(meetingId)?.endedAt);
 });
+
+test("a note change from someone who isn't the host says why, and puts their screen back", async () => {
+  const { db, session, meetingId } = setup();
+  await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  // Sent while offline, back when Ann was hosting; it arrives after the seat moved.
+  await say(ann, { type: "note.add", itemId: null, kind: "action", text: "Write the doc", owner: null, cid: "late" });
+  assert.equal(db.meetingNotes(meetingId).length, 0);
+  assert.ok(ann.got.some((m) => m.type === "ack" && m.cid === "late"));
+  const err = ann.got.find((m) => m.type === "error");
+  assert.match(err?.type === "error" ? err.message : "", /Couldn't save your to-do: only the host can change notes, and Joe is hosting now/);
+  // The list she's shown is the real one, without the to-do that didn't go in.
+  assert.ok(ann.got.some((m) => m.type === "notes" && m.itemId === null && m.notes.length === 0));
+  await session.end();
+});
+
+test("the agenda changing doesn't move a host off General, and a removed item takes its pin and nudge with it", async () => {
+  const { db, session, items } = setup();
+  const host = await join(session, { id: "u1", name: "Joe" });
+  await say(host, { type: "focus", itemId: null });
+  db.addItems(session.roomId, [{ source: "agenda", externalId: null, title: "Four", url: null, description: null }]);
+  session.itemsChanged();
+  assert.equal(session.state().focusItemId, null, "a host on General stays there");
+
+  await say(host, { type: "pin", itemId: items[1].id });
+  assert.equal(session.state().pinnedBy, "Joe");
+  db.archiveItem(items[1].id);
+  session.itemsChanged();
+  assert.equal(session.state().focusItemId, items[0].id);
+  assert.equal(session.state().pinnedBy, null, "the pin went with its item");
+
+  session.demoSuggest(items[2].id, "Three is on screen");
+  db.archiveItem(items[2].id);
+  session.itemsChanged();
+  assert.equal(session.state().suggestion, null, "no nudge for an item that's gone");
+  await session.end();
+});
+
+test("Undo of Switch and move puts the focus and every remark back, late ones too", async () => {
+  const { db, session, items, meetingId } = setup();
+  const host = await join(session, { id: "u1", name: "Joe" });
+  session.addSpeech("u2", "Sam", "Before the screen changed", Date.now() - 5_000);
+  session.demoSuggest(items[2].id, "Three is on screen");
+  await new Promise((r) => setTimeout(r, 5));
+  session.addSpeech("u2", "Sam", "Still on one, really", Date.now());
+  await say(host, { type: "suggestion.accept", cid: "a" });
+  assert.equal(session.state().focusItemId, items[2].id);
+  // Words spoken before the click, arriving after it.
+  session.addSpeech("u3", "Ann", "Agreed on one", Date.now() - 1);
+  await say(host, { type: "suggestion.undo", cid: "u" });
+  assert.equal(session.state().focusItemId, items[0].id);
+  assert.deepEqual(
+    db.meetingSegments(meetingId).map((s) => s.itemId),
+    [items[0].id, items[0].id, items[0].id],
+  );
+  await session.end();
+});
+
+test("only one person shares at a time; the second is told who is", async () => {
+  const { session } = setup();
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  await say(joe, { type: "sharing", on: true });
+  await say(ann, { type: "sharing", on: true });
+  const err = ann.got.find((m) => m.type === "error");
+  assert.match(err?.type === "error" ? err.message : "", /Joe is already sharing/);
+  assert.deepEqual(
+    session.state().participants.filter((p) => p.isSharing).map((p) => p.id),
+    ["u1"],
+  );
+  await session.end();
+});
+
+test("notes that fail stay marked on their item until a try works, and anyone can retry", async () => {
+  const { session, items } = setup();
+  const agent = (session as unknown as { agent: HeuristicAgent }).agent;
+  const real = agent.notesFor.bind(agent);
+  agent.notesFor = () => Promise.reject(new Error("rate limited"));
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  session.addSpeech("u2", "Ann", "We should ship the checklist on Friday", Date.now());
+  await say(ann, { type: "notes.retry", itemId: items[0].id });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(session.state().notesFailing, [items[0].id]);
+  agent.notesFor = real;
+  await say(ann, { type: "notes.retry", itemId: items[0].id });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(session.state().notesFailing, []);
+  await session.end();
+});
+
+test("someone whose browser can't transcribe shows as not recorded to everyone", async () => {
+  const { session } = setup();
+  await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  await say(ann, { type: "recording", on: false });
+  assert.equal(session.state().participants.find((p) => p.id === "u2")?.notRecording, true);
+  await say(ann, { type: "recording", on: true });
+  assert.equal(session.state().participants.find((p) => p.id === "u2")?.notRecording, false);
+  await session.end();
+});
+
+test("after a restart the held seat names its host and says how long it's held", async () => {
+  const { db, session } = setup();
+  const room = db.getRoom(session.roomId)!;
+  const joe = db.upsertUser({ googleSub: null, email: "joe@example.com", name: "Joe Liang", picture: null });
+  await join(session, { id: joe.id, name: joe.name });
+  const [open] = db.openMeetings(room.id);
+  const again = new RoomSession(db, new HeuristicAgent(), room, () => {}, undefined, undefined, open);
+  await join(again, { id: "u2", name: "Ann" });
+  assert.equal(again.state().hostAway, "Joe Liang");
+  assert.ok((again.state().hostAwayMs ?? 0) > 0);
+  await again.end();
+});
+
+test("transcription that stops starts again by itself once, then asks people to rejoin", async (t) => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  let started = 0;
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {}, () => (started++, { stop: async () => {} }));
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  assert.equal(started, 1);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  session.transcriptionFailed("speech-to-text stopped");
+  assert.equal(session.state().transcriptionDown, true);
+  assert.equal(session.state().transcriptionRestarting, true);
+  assert.match(String(joe.got.findLast((m) => m.type === "error")?.message), /starting it again/);
+  t.mock.timers.tick(10_000);
+  assert.equal(started, 2);
+  assert.equal(session.state().transcriptionDown, false);
+  // A second stop soon after: no loop of restarts, people are told what to do.
+  session.transcriptionFailed("speech-to-text stopped");
+  t.mock.timers.tick(10_000);
+  assert.equal(started, 2);
+  assert.equal(session.state().transcriptionRestarting, false);
+  assert.match(String(joe.got.findLast((m) => m.type === "error")?.message), /Leave and rejoin/);
+  t.mock.timers.reset();
+  await session.end();
+});
