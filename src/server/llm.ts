@@ -16,6 +16,8 @@ export type DraftNote = Pick<Note, "kind" | "text" | "owner">;
 export interface ItemNotesDraft {
   /** sameAs: the key of an already-captured note this one restates, if any. */
   notes: Array<DraftNote & { discussion: number | null; sameAs?: string | null }>;
+  /** Keys (Q1..) of already-captured open questions the talk has since answered. */
+  answered?: string[];
   discussions: Array<{
     topic: string;
     positions: Array<{ speaker: string; position: string }>;
@@ -49,9 +51,9 @@ export interface NotesOptions {
 /** Discussions of the same item in earlier meetings, so a new one can link back. */
 export type EarlierDiscussion = { id: string; topic: string; meetingStartedAt: number };
 
-/** To-dos and decisions already captured for this item in this meeting, so a
+/** To-dos, decisions and open questions already captured for this item in this meeting, so a
  *  rerun can say which of its notes restate them instead of starting over. */
-export type CapturedNote = { key: string; kind: "action" | "decision"; text: string; owner: string | null };
+export type CapturedNote = { key: string; kind: "action" | "decision" | "question"; text: string; owner: string | null };
 
 /** A snap taken while an item was in focus, as the live notes see it: words only, never the image. */
 export type ScreenNote = { at: number; by: string; caption: string };
@@ -214,9 +216,14 @@ const NotesSchema = z.object({
           same_as: z.string().nullable().describe("The key (A1, A2...) of the already-captured action item this is, or null if new"),
         }),
       ),
-      open_questions: z.array(z.string()),
+      open_questions: z.array(
+        z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (Q1, Q2...) of the already-captured open question this is, or null if new") }),
+      ),
     }),
   ),
+  answered_questions: z
+    .array(z.string())
+    .describe("Keys (Q1, Q2...) of already-captured open questions the talk has now answered or settled. Leave them out of the discussions."),
 });
 
 const ScreenSchema = z.object({
@@ -409,7 +416,7 @@ export class ClaudeAgent implements Agent {
     }`;
     const already = captured.length
       ? `\n\nAlready captured from earlier in this meeting (keep every one; reword only if the talk since made it clearer):\n${captured
-          .map((c) => `- ${c.key} ${c.kind === "action" ? "action item" : "decision"}: ${c.text}${c.owner ? ` (owner: ${c.owner})` : ""}`)
+          .map((c) => `- ${c.key} ${c.kind === "action" ? "action item" : c.kind === "decision" ? "decision" : "open question"}: ${c.text}${c.owner ? ` (owner: ${c.owner})` : ""}`)
           .join("\n")}`
       : "";
     const screens = context.screens ?? [];
@@ -434,7 +441,7 @@ Group the talk into discussions: a discussion is a stretch of back-and-forth abo
 
 For each discussion, give each participant's position in one short line, how it ended, and the decisions actually made, the action items with their owner (the speaker's name; null if nobody took it), and the questions left open. Phrase action items as tasks, not quotes. If it picks up a discussion from an earlier meeting in the list, give that id.
 
-Notes are rewritten as the meeting goes on. Every already-captured action item and decision must appear again, under the discussion it belongs to, with its key in same_as. Never drop or merge two of them into one; only give same_as for a note that is the same task or decision.
+Notes are rewritten as the meeting goes on. Every already-captured action item, decision and open question must appear again, under the discussion it belongs to, with its key in same_as. Never drop or merge two of them into one; only give same_as for a note that is the same task, decision or question. An open question leaves only when the talk has answered or settled it: then give its key in answered_questions instead of writing it again.
 
 In a long meeting, topics that went quiet are listed as settled, with their keys (T1, T2...) and notes. If the talk goes back to one, give its key in picks_up and list only the new lines in turns. Don't write a settled topic's notes again.
 
@@ -456,11 +463,12 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
       notes.push(
         ...d.decisions.map((t) => ({ kind: "decision" as const, text: t.text, owner: null, discussion: i, sameAs: t.same_as })),
         ...d.action_items.map((a) => ({ kind: "action" as const, text: a.text, owner: a.owner, discussion: i, sameAs: a.same_as })),
-        ...d.open_questions.map((t) => ({ kind: "question" as const, text: t, owner: null, discussion: i })),
+        ...d.open_questions.map((q) => ({ kind: "question" as const, text: q.text, owner: null, discussion: i, sameAs: q.same_as })),
       );
     });
     return {
       notes,
+      answered: out.answered_questions ?? [],
       discussions: out.discussions.map((d) => ({
         topic: d.topic.trim().slice(0, 120),
         positions: d.positions.filter((p) => p.position.trim()),

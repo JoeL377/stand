@@ -1192,6 +1192,7 @@ export class RoomSession implements SpeechSink {
         current.filter((n) => !carried.includes(n)),
         keys,
         this.db.dismissedNotes(this.meetingId, itemId),
+        draft.answered,
       ),
     ]);
     this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
