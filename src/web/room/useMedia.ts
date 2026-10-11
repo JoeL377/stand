@@ -30,6 +30,9 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   const { roomId, livekit, enabled } = opts;
   const roomRef = useRef<Room | null>(null);
   const [micOn, setMicOn] = useState(false);
+  // The mic itself, for the Mac app's bar to hear. With LiveKit it stays while muted (muting
+  // silences it); without, muting lets go of the mic.
+  const [micTrack, setMicTrack] = useState<MediaStreamTrack | null>(null);
   const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
   useEffect(() => {
     screenRef.current = localScreen;
@@ -78,9 +81,15 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
         setSpeaking(new Set(speakers.map((s) => s.identity)));
       })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => setNeedsAudioUnlock(!room.canPlaybackAudio))
+      .on(RoomEvent.LocalTrackPublished, (pub) => {
+        if (pub.source === Track.Source.Microphone) setMicTrack(pub.track?.mediaStreamTrack ?? null);
+      })
       .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         if (pub.source === Track.Source.ScreenShare) setLocalScreen(null);
-        if (pub.source === Track.Source.Microphone) setMicOn(false);
+        if (pub.source === Track.Source.Microphone) {
+          setMicOn(false);
+          setMicTrack(null);
+        }
       })
       .on(RoomEvent.Disconnected, () => setConnected(false))
       .on(RoomEvent.Reconnected, () => setConnected(true));
@@ -118,6 +127,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
       room.disconnect();
       audioEls.forEach((el) => el.remove());
       roomRef.current = null;
+      setMicTrack(null);
     };
   }, [livekit, enabled, roomId]);
 
@@ -158,6 +168,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           mockMicStream.current?.getTracks().forEach((t) => t.stop());
           mockMicStream.current = null;
           setMicOn(false);
+          setMicTrack(null);
         } else {
           // Ask for mic permission up front so speech recognition can use it.
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -167,6 +178,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           }
           mockMicStream.current = stream;
           setMicOn(true);
+          setMicTrack(stream.getAudioTracks()[0] ?? null);
         }
       }
       setMicError(null);
@@ -234,6 +246,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
 
   return {
     micOn,
+    micTrack,
     micStarting,
     micError,
     toggleMic,

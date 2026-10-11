@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("standApp", {
   snap: () => ipcRenderer.invoke("app:snap"),
   // { space, itemKey, item, micOn } while in a meeting, null after.
   meeting: (m) => ipcRenderer.send("app:meeting", m),
+  // How loud your mic is, 0 to 1, many times a second while you talk, for the bar's ring.
+  level: (v) => ipcRenderer.send("app:level", v),
   onCommand: (fn) => {
     const on = (_e, command) => fn(command);
     ipcRenderer.on("app:command", on);

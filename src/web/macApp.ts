@@ -15,6 +15,8 @@ type Bridge = {
   snap(): Promise<SnapReport>;
   /** The meeting this window is in, or null once it's left. */
   meeting?(m: MeetingBar | null): void;
+  /** How loud your mic is, 0 to 1, for the bar's ring. */
+  level?(level: number): void;
   /** Buttons pressed on the floating bar. Returns a function that stops listening. */
   onCommand?(fn: (command: "mic") => void): () => void;
 };
