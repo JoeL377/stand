@@ -4,8 +4,9 @@
 // though the agent still reads it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Room, RoomEvent, Track, type RemoteTrack, type Participant } from "livekit-client";
+import { DisconnectReason, Room, RoomEvent, Track, type RemoteTrack, type Participant } from "livekit-client";
 import { api } from "../api.ts";
+import { toast } from "../Toasts.tsx";
 
 export interface RemoteScreen {
   participantId: string;
@@ -42,6 +43,11 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [connected, setConnected] = useState(!livekit);
+  // Why the voice connection dropped for good, if it did: "elsewhere" when you joined this
+  // meeting again from another window or the Mac app (one person talks from one place, so
+  // the newer one takes over), "lost" for anything else. talkHere() joins again from here.
+  const [audioAway, setAudioAway] = useState<"elsewhere" | "lost" | null>(null);
+  const [joins, setJoins] = useState(0);
 
   // ---- LiveKit connection -------------------------------------------------
   useEffect(() => {
@@ -91,7 +97,23 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           setMicTrack(null);
         }
       })
-      .on(RoomEvent.Disconnected, () => setConnected(false))
+      .on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
+        setConnected(false);
+        if (cancelled || reason === DisconnectReason.CLIENT_INITIATED) return;
+        setMicOn(false);
+        setMicTrack(null);
+        setLocalScreen(null);
+        const elsewhere = reason === DisconnectReason.DUPLICATE_IDENTITY;
+        setAudioAway(elsewhere ? "elsewhere" : "lost");
+        toast({
+          tone: elsewhere ? "info" : "error",
+          text: elsewhere
+            ? "You joined this meeting in another window, so your mic moved there."
+            : "Your audio disconnected, so nobody can hear you.",
+          action: { label: elsewhere ? "Talk here" : "Reconnect", run: () => setJoins((n) => n + 1) },
+          ms: 12000,
+        });
+      })
       .on(RoomEvent.Reconnected, () => setConnected(true));
 
     (async () => {
@@ -101,6 +123,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
         await room.connect(url, token);
         if (cancelled) return room.disconnect();
         setConnected(true);
+        setAudioAway(null);
         setNeedsAudioUnlock(!room.canPlaybackAudio);
         // Connected is one thing; the mic is another, with its own prompt and its own ways to fail.
         micBusy.current = true;
@@ -129,7 +152,8 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
       roomRef.current = null;
       setMicTrack(null);
     };
-  }, [livekit, enabled, roomId]);
+  }, [livekit, enabled, roomId, joins]);
+  const talkHere = useCallback(() => setJoins((n) => n + 1), []);
 
   // ---- mic ----------------------------------------------------------------
   const mockMicStream = useRef<MediaStream | null>(null);
@@ -153,6 +177,8 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   // Shown on the button while the browser asks for the mic, so a click there isn't a mystery.
   const [micStarting, setMicStarting] = useState(false);
   const toggleMic = useCallback(async () => {
+    // Unmuting where the mic isn't connected any more brings it back here.
+    if (audioAway) return talkHere();
     if (micBusy.current) return;
     micBusy.current = true;
     if (!micOn) setMicStarting(true);
@@ -190,7 +216,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
       micBusy.current = false;
       setMicStarting(false);
     }
-  }, [livekit, micOn]);
+  }, [livekit, micOn, audioAway, talkHere]);
 
   // Joining means talking: the mic starts on without LiveKit too, as it does with it.
   const toggleRef = useRef(toggleMic);
@@ -259,6 +285,8 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
     unlockAudio,
     mediaError,
     connected,
+    audioAway,
+    talkHere,
     leave,
   };
 }

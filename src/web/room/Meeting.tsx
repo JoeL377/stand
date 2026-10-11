@@ -241,15 +241,29 @@ export function Meeting(props: {
           )}
           <ConnectionPill room={room} />
           {state.ending && !canSteer && <span className="badge">Writing notes…</span>}
-          {!media.micOn && (
+          {media.audioAway ? (
             <button
-              className={media.micError ? "badge muted-pill blocked" : "badge muted-pill"}
-              onClick={() => void media.toggleMic()}
-              disabled={media.micStarting}
-              title={media.micError ?? "Nothing you say is recorded while you're muted. Click to unmute."}
+              className="badge muted-pill blocked"
+              onClick={media.talkHere}
+              title={
+                media.audioAway === "elsewhere"
+                  ? "You joined this meeting in another window or the Mac app, and your mic moved there. Click to talk from here instead."
+                  : "Your audio disconnected, so nobody can hear you. Click to reconnect."
+              }
             >
-              <MicOffIcon /> {media.micStarting ? "Asking for the mic…" : media.micError ? "Mic blocked" : "Muted"}
+              <MicOffIcon /> {media.audioAway === "elsewhere" ? "Mic in another window · Talk here" : "Audio disconnected · Reconnect"}
             </button>
+          ) : (
+            !media.micOn && (
+              <button
+                className={media.micError ? "badge muted-pill blocked" : "badge muted-pill"}
+                onClick={() => void media.toggleMic()}
+                disabled={media.micStarting}
+                title={media.micError ?? "Nothing you say is recorded while you're muted. Click to unmute."}
+              >
+                <MicOffIcon /> {media.micStarting ? "Asking for the mic…" : media.micError ? "Mic blocked" : "Muted"}
+              </button>
+            )
           )}
         </div>
         <div className="topbar-right">
