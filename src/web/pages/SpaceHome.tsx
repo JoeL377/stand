@@ -1,6 +1,7 @@
 // A space's own page, the one people open between meetings: what came into the space since
 // last time (snaps people saved, meetings, agents' updates), and where the space stands (to-dos,
 // decisions, open questions and the suggested agenda). Start talking turns it into the meeting.
+// It shows captures but doesn't make them: snaps come from the Stand bar.
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -10,7 +11,7 @@ import { useAuth } from "../auth.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { CameraIcon, CloseIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { Avatar } from "../room/Stage.tsx";
-import { addImageSnap, removeSnap } from "../Snaps.tsx";
+import { removeSnap } from "../Snaps.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { fmtDate, fmtTime } from "../util.ts";
@@ -36,7 +37,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [error, setError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Snap | null>(null);
   const [copied, setCopied] = useState(false);
-  const [dropping, setDropping] = useState(false);
 
   const load = useCallback(() => {
     reload();
@@ -61,31 +61,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       window.removeEventListener("focus", load);
     };
   }, [load]);
-
-  // A screenshot pasted or dropped anywhere on the page is saved to the space.
-  const save = useCallback(
-    (file: Blob) => {
-      addImageSnap(file, room.id, true).then(
-        (s) => {
-          load();
-          toast({ text: `Saved to ${room.name}`, action: { label: "Undo", run: () => (removeSnap(s.id), setTimeout(load, 400)) } });
-        },
-        errorToast("Couldn't save the screenshot"),
-      );
-    },
-    [room.id, room.name, load],
-  );
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      if (e.target instanceof Element && e.target.closest("input, textarea, [contenteditable]")) return;
-      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
-      if (!file) return;
-      e.preventDefault();
-      save(file);
-    };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, [save]);
 
   const pickItem = (snap: Snap, itemId: string | null) => {
     setFeed((f) => f && { ...f, captures: f.captures.map((c) => (c.id === snap.id ? { ...c, itemId, itemSuggested: false } : c)) });
@@ -141,22 +116,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
 
   return (
     <SpacesShell spaces={spaces}>
-      <main
-        className={dropping ? "sh-main dropping" : "sh-main"}
-        onDragOver={(e) => {
-          if (![...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) return;
-          e.preventDefault();
-          setDropping(true);
-        }}
-        onDragLeave={(e) => e.currentTarget === e.target && setDropping(false)}
-        onDrop={(e) => {
-          const file = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
-          setDropping(false);
-          if (!file) return;
-          e.preventDefault();
-          save(file);
-        }}
-      >
+      <main className="sh-main">
         <header className="sh-head">
           <h1>{room.name}</h1>
           {room.purpose && <span className="sh-purpose">{room.purpose}</span>}
@@ -205,8 +165,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               <div className="sh-empty">
                 <CameraIcon size={18} />
                 <p>
-                  Nothing here yet. Snaps you save with <strong>Control + Shift + S</strong> in the Mac app, or paste or drop on this page,
-                  land here. So do meetings once they end, and what agents report.
+                  Nothing here yet. Snaps you take from the Stand bar in the Mac app (<strong>Control + Shift + S</strong>) land here, and so
+                  do meetings once they end and what agents report.
                 </p>
               </div>
             )}
