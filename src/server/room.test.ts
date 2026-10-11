@@ -521,6 +521,77 @@ test("in a long meeting a quiet topic settles: runs read what's still going, and
   assert.ok(db.meetingNotes(session.meetingId).some((n) => n.id === keep.id && n.doneBy === "Joe"));
 });
 
+test("one topic for an hour: its older talk folds into where it stood, and the run carries it on", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "One", url: null, description: null }]);
+  const calls: Array<{ lines: string[]; settled: SettledTopic[] }> = [];
+  const MIN = 60_000;
+  const t = Date.now();
+  const drafts: ItemNotesDraft[] = [
+    {
+      notes: [
+        { kind: "question", text: "Per seat or per space?", owner: null, discussion: 0 },
+        { kind: "action", text: "Price out SSO", owner: "Andy", discussion: 0 },
+      ],
+      discussions: [{ topic: "Pricing", positions: [{ speaker: "Huy", position: "Per seat" }], outcome: "open", segmentIndexes: [...Array(50).keys()], continuesId: null }],
+    },
+    {
+      notes: [
+        { kind: "decision", text: "Charge per seat", owner: null, discussion: 0 },
+        { kind: "action", text: "Price out SSO", owner: "Andy", discussion: 0, sameAs: "A1" },
+      ],
+      discussions: [
+        // Every line it was sent; how many depends on where the 5-minute step falls.
+        { topic: "Pricing", positions: [{ speaker: "Joe", position: "Per seat, then" }], outcome: "decided", segmentIndexes: [], continuesId: null, picksUp: "T1" },
+      ],
+    },
+  ];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async notesFor(item: Item | null, segments: Segment[], _e: unknown, _c: unknown, _s: unknown, options?: NotesOptions) {
+      calls.push({ lines: segments.map((x) => x.text), settled: options?.settled ?? [] });
+      const draft = drafts.shift();
+      if (draft && calls.length === 2) draft.discussions[0].segmentIndexes = [...segments.keys()];
+      return draft ?? new HeuristicAgent().notesFor(item, segments);
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const refresh = (session as unknown as { refreshNotes(id: string | null): Promise<Note[]> }).refreshNotes.bind(session);
+  // Fifty remarks on pricing over the last hour, the latest six minutes ago.
+  for (let i = 0; i < 50; i++) session.addSpeech("p1", i % 2 ? "Huy" : "Joe", `Pricing, take ${i}`, t - (60 - i * 1.1) * MIN);
+  const itemId = db.meetingSegments(session.meetingId)[0].itemId;
+  await refresh(itemId);
+  const pricing = db.meetingDiscussions(session.meetingId)[0];
+  assert.equal(pricing.segmentIds.length, 50);
+
+  session.addSpeech("p2", "Joe", "OK, per seat", t - 2 * MIN);
+  session.addSpeech("p1", "Huy", "Agreed", t - 1 * MIN);
+  const notes = await refresh(itemId);
+  // The talk from over 15 minutes ago isn't sent again; where the topic stood is.
+  // The topic's last 15 to 20 minutes (the edge moves in 5-minute steps) and the new talk.
+  const sent = calls[1].lines.length;
+  assert.ok(sent >= 11 && sent <= 15, `sent ${sent} lines`);
+  assert.deepEqual(calls[1].lines.slice(-2), ["OK, per seat", "Agreed"]);
+  assert.deepEqual(calls[1].settled[0], {
+    key: "T1",
+    topic: "Pricing",
+    outcome: "open",
+    going: true,
+    positions: [{ speaker: "Huy", position: "Per seat" }],
+    notes: [
+      { kind: "question", text: "Per seat or per space?", owner: null },
+      { kind: "action", text: "Price out SSO", owner: "Andy" },
+    ],
+  });
+  const after = db.meetingDiscussions(session.meetingId);
+  assert.equal(after.length, 1);
+  assert.equal(after[0].id, pricing.id);
+  assert.equal(after[0].segmentIds.length, 52, "its older lines and the new ones");
+  assert.deepEqual(after[0].positions.map((p) => p.speaker), ["Huy", "Joe"]);
+  assert.deepEqual(notes.map((n) => n.kind).sort(), ["action", "decision"]);
+  assert.ok(notes.every((n) => n.discussionId === pricing.id));
+});
+
 test("spaces: every space is listed with its open to-dos, the ones for you, and what to decide", async () => {
   const { toSpaceSummary, ownedBy } = await import("./spaces.ts");
   const db = openDb(":memory:");

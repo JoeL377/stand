@@ -29,12 +29,15 @@ export interface ItemNotesDraft {
 }
 
 /** A topic from earlier in this meeting that has gone quiet (see settle.ts): the model sees it
- *  as a line with its notes instead of reading its lines again. */
+ *  as a line with its notes instead of reading its lines again. A topic still going whose older
+ *  talk folded (going) is shown the same way, with its positions so far, and carried on. */
 export type SettledTopic = {
   key: string;
   topic: string;
   outcome: DiscussionOutcome;
   notes: Array<{ kind: Exclude<NoteKind, "summary">; text: string; owner: string | null }>;
+  going?: boolean;
+  positions?: Array<{ speaker: string; position: string }>;
 };
 
 export interface NotesOptions {
@@ -190,7 +193,7 @@ const NotesSchema = z.object({
       picks_up: z
         .string()
         .nullable()
-        .describe("The key (T1, T2...) of the settled topic from earlier in this meeting that this goes back to, or null"),
+        .describe("The key (T1, T2...) of the topic listed from earlier in this meeting that this goes back to or carries on, or null"),
       decisions: z.array(
         z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (D1, D2...) of the already-captured decision this is, or null if new") }),
       ),
@@ -365,16 +368,26 @@ export class ClaudeAgent implements Agent {
           .join("\n")}`
       : "";
     const label = { action: "To do", decision: "Decided", question: "Open" };
-    const quiet = settled.length
-      ? `\n\nTopics from earlier in this meeting that have gone quiet. Their lines aren't repeated below, and their notes are kept as they are:\n${settled
-          .map(
-            (t) =>
-              `- ${t.key} (${t.outcome}) ${t.topic}${t.notes
-                .map((n) => `\n  ${label[n.kind]}: ${n.text}${n.owner ? ` (${n.owner})` : ""}`)
-                .join("")}`,
-          )
-          .join("\n")}`
-      : "";
+    const topicLines = (list: SettledTopic[]) =>
+      list
+        .map(
+          (t) =>
+            `- ${t.key} (${t.outcome}) ${t.topic}${(t.positions ?? []).map((p) => `\n  ${p.speaker}: ${p.position}`).join("")}${t.notes
+              .map((n) => `\n  ${label[n.kind]}: ${n.text}${n.owner ? ` (${n.owner})` : ""}`)
+              .join("")}`,
+        )
+        .join("\n");
+    const quietOnes = settled.filter((t) => !t.going);
+    const goingOnes = settled.filter((t) => t.going);
+    const quiet = `${
+      quietOnes.length
+        ? `\n\nTopics from earlier in this meeting that have gone quiet. Their lines aren't repeated below, and their notes are kept as they are:\n${topicLines(quietOnes)}`
+        : ""
+    }${
+      goingOnes.length
+        ? `\n\nTopics still going that started a while ago. Their earlier talk isn't repeated below; this is where they stood:\n${topicLines(goingOnes)}`
+        : ""
+    }`;
     const already = captured.length
       ? `\n\nAlready captured from earlier in this meeting (keep every one; reword only if the talk since made it clearer):\n${captured
           .map((c) => `- ${c.key} ${c.kind === "action" ? "action item" : "decision"}: ${c.text}${c.owner ? ` (owner: ${c.owner})` : ""}`)
@@ -405,6 +418,8 @@ For each discussion, give each participant's position in one short line, how it 
 Notes are rewritten as the meeting goes on. Every already-captured action item and decision must appear again, under the discussion it belongs to, with its key in same_as. Never drop or merge two of them into one; only give same_as for a note that is the same task or decision.
 
 In a long meeting, topics that went quiet are listed as settled, with their keys (T1, T2...) and notes. If the talk goes back to one, give its key in picks_up and list only the new lines in turns. Don't write a settled topic's notes again.
+
+A long topic that is still going is listed with its key too, with where it stood before the lines below. Carry it on: give its key in picks_up, its new lines in turns, its positions in full, and its decisions, action items and open questions in full, earlier ones included.
 
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
       tidy ? "medium" : "low",

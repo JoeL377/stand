@@ -118,6 +118,28 @@ test("settled topics go before the transcript as lines with their notes, and the
   assert.equal(opts?.timeout, 120_000);
 });
 
+test("a long topic still going shows where it stood, positions and all, and is carried on", async () => {
+  const { agent, calls } = withApi(() => ({
+    ...noteReply,
+    parsed_output: { ...noteReply.parsed_output, discussions: [{ ...noteReply.parsed_output.discussions[0], turns: [1, 2], picks_up: "T1" }] },
+  }));
+  const settled = [
+    {
+      key: "T1",
+      topic: "Pricing",
+      outcome: "open" as const,
+      going: true,
+      positions: [{ speaker: "Huy", position: "Per seat is simplest" }],
+      notes: [{ kind: "question" as const, text: "Per seat or per space?", owner: null }],
+    },
+  ];
+  const draft = await agent.notesFor(null, said(3), [], [], [], { settled });
+  const blocks = calls[0].body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
+  assert.match(blocks[0].text, /still going.*\n- T1 \(open\) Pricing\n  Huy: Per seat is simplest\n  Open: Per seat or per space\?\n\nWhat was said since/s);
+  assert.doesNotMatch(blocks[0].text, /gone quiet/);
+  assert.equal(draft.discussions[0].picksUp, "T1");
+});
+
 test("the run as the meeting ends reads more carefully and has longer", async () => {
   const { agent, calls } = withApi(() => noteReply);
   await agent.notesFor(null, said(3), [], [], {}, { tidy: true });
