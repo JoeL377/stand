@@ -541,6 +541,8 @@ test("one topic for an hour: its older talk folds into where it stood, and the r
         { kind: "decision", text: "Charge per seat", owner: null, discussion: 0 },
         { kind: "action", text: "Price out SSO", owner: "Andy", discussion: 0, sameAs: "A1" },
       ],
+      // Deciding per seat answered the open question.
+      answered: ["Q1"],
       discussions: [
         // Every line it was sent; how many depends on where the 5-minute step falls.
         { topic: "Pricing", positions: [{ speaker: "Joe", position: "Per seat, then" }], outcome: "decided", segmentIndexes: [], continuesId: null, picksUp: "T1" },
