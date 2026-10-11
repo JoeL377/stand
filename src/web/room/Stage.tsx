@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import type { ClientMessage, Item, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
@@ -29,6 +29,8 @@ export function Stage(props: {
   interims: Record<string, Interim>;
   segments: Segment[];
   livekit: boolean;
+  /** Set to a function that snaps the shared screen while one is up, for the pop-out bar. */
+  snapRef?: MutableRefObject<(() => Promise<boolean>) | null>;
 }) {
   const { state, focusItem, canSteer, send, localScreen, remoteScreen, speaking, interims } = props;
   const suggested = state.suggestion ? state.items.find((i) => i.id === state.suggestion!.itemId) : null;
@@ -103,13 +105,15 @@ export function Stage(props: {
   const failed = (err: unknown) => toast({ tone: "error", text: String((err as Error).message ?? err) });
   const snap = async () => {
     const video = screenRef.current?.querySelector("video");
-    if (!video) return;
+    if (!video) return false;
     setFlash((f) => f + 1);
     try {
       const id = await takeSnap(video, state.roomId);
       toast({ text: "Snapped", action: crop(id) });
+      return true;
     } catch (err) {
       failed(err);
+      return false;
     }
   };
   // The Mac app's toolbar. Whatever comes of it, including why it couldn't, shows here.
@@ -125,6 +129,9 @@ export function Stage(props: {
   };
   const snapRef = useRef(snap);
   snapRef.current = snap;
+  useEffect(() => {
+    if (props.snapRef) props.snapRef.current = showingScreen ? () => snapRef.current() : null;
+  });
   useEffect(() => {
     // The Mac app catches the shortcut itself, from any app.
     if (!showingScreen && macApp) return;

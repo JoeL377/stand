@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Capabilities, User } from "../../shared/protocol.ts";
 import { useRoomSocket } from "./useRoomSocket.ts";
 import { useMedia } from "./useMedia.ts";
@@ -10,6 +10,7 @@ import { SidePanel } from "./SidePanel.tsx";
 import { fmtDuration, keyOf } from "../util.ts";
 import { macApp } from "../macApp.ts";
 import { useMicLevel } from "./micLevel.ts";
+import { PopOutBar, canPopOut, usePopOut } from "./PopOutBar.tsx";
 import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
 import { toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
@@ -160,7 +161,22 @@ export function Meeting(props: {
     if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn, sharing, todos: barTodos });
   }, [state?.roomName, focusItem, micOn, sharing, barTodos]);
   useEffect(() => () => macApp?.meeting?.(null), []);
-  useMicLevel(media.micTrack, macApp?.level);
+  // In a browser, the bar pops out into a little always-on-top window (Chrome and Edge).
+  const popOut = usePopOut();
+  const popLevels = useRef<((v: number) => void) | null>(null);
+  const popLevel = useCallback((v: number) => popLevels.current?.(v), []);
+  const stageSnap = useRef<(() => Promise<boolean>) | null>(null);
+  const openPopOut = useCallback(
+    () => void popOut.open().catch(() => toast({ tone: "error", text: "Your browser didn't let Stand pop out the bar. Try the Pop out button." })),
+    [popOut.open],
+  );
+  const offerPopOut = !macApp && canPopOut();
+  // Starting a share is when you leave this tab: offer the bar then.
+  useEffect(() => {
+    if (sharing && offerPopOut && !popOut.win)
+      toast({ text: "Pop out a small bar to keep your mic and Snap in reach while you share.", action: { label: "Pop out", run: openPopOut }, ms: 10000 });
+  }, [sharing]);
+  useMicLevel(media.micTrack, macApp?.level ?? (popOut.win ? popLevel : undefined));
   useEffect(() => macApp?.onCommand?.((c) => c === "mic" && void toggleMic()), [toggleMic]);
   // Mute and unmute from the keyboard, as in other meeting apps (Command or Ctrl + D).
   useEffect(() => {
@@ -319,6 +335,7 @@ export function Meeting(props: {
           segments={room.segments}
           offline={!room.connected}
           livekit={caps.livekit}
+          snapRef={stageSnap}
         />
         <SidePanel
           state={state}
@@ -359,6 +376,16 @@ export function Meeting(props: {
               <span>Share screen</span>
             </button>
           )}
+          {offerPopOut && (
+            <button
+              className={popOut.win ? "control on" : "control"}
+              onClick={openPopOut}
+              title="A small bar that stays over your other apps, with your mic, Snap and the space's to-dos"
+            >
+              <PopOutIcon />
+              <span>Pop out</span>
+            </button>
+          )}
           {canSteer && (!caps.livekit || !caps.llm) ? (
             <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this space">
               <PlayIcon />
@@ -393,9 +420,29 @@ export function Meeting(props: {
         </button>
         )}
       </footer>
+      {popOut.win && state && (
+        <PopOutBar
+          win={popOut.win}
+          space={state.roomName}
+          itemKey={keyOf(focusItem)}
+          item={focusItem?.title ?? null}
+          micOn={micOn}
+          onMic={() => void toggleMic()}
+          onSnap={media.localScreen || media.remoteScreen ? () => stageSnap.current?.() ?? Promise.resolve(false) : null}
+          todos={barTodos}
+          levels={popLevels}
+        />
+      )}
     </div>
   );
 }
+
+const PopOutIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <rect x="12" y="11" width="7" height="6" rx="1" />
+  </svg>
+);
 
 /** What didn't happen, when a click needed the connection and it was down. */
 const REFUSED: Partial<Record<string, string>> = {
