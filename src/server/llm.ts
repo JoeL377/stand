@@ -6,7 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { type DraftSlide, outlineToSlides } from "../shared/outline.ts";
-import type { DiscussionOutcome, Item, Note, Segment } from "../shared/protocol.ts";
+import type { DiscussionOutcome, Item, Note, NoteKind, Segment } from "../shared/protocol.ts";
 import { config } from "./config.ts";
 
 export type DraftNote = Pick<Note, "kind" | "text" | "owner">;
@@ -23,7 +23,24 @@ export interface ItemNotesDraft {
     segmentIndexes: number[];
     /** An earlier discussion of this item that this one picks up again. */
     continuesId: string | null;
+    /** The key of a settled topic from earlier in this meeting that the talk went back to. */
+    picksUp?: string | null;
   }>;
+}
+
+/** A topic from earlier in this meeting that has gone quiet (see settle.ts): the model sees it
+ *  as a line with its notes instead of reading its lines again. */
+export type SettledTopic = {
+  key: string;
+  topic: string;
+  outcome: DiscussionOutcome;
+  notes: Array<{ kind: Exclude<NoteKind, "summary">; text: string; owner: string | null }>;
+};
+
+export interface NotesOptions {
+  settled?: SettledTopic[];
+  /** The run as the meeting ends: the whole transcript, read more carefully, for the recap. */
+  tidy?: boolean;
 }
 
 /** Discussions of the same item in earlier meetings, so a new one can link back. */
@@ -75,6 +92,7 @@ export interface Agent {
     earlier?: EarlierDiscussion[],
     captured?: CapturedNote[],
     screens?: ScreenNote[],
+    options?: NotesOptions,
   ): Promise<ItemNotesDraft>;
   matchScreen(jpegDataUrl: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch>;
   summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
@@ -140,6 +158,10 @@ const NotesSchema = z.object({
         .describe("One per participant who contributed, in the order they first spoke"),
       outcome: z.enum(["decided", "action", "open", "info"]).describe("decided: a decision was made. action: it ended with someone taking work. open: unresolved. info: an update with nothing to resolve."),
       continues: z.string().nullable().describe("The id of the earlier discussion this picks up again, from the list given, or null"),
+      picks_up: z
+        .string()
+        .nullable()
+        .describe("The key (T1, T2...) of the settled topic from earlier in this meeting that this goes back to, or null"),
       decisions: z.array(
         z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (D1, D2...) of the already-captured decision this is, or null if new") }),
       ),
@@ -217,6 +239,8 @@ const AgendaSchema = z.object({
 /** A notes run that hangs keeps "Updating" up; past this it fails and the next pause tries
  *  again. Long enough for the whole transcript of an item talked about for two hours. */
 const NOTES_TIMEOUT_MS = 120_000;
+/** The last run as the meeting ends reads the whole meeting, and everyone is already waiting on the recap. */
+const NOTES_TIDY_TIMEOUT_MS = 240_000;
 /** The notes list every transcript line under its topic, so they grow with a long item, and
  *  the model thinks first within the same limit. Only what it writes is billed. */
 const NOTES_MAX_TOKENS = 16_000;
@@ -301,6 +325,7 @@ export class ClaudeAgent implements Agent {
     earlier: EarlierDiscussion[] = [],
     captured: CapturedNote[] = [],
     screens: ScreenNote[] = [],
+    { settled = [], tidy = false }: NotesOptions = {},
   ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
     const numbered = segments.map((s, i) => `[${i + 1}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`);
@@ -308,6 +333,17 @@ export class ClaudeAgent implements Agent {
       ? `\n\nDiscussions of this item in earlier meetings (newest first):\n${earlier
           .slice(0, 15)
           .map((d) => `- id=${d.id} (${new Date(d.meetingStartedAt).toISOString().slice(0, 10)}): ${d.topic}`)
+          .join("\n")}`
+      : "";
+    const label = { action: "To do", decision: "Decided", question: "Open" };
+    const quiet = settled.length
+      ? `\n\nTopics from earlier in this meeting that have gone quiet. Their lines aren't repeated below, and their notes are kept as they are:\n${settled
+          .map(
+            (t) =>
+              `- ${t.key} (${t.outcome}) ${t.topic}${t.notes
+                .map((n) => `\n  ${label[n.kind]}: ${n.text}${n.owner ? ` (${n.owner})` : ""}`)
+                .join("")}`,
+          )
           .join("\n")}`
       : "";
     const already = captured.length
@@ -324,9 +360,9 @@ export class ClaudeAgent implements Agent {
     const out = await this.parse(
       NotesSchema,
       notesPrompt(
-        `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}
+        `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${quiet}
 
-What was said while this item was in focus (speech transcript and in-room chat, in order):`,
+${quiet ? "What was said since, while this item was in focus" : "What was said while this item was in focus"} (speech transcript and in-room chat, in order):`,
         numbered,
         `${already}${shown}`,
       ),
@@ -338,16 +374,19 @@ For each discussion, give each participant's position in one short line, how it 
 
 Notes are rewritten as the meeting goes on. Every already-captured action item and decision must appear again, under the discussion it belongs to, with its key in same_as. Never drop or merge two of them into one; only give same_as for a note that is the same task or decision.
 
+In a long meeting, topics that went quiet are listed as settled, with their keys (T1, T2...) and notes. If the talk goes back to one, give its key in picks_up and list only the new lines in turns. Don't write a settled topic's notes again.
+
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
-      "low",
+      tidy ? "medium" : "low",
       config.notesModel,
-      { timeout: NOTES_TIMEOUT_MS, maxTokens: NOTES_MAX_TOKENS },
+      { timeout: tidy ? NOTES_TIDY_TIMEOUT_MS : NOTES_TIMEOUT_MS, maxTokens: NOTES_MAX_TOKENS },
     ).catch((err) => {
       throw notesTrouble(err) ?? err;
     });
     // Declined: keep the notes and topics as they are rather than writing none.
     if (!out) throw new Error("the model declined to write notes");
     const known = new Set(earlier.map((d) => d.id));
+    const keys = new Set(settled.map((t) => t.key));
     const notes: ItemNotesDraft["notes"] = out.summary.trim() ? [{ kind: "summary", text: out.summary.trim(), owner: null, discussion: null }] : [];
     out.discussions.forEach((d, i) => {
       notes.push(
@@ -364,6 +403,7 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
         outcome: d.outcome,
         segmentIndexes: [...new Set(d.turns.map((n) => n - 1).filter((n) => n >= 0 && n < segments.length))].sort((a, b) => a - b),
         continuesId: d.continues && known.has(d.continues) ? d.continues : null,
+        picksUp: d.picks_up && keys.has(d.picks_up) ? d.picks_up : null,
       })),
     };
   }
