@@ -62,3 +62,22 @@ test("what a run reads only loses lines now and then, so the start of the prompt
   // Five minutes of runs: the first line read changes at most twice.
   assert.ok(new Set(windows).size <= 2, `first line changed ${new Set(windows).size} times`);
 });
+
+test("inside a long topic still going, talk older than 15 minutes folds once there's a lot of it", () => {
+  // An hour on one topic: a line a minute, the last one just now.
+  const lines = Array.from({ length: 61 }, (_, i) => line(`pricing-${i}`, 60 - i));
+  const { settled, folded, window } = settle(lines, [topic("Pricing", lines.map((s) => s.id))], now, now);
+  assert.deepEqual(settled, []);
+  assert.equal(folded.length, 1);
+  // The fold edge moves in 5-minute steps: 15 minutes ago, here on the step itself.
+  assert.deepEqual(folded[0].segmentIds, lines.filter((s) => s.ts < now - 15 * MIN).map((s) => s.id));
+  assert.deepEqual(window.map((s) => s.id), lines.filter((s) => s.ts >= now - 15 * MIN).map((s) => s.id));
+
+  // Twenty minutes on one topic: too little to fold, so all of it is read.
+  const short = lines.slice(-20);
+  assert.deepEqual(settle(short, [topic("Pricing", short.map((s) => s.id))], now, now).folded, []);
+  // And talk no run has read yet never folds.
+  const unread = settle(lines, [topic("Pricing", lines.map((s) => s.id))], now, now - 20 * MIN);
+  assert.deepEqual(unread.folded[0].segmentIds, lines.filter((s) => s.ts <= now - 20 * MIN).map((s) => s.id));
+  assert.equal(unread.window[0].id, "pricing-41");
+});

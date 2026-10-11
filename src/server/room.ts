@@ -1050,8 +1050,8 @@ export class RoomSession implements SpeechSink {
       const item = itemId ? this.db.getItem(itemId) : null;
       // As the meeting ends, the last run reads the whole meeting again to tidy it up for the recap.
       const tidy = this.ended;
-      const { settled, window } = tidy
-        ? { settled: [], window: segments }
+      const { settled, folded, window } = tidy
+        ? { settled: [], folded: [], window: segments }
         : settle(
             segments,
             this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId),
@@ -1062,11 +1062,13 @@ export class RoomSession implements SpeechSink {
         const settledIds = new Set(settled.map((d) => d.id));
         const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
         const keys = capturedFor(current.filter((n) => !n.discussionId || !settledIds.has(n.discussionId)));
-        const topics: SettledTopic[] = settled.map((d, i) => ({
+        // A long topic still going is shown as where it stood, like a settled one, but carried on.
+        const topics: SettledTopic[] = [...settled, ...folded].map((d, i) => ({
           key: `T${i + 1}`,
           topic: d.topic,
           outcome: d.outcome,
           notes: current.flatMap((n) => (n.discussionId === d.id && n.kind !== "summary" ? [{ kind: n.kind, text: n.text, owner: n.owner }] : [])),
+          ...(i >= settled.length ? { going: true, positions: d.positions } : {}),
         }));
         const earlier = itemId
           ? this.db
@@ -1089,11 +1091,12 @@ export class RoomSession implements SpeechSink {
                 segments,
                 window,
                 settled,
+                folded,
                 keys,
               );
         if (segments.length) this.notesReadUpTo.set(itemId, segments[segments.length - 1].ts);
         console.log(
-          `[agent] notes for ${itemId ?? "off-agenda"}: ${window.length} of ${segments.length} lines${settled.length ? `, ${settled.length} topics settled` : ""}${tidy ? ", whole meeting" : ""} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
+          `[agent] notes for ${itemId ?? "off-agenda"}: ${window.length} of ${segments.length} lines${settled.length ? `, ${settled.length} topics settled` : ""}${folded.length ? `, ${folded.length} long topics folded` : ""}${tidy ? ", whole meeting" : ""} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
         );
         if (this.notesFailing.delete(itemId)) {
           if (!this.notesFailing.size) this.notesWhy = null;
@@ -1124,22 +1127,25 @@ export class RoomSession implements SpeechSink {
   }
 
   /** Saves a notes run: the topics and notes it wrote, with the settled topics and their notes
-   *  carried over as they were. `window` is what the run read; draft lines index into it. */
+   *  carried over as they were. `window` is what the run read; draft lines index into it.
+   *  `folded`: long topics still going, each with the older lines the run didn't read. */
   private saveNotes(
     itemId: string | null,
     draft: ItemNotesDraft,
     segments: Segment[],
     window: Segment[],
     settled: Discussion[],
+    folded: Discussion[],
     keys: Array<{ id: string; key: string }>,
   ): Note[] {
-    const byKey = new Map(settled.map((d, i) => [`T${i + 1}`, d]));
+    const byKey = new Map([...settled, ...folded].map((d, i) => [`T${i + 1}`, d]));
     const back = new Set<string>();
     const fresh: DraftDiscussion[] = draft.discussions.map(({ segmentIndexes, picksUp, ...d }) => {
       const lines = segmentIndexes.map((i) => window[i].id);
       const was = picksUp ? byKey.get(picksUp) : undefined;
       if (!was || back.has(was.id)) return { ...d, segmentIds: lines };
-      // The talk went back to a settled topic: it carries on under its id, earlier lines and all.
+      // The talk went back to a settled topic, or carried on a long one: it goes on under its id,
+      // earlier lines and all.
       back.add(was.id);
       const spoke = new Set(d.positions.map((p) => p.speaker));
       return {
@@ -1149,7 +1155,8 @@ export class RoomSession implements SpeechSink {
         positions: [...was.positions.filter((p) => !spoke.has(p.speaker)), ...d.positions],
       };
     });
-    const kept: DraftDiscussion[] = settled
+    // A long topic the model didn't carry on keeps its older lines; the recent ones went where it put them.
+    const kept: DraftDiscussion[] = [...settled, ...folded]
       .filter((d) => !back.has(d.id))
       .map((d) => ({ id: d.id, topic: d.topic, positions: d.positions, outcome: d.outcome, segmentIds: d.segmentIds, continuesId: d.continues?.id ?? null }));
     // Topics in the order they came up.
