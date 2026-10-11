@@ -330,6 +330,8 @@ export class RoomSession implements SpeechSink {
     takenBy: string;
     /** Pasted or dropped: nobody's shared screen. */
     pasted?: boolean;
+    /** What they typed with it. */
+    line?: string | null;
   }) {
     const at = Math.min(Math.max(snap.at || Date.now(), this.meetingStartedAt), Date.now());
     const sharer = snap.pasted ? null : ([...this.participants.values()].find((p) => p.isSharing) ?? null);
@@ -338,6 +340,7 @@ export class RoomSession implements SpeechSink {
     const itemId = this.focusAt(at);
     this.db.addSnap({
       id,
+      roomId: this.roomId,
       meetingId: this.meetingId,
       itemId,
       ts: at,
@@ -350,6 +353,7 @@ export class RoomSession implements SpeechSink {
       sharerId: sharer?.id ?? null,
       sharerName: sharer?.name ?? null,
       noteId: null,
+      line: snap.line ?? null,
     });
     // Everyone sees what was just captured, unless the meeting has already moved on.
     if (itemId === this.focusItemId) this.stageSnapId = id;
@@ -404,6 +408,7 @@ export class RoomSession implements SpeechSink {
       const sharer = [...this.participants.values()].find((p) => p.isSharing) ?? null;
       this.db.addSnap({
         id,
+        roomId: this.roomId,
         meetingId: this.meetingId,
         itemId,
         ts: seen.at,

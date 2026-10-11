@@ -114,6 +114,8 @@ export function agentApi(deps: AgentDeps) {
   const snapInfo = (p: SnapRow, notes: Note[], baseUrl: string) => ({
     image_url: `${baseUrl}/api/snaps/${p.id}.${p.ext}?v=${p.version}`,
     caption: p.caption ?? undefined,
+    note: p.line ?? undefined,
+    text_on_screen: p.screenText ?? undefined,
     by: p.source === "agent" ? "the Stand agent (kept because it backs a note)" : p.takenBy,
     backs: p.noteId ? notes.find((n) => n.id === p.noteId)?.text : undefined,
     at: new Date(p.ts).toISOString(),

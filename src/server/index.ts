@@ -28,6 +28,7 @@ import { importFromLinear } from "./linear.ts";
 import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
+import { cleanLine, cleanScreenText, itemIn, saveCapture, spaceFeed } from "./captures.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile } from "./snaps.ts";
 import { toSpaceSummary } from "./spaces.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
@@ -204,12 +205,17 @@ const canChangeSnap = (userId: string, snap: { roomId: string; takenById: string
 
 // Taken in the meeting: the image is the raw body, at the size it was shared.
 // ?pasted=1 for a screenshot someone pasted or dropped in, which is nobody's shared screen.
+// ?to=space saves it straight to the space instead, between meetings, on ?item when given.
+// The line typed with it comes URI-encoded in the X-Stand-Line header.
 app.post(
   "/api/rooms/:id/snaps",
   express.raw({ type: () => true, limit: MAX_SNAP_BYTES }),
   route((req, res) => {
-    const s = live(req.params.id);
-    if (!s || !s.has(req.user!.id)) return res.status(409).json({ error: "Snaps are taken in a live meeting." });
+    const room = db.getRoom(req.params.id);
+    if (!room) return notFound(res, "Space not found");
+    const toSpace = req.query.to === "space";
+    const s = live(room.id);
+    if (!toSpace && (!s || !s.has(req.user!.id))) return res.status(409).json({ error: "Snaps are taken in a live meeting." });
     const buf = req.body as Buffer;
     const ext = Buffer.isBuffer(buf) ? imageType(buf) : null;
     if (!ext || ext === "gif") return res.status(400).json({ error: "Send a PNG, JPEG or WebP image." });
@@ -217,7 +223,13 @@ app.post(
     const key = typeof req.query.key === "string" && /^[A-Za-z0-9-]{8,64}$/.test(req.query.key) ? `${req.user!.id}:${req.query.key}` : null;
     const already = key ? snapKeys.get(key) : undefined;
     if (already && db.getSnap(already)) return res.json({ id: already, itemId: db.getSnap(already)?.itemId ?? null });
-    const id = s.addSnap({
+    let line: string | null = null;
+    try {
+      line = cleanLine(decodeURIComponent(String(req.get("x-stand-line") ?? "")));
+    } catch {
+      // A header that isn't URI-encoded: saved without the line rather than not at all.
+    }
+    const shot = {
       buf,
       ext,
       width: size(req.query.w),
@@ -225,8 +237,15 @@ app.post(
       at: Number(req.query.at) || Date.now(),
       takenById: req.user!.id,
       takenBy: req.user!.name,
-      pasted: req.query.pasted === "1",
-    });
+      line,
+    };
+    let id: string;
+    if (toSpace) {
+      db.touchMembership(room.id, req.user!.id);
+      // A meeting going on in the space sees it in its suggested agenda.
+      id = saveCapture(db, agent, { ...shot, roomId: room.id, itemId: itemIn(db, room.id, req.query.item) }, () => live(room.id)?.snapsChanged());
+      live(room.id)?.snapsChanged();
+    } else id = s!.addSnap({ ...shot, pasted: req.query.pasted === "1" });
     if (key) {
       snapKeys.set(key, id);
       setTimeout(() => snapKeys.delete(key), 10 * 60_000).unref?.();
@@ -257,6 +276,29 @@ app.put(
   }),
 );
 
+// What a snap says and where it sits: the line typed with it and the text read off it (whoever
+// took it), and its item (anyone in the space; that confirms an item the agent suggested).
+app.patch(
+  "/api/snaps/:id",
+  route((req, res) => {
+    const snap = db.getSnap(req.params.id);
+    if (!snap || !db.isMember(snap.roomId, req.user!.id)) return notFound(res);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (("line" in body || "screenText" in body) && snap.takenById !== req.user!.id)
+      return res.status(403).json({ error: "Only whoever took it can change what it says." });
+    let itemId: string | null | undefined;
+    if ("itemId" in body) {
+      itemId = body.itemId === null ? null : itemIn(db, snap.roomId, body.itemId);
+      if (body.itemId !== null && !itemId) return res.status(400).json({ error: "That item isn't in this space any more." });
+    }
+    if ("line" in body) db.setSnapLine(snap.id, cleanLine(body.line));
+    if ("screenText" in body) db.setSnapText(snap.id, cleanScreenText(body.screenText));
+    if (itemId !== undefined) db.setSnapItem(snap.id, itemId);
+    live(snap.roomId)?.snapsChanged();
+    res.json(linkSnaps([db.getSnap(snap.id)!], [], [])[0]);
+  }),
+);
+
 app.delete(
   "/api/snaps/:id",
   route((req, res) => {
@@ -284,10 +326,10 @@ app.post(
     if (!deleted || !db.isMember(deleted.snap.roomId, req.user!.id)) return res.status(404).json({ error: "It's been too long to bring it back." });
     clearTimeout(deleted.timer);
     deletedSnaps.delete(req.params.id);
-    const { roomId, version: _version, caption, ...row } = deleted.snap;
+    const { version: _version, caption, ...row } = deleted.snap;
     db.addSnap(row);
     if (caption) db.setSnapCaption(row.id, caption);
-    live(roomId)?.snapsChanged();
+    live(row.roomId)?.snapsChanged();
     res.json({ ok: true });
   }),
 );
@@ -816,6 +858,18 @@ app.get(
     });
     if (req.params.format === "json") return void res.json(feed);
     res.type("text/markdown; charset=utf-8").send(followUpsToMarkdown(feed));
+  }),
+);
+
+// The space page's feed: snaps saved to the space, meetings, agents' updates, and what's
+// decided and open across it.
+app.get(
+  "/api/rooms/:id/feed",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room) return notFound(res, "Space not found");
+    db.touchMembership(room.id, req.user!.id);
+    res.json(spaceFeed(db, room.id));
   }),
 );
 

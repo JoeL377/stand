@@ -82,6 +82,7 @@ test("get brings the snaps that go with a topic or a note", () => {
   const snap = (id: string) =>
     db.addSnap({
       id,
+      roomId: item.roomId,
       meetingId,
       itemId: item.id,
       ts: Date.now(),

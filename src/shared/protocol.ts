@@ -112,8 +112,11 @@ export interface Discussion {
  *  one (source "agent") only when the frame backs a decision or to-do it wrote. */
 export interface Snap {
   id: string;
-  meetingId: string;
+  /** Null for a snap saved straight to the space between meetings. */
+  meetingId: string | null;
   itemId: string | null;
+  /** The agent picked the item and nobody has confirmed it yet (shown with ✦). */
+  itemSuggested: boolean;
   ts: number;
   /** The image, at the size it was shared (cropped if someone cropped it). */
   url: string;
@@ -127,6 +130,10 @@ export interface Snap {
   sharerName: string | null;
   /** The agent's one line on what's on screen; null until it has looked. */
   caption: string | null;
+  /** The line the person typed with it, if any. */
+  line: string | null;
+  /** The text in the image, read on the Mac that took it; null until read, or when it wasn't. */
+  screenText: string | null;
   /** The to-do, decision or open question it backs: the agent's own snaps when
    *  kept, and any snap once the end-of-meeting recap has looked at it. */
   noteId: string | null;
@@ -175,9 +182,10 @@ export interface FollowUp extends Note {
 /** One thing the agent proposes for the agenda, with why. Nothing joins the
  *  agenda until someone adds it. */
 export interface UpNextSuggestion {
-  /** "note:<id>", "item:<id>" or "space:<id>" (open to-dos in another space); what add and dismiss refer to. */
+  /** "note:<id>", "item:<id>", "space:<id>" (open to-dos in another space) or "snap:<id>" (saved
+   *  to the space since the last meeting); what add and dismiss refer to. */
   key: string;
-  kind: "needs_people" | "question" | "todo";
+  kind: "needs_people" | "question" | "capture" | "todo";
   title: string;
   /** One line shown on hover, e.g. "Open question from Thu 9 Oct". */
   reason: string;
@@ -392,6 +400,28 @@ export interface MeetingRecap {
 }
 
 /** One space (a room) as the home page lists it. */
+/** The space page's feed: what came into the space, newest first, and where it stands. */
+export interface SpaceFeed {
+  /** Snaps saved straight to the space, newest first. */
+  captures: Snap[];
+  /** Meetings that ended, newest first, each as one row. */
+  meetings: Array<{
+    id: string;
+    startedAt: number;
+    endedAt: number;
+    summary: string | null;
+    todos: number;
+    decided: number;
+    open: number;
+  }>;
+  /** What agents and people reported through the MCP, newest first. */
+  updates: ItemUpdate[];
+  /** Decisions from the space's meetings, newest first. */
+  decided: Note[];
+  /** Open questions from its latest meeting with notes. */
+  open: Note[];
+}
+
 export interface SpaceSummary {
   id: string;
   name: string;
