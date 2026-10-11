@@ -73,10 +73,6 @@
         top: auto;
         bottom: 0;
       }
-      /* The bar already says which space, and its field says the keys. */
-      body.fused .head {
-        display: none;
-      }
       @media (prefers-reduced-motion: no-preference) {
         #card {
           animation: in 0.16s cubic-bezier(0.23, 1, 0.32, 1) both;
@@ -113,26 +109,6 @@
             transform: translateY(4px);
           }
         }
-      }
-      .head {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin: 0 2px 6px;
-        color: #a5a5b3;
-        font-size: 11.5px;
-      }
-      .head b {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: #e8e8ee;
-        font-weight: 600;
-      }
-      .head .keys {
-        margin-left: auto;
-        flex: none;
       }
       #pins {
         display: flex;
@@ -300,9 +276,8 @@
     </style>
   </head>
   <body>
-    <div id="card" role="dialog" aria-labelledby="to">
+    <div id="card" role="dialog" aria-label="Note">
       <div id="form">
-        <div class="head"><span id="to">Note to <b id="space"></b></span><span class="keys">Enter saves · Esc</span></div>
         <div id="pins" role="list" aria-label="Snaps pinned to the note" hidden></div>
         <div class="row">
           <textarea id="text" rows="1" maxlength="2000" placeholder="Write or say a note…" aria-label="The note"></textarea>
@@ -367,7 +342,9 @@
           }),
         );
         const n = pins.length;
-        $("text").placeholder = n ? `Add a note about ${n === 1 ? "it" : "them"}, or just Enter` : "Write or say a note…";
+        // The bar says which space and the keys; away from the bar, the placeholder says the space.
+        const to = st && !document.body.classList.contains("fused") ? ` for ${st.space}` : "";
+        $("text").placeholder = n ? `Add a note about ${n === 1 ? "it" : "them"}, or just Enter` : `Write or say a note${to}…`;
         $("text").ariaLabel = n ? `A note about the ${n === 1 ? "snap" : `${n} snaps`}` : "The note";
         grow();
       }
@@ -377,8 +354,9 @@
         if (o.accent) document.documentElement.style.setProperty("--accent", o.accent);
         if (o.onAccent) document.documentElement.style.setProperty("--on-accent", o.onAccent);
         placed(o);
-        $("space").textContent = o.space;
+        $("card").ariaLabel = `Note to ${o.space}`;
         $("text").value = o.draft || "";
+        renderPins();
         $("say").title = `Say it (dictation: ${o.dictateKey})`;
         grow();
         $("text").focus();
@@ -391,6 +369,7 @@
       window.note.onFocus(() => $("text").focus());
       window.note.onPlace((o) => {
         placed(o);
+        renderPins();
         report();
       });
       window.note.onPins((list) => {
