@@ -64,21 +64,48 @@ export function initConxt(sql: DatabaseSync) {
 /** Called inside the same transaction that ends a meeting. No network or model call. */
 export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
   if (sql.prepare("SELECT 1 FROM conxt_deliveries WHERE meeting_id=?").get(meetingId)) return;
-  const row = sql.prepare(`SELECT m.id,m.room_id,m.started_at,r.name,c.id AS connection_id
+  const row = sql.prepare(`SELECT m.id,m.room_id,m.started_at,m.summary,m.synthesis,r.name,c.id AS connection_id
     FROM meetings m JOIN rooms r ON r.id=m.room_id JOIN conxt_meetings cm ON cm.meeting_id=m.id
     JOIN conxt_connections c ON c.id=cm.connection_id
     WHERE m.id=? AND m.ended_at IS NOT NULL AND c.enabled=1`).get(meetingId) as Row | undefined;
   if (!row) return;
-  const segments = sql.prepare(`SELECT speaker_name,kind,text,ts FROM segments
+  const segments = sql.prepare(`SELECT id,speaker_name,kind,text,ts FROM segments
     WHERE meeting_id=? ORDER BY ts,rowid`).all(meetingId) as Row[];
-  // Send exactly the recorded remarks, not generated notes or inferred decisions.
-  const content = segments.map(s => `[${new Date(s.ts as number).toISOString()}] ${s.speaker_name} (${s.kind}): ${s.text}`).join("\n");
+  // Canonical evidence stays separate from Stand's existing synthesis.
+  const canonical = (text: string) => text.replace(/\r\n?/g, "\n");
+  const content = segments.map(s => `[${new Date(s.ts as number).toISOString()}] ${s.speaker_name} (${s.kind}): ${canonical(s.text as string)}`).join("\n");
+  let cursor = 0;
+  const turns = segments.map(s => {
+    const prefix = `[${new Date(s.ts as number).toISOString()}] ${s.speaker_name} (${s.kind}): `;
+    const text = canonical(s.text as string);
+    const start = cursor + Array.from(prefix).length;
+    cursor = start + Array.from(text).length + 1;
+    return { id: s.id, speaker: s.speaker_name, text, start };
+  });
+  const byId = new Map(turns.map(t => [t.id, t]));
+  const notes = sql.prepare(`SELECT n.*,d.outcome,d.segment_ids_json FROM notes n
+    LEFT JOIN discussions d ON d.id=n.discussion_id AND d.meeting_id=n.meeting_id
+    WHERE n.meeting_id=? AND n.kind!='summary' ORDER BY n.ts,n.rowid`).all(meetingId) as Row[];
+  const items = notes.map(n => {
+    const ids: string[] = n.segment_ids_json ? JSON.parse(n.segment_ids_json as string) : [];
+    // Missing/stale/oversized citations are held, never manufactured or truncated.
+    const linked = ids.map(id => byId.get(id));
+    const grounded = linked.length > 0 && linked.length <= 32 && linked.every(t => t && t.text.trim() && t.text.length <= 12000);
+    return {
+      id: n.id, content: n.text,
+      primitive: n.kind === "action" ? "task" : n.kind,
+      disposition: n.kind === "question" || !grounded || (n.kind === "decision" && n.outcome !== "decided") ? "unresolved" : "settled",
+      evidence: grounded ? linked.map(t => ({ turn_id: t!.id, quote: t!.text })) : [],
+      owner: n.owner, completed: n.kind === "action" ? n.done_at != null : null,
+    };
+  });
   const instance = (sql.prepare("SELECT value FROM conxt_settings WHERE key='instance_id'").get() as Row).value;
   const id = randomUUID();
   const body: Record<string, unknown> = {
     id, external_id: `stand:${instance}:${meetingId}`,
     external_revision: "1", title: String(row.name).slice(0, 256), format: "txt", content,
     occurred_at: new Date(row.started_at as number).toISOString(), timezone: "UTC",
+    turns, synthesis: { version: 1, summary: row.summary, narrative: row.synthesis, items },
   };
   if (config.publicUrl) {
     try {
@@ -90,8 +117,9 @@ export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
   const revision = { ...body }; delete revision.id; delete revision.external_revision;
   body.external_revision = createHash("sha256").update(JSON.stringify(revision)).digest("hex");
   const size = Buffer.byteLength(content, "utf8");
-  const state = !content ? "skipped" : size > 250_000 ? "failed" : "queued";
-  const error = !content ? "No recorded transcript" : size > 250_000 ? "Transcript exceeds Conxt's 250 KB limit; nothing was truncated or sent" : null;
+  const oversized = size > 250_000 || Buffer.byteLength(JSON.stringify(body), "utf8") > 2_000_000 || items.length > 200 || turns.length > 10000;
+  const state = !content ? "skipped" : oversized ? "failed" : "queued";
+  const error = !content ? "No recorded transcript" : size > 250_000 ? "Transcript exceeds Conxt's 250 KB limit; nothing was truncated or sent" : oversized ? "Meeting exceeds Conxt ingestion limits; nothing was truncated or sent" : null;
   sql.prepare(`INSERT OR IGNORE INTO conxt_deliveries
     (id,connection_id,meeting_id,payload,state,error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`)
     .run(id, row.connection_id as string, meetingId, JSON.stringify(body), state, error, Date.now(), Date.now());
@@ -258,7 +286,10 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
     const result = db.raw.prepare(`UPDATE conxt_deliveries SET state=CASE WHEN receipt_id IS NULL THEN 'queued' ELSE 'delivered' END,
       attempts=0,next_at=0,error=NULL WHERE id=? AND state='failed' AND remote_status IS NOT 'failed'
       AND connection_id IN (SELECT id FROM conxt_connections WHERE room_id=? AND enabled=1)
-      AND length(CAST(json_extract(payload,'$.content') AS BLOB))<=250000`)
+      AND length(CAST(json_extract(payload,'$.content') AS BLOB))<=250000
+      AND length(CAST(payload AS BLOB))<=2000000
+      AND COALESCE(json_array_length(payload,'$.synthesis.items'),0)<=200
+      AND COALESCE(json_array_length(payload,'$.turns'),0)<=10000`)
       .run(req.params.deliveryId as string, roomId(req));
     res.status(result.changes ? 200 : 409).json(result.changes ? { ok: true } : { error: "Delivery cannot be retried here; inspect its connection or Conxt processing status" });
   });

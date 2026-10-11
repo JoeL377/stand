@@ -206,3 +206,36 @@ test("remote processing failure remains visible and later Conxt retry is observe
   assert.equal(calls, 2);
   assert.equal(db.raw.prepare("SELECT state FROM conxt_deliveries").get()?.state, "ready"); db.raw.close();
 });
+
+
+test("finalized synthesis carries exact discussion evidence and holds tasks and unsupported decisions", () => {
+  const { db, owner, room } = setup();
+  connect(db, room.id, owner.id);
+  const meeting = db.startMeeting(room.id);
+  const first = db.addSegment({ meetingId: meeting.id, itemId: null, speakerId: "a", speakerName: "Alice", kind: "speech", text: "Launch Friday?", ts: meeting.startedAt });
+  const last = db.addSegment({ meetingId: meeting.id, itemId: null, speakerId: "b", speakerName: "Bob", kind: "speech", text: "😀 Agreed Monday instead.\r\nAlice will do QA.", ts: meeting.startedAt + 1 });
+  const [discussion] = db.replaceDiscussions(meeting.id, null, [{ topic: "Launch", outcome: "decided", positions: [], segmentIds: [first.id, last.id], continuesId: null }]);
+  db.replaceNotes(meeting.id, null, [
+    { kind: "decision", text: "Launch Monday.", owner: null, discussionId: discussion.id },
+    { kind: "action", text: "Run QA.", owner: "Alice", discussionId: discussion.id },
+    { kind: "decision", text: "Use Redis.", owner: null, discussionId: null },
+    { kind: "question", text: "What next?", owner: null, discussionId: discussion.id },
+  ]);
+  db.endMeeting(meeting.id, "Launch rescheduled.", "Monday after QA.");
+  const row = db.raw.prepare("SELECT payload FROM conxt_deliveries WHERE meeting_id=?").get(meeting.id)!;
+  const payload = JSON.parse(row.payload as string);
+  assert.equal(payload.synthesis.summary, "Launch rescheduled.");
+  assert.equal(payload.synthesis.narrative, "Monday after QA.");
+  assert.equal(payload.synthesis.items.length, 4);
+  const decision = payload.synthesis.items.find((i: { content: string }) => i.content === "Launch Monday.");
+  assert.equal(decision.disposition, "settled");
+  assert.deepEqual(decision.evidence.map((e: { turn_id: string }) => e.turn_id), [first.id, last.id]);
+  assert.equal(decision.evidence[1].quote, "😀 Agreed Monday instead.\nAlice will do QA.");
+  for (const e of decision.evidence) assert.ok(payload.content.includes(e.quote));
+  assert.equal(payload.synthesis.items.find((i: { primitive: string }) => i.primitive === "task").owner, "Alice");
+  assert.equal(payload.synthesis.items.find((i: { content: string }) => i.content === "Use Redis.").disposition, "unresolved");
+  assert.equal(payload.synthesis.items.find((i: { primitive: string }) => i.primitive === "question").disposition, "unresolved");
+  db.endMeeting(meeting.id, "Changed summary");
+  assert.equal(db.raw.prepare("SELECT payload FROM conxt_deliveries WHERE meeting_id=?").get(meeting.id)!.payload, row.payload);
+  db.raw.close();
+});

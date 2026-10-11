@@ -137,3 +137,19 @@ or provider credential is used.
 Before calling the integration live, verify both deployment statuses, an actual room
 owner connection, a real completed meeting, provider processing and a second user's
 Conxt review/retrieval. Back up each production database before additive schema rollout.
+
+
+## Producer synthesis (2026-10-11)
+
+Stand now owns synthesis for this integration. At finalization the immutable outbox
+captures existing structured notes, summary, optional narrative, and ordered transcript
+turns. Discussion-linked segments supply exact evidence. Turn starts use Unicode code
+point coordinates in the canonical transcript (not JavaScript UTF-16 offsets).
+Decisions outside a decided discussion and notes without bounded transcript links are
+held unresolved. No additional model call is made; summaries never replace evidence.
+Conxt stages evidence-linked settled knowledge for assessment and human review.
+Tasks/questions remain source context, with owner/completion snapshots; Stand remains
+the task authority. Later edits and task completion do not currently sync automatically.
+Old queued deliveries remain unchanged. Deploy the Conxt contract first, then Stand.
+A synthetic producer fixture was generated with actual finalization/outbox code and
+validated through Conxt's disposable PostgreSQL API/worker/review pipeline.
