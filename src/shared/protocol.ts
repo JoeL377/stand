@@ -275,6 +275,8 @@ export interface RoomState {
   hostAwayMs?: number | null;
   /** Items whose notes the agent couldn't write on its last try (null: General). */
   notesFailing?: Array<string | null>;
+  /** Why, when it's the account and not one run: its rate limit, or its credit ran out. */
+  notesTrouble?: "busy" | "credit" | null;
   /** The server's transcriber stopped: talk isn't being recorded until someone rejoins. */
   transcriptionDown?: boolean;
   /** While down: Stand is about to start it again by itself. */
