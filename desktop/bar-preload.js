@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("bar", {
   // How loud your mic is, 0 to 1, while you talk.
   onLevel: (fn) => ipcRenderer.on("bar:level", (_e, v) => fn(v)),
   press: (button) => ipcRenderer.send("bar:press", button),
+  // Dragging the bar by its note field: "start", "move" as the pointer moves, "end".
+  drag: (phase) => ipcRenderer.send("drag", phase),
   // The first frame of the bar arriving is on screen: it can be made visible.
   painted: () => ipcRenderer.send("bar:painted"),
   onVisible: (fn) => ipcRenderer.on("bar:visible", () => fn()),

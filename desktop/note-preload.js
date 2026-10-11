@@ -17,4 +17,6 @@ contextBridge.exposeInMainWorld("note", {
   // The snaps pinned to the note, [{id, thumb}], whenever they change.
   onPins: (fn) => ipcRenderer.on("note:pins", (_e, list) => fn(list)),
   unpin: (id) => ipcRenderer.send("note:unpin", id),
+  // Dragging the box (and the bar it hangs from): "start", "move" as the pointer moves, "end".
+  drag: (phase) => ipcRenderer.send("drag", phase),
 });

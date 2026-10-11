@@ -580,7 +580,33 @@
   // In a meeting the mic mutes; out of one it starts talking in the space (or joins whoever is).
   press($("mic"), () => (state?.rest ? "talk" : "mic"));
   press($("space"), "spaces");
-  press($("note"), "note");
+  // The note field fills the middle of the bar at rest, so it's also where people grab it:
+  // press and move drags the bar, a click opens the note.
+  $("note").addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const el = $("note");
+    el.setPointerCapture(e.pointerId);
+    const [x0, y0] = [e.screenX, e.screenY];
+    let dragging = false;
+    window.bar.drag("start");
+    const move = (m) => {
+      if (!dragging && Math.hypot(m.screenX - x0, m.screenY - y0) < 4) return;
+      dragging = true;
+      window.bar.drag("move");
+    };
+    const end = (u) => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", end);
+      el.removeEventListener("pointercancel", end);
+      window.bar.drag("end");
+      if (!dragging && u.type === "pointerup") window.bar.press("note");
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  });
+  $("note").addEventListener("click", (e) => e.detail === 0 && window.bar.press("note"));
   // Presses are taken over on pointerdown, so :active never applies: the give is set by hand.
   const up = () => document.querySelectorAll("button.down").forEach((b) => b.classList.remove("down"));
   document.addEventListener("pointerdown", (e) => e.button === 0 && e.target.closest?.("button")?.classList.add("down"), true);

@@ -1889,6 +1889,38 @@ function revealBar() {
 }
 /** The meeting whose bar has had its glow. */
 let pulsedFor = null;
+/** Dragged by hand, from the bar's note field or the note box, where macOS can't drag it
+ *  (they take clicks): the bar follows the pointer, and the box with it. On the Mac the box is
+ *  the bar's child window, so the two move in the same frame. Away from the bar, the box moves alone. */
+let dragging = null;
+function handDrag(sender, phase) {
+  const fromCard = Boolean(noteWin && !noteWin.isDestroyed() && sender === noteWin.webContents);
+  if (!fromCard && sender !== bar?.webContents) return;
+  if (phase === "start") {
+    const w = fromCard && !notePlaced?.fused ? noteWin : bar;
+    if (!w || w.isDestroyed() || !w.isVisible()) return void (dragging = null);
+    const [x, y] = w.getPosition();
+    dragging = { w, x, y, from: screen.getCursorScreenPoint(), moved: false };
+    return;
+  }
+  if (!dragging || dragging.w.isDestroyed()) return void (dragging = null);
+  const { w } = dragging;
+  if (phase === "move") {
+    const p = screen.getCursorScreenPoint();
+    w.setPosition(dragging.x + p.x - dragging.from.x, dragging.y + p.y - dragging.from.y);
+    dragging.moved = true;
+    if (w === bar && !noteTied) placeNote();
+    return;
+  }
+  // Let go: where the bar is now is where it stays, as after any drag.
+  if (dragging.moved && w === bar) {
+    const [x, y] = bar.getPosition();
+    fs.promises.writeFile(barFile(), JSON.stringify({ x, y: barList?.up ? y + barList.h : y })).catch(() => {});
+    placeNote();
+  }
+  dragging = null;
+}
+
 function hideBar() {
   untieNote();
   bar.setOpacity(0);
@@ -2023,6 +2055,7 @@ app.whenReady().then(async () => {
     bar.webContents.send("bar:level", Math.max(0, Math.min(1, v)));
   });
   ipcMain.on("bar:press", (e, button) => e.sender === bar?.webContents && void pressOnBar(button));
+  ipcMain.on("drag", (e, phase) => handDrag(e.sender, phase));
   ipcMain.on("bar:painted", (e) => e.sender === bar?.webContents && revealBar());
   ipcMain.handle(
     "bar:size",

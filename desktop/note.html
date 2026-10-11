@@ -426,6 +426,32 @@
         });
       });
       window.note.onFocus(() => $("text").focus());
+      // The box and the bar are one piece, so it drags by anything that isn't for typing or
+      // pressing: its edges, the snap. The keyboard stays in the note.
+      $("card").addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || e.target.closest("textarea, button")) return;
+        e.preventDefault();
+        const el = $("card");
+        el.setPointerCapture(e.pointerId);
+        const [x0, y0] = [e.screenX, e.screenY];
+        let dragging = false;
+        window.note.drag("start");
+        const move = (m) => {
+          if (!dragging && Math.hypot(m.screenX - x0, m.screenY - y0) < 4) return;
+          dragging = true;
+          window.note.drag("move");
+        };
+        const end = () => {
+          el.removeEventListener("pointermove", move);
+          el.removeEventListener("pointerup", end);
+          el.removeEventListener("pointercancel", end);
+          window.note.drag("end");
+          $("text").focus();
+        };
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", end);
+        el.addEventListener("pointercancel", end);
+      });
       window.note.onPlace((o) => {
         placed(o);
         renderPins();
