@@ -8,7 +8,7 @@ export type SnapReport = { title: string; body: string; snapId?: string } | null
 export type BarTodo = { id: string; text: string; owner: string | null; itemKey: string | null };
 
 /** What the app's floating bar shows during a meeting. */
-export type MeetingBar = { space: string; itemKey: string | null; item: string | null; micOn: boolean; todos: BarTodo[] };
+export type MeetingBar = { space: string; itemKey: string | null; item: string | null; micOn: boolean; sharing?: boolean; todos: BarTodo[] };
 
 type Bridge = {
   /** The snap toolbar: the screen, a window or part of it. */
