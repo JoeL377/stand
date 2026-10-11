@@ -206,7 +206,8 @@ export function Stage(props: {
   }, [state.snaps, props.participantId]);
   const cropSnap = cropId ? state.snaps.find((s) => s.id === cropId) : undefined;
   const viewSnap = viewId ? state.snaps.find((s) => s.id === viewId) : undefined;
-  // The snap on everyone's middle screen. The host or whoever took it can take it down.
+  // The latest snap, small in the corner of everyone's middle screen. Each person can expand
+  // it for themselves; the host or whoever took it can take it down for everyone.
   const stageSnap = state.stageSnapId ? state.snaps.find((s) => s.id === state.stageSnapId) : undefined;
   const onStage = stageSnap && {
     snap: stageSnap,
@@ -292,14 +293,12 @@ export function Stage(props: {
           <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
         )}
         {viewSnap && <SnapGallery snaps={[viewSnap]} me={props.participantId} isHost={canSteer} onClose={() => setViewId(null)} />}
-        {/* While a screen is shared, the share keeps the middle and the snap waits in the corner. */}
-        {onStage && showingScreen && <StageSnap {...onStage} small />}
+        {/* Whatever is on the middle screen keeps it; the snap sits on top in the corner. */}
+        {onStage && <StageSnap key={onStage.snap.id} {...onStage} />}
         {localScreen ? (
           <Video stream={localScreen} label={`You're sharing your screen · ${SNAP_KEYS_WORDS} snaps it`} />
         ) : remoteScreen ? (
           <RemoteVideo screen={remoteScreen} label={`${state.participants.find((p) => p.id === remoteScreen.participantId)?.name ?? "Someone"}'s screen`} />
-        ) : onStage ? (
-          <StageSnap {...onStage} />
         ) : sharer && !props.livekit ? (
           <div className="screen-empty">
             <p>
@@ -441,32 +440,38 @@ export function Avatar({ id, name, picture, size = 44 }: { id: string; name: str
   );
 }
 
-/** A snap on the middle screen: the picture, who took it and the agent's caption. Clicking
- *  it opens it full size; ✕ takes it off everyone's screen, and it stays on the item. */
-function StageSnap(props: { snap: Snap; me: string; canClose: boolean; small?: boolean; onOpen: () => void; onClose: () => void }) {
+/** The latest snap, small in the top right corner of the middle screen: the picture, who
+ *  took it and the agent's caption. Expand (or a click on it) opens it full size for you
+ *  only; ✕ takes it off everyone's screen, and it stays on the item. */
+function StageSnap(props: { snap: Snap; me: string; canClose: boolean; onOpen: () => void; onClose: () => void }) {
   const { snap } = props;
   const who = snap.takenById === props.me ? "You" : snap.takenBy.split(" ")[0];
   return (
-    <figure className={props.small ? "stage-snap small" : "stage-snap"}>
-      <button className="stage-snap-img" onClick={props.onOpen} title="See it full size">
+    <figure className="stage-snap">
+      <button className="stage-snap-img" onClick={props.onOpen} title="Expand">
         <img src={snap.url} alt={snap.caption ?? `${who} snapped this`} />
       </button>
-      {!props.small && (
-        <figcaption>
-          <CameraIcon />
-          <span className="stage-snap-who">{who} snapped this</span>
-          {snap.caption && (
-            <span className="stage-snap-cap" title={snap.caption}>
-              <span className="agent-mark">✦</span> {snap.caption}
-            </span>
-          )}
-        </figcaption>
-      )}
-      {props.canClose && (
-        <button className="stage-snap-close" onClick={props.onClose} title="Take it off everyone's screen. It stays on the item." aria-label="Take the snap off the screen">
-          ✕
+      <figcaption title={snap.caption ?? undefined}>
+        <CameraIcon />
+        <span className="stage-snap-who">{who}</span>
+        {snap.caption && (
+          <span className="stage-snap-cap">
+            <span className="agent-mark">✦</span> {snap.caption}
+          </span>
+        )}
+      </figcaption>
+      <span className="stage-snap-tools">
+        <button onClick={props.onOpen} title="Expand it, just for you" aria-label="Expand the snap">
+          <svg viewBox="0 0 24 24" aria-hidden>
+            <path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7" />
+          </svg>
         </button>
-      )}
+        {props.canClose && (
+          <button onClick={props.onClose} title="Take it off everyone's screen. It stays on the item." aria-label="Take the snap off the screen">
+            ✕
+          </button>
+        )}
+      </span>
     </figure>
   );
 }
