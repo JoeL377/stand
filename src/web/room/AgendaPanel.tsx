@@ -499,11 +499,9 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
   const provenance = `Drafted by the agent from ${plural(upNext.meetingsUsed, "meeting")} and ${plural(upNext.updatesUsed, "update")}${
     upNext.polishing ? " · Claude is tidying it now" : upNext.polishedAt ? ` · tidied by Claude ${agoText(upNext.polishedAt)}` : ""
   }`;
-  const row = (s: UpNextSuggestion) => (
-    <li key={s.key} className="upnext-row">
-      <span className="upnext-mark" aria-hidden>
-        ✦
-      </span>
+  // Rows sit under the header's ✦, so they don't repeat it.
+  const row = (s: UpNextSuggestion, isParked = false) => (
+    <li key={s.key} className={isParked ? "upnext-row parked" : "upnext-row"}>
       <span className="upnext-title">{s.title}</span>
       <span className="upnext-reason" role="tooltip">
         {s.reason}
@@ -550,18 +548,18 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
     <section className="upnext">
       <div className="upnext-head">
         <button className="upnext-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)} title={provenance}>
+          <span className={open ? "chev open" : "chev"} aria-hidden>
+            <ChevronIcon />
+          </span>
           <span className={upNext.polishing ? "upnext-mark pulsing" : "upnext-mark"} aria-hidden>
             ✦
           </span>
           <span>{suggestions.length ? `Suggested · ${suggestions.length}` : "Suggested"}</span>
           {upNext.total > 0 && (
             <span className="upnext-progress" title="To-dos from earlier meetings that are done now">
-              {upNext.closed} of {upNext.total} to-dos done
+              {upNext.closed} of {upNext.total} done
             </span>
           )}
-          <span className={open ? "chev open" : "chev"} aria-hidden>
-            <ChevronIcon />
-          </span>
         </button>
         {canSteer && suggestions.length > 1 && (
           <span className="pop-wrap" ref={menuRef}>
@@ -586,15 +584,22 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
       </div>
       {open && (
         <ul className="upnext-list">
-          {suggestions.map(row)}
+          {suggestions.map((s) => row(s))}
           {parked.length > 0 && (
             <li className="upnext-parked">
-              <button className="link small" onClick={() => setShowParked((p) => !p)}>
-                {showParked ? "Hide parked" : `Parked (${parked.length})`}
+              <button
+                aria-expanded={showParked}
+                title="Quiet for two meetings. Still addable."
+                onClick={() => setShowParked((p) => !p)}
+              >
+                Parked · {parked.length}
+                <span className={showParked ? "chev open" : "chev"} aria-hidden>
+                  <ChevronIcon />
+                </span>
               </button>
             </li>
           )}
-          {showParked && parked.map(row)}
+          {showParked && parked.map((s) => row(s, true))}
           {!suggestions.length && !parked.length && (
             <li className="upnext-none">Nothing waiting. The agent adds things here as work comes in.</li>
           )}
