@@ -26,6 +26,11 @@
   --stage: #0d0d0f;
   --radius: 8px;
   --shadow: 0 1px 2px rgb(15 15 15 / 0.04), 0 6px 20px rgb(15 15 15 / 0.06);
+  /* Motion: one strong ease-out for things arriving and leaving, short durations, and
+     press feedback that answers before the click completes. Colour-only hovers keep plain ease. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --dur-press: 160ms;
+  --dur-ui: 200ms;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -271,6 +276,7 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); }
   animation: pop 0.2s ease-out;
 }
 @keyframes pop { from { transform: translateY(-4px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } }
 .agent-mark { color: var(--accent); font-size: 18px; }
 .suggestion-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .suggestion-actions { display: flex; gap: 6px; }
@@ -452,7 +458,13 @@ img.avatar { object-fit: cover; }
 a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 .person-action { font-size: 11px; }
 .focus-desc { max-height: 40vh; overflow-y: auto; text-align: left; }
+/* Floats over the top of the screen, so the slide or shared screen under it doesn't move. */
 .nudge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 6;
+  max-width: calc(100% - 68px);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -460,8 +472,11 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
   padding: 6px 10px;
   border-radius: 8px;
   background: var(--accent-soft);
-  animation: pop 0.2s ease-out;
+  transition: opacity var(--dur-ui) var(--ease-out), transform var(--dur-ui) var(--ease-out);
 }
+@starting-style { .nudge { opacity: 0; transform: translateY(-6px); } }
+/* The latest snap sits in the top right corner: the nudge stops short of it. */
+.screen:has(.stage-snap) .nudge { max-width: calc(100% - 320px); }
 .nudge .agent-mark { font-size: 14px; }
 .nudge-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -537,8 +552,13 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 .seg-pick button { padding: 5px 9px; font-size: 12px; }
 .seg-pick button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .row.end { justify-content: flex-end; }
-.dialog-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; }
-.dialog { background: var(--panel); border-radius: 12px; padding: 20px; width: min(640px, 100%); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 40px rgb(0 0 0 / 0.3); }
+.dialog-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; transition: background-color 180ms ease-out; }
+.dialog { background: var(--panel); border-radius: 12px; padding: 20px; width: min(640px, 100%); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 40px rgb(0 0 0 / 0.3); transition: opacity var(--dur-ui) var(--ease-out), transform var(--dur-ui) var(--ease-out); }
+/* The screen dims and the dialog settles in, rather than both appearing in one frame. */
+@starting-style {
+  .dialog-backdrop { background-color: rgb(0 0 0 / 0); }
+  .dialog { opacity: 0; transform: scale(0.97); }
+}
 .dialog textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 @media (max-width: 900px) {
   .editor-body { grid-template-columns: 1fr; grid-auto-rows: auto; overflow: auto; }
@@ -552,7 +572,18 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
    Look: Notion-calm pages, Zoom-dark meeting room.
    ====================================================================== */
 ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
-button { transition: background 0.12s, border-color 0.12s, color 0.12s; font-weight: 500; }
+button { transition: background 0.12s, border-color 0.12s, color 0.12s, scale var(--dur-press) var(--ease-out); font-weight: 500; }
+/* Pressed: buttons give a little as the pointer goes down; full-width rows darken instead. */
+:is(.control, .app-snap, .snap-btn, .lobby-join, button.primary, .icon-btn, .toast-action, .stage-snap-tools button, .stage-tab button, .slide-bar .ghost):not(:disabled):active { scale: 0.97; }
+.agenda .item:has(> .item-main:active:not(:disabled)) { background: color-mix(in srgb, var(--text) 12%, transparent); }
+/* Text buttons and small marks dim instead. */
+:is(button.link, .toast-x, button.badge):not(:disabled):active { opacity: 0.6; }
+/* Reduce Motion: the press darkens instead of giving. */
+@media (prefers-reduced-motion: reduce) {
+  :is(.control, .app-snap, .snap-btn, .lobby-join, button.primary, .icon-btn, .toast-action, .stage-snap-tools button, .stage-tab button, .slide-bar .ghost):not(:disabled):active { scale: none; filter: brightness(0.9); }
+}
+/* A card whose rows are gliding keeps them inside its edge. */
+.tk-card.gliding { overflow: clip; }
 button:hover:not(:disabled) { background: var(--hover); }
 button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, black); }
 button.link:hover:not(:disabled) { background: none; text-decoration: underline; }
@@ -629,7 +660,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .screen { border-radius: 14px; background: var(--stage); box-shadow: inset 0 0 0 1px var(--line); }
 .slide-bar .ghost { background: rgb(255 255 255 / 0.06); border-color: transparent; border-radius: 999px; }
 .slide-bar .ghost:hover:not(:disabled) { background: rgb(255 255 255 / 0.14); }
-.nudge { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+.nudge { background: var(--panel-2); box-shadow: 0 6px 20px rgb(0 0 0 / 0.35), inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 
 /* Participant tiles, like a call's gallery strip. */
 .people { gap: 8px; padding: 0 0 2px; flex-wrap: nowrap; overflow-x: auto; }
@@ -643,11 +674,14 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   display: grid;
   place-items: center;
   box-shadow: inset 0 0 0 2px transparent;
-  transition: box-shadow 0.15s;
+  /* Snaps on when someone talks, eases off, so short pauses don't flicker it. */
+  transition: box-shadow 300ms ease-out;
 }
+.person.talking { transition-duration: 80ms; }
 .person .avatar { width: 44px !important; height: 44px !important; box-shadow: none; }
 .person.talking { box-shadow: inset 0 0 0 2px var(--ok); }
-.person.talking .avatar { box-shadow: 0 0 0 4px rgb(22 163 74 / 0.25); }
+.person.talking .avatar { box-shadow: 0 0 0 4px rgb(22 163 74 / 0.25); transition-duration: 80ms; }
+.person .avatar { transition: box-shadow 300ms ease-out; }
 .person-label {
   position: absolute;
   left: 6px;
@@ -789,7 +823,8 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   color: var(--text);
   text-align: left;
 }
-.focus-notes-head .chev { margin-left: auto; color: var(--muted); }
+.focus-notes-head .chev { margin-left: auto; display: inline-flex; color: var(--muted); transition: transform 150ms var(--ease-out); }
+.focus-notes-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .focus-notes-body { padding: 0 12px 10px; font-size: 13px; }
 .side-notes-empty { margin: 14px 16px 0; font-size: 13px; color: var(--muted); }
 .focus-notes-body .note-summary { margin: 0 0 6px; }
@@ -840,7 +875,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .agenda .item-tools .icon.on { color: var(--accent); }
 .agenda .item-tools .icon.spacer { pointer-events: none; }
 .agenda .item-tools { padding-right: 4px; }
-.agenda .deck-toggle .chev { width: 12px; height: 12px; display: inline-flex; transition: transform 0.12s; }
+.agenda .deck-toggle .chev { width: 12px; height: 12px; display: inline-flex; transition: transform 150ms var(--ease-out); }
 .agenda .deck-toggle .chev.open { transform: rotate(90deg); }
 .add-head .icon, .upload-note .icon { display: inline-flex; align-items: center; }
 .pinned-note svg { vertical-align: -2px; }
@@ -948,7 +983,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .disc-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
 .disc-now { color: var(--accent); font-weight: 600; }
 .disc.title-only .disc-head { align-items: center; }
-.disc-chevron { flex: none; color: var(--muted); transition: transform 0.15s; }
+.disc-chevron { flex: none; color: var(--muted); transition: transform 150ms var(--ease-out); }
 .disc[open] .disc-chevron { transform: rotate(90deg); }
 .disc-overview { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .disc-overview .rc-outcome { margin-bottom: 4px; }
@@ -1000,8 +1035,21 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .live-details { border-top: 1px solid var(--line); padding-top: 8px; }
 .live-details > summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
 .live-details > summary::-webkit-details-marker { display: none; }
-.live-details > summary::before { content: "▸ "; }
-.live-details[open] > summary::before { content: "▾ "; }
+/* The same turning chevron as topics and decks. */
+.live-details > summary::before, .rc-topic > summary::before {
+  content: "";
+  flex: none;
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 150ms var(--ease-out);
+}
+.live-details[open] > summary::before, .rc-topic[open] > summary::before { transform: rotate(90deg); }
 .live-details > summary:hover { color: var(--text); }
 .live-gist { margin: 8px 0 0; color: var(--muted); }
 .live-details .discussions.compact { margin: 8px 0 0; }
@@ -1039,8 +1087,6 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   padding: 8px 10px; margin: 0 -10px; border-radius: 8px;
 }
 .rc-topic > summary::-webkit-details-marker { display: none; }
-.rc-topic > summary::before { content: "▸"; color: var(--muted); font-size: 11px; width: 10px; }
-.rc-topic[open] > summary::before { content: "▾"; }
 .rc-topic > summary:hover { background: var(--panel-2); }
 .rc-topic-title { font-weight: 500; }
 .rc-people { font-size: 12px; color: var(--muted); margin-left: auto; }
@@ -1313,7 +1359,9 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .disc-pills { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .disc-pill { min-height: 0; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text); font-size: 12px; cursor: pointer; }
 .disc-pill:hover { border-color: var(--muted); background: var(--hover); }
-.tk.action.flash { border-radius: 6px; background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); transition: background 0.3s, box-shadow 0.3s; }
+.tk.action.flash { border-radius: 6px; animation: note-fresh 2.4s ease-out; }
+/* A ticked to-do fades before it folds into "n done", rather than vanishing. */
+.tk.action.folding { opacity: 0; transition: opacity var(--dur-ui) ease-out; }
 .remarks-pop { width: min(520px, 100%); max-height: 80vh; }
 .remarks-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .remarks-pop-body { overflow-y: auto; }
@@ -1341,7 +1389,7 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 @keyframes upnext-pulse { 50% { opacity: 0.35; transform: scale(0.8); } }
 @media (prefers-reduced-motion: reduce) { .upnext-mark.pulsing { animation: none; opacity: 0.5; } }
 .upnext-progress { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 11.5px; white-space: nowrap; }
-.upnext .chev { display: inline-flex; flex: none; width: 12px; height: 12px; color: var(--muted); transition: transform 0.12s; }
+.upnext .chev { display: inline-flex; flex: none; width: 12px; height: 12px; color: var(--muted); transition: transform 150ms var(--ease-out); }
 .upnext .chev.open { transform: rotate(90deg); }
 .upnext-more { width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
 .upnext-menu { left: auto; right: 0; width: 220px; }
@@ -1368,12 +1416,14 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 
 /* ---- snaps ---------------------------------------------------------------- */
 .screen { position: relative; }
-.snap-btn { position: absolute; top: 12px; right: 12px; z-index: 5; width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: rgb(0 0 0 / 0.55); color: #fff; cursor: pointer; opacity: 0; transition: opacity 0.15s; box-shadow: none; }
+.snap-btn { position: absolute; top: 12px; right: 12px; z-index: 5; width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: rgb(0 0 0 / 0.55); color: #fff; cursor: pointer; opacity: 0; transition: opacity 0.15s, scale var(--dur-press) var(--ease-out); box-shadow: none; }
 .screen:hover .snap-btn, .snap-btn:focus-visible { opacity: 1; }
 .snap-btn:hover { background: rgb(0 0 0 / 0.75); }
-.snap-flash { position: absolute; inset: 0; z-index: 4; border-radius: inherit; background: #fff; pointer-events: none; animation: snap-flash 0.35s ease-out forwards; }
-@keyframes snap-flash { from { opacity: 0.7; } to { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .snap-flash { animation-duration: 0.01s; } }
+.snap-flash { position: absolute; inset: 0; z-index: 4; border-radius: inherit; background: #fff; pointer-events: none; animation: snap-flash 220ms var(--ease-out) forwards; }
+@keyframes snap-flash { from { opacity: 0.45; } to { opacity: 0; } }
+/* Gentler, not gone: the stage still confirms the snap. */
+@keyframes snap-flash-soft { from { opacity: 0.2; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .snap-flash { animation-name: snap-flash-soft; animation-duration: 200ms; } }
 .snap-toasts { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
 .snap-toast { pointer-events: auto; display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 999px; background: rgb(20 20 22 / 0.88); color: #fff; font-size: 12.5px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.3); white-space: nowrap; }
 .snap-toast .link { color: #8fb6ff; font-size: 12.5px; }
@@ -1451,7 +1501,7 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .app-snap svg { width: 16px; height: 16px; }
 
 /* ---- the latest snap, small in the corner of the middle screen ---- */
-.stage-snap { position: absolute; top: 12px; right: 12px; z-index: 5; width: 240px; margin: 0; border-radius: 10px; overflow: hidden; background: #111216; box-shadow: 0 8px 24px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.14); animation: stage-snap-in 0.25s ease-out, stage-snap-ring 1.6s 0.25s ease-out; }
+.stage-snap { position: absolute; top: 12px; right: 12px; z-index: 5; width: 240px; margin: 0; border-radius: 10px; overflow: hidden; background: #111216; box-shadow: 0 8px 24px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.14); transform-origin: top right; animation: stage-snap-in var(--dur-ui) var(--ease-out), stage-snap-ring 1.6s var(--dur-ui) ease-out; }
 /* In the browser the screen's own snap button lives in that corner. */
 .screen:has(.snap-btn) .stage-snap { right: 56px; }
 .stage-snap-img { display: block; width: 100%; padding: 0; border: 0; border-radius: 0; background: #000; box-shadow: none; cursor: zoom-in; }
@@ -1468,7 +1518,8 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 @keyframes stage-snap-in { from { opacity: 0; transform: translateY(-6px) scale(0.96); } }
 /* A blue ring when it arrives, so a new snap gets noticed without taking the screen. */
 @keyframes stage-snap-ring { from { box-shadow: 0 8px 24px rgb(0 0 0 / 0.5), 0 0 0 2px var(--accent), 0 0 0 6px rgb(45 108 223 / 0.35); } }
-@media (prefers-reduced-motion: reduce) { .stage-snap { animation: none; } }
+/* Reduce Motion: it still fades in, without moving or ringing. */
+@media (prefers-reduced-motion: reduce) { .stage-snap { animation: fade-in var(--dur-ui) var(--ease-out); } }
 /* ---- snaps you expanded, as tabs beside the main screen ---- */
 .stage-tabs { margin-left: auto; display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
 /* The tabs need the room more; the Host tag on the person shows who hosts. */
@@ -1494,14 +1545,19 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 
 /* ---- interaction pass: toasts, pills, shortcuts, fresh notes ---- */
 .toasts { position: fixed; left: 50%; bottom: 78px; transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: calc(100vw - 32px); pointer-events: none; }
-.toast { pointer-events: auto; display: inline-flex; align-items: center; gap: 12px; max-width: 560px; padding: 8px 10px 8px 14px; border-radius: 10px; background: rgb(24 24 27 / 0.94); color: #fff; font-size: 13px; line-height: 1.4; box-shadow: 0 6px 20px rgb(0 0 0 / 0.3); animation: pop 0.15s ease-out; }
+.toast { pointer-events: auto; display: inline-flex; align-items: center; gap: 12px; max-width: 560px; padding: 8px 10px 8px 14px; border-radius: 10px; background: rgb(24 24 27 / 0.94); color: #fff; font-size: 13px; line-height: 1.4; box-shadow: 0 6px 20px rgb(0 0 0 / 0.3); transition: opacity 150ms ease-out, transform var(--dur-ui) var(--ease-out); }
+@starting-style { .toast { opacity: 0; transform: translateY(8px); } }
+.toast.leaving { opacity: 0; transform: translateY(6px) scale(0.98); pointer-events: none; transition-duration: 160ms; }
 .toast.error { background: #b42318; }
 .toast-text { min-width: 0; }
 .toast-action { flex: none; border: 0; background: none; padding: 2px 4px; color: #8fb6ff; font: inherit; font-weight: 600; cursor: pointer; }
 .toast.error .toast-action { color: #fff; text-decoration: underline; }
 .toast-x { flex: none; border: 0; background: none; padding: 2px 4px; color: inherit; opacity: 0.6; font-size: 12px; line-height: 1; cursor: pointer; }
 .toast-x:hover { opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+/* Reduce Motion: things still fade in and out, but nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .toast, .toast.leaving, .nudge, .dialog, .stage-snap { transform: none !important; }
+}
 
 .topbar .muted-pill { display: inline-flex; align-items: center; gap: 4px; border: 0; cursor: pointer; color: var(--warn-text); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .topbar .muted-pill svg { width: 12px; height: 12px; }
@@ -1512,7 +1568,7 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .demo-mode-pop li + li { margin-top: 4px; }
 .keys-btn { width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 13px; font-weight: 600; }
 
-.shortcuts { position: fixed; top: 50px; right: 16px; z-index: 40; width: 380px; max-width: calc(100vw - 32px); padding: 12px 14px 14px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / 0.3); animation: pop 0.12s ease-out; }
+.shortcuts { position: fixed; top: 50px; right: 16px; z-index: 40; width: 380px; max-width: calc(100vw - 32px); padding: 12px 14px 14px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / 0.3); }
 .shortcuts-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
 .shortcuts .toast-x { color: var(--muted); }
 .shortcuts dl { margin: 10px 0 0; display: grid; gap: 8px; }
@@ -1586,3 +1642,25 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
   .agenda.rail { flex-direction: row; justify-content: flex-start; min-height: 44px; padding: 6px 8px; overflow: visible; }
   .rail-items { flex-direction: row; flex-wrap: wrap; }
 }
+
+/* ---- meeting states (connection, notes, recording, hosting) ---- */
+/* The pulsing dots hold still for people who turn motion down. */
+@media (prefers-reduced-motion: reduce) {
+  .side-toggle-dot,
+  .side-sliver-row.live .side-sliver-dot { animation: none; }
+}
+.loading:has(> .link) { align-content: center; gap: 12px; text-align: center; }
+.conn-pill .link { margin-left: 8px; font-size: inherit; color: inherit; text-decoration: underline; }
+.notes-busy-dot { flex: none; align-self: center; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); opacity: 0.7; }
+.notes-paused { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--text); font-size: 12.5px; }
+.pinned-badge { display: inline-flex; align-items: center; gap: 6px; }
+.pinned-badge .link { font-size: 11.5px; }
+.host-note .link { margin-left: 8px; font-size: inherit; }
+.note-form-hint { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+.not-recorded-flag { position: absolute; top: 6px; left: 6px; padding: 1px 7px; border-radius: 6px; background: rgb(0 0 0 / 0.55); color: #ff9a9a; font-size: 11px; font-weight: 500; }
+.lobby-wrapping { margin: 6px 0 0; font-size: 13px; }
+
+/* The item changed under you (someone else switched): the new one fades in so the change
+   registers. The host's own switches stay instant. */
+.focus-card.arrive, .slide-stage.arrive { animation: fade-up 150ms var(--ease-out); }
+@keyframes fade-up { from { opacity: 0.4; } }

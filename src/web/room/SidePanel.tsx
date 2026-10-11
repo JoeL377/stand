@@ -6,6 +6,7 @@ import { FollowUpList } from "../FollowUps.tsx";
 import { LiveItemNotes, type NoteEditing } from "../Discussions.tsx";
 import { SnapsPill } from "../Snaps.tsx";
 import { toast, undoing } from "../Toasts.tsx";
+import { ChevronIcon } from "../icons.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -26,6 +27,8 @@ export function SidePanel(props: {
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
   const focusDiscussions = props.discussions.filter((d) => d.itemId === state.focusItemId);
   const notesUpdating = props.notesBusy.includes(state.focusItemId ?? "");
+  // The agent's last try at this item failed: it says so here until a later try works.
+  const notesFailed = (state.notesFailing ?? []).includes(state.focusItemId);
   // Action items about this item from earlier meetings, still open (or just checked off).
   const earlier = (state.followUps ?? []).filter((f) => f.itemId === state.focusItemId);
   const earlierOpenCount = earlier.filter((f) => !f.doneAt).length;
@@ -125,6 +128,14 @@ export function SidePanel(props: {
           {!hasNotes && !talkStarted && (
             <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>
           )}
+          {notesFailed && !notesUpdating && (
+            <p className="notes-paused" role="status">
+              The agent couldn't update these notes. Everything said is kept.
+              <button className="link" onClick={() => send({ type: "notes.retry", itemId: state.focusItemId })}>
+                Try again
+              </button>
+            </p>
+          )}
           {since.length > 0 && <SinceLastTime updates={since} />}
           {earlier.length > 0 && (
             <section className={earlierOpen ? "focus-notes earlier open" : "focus-notes earlier"}>
@@ -132,7 +143,7 @@ export function SidePanel(props: {
                 <span>From earlier meetings</span>
                 <span className="muted">{earlierOpenCount} open</span>
                 <span className="chev" aria-hidden>
-                  {earlierOpen ? "▾" : "▸"}
+                  <ChevronIcon />
                 </span>
               </button>
               {earlierOpen && (
@@ -147,10 +158,11 @@ export function SidePanel(props: {
               )}
             </section>
           )}
-          {(focusNotes.length > 0 || notesUpdating) && (
+          {/* One list whether or not there are notes yet, so a form the host has open stays open when the first ones arrive. */}
+          {(focusNotes.length > 0 || notesUpdating || isHost) && (
             <section className="side-agent-notes">
-              {!focusNotes.length && <p className="tk-empty">Writing the first notes…</p>}
-              {focusNotes.length > 0 && (
+              {!focusNotes.length && notesUpdating && <p className="tk-empty">Writing the first notes…</p>}
+              {(focusNotes.length > 0 || isHost) && (
                 <LiveItemNotes
                   key={state.focusItemId ?? "general"}
                   fresh={fresh}
@@ -162,11 +174,6 @@ export function SidePanel(props: {
                   snaps={{ list: focusSnaps, me: props.participantId, isHost }}
                 />
               )}
-            </section>
-          )}
-          {isHost && focusNotes.length === 0 && !notesUpdating && (
-            <section className="side-agent-notes">
-              <LiveItemNotes key={state.focusItemId ?? "general"} notes={[]} discussions={[]} segments={[]} editing={editing} />
             </section>
           )}
         </div>

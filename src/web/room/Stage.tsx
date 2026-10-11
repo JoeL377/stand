@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { ClientMessage, Item, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
 import { Slide } from "../slides.tsx";
 import { CameraIcon, ShareIcon } from "../icons.tsx";
-import { SnapGallery, addImageSnap, deleteSnap, takeSnap } from "../Snaps.tsx";
+import { SnapGallery, SnapNotSaved, addImageSnap, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
-import { errorToast, toast, undoing } from "../Toasts.tsx";
+import { dismissToast, toast, undoing } from "../Toasts.tsx";
 
 /** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
 const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
@@ -23,6 +23,8 @@ export function Stage(props: {
   send: (m: ClientMessage) => boolean;
   /** The connection is down: what steers the meeting waits until it's back. */
   offline?: boolean;
+  /** The meeting has ended and the notes are being written: nothing steers it any more. */
+  ending?: boolean;
   localScreen: MediaStream | null;
   remoteScreen: RemoteScreen | null;
   speaking: Set<string>;
@@ -42,23 +44,36 @@ export function Stage(props: {
     : [];
   const moving = movingIds.length;
   const accept = () => {
-    const from = state.focusItemId;
-    const ids = movingIds;
+    const n = moving;
     const to = suggested;
-    if (!send({ type: "suggestion.accept" }) || !ids.length || !to) return;
+    if (!to || !send({ type: "suggestion.accept", itemId: to.id }) || !n) return;
     // Moving remarks is the part people might not have meant, so it can be taken back.
+    // The server puts back every remark it moved, including any still arriving.
     toast({
-      text: `Moved ${ids.length} remark${ids.length === 1 ? "" : "s"} to ${keyOf(to) ?? to.title}`,
-      action: {
-        label: "Undo",
-        run: undoing(() => {
-          if (!send({ type: "focus", itemId: from })) return false;
-          for (const segmentId of ids) send({ type: "segment.move", segmentId, itemId: from });
-          return true;
-        }),
-      },
+      text: `Moved ${n} remark${n === 1 ? "" : "s"} to ${keyOf(to) ?? to.title}`,
+      action: { label: "Undo", run: undoing(() => send({ type: "suggestion.undo" })) },
     });
   };
+  // The seat held for a host who dropped: who it waits for, how long, and a way to take it now.
+  const [, tick] = useState(0);
+  // Counted from when the state arrived, on this computer's clock.
+  const holdUntil = useMemo(() => (state.hostAwayMs ? Date.now() + state.hostAwayMs : null), [state.hostAwayMs]);
+  useEffect(() => {
+    if (!holdUntil) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [holdUntil]);
+  // The item changed under you (someone else switched): it fades up so the change registers.
+  // Not for the host's own switches, slide flips within a deck, or quick steps through items.
+  // A deck counts as one thing here, so flipping its slides never fades.
+  const shownId = focusItem ? (focusItem.deckId ?? focusItem.id) : null;
+  const lastSwitch = useRef<{ id: string | null; at: number; quick: boolean }>({ id: null, at: 0, quick: true });
+  if (shownId !== lastSwitch.current.id) {
+    const now = Date.now();
+    lastSwitch.current = { id: shownId, at: now, quick: now - lastSwitch.current.at < 300 };
+  }
+  const arrive = canSteer || lastSwitch.current.quick ? "" : " arrive";
+  const holdLeft = holdUntil ? Math.max(0, Math.ceil((holdUntil - Date.now()) / 1000)) : null;
 
   // Slides of the deck in focus, in order, so the host can flip with arrows.
   const deckSlides = focusItem?.deckId ? state.items.filter((i) => i.deckId === focusItem.deckId) : [];
@@ -102,19 +117,36 @@ export function Stage(props: {
   const [tabs, setTabs] = useState<string[]>([]);
   const [tab, setTab] = useState<string | null>(null);
   const crop = (id: string) => ({ label: "Crop", run: () => setCropId(id) });
-  const failed = (err: unknown) => toast({ tone: "error", text: String((err as Error).message ?? err) });
+  const itemsRef = useRef(state.items);
+  itemsRef.current = state.items;
+  const labelOf = (itemId: string | null) => {
+    const it = itemId ? itemsRef.current.find((i) => i.id === itemId) : null;
+    return it ? (keyOf(it) ?? it.title) : "General";
+  };
+  /** Says it's saving at once, then where it landed; a failed upload keeps the picture for Try again. */
+  const saving = async (work: () => Promise<Snapped>, verb: string): Promise<boolean> => {
+    const wait = toast({ text: "Saving snap…", ms: 100_000 });
+    try {
+      const r = await work();
+      toast({ text: `${verb} to ${labelOf(r.itemId)}`, action: crop(r.id) });
+      return true;
+    } catch (err) {
+      toast(
+        err instanceof SnapNotSaved
+          ? // Up until it's closed: the picture is only kept for as long as the message is.
+            { tone: "error", text: err.message, ms: 30 * 60_000, action: { label: "Try again", run: () => void saving(err.retry, verb) } }
+          : { tone: "error", text: String((err as Error).message ?? err) },
+      );
+      return false;
+    } finally {
+      dismissToast(wait);
+    }
+  };
   const snap = async () => {
     const video = screenRef.current?.querySelector("video");
     if (!video) return false;
     setFlash((f) => f + 1);
-    try {
-      const id = await takeSnap(video, state.roomId);
-      toast({ text: "Snapped", action: crop(id) });
-      return true;
-    } catch (err) {
-      failed(err);
-      return false;
-    }
+    return saving(() => takeSnap(video, state.roomId), "Snapped");
   };
   // The Mac app's toolbar. Whatever comes of it, including why it couldn't, shows here.
   const snapInApp = async () => {
@@ -122,11 +154,27 @@ export function Stage(props: {
       const r = await macApp?.snap();
       const text = r && `${r.title}. ${r.body}`;
       // Long ones say what to fix (a permission, say), so they stay up long enough to read.
-      if (text) toast({ text, ...(r.snapId ? { action: crop(r.snapId) } : {}), ms: Math.max(5000, text.length * 60) });
+      const fix = r?.settings && macApp?.openSettings ? { label: "Open System Settings", run: () => macApp?.openSettings?.(r.settings!) } : null;
+      if (text) toast({ text, ...(r.snapId ? { action: crop(r.snapId) } : fix ? { action: fix } : {}), ms: Math.max(5000, text.length * 60) });
     } catch {
       toast({ tone: "error", text: "Quit the Stand app and open it again to use Snap." });
     }
   };
+  // A snap from the Mac toolbar saving while Stand is in front: say so here, as the bar would.
+  useEffect(() => {
+    let wait: number | null = null;
+    const off = macApp?.onCommand?.((c) => {
+      if (c === "saving" && wait === null) wait = toast({ text: "Saving snap…", ms: 100_000 });
+      if (c === "saved" && wait !== null) {
+        dismissToast(wait);
+        wait = null;
+      }
+    });
+    return () => {
+      off?.();
+      if (wait !== null) dismissToast(wait);
+    };
+  }, []);
   const snapRef = useRef(snap);
   snapRef.current = snap;
   useEffect(() => {
@@ -150,14 +198,7 @@ export function Stage(props: {
   const [dropping, setDropping] = useState(false);
   const focusLabel = focusItem ? (keyOf(focusItem) ?? focusItem.title) : "General";
   const addImages = async (files: File[]) => {
-    for (const f of files.slice(0, 5)) {
-      try {
-        const id = await addImageSnap(f, state.roomId);
-        toast({ text: `Added to ${focusLabel}`, action: crop(id) });
-      } catch (err) {
-        failed(err);
-      }
-    }
+    for (const f of files.slice(0, 5)) await saving(() => addImageSnap(f, state.roomId), "Added");
   };
   const addRef = useRef(addImages);
   addRef.current = addImages;
@@ -208,11 +249,12 @@ export function Stage(props: {
         if (s.sharerId === props.participantId && s.takenById !== props.participantId)
           toast({
             text: `${s.takenBy.split(" ")[0]} snapped your screen`,
-            action: { label: "Delete", run: () => void deleteSnap(s.id).catch(errorToast("Couldn't delete the snap")) },
+            action: { label: "Delete", run: () => removeSnap(s.id) },
           });
       }
     }
-    seenSnaps.current = ids;
+    // Every snap seen so far, so one brought back with Undo isn't news again.
+    seenSnaps.current = new Set([...(seenSnaps.current ?? []), ...ids]);
   }, [state.snaps, props.participantId]);
   const cropSnap = cropId ? state.snaps.find((s) => s.id === cropId) : undefined;
   const tabSnaps = tabs.map((id) => state.snaps.find((s) => s.id === id)).filter((s): s is Snap => Boolean(s));
@@ -249,7 +291,16 @@ export function Stage(props: {
           {keyOf(focusItem) && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}
         </span>
-        {state.pinnedBy && <span className="badge">📌 Pinned</span>}
+        {state.pinnedBy && (
+          <span className="badge pinned-badge">
+            📌 Pinned
+            {canSteer && (
+              <button className="link" onClick={() => send({ type: "unpin" })} disabled={props.offline} title="Let the agent follow the screen again">
+                Unpin
+              </button>
+            )}
+          </span>
+        )}
         {tabSnaps.length > 0 && (
           <span className="stage-tabs" role="tablist" aria-label="Main screen and the snaps you opened">
             <button role="tab" aria-selected={!openSnap} className={openSnap ? "stage-tab" : "stage-tab on"} onClick={() => setTab(null)}>
@@ -271,44 +322,60 @@ export function Stage(props: {
         {host ? (
           <span className="host-note muted small">{canSteer ? "You're the host" : `${host.name} is hosting`}</span>
         ) : (
-          state.hostAway && <span className="host-note muted small">{state.hostAway} is reconnecting…</span>
+          state.hostAway && (
+            <span
+              className="host-note muted small"
+              title={holdLeft !== null ? `If ${state.hostAway} isn't back in ${holdLeft} seconds, hosting passes to the next person.` : undefined}
+            >
+              {state.hostAway} is reconnecting{holdLeft !== null ? ` · ${holdLeft} s` : "…"}
+              {!props.ending && (
+                <button
+                  className="link"
+                  onClick={() => send({ type: "host.give", participantId: props.participantId })}
+                  disabled={props.offline}
+                  title="Host now: you choose the item everyone talks about"
+                >
+                  Take over
+                </button>
+              )}
+            </span>
+          )
         )}
       </div>
 
-      {/* A quiet nudge for the host only: their click is what moves the meeting. */}
-      {canSteer && suggested && state.suggestion && (
-        <div className="nudge" role="status" title={state.suggestion.reason}>
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>
-          <span className="nudge-text">
-            {state.suggestion.source === "talk" ? "Sounds like " : sharer && sharer.id !== props.participantId ? "The shared screen shows " : "Your screen shows "}
-            <strong>
-              {keyOf(suggested) ? `${keyOf(suggested)} · ` : ""}
-              {suggested.title}
-            </strong>
-          </span>
-          <button
-            className="link"
-            onClick={accept}
-            disabled={props.offline}
-            title={
-              props.offline
-                ? "You can switch once Stand reconnects"
-                : moving
-                  ? "Opens it for everyone and files what was said since then under it"
-                  : undefined
-            }
-          >
-            {moving ? `Switch and move ${moving} remark${moving === 1 ? "" : "s"}` : "Switch to it"}
-          </button>
-          <button className="link muted" onClick={() => send({ type: "suggestion.dismiss" })} aria-label="Dismiss">
-            ✕
-          </button>
-        </div>
-      )}
-
       <div className="screen" ref={screenRef}>
+        {/* A quiet nudge for the host only: their click is what moves the meeting. */}
+        {canSteer && !props.ending && suggested && state.suggestion && (
+          <div className="nudge" role="status" title={state.suggestion.reason}>
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>
+            <span className="nudge-text">
+              {state.suggestion.source === "talk" ? "Sounds like " : sharer && sharer.id !== props.participantId ? "The shared screen shows " : "Your screen shows "}
+              <strong>
+                {keyOf(suggested) ? `${keyOf(suggested)} · ` : ""}
+                {suggested.title}
+              </strong>
+            </span>
+            <button
+              className="link"
+              onClick={accept}
+              disabled={props.offline}
+              title={
+                props.offline
+                  ? "You can switch once Stand reconnects"
+                  : moving
+                    ? "Opens it for everyone and files what was said since then under it"
+                    : undefined
+              }
+            >
+              {moving ? `Switch and move ${moving} remark${moving === 1 ? "" : "s"}` : "Switch to it"}
+            </button>
+            <button className="link muted" onClick={() => send({ type: "suggestion.dismiss" })} aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+        )}
         {macApp ? (
           <button className="app-snap" title={`Snap the screen, a window or part of it (${SNAP_KEYS})`} onClick={() => void snapInApp()}>
             <CameraIcon />
@@ -335,23 +402,38 @@ export function Stage(props: {
         {/* A snap's tab covers the main screen, which keeps running underneath (a share stays live). */}
         {openSnap && <SnapTab snap={openSnap} me={props.participantId} />}
         {localScreen ? (
-          <Video stream={localScreen} label={`You're sharing your screen · ${SNAP_KEYS_WORDS} snaps it`} />
+          <Video
+            stream={localScreen}
+            label={`You're sharing your screen · ${SNAP_KEYS_WORDS} snaps it${canSteer ? "" : " · The agent reads only the host's screen"}`}
+          />
         ) : remoteScreen ? (
-          <RemoteVideo screen={remoteScreen} label={`${state.participants.find((p) => p.id === remoteScreen.participantId)?.name ?? "Someone"}'s screen`} />
+          <RemoteVideo
+            screen={remoteScreen}
+            label={`${state.participants.find((p) => p.id === remoteScreen.participantId)?.name ?? "Someone"}'s screen${
+              host && remoteScreen.participantId !== host.id ? " · The agent reads only the host's screen" : ""
+            }`}
+          />
         ) : sharer && !props.livekit ? (
           <div className="screen-empty">
             <p>
-              <strong>{sharer.name}</strong> is sharing. In mock mode only they can see it; the agent still reads it.
+              <strong>{sharer.name}</strong> is sharing. In mock mode only they can see it
+              {sharer.isHost ? "; the agent still reads it." : ". The agent follows only the host's screen."}
             </p>
           </div>
         ) : (
           <div className="screen-empty">
             {focusItem?.deckId && (focusItem.slideNo || focusItem.slide) ? (
-              <div className="slide-stage">
+              <div key={focusItem.deckId} className={`slide-stage${arrive}`}>
                 <Slide item={focusItem} deck={deck} className="slide-main" />
                 <div className="slide-bar">
                   {canSteer && (
-                    <button className="ghost" onClick={() => flip(-1)} disabled={slideIdx <= 0} aria-label="Previous slide">
+                    <button
+                      className="ghost"
+                      onClick={() => flip(-1)}
+                      disabled={props.offline || slideIdx <= 0}
+                      title={props.offline ? "You can flip slides once Stand reconnects" : undefined}
+                      aria-label="Previous slide"
+                    >
                       ←
                     </button>
                   )}
@@ -362,7 +444,8 @@ export function Stage(props: {
                     <button
                       className="ghost"
                       onClick={() => flip(1)}
-                      disabled={slideIdx < 0 || slideIdx >= deckSlides.length - 1}
+                      disabled={props.offline || slideIdx < 0 || slideIdx >= deckSlides.length - 1}
+                      title={props.offline ? "You can flip slides once Stand reconnects" : undefined}
                       aria-label="Next slide"
                     >
                       →
@@ -373,7 +456,7 @@ export function Stage(props: {
                 {canSteer && focusItem.slide?.notes && <p className="slide-notes">{focusItem.slide.notes}</p>}
               </div>
             ) : focusItem ? (
-              <div className="focus-card">
+              <div key={focusItem.id} className={`focus-card${arrive}`}>
                 {keyOf(focusItem) && <div className="key big">{keyOf(focusItem)}</div>}
                 <h2>{focusItem.title}</h2>
                 {focusItem.description && <p className="muted pre focus-desc">{focusItem.description}</p>}
@@ -402,6 +485,7 @@ export function Stage(props: {
             talking={talkingIds.has(p.id)}
             tag={p.isHost ? "Host" : undefined}
             sharing={p.isSharing}
+            notRecorded={p.notRecording}
             onMakeHost={
               canSteer && !props.offline && p.id !== props.participantId ? () => send({ type: "host.give", participantId: p.id }) : undefined
             }
@@ -422,9 +506,11 @@ function Person(props: {
   talking: boolean;
   tag?: string;
   sharing?: boolean;
+  /** Their browser can't transcribe them, so what they say isn't in the notes. */
+  notRecorded?: boolean;
   onMakeHost?: () => void;
 }) {
-  const { id, name, picture, talking, tag, sharing, onMakeHost } = props;
+  const { id, name, picture, talking, tag, sharing, notRecorded, onMakeHost } = props;
   // Handing over hosting takes a second click, so a stray one doesn't give the meeting away.
   const [confirm, setConfirm] = useState(false);
   useEffect(() => {
@@ -435,6 +521,12 @@ function Person(props: {
   return (
     <div className={talking ? "person talking" : "person"}>
       <Avatar id={id} name={name} picture={picture} />
+      {/* In words, in the corner: a crossed-out mic would read as muted, and the name keeps its room. */}
+      {notRecorded && (
+        <span className="not-recorded-flag" title={`What ${name.split(" ")[0]} says isn't in the notes: their browser can't transcribe it.`}>
+          Not recorded
+        </span>
+      )}
       <div className="person-label">
         <span className="person-name" title={name}>
           {name}
