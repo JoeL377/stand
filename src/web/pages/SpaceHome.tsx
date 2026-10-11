@@ -1,0 +1,521 @@
+// A space's own page, the one people open between meetings: what came into the space since
+// last time (snaps people saved, meetings, agents' updates), and where the space stands (to-dos,
+// decisions, open questions and the suggested agenda). Start talking turns it into the meeting.
+
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import type { ItemUpdate, Note, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import { api, type RoomInfo } from "../api.ts";
+import { useAuth } from "../auth.tsx";
+import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
+import { CameraIcon, CloseIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { Avatar } from "../room/Stage.tsx";
+import { addImageSnap, removeSnap } from "../Snaps.tsx";
+import { errorToast, toast } from "../Toasts.tsx";
+import { useDismiss } from "../useDismiss.ts";
+import { fmtDate, fmtTime } from "../util.ts";
+import { ModeNote } from "./RoomPage.tsx";
+import { SpacesShell } from "./SpacesShell.tsx";
+
+/** Rows each right-hand card shows before folding the rest into "N more". */
+const CARD_ROWS = 4;
+/** Suggestions Up next shows under the agenda before folding. */
+const SUGGESTED_ROWS = 3;
+
+type Entry =
+  | { kind: "snap"; at: number; snap: Snap }
+  | { kind: "meeting"; at: number; meeting: SpaceFeed["meetings"][number] }
+  | { kind: "update"; at: number; update: ItemUpdate };
+
+export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: () => void }) {
+  const { room, reload } = props;
+  const { user, caps } = useAuth();
+  const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
+  const [feed, setFeed] = useState<SpaceFeed | null>(null);
+  const [upNext, setUpNext] = useState<UpNext | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<Snap | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [dropping, setDropping] = useState(false);
+
+  const load = useCallback(() => {
+    reload();
+    api.feed(room.id).then(
+      (f) => {
+        setFeed(f);
+        setError(null);
+      },
+      (e: Error) => setError(e.message),
+    );
+    api.suggested(room.id).then((s) => setUpNext(s.upNext), () => {});
+  }, [room.id, reload]);
+
+  useEffect(() => {
+    load();
+    api.spaces().then(setSpaces, () => {});
+    // What others save shows up while the page is open, and when you come back to it.
+    const t = setInterval(load, 20_000);
+    window.addEventListener("focus", load);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", load);
+    };
+  }, [load]);
+
+  // A screenshot pasted or dropped anywhere on the page is saved to the space.
+  const save = useCallback(
+    (file: Blob) => {
+      addImageSnap(file, room.id, true).then(
+        (s) => {
+          load();
+          toast({ text: `Saved to ${room.name}`, action: { label: "Undo", run: () => (removeSnap(s.id), setTimeout(load, 400)) } });
+        },
+        errorToast("Couldn't save the screenshot"),
+      );
+    },
+    [room.id, room.name, load],
+  );
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (e.target instanceof Element && e.target.closest("input, textarea, [contenteditable]")) return;
+      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+      if (!file) return;
+      e.preventDefault();
+      save(file);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [save]);
+
+  const pickItem = (snap: Snap, itemId: string | null) => {
+    setFeed((f) => f && { ...f, captures: f.captures.map((c) => (c.id === snap.id ? { ...c, itemId, itemSuggested: false } : c)) });
+    api.updateSnap(snap.id, { itemId }).then(load, (err) => {
+      load();
+      errorToast("Couldn't move it")(err);
+    });
+  };
+
+  const live = !!room.liveMeetingId;
+  const wrapping = live && room.people.length === 0;
+  const members = spaces?.find((s) => s.id === room.id)?.people ?? [];
+  const faces = live && room.people.length ? room.people : members.map((name) => ({ name, picture: null }));
+
+  const copy = () => {
+    const done = () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    };
+    const show = () => toast({ text: `Copy this link: ${location.href}`, ms: 15_000 });
+    if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(done, show);
+    else show();
+  };
+
+  // The agenda as the meeting shows it, a deck as one line, then what the agent would add.
+  const agenda: Array<{ key: string; title: string; href: string; open: number }> = [];
+  for (const it of room.items) {
+    const key = it.deckId ?? it.id;
+    if (agenda.some((a) => a.key === key)) continue;
+    const deck = it.deckId ? room.decks.find((d) => d.id === it.deckId) : null;
+    agenda.push({ key, title: deck ? deck.title : it.title, href: deck ? `/decks/${deck.id}` : `/items/${it.id}`, open: 0 });
+  }
+  for (const f of room.followUps) {
+    const it = room.items.find((i) => i.id === f.itemId);
+    const row = it && agenda.find((a) => a.key === (it.deckId ?? it.id));
+    if (row) row.open++;
+  }
+  const suggested = upNext?.suggestions ?? [];
+
+  const entries: Entry[] = feed
+    ? [
+        ...feed.captures.map((snap) => ({ kind: "snap" as const, at: snap.ts, snap })),
+        ...feed.meetings.map((meeting) => ({ kind: "meeting" as const, at: meeting.endedAt, meeting })),
+        ...feed.updates.map((update) => ({ kind: "update" as const, at: update.ts, update })),
+      ].sort((a, b) => b.at - a.at)
+    : [];
+  const days: Array<{ label: string; entries: Entry[] }> = [];
+  for (const e of entries) {
+    const label = dayLabel(e.at);
+    if (days.at(-1)?.label !== label) days.push({ label, entries: [] });
+    days.at(-1)!.entries.push(e);
+  }
+
+  return (
+    <SpacesShell spaces={spaces}>
+      <main
+        className={dropping ? "sh-main dropping" : "sh-main"}
+        onDragOver={(e) => {
+          if (![...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) return;
+          e.preventDefault();
+          setDropping(true);
+        }}
+        onDragLeave={(e) => e.currentTarget === e.target && setDropping(false)}
+        onDrop={(e) => {
+          const file = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
+          setDropping(false);
+          if (!file) return;
+          e.preventDefault();
+          save(file);
+        }}
+      >
+        <header className="sh-head">
+          <h1>{room.name}</h1>
+          {room.purpose && <span className="sh-purpose">{room.purpose}</span>}
+          <span className="sh-head-end">
+            {live && (
+              <span
+                className={wrapping ? "sh-live wrapping" : "sh-live"}
+                title={wrapping ? "Nobody's in the meeting now. It ends by itself in about 2 minutes unless someone joins." : undefined}
+              >
+                <span className="dot" />
+                {wrapping ? "Wrapping up" : "Talking now"}
+              </span>
+            )}
+            {faces.length > 0 && (
+              <span className="sh-faces stack" title={faces.map((f) => f.name).join(", ")}>
+                {faces.slice(0, 4).map((p, i) => (
+                  <Avatar key={i} id={p.name} name={p.name} picture={p.picture} size={24} />
+                ))}
+                {faces.length > 4 && <span className="sh-faces-more">+{faces.length - 4}</span>}
+              </span>
+            )}
+            <button className="sh-invite" onClick={copy} title="Copy a link others can join with">
+              <LinkIcon />
+              {copied ? "Copied" : "Invite"}
+            </button>
+            <button className="primary sh-join" onClick={props.onJoin}>
+              <MicIcon />
+              {wrapping ? "Join" : live ? "Join them" : "Start talking"}
+            </button>
+          </span>
+        </header>
+        <ModeNote caps={caps} />
+
+        <div className="sh-cols">
+          <section className="sh-feed" aria-labelledby="sh-feed-title">
+            <h2 id="sh-feed-title">Since last time</h2>
+            {error && !feed && (
+              <p className="error">
+                {error}{" "}
+                <button className="link" onClick={load}>
+                  Try again
+                </button>
+              </p>
+            )}
+            {feed && !entries.length && (
+              <div className="sh-empty">
+                <CameraIcon size={18} />
+                <p>
+                  Nothing here yet. Snaps you save with <strong>Control + Shift + S</strong> in the Mac app, or paste or drop on this page,
+                  land here. So do meetings once they end, and what agents report.
+                </p>
+              </div>
+            )}
+            {days.map((d) => (
+              <div key={d.label} className="sh-day">
+                <h3>{d.label}</h3>
+                <ul className="sh-rows">
+                  {d.entries.map((e) =>
+                    e.kind === "snap" ? (
+                      <SnapRow key={e.snap.id} snap={e.snap} room={room} me={user.id} onOpen={() => setViewing(e.snap)} onPick={(id) => pickItem(e.snap, id)} />
+                    ) : e.kind === "meeting" ? (
+                      <MeetingRow key={e.meeting.id} m={e.meeting} />
+                    ) : (
+                      <UpdateRow key={e.update.id} u={e.update} room={room} />
+                    ),
+                  )}
+                </ul>
+              </div>
+            ))}
+          </section>
+
+          <aside className="sh-side" aria-label="Where the space stands">
+            <Card title="To do" count={room.followUps.length} empty="No open to-dos.">
+              {(all) => (
+                <FollowUpList
+                  compact
+                  notes={all ? room.followUps : room.followUps.slice(0, CARD_ROWS)}
+                  onToggle={saveFollowUp(room.id)}
+                  source={(n) => ({ label: sourceLabel(n.itemId, room.items, room.decks), href: itemHref(n.itemId, room.items) })}
+                />
+              )}
+            </Card>
+            <NoteCard title="Decided" notes={feed?.decided ?? []} room={room} empty="No decisions yet." />
+            <NoteCard title="Open" notes={feed?.open ?? []} room={room} empty="No open questions from the last meeting." />
+            <Card
+              title="Up next"
+              count={agenda.length + suggested.length}
+              folded={Math.max(0, agenda.length - CARD_ROWS) + Math.max(0, suggested.length - SUGGESTED_ROWS)}
+              empty="Nothing on the agenda yet. Suggestions come from meetings and what people save here.">
+              {(all) => (
+                <>
+                  <ul className="sh-list">
+                    {(all ? agenda : agenda.slice(0, CARD_ROWS)).map((e) => (
+                      <li key={e.key}>
+                        <Link to={e.href}>{e.title}</Link>
+                        {e.open > 0 && <span className="sh-open-count">{e.open} open</span>}
+                      </li>
+                    ))}
+                  </ul>
+                  {suggested.length > 0 && (
+                    <>
+                      <p className="sh-group" title="What the agent suggests adding when the next meeting starts">
+                        <span className="sh-mark">✦</span>Suggested · {suggested.length}
+                      </p>
+                      <ul className="sh-list suggested">
+                        {(all ? suggested : suggested.slice(0, SUGGESTED_ROWS)).map((s) => (
+                          <li key={s.key} title={s.reason}>
+                            {s.kind === "capture" && <CameraIcon size={12} />}
+                            <span>{s.title}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
+              )}
+            </Card>
+          </aside>
+        </div>
+        {viewing && <SnapView snap={viewing} me={user.id} room={room} onClose={() => setViewing(null)} onDeleted={load} />}
+      </main>
+    </SpacesShell>
+  );
+}
+
+function dayLabel(ts: number) {
+  const day = (t: number) => new Date(t).toDateString();
+  if (day(ts) === day(Date.now())) return "Today";
+  if (day(ts) === day(Date.now() - 86_400_000)) return "Yesterday";
+  return fmtDate(ts);
+}
+
+const firstName = (name: string) => name.split(" ")[0];
+
+function SnapRow(props: { snap: Snap; room: RoomInfo; me: string; onOpen: () => void; onPick: (itemId: string | null) => void }) {
+  const { snap } = props;
+  const who = snap.takenById === props.me ? "You" : firstName(snap.takenBy);
+  return (
+    <li className="sh-row">
+      <button className="sh-thumb" onClick={props.onOpen} aria-label="Open the snap">
+        <img src={snap.url} alt="" loading="lazy" />
+      </button>
+      <span className="sh-row-text">
+        <span className="sh-who">{who}</span>
+        {snap.line ? (
+          <span className="sh-what">{snap.line}</span>
+        ) : snap.caption ? (
+          <span className="sh-what agent">✦ {snap.caption}</span>
+        ) : (
+          <span className="sh-what muted">Snap</span>
+        )}
+      </span>
+      <ItemPill snap={snap} room={props.room} onPick={props.onPick} />
+      <time className="sh-time">{fmtTime(snap.ts)}</time>
+    </li>
+  );
+}
+
+function ItemPill(props: { snap: Snap; room: RoomInfo; onPick: (itemId: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
+  const items = props.room.items.filter((i) => !i.deckId);
+  const item = props.room.items.find((i) => i.id === props.snap.itemId);
+  const suggested = props.snap.itemSuggested && !!item;
+  const pick = (id: string | null) => {
+    setOpen(false);
+    props.onPick(id);
+  };
+  return (
+    <span className="sh-pill-wrap" ref={ref}>
+      <button
+        className={`sh-pill${suggested ? " suggested" : ""}${props.snap.itemId ? "" : " none"}`}
+        aria-expanded={open}
+        title={suggested ? "The agent's pick. Click to confirm it or choose another item." : "Choose the item it's about"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {suggested && "✦ "}
+        {item ? item.title : props.snap.itemId ? "An earlier item" : "No item"}
+      </button>
+      {open && (
+        <span className="sh-menu" role="menu">
+          {suggested && (
+            <button role="menuitem" className="sh-menu-confirm" onClick={() => pick(item.id)}>
+              Confirm {item.title}
+            </button>
+          )}
+          {items.map((it) => (
+            <button key={it.id} role="menuitem" className={it.id === props.snap.itemId && !suggested ? "on" : undefined} onClick={() => pick(it.id)}>
+              {it.title}
+            </button>
+          ))}
+          <button role="menuitem" className={!props.snap.itemId ? "on" : undefined} onClick={() => pick(null)}>
+            No item
+          </button>
+          {item && (
+            <Link role="menuitem" className="sh-menu-link" to={`/items/${item.id}`}>
+              Open {item.title}
+            </Link>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function MeetingRow({ m }: { m: SpaceFeed["meetings"][number] }) {
+  const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const out = [m.todos && plural(m.todos, "to-do"), m.decided && `${m.decided} decided`, m.open && `${m.open} open`].filter(Boolean).join(" · ");
+  return (
+    <li className="sh-row">
+      <Link to={`/meetings/${m.id}`} className="sh-row-link" title={m.summary ?? undefined}>
+        <span className="sh-icon" aria-hidden>
+          <MicIcon />
+        </span>
+        <span className="sh-row-text">
+          <span className="sh-who">Meeting</span>
+          <span className="sh-what">
+            {minutes} min{out && <span className="muted"> · {out}</span>}
+          </span>
+        </span>
+        <time className="sh-time">{fmtTime(m.endedAt)}</time>
+      </Link>
+    </li>
+  );
+}
+
+const UPDATE_LABEL: Record<ItemUpdate["status"], string | null> = { progress: null, blocked: "Blocked", needs_decision: "Needs a decision", done: "Done" };
+
+function UpdateRow({ u, room }: { u: ItemUpdate; room: RoomInfo }) {
+  const item = room.items.find((i) => i.id === u.itemId);
+  const label = UPDATE_LABEL[u.status];
+  return (
+    <li className="sh-row">
+      <span className="sh-icon agent" aria-hidden>
+        ✦
+      </span>
+      <span className="sh-row-text">
+        <span className="sh-who">{u.client ? `${firstName(u.userName)}'s agent` : firstName(u.userName)}</span>
+        {label && <span className={`sh-status ${u.status}`}>{label}</span>}
+        <span className="sh-what">{u.text || u.noteText}</span>
+      </span>
+      {item && (
+        <Link className="sh-pill" to={itemHref(item.id, room.items) ?? `/items/${item.id}`}>
+          {item.title}
+        </Link>
+      )}
+      <time className="sh-time">{fmtTime(u.ts)}</time>
+    </li>
+  );
+}
+
+/** A right-hand card: a small header with a count, and its rows folded past CARD_ROWS. */
+function Card(props: {
+  title: string;
+  count: number;
+  /** How many rows are folded away; the rows past CARD_ROWS unless the card says. */
+  folded?: number;
+  mark?: boolean;
+  empty: string;
+  children: (all: boolean) => React.ReactNode;
+}) {
+  const [all, setAll] = useState(false);
+  const folded = props.folded ?? props.count - CARD_ROWS;
+  return (
+    <section className="sh-card">
+      <h2>
+        {props.mark && <span className="sh-mark">✦</span>}
+        {props.title}
+        {props.count > 0 && <span className="count">{props.count}</span>}
+      </h2>
+      {props.count ? props.children(all) : <p className="sh-card-empty">{props.empty}</p>}
+      {folded > 0 && (
+        <button className="sh-more" onClick={() => setAll((a) => !a)}>
+          {all ? "Show fewer" : `${folded} more`}
+        </button>
+      )}
+    </section>
+  );
+}
+
+function NoteCard(props: { title: string; notes: Note[]; room: RoomInfo; empty: string }) {
+  return (
+    <Card title={props.title} count={props.notes.length} empty={props.empty}>
+      {(all) => (
+        <ul className="sh-list">
+          {(all ? props.notes : props.notes.slice(0, CARD_ROWS)).map((n) => (
+            <li key={n.id}>
+              <span>{n.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/** One snap, big: what was typed with it, the agent's line, and the text read off it. */
+function SnapView(props: { snap: Snap; me: string; room: RoomInfo; onClose: () => void; /** Something changed: load the feed again. */ onDeleted: () => void }) {
+  const { snap, onClose } = props;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const item = props.room.items.find((i) => i.id === snap.itemId);
+  const mine = snap.takenById === props.me;
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog sh-view" role="dialog" aria-modal="true" aria-label="Snap">
+        <div className="sh-view-head">
+          <strong>
+            {mine ? "You" : snap.takenBy} · {fmtDate(snap.ts)} {fmtTime(snap.ts)}
+            {item && <span className="muted"> · {item.title}</span>}
+          </strong>
+          {mine && (
+            <button
+              className="icon-btn"
+              title="Delete"
+              aria-label="Delete the snap"
+              onClick={() => {
+                removeSnap(snap.id);
+                onClose();
+                setTimeout(props.onDeleted, 400);
+              }}
+            >
+              <TrashIcon />
+            </button>
+          )}
+          <button className="icon-btn" aria-label="Close" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </div>
+        <img className="sh-view-img" src={snap.url} alt={snap.line ?? snap.caption ?? "Snap"} />
+        {mine ? (
+          <input
+            className="sh-view-line edit"
+            defaultValue={snap.line ?? ""}
+            placeholder="Add a line about it for the space"
+            maxLength={300}
+            aria-label="What it's about"
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            onBlur={(e) => {
+              const line = e.currentTarget.value.trim();
+              if (line === (snap.line ?? "")) return;
+              api.updateSnap(snap.id, { line }).then(props.onDeleted, errorToast("Couldn't save the line"));
+            }}
+          />
+        ) : (
+          snap.line && <p className="sh-view-line">{snap.line}</p>
+        )}
+        {snap.caption && <p className="sh-view-caption">✦ {snap.caption}</p>}
+        {snap.screenText && (
+          <details className="sh-view-text">
+            <summary>Text in it</summary>
+            <pre>{snap.screenText}</pre>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}

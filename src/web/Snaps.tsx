@@ -35,8 +35,9 @@ export async function takeSnap(video: HTMLVideoElement, roomId: string): Promise
   return uploadSnap(canvas, roomId, at, false);
 }
 
-/** A screenshot someone pasted or dropped in: kept on the item in focus, like a snap. */
-export async function addImageSnap(file: Blob, roomId: string): Promise<Snapped> {
+/** A screenshot someone pasted or dropped in: kept on the item in focus, like a snap, or
+ *  saved straight to the space when it's dropped on the space's page (toSpace). */
+export async function addImageSnap(file: Blob, roomId: string, toSpace = false): Promise<Snapped> {
   const at = Date.now();
   const bmp = await createImageBitmap(file).catch(() => {
     throw new Error("That image couldn't be read.");
@@ -51,16 +52,16 @@ export async function addImageSnap(file: Blob, roomId: string): Promise<Snapped>
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
-  return uploadSnap(canvas, roomId, at, true);
+  return uploadSnap(canvas, roomId, at, true, toSpace);
 }
 
-async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number, pasted: boolean): Promise<Snapped> {
+async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number, pasted: boolean, toSpace = false): Promise<Snapped> {
   const blob = await new Promise<Blob>((ok, fail) =>
     canvas.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't read the image"))), "image/jpeg", 0.92),
   );
   // One key for every try, so a try that got through before timing out isn't saved twice.
   const key = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
-  const url = `/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}&key=${key}${pasted ? "&pasted=1" : ""}`;
+  const url = `/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}&key=${key}${pasted ? "&pasted=1" : ""}${toSpace ? "&to=space" : ""}`;
   // Longer for a bigger picture: at least 15 s, and as long as a slow (50 KB/s) line needs,
   // but 90 s for all the tries together.
   const limit = Math.min(90_000, Math.max(15_000, blob.size / 50));
