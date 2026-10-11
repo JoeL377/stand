@@ -59,6 +59,8 @@ function DiscussionBlock(props: {
   onShowTodos?: (ids: string[]) => void;
   /** Live panel: snaps taken while this topic was talked about. */
   snaps?: { list: Snap[]; me: string; isHost: boolean };
+  /** Live panel: when the topic came up, so a long meeting reads as a timeline. */
+  at?: number;
 }) {
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
@@ -102,7 +104,11 @@ function DiscussionBlock(props: {
     >
       <summary>
         <span className="disc-head">
-          <span className="disc-topic">{d.topic}</span>
+          {props.at !== undefined && <span className="disc-at">{clock(props.at)}</span>}
+          <span className="disc-topic">
+            {d.topic}
+            {props.titleOnly && props.live && <span className="disc-now-pill">Now</span>}
+          </span>
           {!props.titleOnly && (
             <span className={`rc-outcome ${d.outcome}`}>
               <o.Icon size={13} /> {o.label}
@@ -372,6 +378,15 @@ function EditButton(props: { onClick: () => void }) {
 /** Smooth scrolling, unless Reduce Motion is on. */
 const scrollBehavior = (): ScrollBehavior => (matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
 const FOLD_DONE_AFTER_MS = 5_000;
+/** Rows a notes card shows before folding the older ones. */
+const CARD_ROWS = 4;
+/** Topics shown before the older ones fold; the one being talked about always shows. */
+const TOPIC_ROWS = 5;
+
+function foldTopics<T extends { d: Discussion }>(ranked: T[], liveId: string | null, all: boolean): T[] {
+  if (all || ranked.length <= TOPIC_ROWS + 1) return ranked;
+  return ranked.filter((r, i) => i < TOPIC_ROWS || r.d.id === liveId);
+}
 
 export function LiveItemNotes(props: {
   notes: Note[];
@@ -455,10 +470,33 @@ export function LiveItemNotes(props: {
     const fold = setTimeout(() => (setLingering([]), setFolding(false)), FOLD_DONE_AFTER_MS);
     return () => (clearTimeout(fade), clearTimeout(fold));
   }, [lingering]);
-  const todo = notes.filter((n) => n.kind === "action" && (!n.doneAt || lingering.includes(n.id)));
-  const done = notes.filter((n) => n.kind === "action" && n.doneAt && !lingering.includes(n.id));
-  const decided = notes.filter((n) => n.kind === "decision");
-  const open = notes.filter((n) => n.kind === "question");
+  // Newest first, so what was just said is on top however long the meeting runs.
+  const latest = [...notes].reverse().sort((a, b) => b.ts - a.ts);
+  const todo = latest.filter((n) => n.kind === "action" && (!n.doneAt || lingering.includes(n.id)));
+  const done = latest.filter((n) => n.kind === "action" && n.doneAt && !lingering.includes(n.id));
+  const decided = latest.filter((n) => n.kind === "decision");
+  const open = latest.filter((n) => n.kind === "question");
+  // A long card shows its newest rows and folds the rest into "N earlier", unless one of
+  // those is being pointed at or just changed.
+  const [unfolded, setUnfolded] = useState<string[]>([]);
+  const fold = (key: string, list: Note[]) => {
+    const all =
+      unfolded.includes(key) || list.length <= CARD_ROWS + 1 || list.slice(CARD_ROWS).some((n) => flash.includes(n.id) || props.fresh?.includes(n.id));
+    return { rows: all ? list : list.slice(0, CARD_ROWS), more: all ? 0 : list.length - CARD_ROWS };
+  };
+  const foldToggle = (key: string, list: Note[], more: number) =>
+    more > 0 ? (
+      <button className="link small tk-more" onClick={() => setUnfolded((u) => [...u, key])}>
+        {more} earlier
+      </button>
+    ) : unfolded.includes(key) && list.length > CARD_ROWS + 1 ? (
+      <button className="link small tk-more" onClick={() => setUnfolded((u) => u.filter((k) => k !== key))}>
+        Show fewer
+      </button>
+    ) : null;
+  const todoFold = fold("todo", todo);
+  const decidedFold = fold("decided", decided);
+  const openFold = fold("open", open);
   const summary = notes.filter((n) => n.kind === "summary");
   const empty = !todo.length && !done.length && !decided.length && !open.length;
   const liveId = talkingNow(discussions, segments);
@@ -563,7 +601,8 @@ export function LiveItemNotes(props: {
             )}
           </h4>
           {todo.length === 0 && done.length === 0 && <p className="tk-none">Nothing yet</p>}
-          {todo.length > 0 && <ul>{todo.map(action)}</ul>}
+          {todo.length > 0 && <ul>{todoFold.rows.map(action)}</ul>}
+          {foldToggle("todo", todo, todoFold.more)}
           {done.length > 0 && (
             <>
               <button className="link small tk-more" onClick={() => setShowDone((s) => !s)}>
@@ -578,7 +617,7 @@ export function LiveItemNotes(props: {
         <section className="tk-group tk-card">
           <h4>Decided</h4>
           <ul>
-            {decided.map(
+            {decidedFold.rows.map(
               (n) =>
                 editRow(n) ?? (
                   <li key={n.id} data-note-id={n.id} className={`tk decision${isFresh(n)}`}>
@@ -592,13 +631,14 @@ export function LiveItemNotes(props: {
                 ),
             )}
           </ul>
+          {foldToggle("decided", decided, decidedFold.more)}
         </section>
       )}
       {open.length > 0 && (
         <section className="tk-group tk-card">
           <h4>Open questions</h4>
           <ul>
-            {open.map(
+            {openFold.rows.map(
               (n) =>
                 editRow(n) ?? (
                   <li key={n.id} data-note-id={n.id} className={`tk question${isFresh(n)}`}>
@@ -612,6 +652,7 @@ export function LiveItemNotes(props: {
                 ),
             )}
           </ul>
+          {foldToggle("open", open, openFold.more)}
         </section>
       )}
       {editing &&
@@ -637,7 +678,7 @@ export function LiveItemNotes(props: {
         <section className="tk-group tk-card live-topics">
           <h4>Topics</h4>
           <div className="discussions compact">
-            {rankTopics(discussions, segments).map(({ d, turns }) => (
+            {foldTopics(rankTopics(discussions, segments), liveId, unfolded.includes("topics")).map(({ d, turns, first }) => (
               <DiscussionBlock
                 key={d.id}
                 d={d}
@@ -645,6 +686,7 @@ export function LiveItemNotes(props: {
                 turns={turns}
                 compact
                 open={false}
+                at={first}
                 live={d.id === liveId}
                 titleOnly
                 onShowTodos={setFlash}
@@ -652,6 +694,14 @@ export function LiveItemNotes(props: {
               />
             ))}
           </div>
+          {discussions.length > TOPIC_ROWS + 1 && (
+            <button
+              className="link small tk-more"
+              onClick={() => setUnfolded((u) => (u.includes("topics") ? u.filter((k) => k !== "topics") : [...u, "topics"]))}
+            >
+              {unfolded.includes("topics") ? "Show fewer" : `${discussions.length - foldTopics(rankTopics(discussions, segments), liveId, false).length} earlier`}
+            </button>
+          )}
         </section>
       ) : (
         summary.length > 0 && (
@@ -669,23 +719,29 @@ export function LiveItemNotes(props: {
   );
 }
 
-const TOPIC_ORDER: Record<DiscussionOutcome, number> = { open: 0, action: 1, decided: 2, info: 3 };
-
-/** Topics that still need something first (open, then to-do, decided, FYI); newest first within each. */
+/** Topics as a timeline, newest first, each with when it came up. */
 function rankTopics(discussions: Discussion[], segments: Segment[]) {
+  const byId = new Map(segments.map((s) => [s.id, s]));
   return discussions
     .map((d) => {
-      const turns = d.segmentIds.flatMap((id) => segments.filter((s) => s.id === id));
-      return { d, turns, last: turns.at(-1)?.ts ?? d.ts };
+      const turns = d.segmentIds.flatMap((id) => byId.get(id) ?? []);
+      return { d, turns, first: turns[0]?.ts ?? d.ts };
     })
-    .sort((a, b) => TOPIC_ORDER[a.d.outcome] - TOPIC_ORDER[b.d.outcome] || b.last - a.last);
+    .sort((a, b) => b.first - a.first);
 }
 
-/** The topic holding the meeting's latest remark, if that remark was in the last two minutes. */
+/** "4:24": the time of day without AM/PM, for a topic's place in the meeting. */
+const clock = (ts: number) => fmtTime(ts).replace(/\s?[AP]M$/i, "");
+
+/** The topic of the latest remark the agent has placed, if it was in the last two minutes.
+ *  The newest few are often small talk, or not placed yet. */
 function talkingNow(discussions: Discussion[], segments: Segment[]): string | null {
-  const latest = segments.reduce<Segment | null>((a, s) => (!a || s.ts > a.ts ? s : a), null);
-  if (!latest || Date.now() - latest.ts > 120_000) return null;
-  return discussions.find((d) => d.segmentIds.includes(latest.id))?.id ?? null;
+  const recent = segments.filter((s) => Date.now() - s.ts < 120_000).sort((a, b) => b.ts - a.ts);
+  for (const s of recent) {
+    const d = discussions.find((d) => d.segmentIds.includes(s.id));
+    if (d) return d.id;
+  }
+  return null;
 }
 
 const ChevronIcon = () => (
