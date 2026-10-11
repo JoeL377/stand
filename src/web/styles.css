@@ -568,8 +568,7 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 .new-deck { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 
 
-/* ======================================================================
-   Look: Notion-calm pages, Zoom-dark meeting room.
+/* ===============================================================   Look: Notion-calm pages, Zoom-dark meeting room.
    ====================================================================== */
 ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 button { transition: background 0.12s, border-color 0.12s, color 0.12s, scale var(--dur-press) var(--ease-out); font-weight: 500; }
@@ -1783,3 +1782,11 @@ a.sh-pill:hover { text-decoration: none; }
 @media (max-width: 760px) {
   .sh-row-text .sh-status ~ .sh-what { display: none; }
 }
+/* Room owners explicitly connect transcript delivery; credentials never reach this panel. */
+.conxt-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.conxt-panel h3 { margin: 0 0 8px; }
+.conxt-panel select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; background: var(--panel-2); }
+.conxt-panel .conxt-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
+.conxt-panel .conxt-consent input { width: auto; margin-top: 4px; }
+.conxt-delivery { border-top: 1px solid var(--line); padding: 10px 0; }
+.conxt-delivery > span { margin-left: 12px; font-size: 13px; }
