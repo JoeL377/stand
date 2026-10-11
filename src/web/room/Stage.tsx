@@ -95,7 +95,10 @@ export function Stage(props: {
   const showingScreen = Boolean(localScreen || remoteScreen);
   const [flash, setFlash] = useState(0);
   const [cropId, setCropId] = useState<string | null>(null);
-  const [viewId, setViewId] = useState<string | null>(null);
+  // Snaps you've expanded, each a tab on the main screen beside the screen itself, and the
+  // one you're on (null: the main screen). Yours alone: nobody else's screen changes.
+  const [tabs, setTabs] = useState<string[]>([]);
+  const [tab, setTab] = useState<string | null>(null);
   const crop = (id: string) => ({ label: "Crop", run: () => setCropId(id) });
   const failed = (err: unknown) => toast({ tone: "error", text: String((err as Error).message ?? err) });
   const snap = async () => {
@@ -205,7 +208,17 @@ export function Stage(props: {
     seenSnaps.current = ids;
   }, [state.snaps, props.participantId]);
   const cropSnap = cropId ? state.snaps.find((s) => s.id === cropId) : undefined;
-  const viewSnap = viewId ? state.snaps.find((s) => s.id === viewId) : undefined;
+  const tabSnaps = tabs.map((id) => state.snaps.find((s) => s.id === id)).filter((s): s is Snap => Boolean(s));
+  const openSnap = tab ? tabSnaps.find((s) => s.id === tab) : undefined;
+  const openTab = (id: string) => {
+    setTabs((t) => (t.includes(id) ? t : [...t, id].slice(-6)));
+    setTab(id);
+  };
+  const closeTab = (id: string) => {
+    setTabs((t) => t.filter((x) => x !== id));
+    setTab((t) => (t === id ? null : t));
+  };
+  const mainLabel = localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : "Main screen";
   // The latest snap, small in the corner of everyone's middle screen. Each person can expand
   // it for themselves; the host or whoever took it can take it down for everyone.
   const stageSnap = state.stageSnapId ? state.snaps.find((s) => s.id === state.stageSnapId) : undefined;
@@ -213,7 +226,7 @@ export function Stage(props: {
     snap: stageSnap,
     me: props.participantId,
     canClose: canSteer || stageSnap.takenById === props.participantId,
-    onOpen: () => setViewId(stageSnap.id),
+    onOpen: () => openTab(stageSnap.id),
     onClose: () => send({ type: "stage.snap.close" }),
   };
 
@@ -230,6 +243,24 @@ export function Stage(props: {
           {focusItem ? focusItem.title : "General / off-agenda"}
         </span>
         {state.pinnedBy && <span className="badge">📌 Pinned</span>}
+        {tabSnaps.length > 0 && (
+          <span className="stage-tabs" role="tablist" aria-label="Main screen and the snaps you opened">
+            <button role="tab" aria-selected={!openSnap} className={openSnap ? "stage-tab" : "stage-tab on"} onClick={() => setTab(null)}>
+              {mainLabel}
+            </button>
+            {tabSnaps.map((s) => (
+              <span key={s.id} className={s === openSnap ? "stage-tab snap on" : "stage-tab snap"} title={s.caption ?? undefined}>
+                <button role="tab" aria-selected={s === openSnap} onClick={() => setTab(s.id)}>
+                  <CameraIcon />
+                  {snapLabel(s, props.participantId)}
+                </button>
+                <button className="stage-tab-x" onClick={() => closeTab(s.id)} title="Close this tab" aria-label="Close this tab">
+                  ✕
+                </button>
+              </span>
+            ))}
+          </span>
+        )}
         {host ? (
           <span className="host-note muted small">{canSteer ? "You're the host" : `${host.name} is hosting`}</span>
         ) : (
@@ -292,9 +323,10 @@ export function Stage(props: {
         {cropSnap && (
           <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
         )}
-        {viewSnap && <SnapGallery snaps={[viewSnap]} me={props.participantId} isHost={canSteer} onClose={() => setViewId(null)} />}
         {/* Whatever is on the middle screen keeps it; the snap sits on top in the corner. */}
-        {onStage && <StageSnap key={onStage.snap.id} {...onStage} />}
+        {onStage && onStage.snap !== openSnap && <StageSnap key={onStage.snap.id} {...onStage} />}
+        {/* A snap's tab covers the main screen, which keeps running underneath (a share stays live). */}
+        {openSnap && <SnapTab snap={openSnap} me={props.participantId} />}
         {localScreen ? (
           <Video stream={localScreen} label={`You're sharing your screen · ${SNAP_KEYS_WORDS} snaps it`} />
         ) : remoteScreen ? (
@@ -440,9 +472,36 @@ export function Avatar({ id, name, picture, size = 44 }: { id: string; name: str
   );
 }
 
+/** "Joe 2:44": who took a snap and when, for its tab. */
+function snapLabel(snap: Snap, me: string) {
+  const who = snap.takenById === me ? "You" : snap.takenBy.split(" ")[0];
+  return `${who} ${new Date(snap.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/i, "")}`;
+}
+
+/** A snap in its own tab: big on the main screen, with who took it and the agent's caption. */
+function SnapTab({ snap, me }: { snap: Snap; me: string }) {
+  const who = snap.takenById === me ? "You" : snap.takenBy.split(" ")[0];
+  return (
+    <figure className="snap-tab" role="tabpanel">
+      <img src={snap.url} alt={snap.caption ?? `${who} snapped this`} />
+      <figcaption>
+        <CameraIcon />
+        <span className="stage-snap-who">
+          {who} snapped this at {new Date(snap.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+        </span>
+        {snap.caption && (
+          <span className="stage-snap-cap" title={snap.caption}>
+            <span className="agent-mark">✦</span> {snap.caption}
+          </span>
+        )}
+      </figcaption>
+    </figure>
+  );
+}
+
 /** The latest snap, small in the top right corner of the middle screen: the picture, who
- *  took it and the agent's caption. Expand (or a click on it) opens it full size for you
- *  only; ✕ takes it off everyone's screen, and it stays on the item. */
+ *  took it and the agent's caption. Expand (or a click on it) opens it in a tab of its own,
+ *  for you only; ✕ takes it off everyone's screen, and it stays on the item. */
 function StageSnap(props: { snap: Snap; me: string; canClose: boolean; onOpen: () => void; onClose: () => void }) {
   const { snap } = props;
   const who = snap.takenById === props.me ? "You" : snap.takenBy.split(" ")[0];
@@ -461,7 +520,7 @@ function StageSnap(props: { snap: Snap; me: string; canClose: boolean; onOpen: (
         )}
       </figcaption>
       <span className="stage-snap-tools">
-        <button onClick={props.onOpen} title="Expand it, just for you" aria-label="Expand the snap">
+        <button onClick={props.onOpen} title="Open it in a tab, just for you" aria-label="Expand the snap">
           <svg viewBox="0 0 24 24" aria-hidden>
             <path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7" />
           </svg>
