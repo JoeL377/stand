@@ -1325,6 +1325,10 @@ export function openDb(file?: string) {
       const r = db.prepare("SELECT * FROM jots WHERE id = ?").get(id) as Row | undefined;
       return r ? toJot(r) : null;
     },
+    /** Notes filed under an item, newest first. */
+    itemJots(itemId: string, limit = 20): Jot[] {
+      return (db.prepare("SELECT * FROM jots WHERE item_id = ? ORDER BY ts DESC LIMIT ?").all(itemId, limit) as Row[]).map(toJot);
+    },
     /** Notes saved to a space, newest first. */
     spaceJots(roomId: string, since = 0, limit = 100): Jot[] {
       return (db.prepare("SELECT * FROM jots WHERE room_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?").all(roomId, since, limit) as Row[]).map(toJot);
