@@ -23,6 +23,7 @@ import type {
 import { newId } from "./ids.ts";
 import type { SnapRow } from "./snaps.ts";
 import type { Polish, UpNextInput } from "./upNext.ts";
+import { initConxt, enqueueConxtMeeting } from "./conxt.ts";
 
 export type DB = ReturnType<typeof openDb>;
 
@@ -391,6 +392,8 @@ export function openDb(file?: string) {
       "ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';",
     );
 
+  initConxt(db);
+
   return {
     raw: db,
 
@@ -709,7 +712,12 @@ export function openDb(file?: string) {
       return { id, startedAt };
     },
     endMeeting(id: string, summary: string | null, synthesis: string | null = null, at = Date.now()) {
-      db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ? WHERE id = ?").run(at, summary, synthesis, id);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ? WHERE id = ?").run(at, summary, synthesis, id);
+        enqueueConxtMeeting(db, id);
+        db.exec("COMMIT");
+      } catch (err) { db.exec("ROLLBACK"); throw err; }
     },
     /** Someone pressed End meeting; the recap is being written. A restart before it's done finishes the job instead of resuming. */
     meetingEnding(id: string) {

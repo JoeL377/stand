@@ -1606,3 +1606,12 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
   .agenda.rail { flex-direction: row; justify-content: flex-start; min-height: 44px; padding: 6px 8px; overflow: visible; }
   .rail-items { flex-direction: row; flex-wrap: wrap; }
 }
+
+/* Room owners explicitly connect transcript delivery; credentials never reach this panel. */
+.conxt-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.conxt-panel h3 { margin: 0 0 8px; }
+.conxt-panel select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; background: var(--panel-2); }
+.conxt-panel .conxt-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
+.conxt-panel .conxt-consent input { width: auto; margin-top: 4px; }
+.conxt-delivery { border-top: 1px solid var(--line); padding: 10px 0; }
+.conxt-delivery > span { margin-left: 12px; font-size: 13px; }

@@ -31,8 +31,10 @@ import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile } from "./snaps.ts";
 import { toSpaceSummary } from "./spaces.ts";
+import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
+const conxtDestinations = parseDestinations(process.env.CONXT_DESTINATIONS);
 const db = openDb(path.join(config.dataDir, "standup.db"));
 const agent = createAgent();
 const sessions = new Map<string, RoomSession>();
@@ -192,6 +194,9 @@ app.get(
 
 // Everything else needs a signed-in user.
 app.use("/api", requireUser(db));
+app.use("/api/rooms/:id/conxt", conxtRoutes(db, conxtDestinations));
+const conxtDelivery = new ConxtDelivery(db, conxtDestinations);
+conxtDelivery.start();
 
 // ---- snaps: stills of the shared screen ------------------------------------
 
