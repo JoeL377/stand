@@ -6,6 +6,7 @@ import type { WebSocket } from "ws";
 import type {
   User,
   ClientMessage,
+  Discussion,
   Item,
   Note,
   Participant,
@@ -15,11 +16,12 @@ import type {
   Suggestion,
 } from "../shared/protocol.ts";
 import { capabilities } from "./config.ts";
-import type { DB, OpenMeeting } from "./db.ts";
-import { type Agent, NotesTrouble, type RecapInput, type SnapMedia } from "./llm.ts";
+import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
+import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
-import { capturedFor, mergeNotes } from "./notesMerge.ts";
+import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
+import { settle } from "./settle.ts";
 import { newId } from "./ids.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
@@ -146,6 +148,8 @@ export class RoomSession implements SpeechSink {
   private transcriberRestarting = false;
   /** Items whose last notes run failed. People are told once, then it shows in the notes. */
   private notesFailing = new Set<string | null>();
+  /** Per item, the newest remark the last notes run that worked had read (see settle.ts). */
+  private notesReadUpTo = new Map<string | null, number>();
   /** Why, when it's the Anthropic account rather than one run: its rate limit or its credit. */
   private notesWhy: NotesTrouble["reason"] | null = null;
   /** Rate limited: no notes run starts before this, so retries don't keep it hit. */
@@ -619,6 +623,8 @@ export class RoomSession implements SpeechSink {
         if (this.lastSpeech?.segmentId === msg.segmentId) this.lastSpeech = null;
         if (seg) {
           this.broadcast({ type: "segment.updated", segment: seg });
+          // An old remark moved here hasn't been read under this item yet.
+          this.notesReadUpTo.delete(seg.itemId);
           this.scheduleNotes(before.itemId, 500);
           this.scheduleNotes(seg.itemId, 500);
         }
@@ -1042,48 +1048,52 @@ export class RoomSession implements SpeechSink {
       this.broadcast({ type: "notes.busy", itemId, busy: true });
       const segments = this.db.itemSegments(this.meetingId, itemId);
       const item = itemId ? this.db.getItem(itemId) : null;
+      // As the meeting ends, the last run reads the whole meeting again to tidy it up for the recap.
+      const tidy = this.ended;
+      const { settled, window } = tidy
+        ? { settled: [], window: segments }
+        : settle(
+            segments,
+            this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId),
+            startedAt,
+            this.notesReadUpTo.get(itemId),
+          );
       try {
+        const settledIds = new Set(settled.map((d) => d.id));
+        const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
+        const keys = capturedFor(current.filter((n) => !n.discussionId || !settledIds.has(n.discussionId)));
+        const topics: SettledTopic[] = settled.map((d, i) => ({
+          key: `T${i + 1}`,
+          topic: d.topic,
+          outcome: d.outcome,
+          notes: current.flatMap((n) => (n.discussionId === d.id && n.kind !== "summary" ? [{ kind: n.kind, text: n.text, owner: n.owner }] : [])),
+        }));
         const earlier = itemId
           ? this.db
               .itemDiscussions(itemId)
               .filter((d) => d.meetingId !== this.meetingId)
               .map((d) => ({ id: d.id, topic: d.topic, meetingStartedAt: d.meetingStartedAt }))
           : [];
-        const keys = capturedFor(this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId));
         // What people saved off the screen, as words: the notes never see the images.
         const screens = this.db
           .meetingSnaps(this.meetingId)
           .filter((p) => p.itemId === itemId && p.caption)
           .map((p) => ({ at: p.ts, by: p.source === "agent" ? "Stand agent" : p.takenBy, caption: p.caption! }));
-        const draft = await this.agent.notesFor(item, segments, earlier, keys, screens);
-        const discussions = this.db.replaceDiscussions(
-          this.meetingId,
-          itemId,
-          draft.discussions.map(({ segmentIndexes, ...d }) => ({ ...d, segmentIds: segmentIndexes.map((i) => segments[i].id) })),
-        );
-        // Re-read: a to-do may have been checked off while the agent was writing.
-        const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
-        notes = this.db.replaceNotes(
-          this.meetingId,
-          itemId,
-          mergeNotes(
-            draft.notes.map(({ discussion, ...n }) => ({
-              ...n,
-              discussionId: discussion === null ? null : (discussions[discussion]?.id ?? null),
-            })),
-            current,
-            keys,
-            this.db.dismissedNotes(this.meetingId, itemId),
-          ),
-        );
-        this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
-        // A snap belongs to the topic its remarks are in, and the topics were just redrafted.
-        if (this.snaps().some((p) => p.itemId === itemId)) this.broadcastState();
-        const before = new Set(current.map((n) => n.id));
-        const fresh = notes.filter((n) => !before.has(n.id) && (n.kind === "action" || n.kind === "decision"));
-        if (fresh.length) void this.keepBackingFrame(itemId, fresh);
+        // Nothing said since every topic settled: the notes stand as they are.
+        notes =
+          !window.length && settled.length
+            ? current
+            : this.saveNotes(
+                itemId,
+                await this.agent.notesFor(item, window, earlier, keys, screens, { settled: topics, tidy }),
+                segments,
+                window,
+                settled,
+                keys,
+              );
+        if (segments.length) this.notesReadUpTo.set(itemId, segments[segments.length - 1].ts);
         console.log(
-          `[agent] notes for ${itemId ?? "off-agenda"}: ${segments.length} turns in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
+          `[agent] notes for ${itemId ?? "off-agenda"}: ${window.length} of ${segments.length} lines${settled.length ? `, ${settled.length} topics settled` : ""}${tidy ? ", whole meeting" : ""} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
         );
         if (this.notesFailing.delete(itemId)) {
           if (!this.notesFailing.size) this.notesWhy = null;
@@ -1110,6 +1120,73 @@ export class RoomSession implements SpeechSink {
     });
     this.noteRuns.set(itemId, run);
     await run;
+    return notes;
+  }
+
+  /** Saves a notes run: the topics and notes it wrote, with the settled topics and their notes
+   *  carried over as they were. `window` is what the run read; draft lines index into it. */
+  private saveNotes(
+    itemId: string | null,
+    draft: ItemNotesDraft,
+    segments: Segment[],
+    window: Segment[],
+    settled: Discussion[],
+    keys: Array<{ id: string; key: string }>,
+  ): Note[] {
+    const byKey = new Map(settled.map((d, i) => [`T${i + 1}`, d]));
+    const back = new Set<string>();
+    const fresh: DraftDiscussion[] = draft.discussions.map(({ segmentIndexes, picksUp, ...d }) => {
+      const lines = segmentIndexes.map((i) => window[i].id);
+      const was = picksUp ? byKey.get(picksUp) : undefined;
+      if (!was || back.has(was.id)) return { ...d, segmentIds: lines };
+      // The talk went back to a settled topic: it carries on under its id, earlier lines and all.
+      back.add(was.id);
+      const spoke = new Set(d.positions.map((p) => p.speaker));
+      return {
+        ...d,
+        id: was.id,
+        segmentIds: [...was.segmentIds, ...lines],
+        positions: [...was.positions.filter((p) => !spoke.has(p.speaker)), ...d.positions],
+      };
+    });
+    const kept: DraftDiscussion[] = settled
+      .filter((d) => !back.has(d.id))
+      .map((d) => ({ id: d.id, topic: d.topic, positions: d.positions, outcome: d.outcome, segmentIds: d.segmentIds, continuesId: d.continues?.id ?? null }));
+    // Topics in the order they came up.
+    const at = new Map(segments.map((s) => [s.id, s.ts]));
+    const start = (d: DraftDiscussion) => Math.min(...d.segmentIds.map((id) => at.get(id) ?? Infinity));
+    const order = [...kept, ...fresh].map((d, i) => ({ d, i, t: start(d) })).sort((a, b) => a.t - b.t || a.i - b.i);
+    const discussions = this.db.replaceDiscussions(
+      this.meetingId,
+      itemId,
+      order.map((o) => o.d),
+    );
+    const idOf = new Map(order.map((o, j) => [o.i, discussions[j].id]));
+    // Re-read: a to-do may have been checked off while the agent was writing.
+    const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
+    const settledIds = new Set(settled.map((d) => d.id));
+    const carried = current.filter((n) => n.discussionId !== null && settledIds.has(n.discussionId));
+    const notes = this.db.replaceNotes(this.meetingId, itemId, [
+      ...carried,
+      ...mergeNotes(
+        draft.notes
+          // The model was shown a settled topic's notes to leave alone; one it writes again is dropped.
+          .filter((n) => !carried.some((c) => c.kind === n.kind && similar(c.text, n.text)))
+          .map(({ discussion, ...n }) => ({
+            ...n,
+            discussionId: discussion === null ? null : (idOf.get(kept.length + discussion) ?? null),
+          })),
+        current.filter((n) => !carried.includes(n)),
+        keys,
+        this.db.dismissedNotes(this.meetingId, itemId),
+      ),
+    ]);
+    this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
+    // A snap belongs to the topic its remarks are in, and the topics were just redrafted.
+    if (this.snaps().some((p) => p.itemId === itemId)) this.broadcastState();
+    const before = new Set(current.map((n) => n.id));
+    const added = notes.filter((n) => !before.has(n.id) && (n.kind === "action" || n.kind === "decision"));
+    if (added.length) void this.keepBackingFrame(itemId, added);
     return notes;
   }
 

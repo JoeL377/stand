@@ -5,8 +5,8 @@ import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps } from "./brief.ts";
 import { looksLikePdf, parseDeck } from "./decks.ts";
-import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, NotesTrouble } from "./llm.ts";
-import type { ClientMessage, Note, ServerMessage, User } from "../shared/protocol.ts";
+import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, type NotesOptions, NotesTrouble, type SettledTopic } from "./llm.ts";
+import type { ClientMessage, Item, Note, Segment, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
 import { outlineToSlides } from "../shared/outline.ts";
@@ -430,6 +430,95 @@ test("a notes refresh never drops a to-do or decision captured earlier, and keep
   assert.equal(actions[2].id, debug.id);
   assert.equal(actions[2].doneBy, "Joe");
   assert.equal(second.filter((n) => n.kind === "decision").length, 1);
+});
+
+test("in a long meeting a quiet topic settles: runs read what's still going, and its notes stay as they were", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "One", url: null, description: null }]);
+  const calls: Array<{ lines: string[]; settled: SettledTopic[]; tidy: boolean }> = [];
+  const drafts: ItemNotesDraft[] = [
+    {
+      notes: [
+        { kind: "action", text: "Make the keep button stand out", owner: "Joe", discussion: 0 },
+        { kind: "decision", text: "Open the review queue in the widget first", owner: null, discussion: 1 },
+      ],
+      discussions: [
+        { topic: "Conflict page", positions: [], outcome: "action", segmentIndexes: [0, 1], continuesId: null },
+        { topic: "Review queue", positions: [], outcome: "decided", segmentIndexes: [2, 3], continuesId: null },
+      ],
+    },
+    // Forty minutes on, the conflict page settled. The model writes its to-do again anyway.
+    {
+      notes: [
+        { kind: "action", text: "Make the keep button stand out more", owner: "Joe", discussion: 0 },
+        { kind: "decision", text: "Open the review queue in the widget first", owner: null, discussion: 0, sameAs: "D1" },
+      ],
+      discussions: [{ topic: "Review queue", positions: [], outcome: "decided", segmentIndexes: [0, 1, 2], continuesId: null }],
+    },
+    // Then the talk goes back to the conflict page.
+    {
+      notes: [
+        { kind: "action", text: "Make the conflict diff easier to read", owner: "Andy", discussion: 0 },
+        { kind: "decision", text: "Open the review queue in the widget first", owner: null, discussion: 1, sameAs: "D1" },
+      ],
+      discussions: [
+        { topic: "Conflict page diff", positions: [{ speaker: "Andy", position: "The diff is hard to read" }], outcome: "action", segmentIndexes: [3], continuesId: null, picksUp: "T1" },
+        { topic: "Review queue", positions: [], outcome: "decided", segmentIndexes: [0, 1, 2], continuesId: null },
+      ],
+    },
+  ];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async notesFor(item: Item | null, segments: Segment[], _e: unknown, _c: unknown, _s: unknown, options?: NotesOptions) {
+      calls.push({ lines: segments.map((x) => x.text), settled: options?.settled ?? [], tidy: !!options?.tidy });
+      return drafts.shift() ?? new HeuristicAgent().notesFor(item, segments);
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const refresh = (session as unknown as { refreshNotes(id: string | null): Promise<Note[]> }).refreshNotes.bind(session);
+  const MIN = 60_000;
+  const t = Date.now();
+  session.addSpeech("p1", "Andy", "The conflict page needs a clearer keep button", t - 40 * MIN);
+  session.addSpeech("p2", "Joe", "I'll make the keep button stand out", t - 39 * MIN);
+  session.addSpeech("p3", "Huy", "Should the review queue open in the widget?", t - 3 * MIN);
+  session.addSpeech("p1", "Andy", "Yes, widget first", t - 2 * MIN);
+  const itemId = db.meetingSegments(session.meetingId)[0].itemId;
+  const first = await refresh(itemId);
+  assert.equal(calls[0].lines.length, 4);
+  const conflict = db.meetingDiscussions(session.meetingId).find((d) => d.topic === "Conflict page")!;
+  const keep = first.find((n) => n.text === "Make the keep button stand out")!;
+  db.setActionDone(room.id, keep.id, "Joe");
+
+  session.addSpeech("p3", "Huy", "And the widget shows the queue count", t - 1 * MIN);
+  const second = await refresh(itemId);
+  assert.deepEqual(calls[1].lines, ["Should the review queue open in the widget?", "Yes, widget first", "And the widget shows the queue count"]);
+  assert.deepEqual(calls[1].settled, [
+    {
+      key: "T1",
+      topic: "Conflict page",
+      outcome: "action",
+      notes: [{ kind: "action", text: "Make the keep button stand out", owner: "Joe" }],
+    },
+  ]);
+  const settled = db.meetingDiscussions(session.meetingId).find((d) => d.id === conflict.id);
+  assert.deepEqual(settled?.segmentIds, conflict.segmentIds);
+  const actions = second.filter((n) => n.kind === "action");
+  assert.deepEqual(actions.map((n) => [n.id, n.doneBy, n.discussionId]), [[keep.id, "Joe", conflict.id]], "kept as it was, not written twice");
+
+  session.addSpeech("p1", "Andy", "Back on the conflict page, the diff is hard to read", Date.now());
+  const third = await refresh(itemId);
+  assert.equal(calls[2].lines.at(-1), "Back on the conflict page, the diff is hard to read");
+  const back = db.meetingDiscussions(session.meetingId).find((d) => d.id === conflict.id)!;
+  assert.equal(back.topic, "Conflict page diff");
+  assert.equal(back.segmentIds.length, 3, "its earlier lines and the new one");
+  assert.equal(third.find((n) => n.text === "Make the conflict diff easier to read")?.discussionId, conflict.id);
+
+  // As the meeting ends, one last run reads all of it.
+  await session.end();
+  assert.equal(calls.at(-1)?.tidy, true);
+  assert.equal(calls.at(-1)?.lines.length, 6);
+  assert.deepEqual(calls.at(-1)?.settled, []);
+  assert.ok(db.meetingNotes(session.meetingId).some((n) => n.id === keep.id && n.doneBy === "Joe"));
 });
 
 test("spaces: every space is listed with its open to-dos, the ones for you, and what to decide", async () => {

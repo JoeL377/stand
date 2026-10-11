@@ -41,7 +41,7 @@ const words = (t: string) =>
   );
 
 /** Same task or decision in different words, for when the model forgot to say so. */
-function similar(a: string, b: string): boolean {
+export function similar(a: string, b: string): boolean {
   const x = words(a);
   const y = words(b);
   if (!x.size || !y.size) return a.trim().toLowerCase() === b.trim().toLowerCase();
