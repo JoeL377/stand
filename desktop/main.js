@@ -932,6 +932,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("app:snap", (e) => (isStand(e.senderFrame?.url) ? snap("page") : null));
   // The meeting page, and the floating bar's buttons.
   ipcMain.on("app:meeting", (e, m) => e.sender === win?.webContents && isStand(e.senderFrame?.url) && setMeeting(m));
+  // How loud your mic is, for the bar's ring. Only a number, and only while the bar is up.
+  ipcMain.on("app:level", (e, v) => {
+    if (e.sender !== win?.webContents || !bar?.isVisible() || typeof v !== "number") return;
+    bar.webContents.send("bar:level", Math.max(0, Math.min(1, v)));
+  });
   ipcMain.on("bar:press", (e, button) => e.sender === bar?.webContents && void pressOnBar(button));
   ipcMain.handle(
     "bar:size",

@@ -13,6 +13,17 @@
   }
   /* The pill drags the bar around; its buttons stay clickable. */
   .pill { position: absolute; top: 4px; left: 4px; right: 4px; height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 5px; border-radius: 999px; background: rgb(24 25 30 / 0.97); box-shadow: var(--ring); color: #e8e8ee; -webkit-app-region: drag; }
+  /* While you talk the ring brightens with your voice (--v, 0 to 1), and settles when you stop. */
+  .pill.voice {
+    box-shadow:
+      0 0 0 calc(1.5px + var(--v) * 0.5px) color-mix(in srgb, rgb(170 205 255) calc(var(--v) * 100%), rgb(96 150 255 / 0.9)),
+      0 0 0 4px rgb(45 108 223 / calc(0.28 + var(--v) * 0.5)),
+      0 2px 4px rgb(0 0 0 / 0.35);
+    transition: box-shadow 0.12s linear;
+  }
+  /* Talking while muted: amber, and the title says so. */
+  .pill.muted-talk { box-shadow: 0 0 0 1.5px rgb(251 191 36), 0 0 0 4px rgb(245 158 11 / 0.4), 0 2px 4px rgb(0 0 0 / 0.35); }
+  .pill.muted-talk .mic { background: rgb(245 158 11 / 0.22); color: #fbbf24; }
   /* Each time the bar comes up (you've switched away from Stand), it pops in and glows twice. */
   @keyframes arrive { from { transform: scale(0.9); opacity: 0; } }
   @keyframes glow { 50% { box-shadow: var(--ring-lit); } }
@@ -26,7 +37,7 @@
   .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d7d7e0; font-size: 12.5px; }
   .what .key { margin-right: 6px; padding: 1px 5px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2); color: #a5a5b3; font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .what.said { color: #86efac; }
-  .what.said.bad { color: #fcd34d; }
+  .what.said.bad, .what.warn { color: #fcd34d; }
   .mic { width: 30px; }
   .mic.off { color: #ff7b7b; }
   .snap { padding: 0 12px 0 10px; background: #2d6cdf; color: #fff; font-size: 12.5px; font-weight: 500; }
@@ -85,24 +96,29 @@
 
   function render() {
     const what = $("what");
+    what.className = "what";
+    what.textContent = "";
+    what.title = "";
     if (saying) {
       what.className = saying.ok ? "what said" : "what said bad";
       what.textContent = saying.text;
       what.title = saying.body ?? "";
-      return;
+    } else if (mutedTalk) {
+      what.className = "what warn";
+      what.textContent = "You're muted";
+      what.title = "Click the mic to unmute";
+    } else if (state) {
+      if (state.itemKey) {
+        const key = document.createElement("span");
+        key.className = "key";
+        key.textContent = state.itemKey;
+        what.append(key);
+      }
+      what.append(state.item ?? state.space);
+      what.title = state.item ? `${state.space}: ${state.item}` : state.space;
     }
-    what.className = "what";
-    what.textContent = "";
-    what.title = "";
+    $("pill").classList.toggle("muted-talk", Boolean(mutedTalk));
     if (!state) return;
-    if (state.itemKey) {
-      const key = document.createElement("span");
-      key.className = "key";
-      key.textContent = state.itemKey;
-      what.append(key);
-    }
-    what.append(state.item ?? state.space);
-    what.title = state.item ? `${state.space}: ${state.item}` : state.space;
     const todos = state.todos ?? [];
     $("todos").hidden = todos.length === 0;
     $("todo-count").textContent = todos.length;
@@ -192,7 +208,41 @@
 
   window.bar.onState((s) => {
     state = s;
+    if (s?.micOn) mutedTalk = false;
+    else {
+      $("pill").classList.remove("voice");
+      $("pill").style.setProperty("--v", 0);
+    }
     render();
+  });
+
+  // ---- your voice ----
+  // The ring follows your mic while you talk. Talk while muted (loud for a moment, so a cough
+  // doesn't count) and the bar turns amber and says "You're muted" until a while after you stop.
+  let mutedTalk = false;
+  let loudSince = 0;
+  let quiet;
+  window.bar.onLevel((v) => {
+    const pill = $("pill");
+    const on = Boolean(state?.micOn);
+    pill.classList.toggle("voice", on);
+    pill.style.setProperty("--v", on ? v : 0);
+    if (on) return;
+    if (v < 0.45) {
+      loudSince = 0;
+      return;
+    }
+    loudSince ||= Date.now();
+    if (Date.now() - loudSince < 400) return;
+    clearTimeout(quiet);
+    quiet = setTimeout(() => {
+      mutedTalk = false;
+      render();
+    }, 2500);
+    if (!mutedTalk) {
+      mutedTalk = true;
+      render();
+    }
   });
   // How the snap went, in place of the title for a few seconds.
   window.bar.onReport((r) => {

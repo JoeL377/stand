@@ -9,6 +9,7 @@ import { Stage } from "./Stage.tsx";
 import { SidePanel } from "./SidePanel.tsx";
 import { fmtDuration, keyOf } from "../util.ts";
 import { macApp } from "../macApp.ts";
+import { useMicLevel } from "./micLevel.ts";
 import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
 import { toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
@@ -159,6 +160,7 @@ export function Meeting(props: {
     if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn, todos: barTodos });
   }, [state?.roomName, focusItem, micOn, barTodos]);
   useEffect(() => () => macApp?.meeting?.(null), []);
+  useMicLevel(media.micTrack, macApp?.level);
   useEffect(() => macApp?.onCommand?.((c) => c === "mic" && void toggleMic()), [toggleMic]);
   // Mute and unmute from the keyboard, as in other meeting apps (Command or Ctrl + D).
   useEffect(() => {
