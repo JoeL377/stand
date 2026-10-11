@@ -110,11 +110,21 @@
           }
         }
       }
+      #form {
+        display: flex;
+        flex-direction: column;
+      }
       #pins {
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
         margin: 0 0 8px;
+      }
+      /* The snaps go on the outside of the bar and the card together: on top when the card
+         opens over the bar, at the bottom when it opens under it. The text stays by the bar. */
+      body.fused:not(.above) #pins {
+        order: 1;
+        margin: 8px 0 0;
       }
       .pin {
         position: relative;

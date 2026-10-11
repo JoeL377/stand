@@ -1057,15 +1057,24 @@ async function pinSnap(image, at, prefs, reading) {
 
 const sendPins = () => noteWin && !noteWin.isDestroyed() && noteWin.webContents.send("note:pins", notePins.map(({ id, thumb }) => ({ id, thumb })));
 
-/** Where the card goes for a given height: joined to the bar's lower edge (its upper edge, when
- *  the bar is low on the screen), so the two read as one piece; or at the top of the screen the
- *  pointer is on when the bar is down. */
+/** Room the card wants over the bar before it opens that way: a row of snaps and a few lines. */
+const NOTE_ROOM = 220;
+
+/** Where the card goes for a given height: joined to the bar's upper edge when there's room over
+ *  it, else its lower edge (the bar at the top of the screen, where it starts), so the two read as
+ *  one piece and the snaps, on the card's far side, are on the outside of it. Once open it stays
+ *  on its side while it fits. Away from the bar (the bar is down): the top of the screen the
+ *  pointer is on. */
 function notePlace(height) {
   if (bar?.isVisible()) {
     const [x, y] = bar.getPosition();
     const a = screen.getDisplayMatching({ x, y, ...BAR }).workArea;
-    const above = y + BAR.height + height > a.y + a.height;
     // The bar's pill runs from 4 px to BAR.height - 4 px down its window.
+    const roomAbove = y + 4 - a.y;
+    const roomBelow = a.y + a.height - (y + BAR.height - 4);
+    const was = notePlaced?.fused ? notePlaced.above : null;
+    const fits = (up) => height <= (up ? roomAbove : roomBelow);
+    const above = was !== null && fits(was) ? was : roomAbove >= Math.max(height, NOTE_ROOM) || !fits(false);
     return { x, y: above ? y - height + 4 : y + BAR.height - 4, above, fused: true };
   }
   const a = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
@@ -1112,6 +1121,7 @@ async function openNote() {
   }
   closeBarList();
   noteHeight = notePins.length ? 170 : 96;
+  notePlaced = null;
   const place = notePlace(noteHeight);
   notePlaced = { above: place.above, fused: place.fused };
   const card = new BrowserWindow({
