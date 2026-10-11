@@ -2,14 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { Capabilities } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
-import { toast } from "../Toasts.tsx";
-import { useAuth, UserMenu } from "../auth.tsx";
-import { fmtDate, fmtTime } from "../util.ts";
+import { useAuth } from "../auth.tsx";
 import { Meeting } from "../room/Meeting.tsx";
-import { DeckIcon, LinkIcon, Logo, PdfIcon, TaskIcon, TicketIcon } from "../icons.tsx";
-import { Avatar } from "../room/Stage.tsx";
-import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
-import { SynthesisLine } from "../Synthesis.tsx";
+import { SpaceHome } from "./SpaceHome.tsx";
 
 export function RoomPage() {
   const { roomId = "" } = useParams();
@@ -17,7 +12,6 @@ export function RoomPage() {
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [joined, setJoined] = useState(false);
-  const [copied, setCopied] = useState(false);
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
 
@@ -31,6 +25,10 @@ export function RoomPage() {
   useEffect(() => {
     load();
   }, [load]);
+  // The space page keeps itself current; a missed refresh keeps what's shown.
+  const refresh = useCallback(() => {
+    api.room(roomId).then(setRoom, () => {});
+  }, [roomId]);
 
   // "Start talking" on the Spaces page comes straight in. The flag goes once used, so
   // leaving the meeting lands on the overview rather than joining again.
@@ -79,160 +77,7 @@ export function RoomPage() {
   }
 
 
-  const past = room.meetings.filter((m) => m.endedAt && m.segmentCount > 0).slice(0, 5);
-  const live = !!room.liveMeetingId;
-  // A meeting nobody's in any more: it ends by itself unless someone comes back.
-  const wrapping = live && room.people.length === 0;
-
-  // The agenda as the meeting shows it: tasks and tickets, with a deck's
-  // slides folded into one line.
-  type Entry = { key: string; kind: "task" | "linear" | "deck" | "pdf"; title: string; meta: string | null; href: string };
-  const entries: Entry[] = [];
-  for (const it of room.items) {
-    if (it.deckId) {
-      const last = entries[entries.length - 1];
-      if (last?.key === it.deckId) {
-        last.meta = `${Number(last.meta?.split(" ")[0] ?? 0) + 1} slides`;
-        continue;
-      }
-      const deck = room.decks.find((d) => d.id === it.deckId);
-      entries.push({ key: it.deckId, kind: deck?.kind === "native" ? "deck" : "pdf", title: deck?.title ?? "Slides", meta: "1 slides", href: `/decks/${it.deckId}` });
-    } else {
-      entries.push({ key: it.id, kind: it.source === "linear" ? "linear" : "task", title: it.title, meta: it.externalId, href: `/items/${it.id}` });
-    }
-  }
-  for (const e of entries) if (e.meta === "1 slides") e.meta = "1 slide";
-  // Open follow-ups per agenda entry (a deck counts its slides').
-  const openOn = new Map<string, number>();
-  for (const f of room.followUps) {
-    const it = room.items.find((i) => i.id === f.itemId);
-    const key = it?.deckId ?? f.itemId;
-    if (key) openOn.set(key, (openOn.get(key) ?? 0) + 1);
-  }
-  const kindIcon = { task: <TaskIcon />, linear: <TicketIcon />, deck: <DeckIcon />, pdf: <PdfIcon /> };
-
-  const copy = () => {
-    const done = () => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    };
-    // Plain http on a local network has no clipboard: show the link to copy by hand.
-    const show = () => toast({ text: `Copy this link: ${location.href}`, ms: 15_000 });
-    if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(done, show);
-    else show();
-  };
-
-  return (
-    <div className="lobby">
-      <header className="lobby-bar">
-        <Link to="/" className="lobby-brand">
-          <Logo />
-          Stand
-        </Link>
-        <UserMenu />
-      </header>
-
-      <main className="lobby-main">
-        <section className="lobby-card">
-          <span className={live && !wrapping ? "lobby-status live" : "lobby-status"}>
-            <span className="dot" />
-            {wrapping ? "Wrapping up" : live ? "Talking now" : "Quiet right now"}
-          </span>
-          <h1>{room.name}</h1>
-          {room.purpose && <p className="lobby-purpose">{room.purpose}</p>}
-          <SynthesisLine roomId={room.id} instructions={room.synthesisInstructions} onSaved={(v) => setRoom({ ...room, synthesisInstructions: v })} />
-          {wrapping && <p className="muted lobby-wrapping">Nobody's in the meeting now. It ends by itself in about 2 minutes, and the notes are written up, unless someone joins.</p>}
-          {live && room.people.length > 0 && (
-            <div className="lobby-people">
-              <span className="stack">
-                {room.people.slice(0, 4).map((p, i) => (
-                  <Avatar key={i} id={p.name} name={p.name} picture={p.picture} size={26} />
-                ))}
-              </span>
-              <span className="muted">
-                {room.people.length === 1 ? `${room.people[0].name} is here` : `${room.people[0].name} and ${room.people.length - 1} more are here`}
-              </span>
-            </div>
-          )}
-          <div className="lobby-actions">
-            <button className="primary lobby-join" autoFocus onClick={() => setJoined(true)}>
-              {wrapping ? "Join" : live ? "Join them" : "Start talking"}
-            </button>
-            <button className="lobby-copy" onClick={copy} title="Copy a link others can join with">
-              <LinkIcon />
-              {copied ? "Copied" : "Invite"}
-            </button>
-          </div>
-          <p className="lobby-as muted">
-            You'll join as <strong>{user.name}</strong>
-          </p>
-          <ModeNote caps={caps} />
-        </section>
-
-        {entries.length > 0 && (
-          <section className="lobby-section">
-            <h2>
-              Agenda <span className="count">{entries.length}</span>
-            </h2>
-            <ul className="lobby-list">
-              {entries.map((e) => (
-                <li key={e.key}>
-                  <Link to={e.href}>
-                    <span className="kind">{kindIcon[e.kind]}</span>
-                    <span className="title">{e.title}</span>
-                    {e.meta && <span className="meta">{e.meta}</span>}
-                    {openOn.get(e.key) ? <span className="open-count" title="Open action items from past meetings">{openOn.get(e.key)} open</span> : null}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {room.followUps.length > 0 && (
-          <section className="lobby-section">
-            <h2>
-              Open follow-ups <span className="count">{room.followUps.length}</span>
-              <span className="h2-links">
-                <a href={`/api/rooms/${room.id}/followups.md`} target="_blank" rel="noreferrer" title="The open follow-ups as Markdown, for people and agents">
-                  Markdown
-                </a>
-                <a href={`/api/rooms/${room.id}/followups.json`} target="_blank" rel="noreferrer" title="The open follow-ups as JSON, for agents and tools">
-                  JSON
-                </a>
-              </span>
-            </h2>
-            <div className="lobby-followups">
-              <FollowUpList
-                notes={room.followUps}
-                onToggle={saveFollowUp(room.id)}
-                source={(n) => ({ label: sourceLabel(n.itemId, room.items, room.decks), href: itemHref(n.itemId, room.items) })}
-                showDate
-              />
-            </div>
-          </section>
-        )}
-
-        {past.length > 0 && (
-          <section className="lobby-section">
-            <h2>Past meetings</h2>
-            <ul className="lobby-list">
-              {past.map((m) => (
-                <li key={m.id}>
-                  <Link to={`/meetings/${m.id}`}>
-                    <span className="title">
-                      {fmtDate(m.startedAt)} · {fmtTime(m.startedAt)}
-                    </span>
-                    {m.summary && <span className="meta summary">{m.summary}</span>}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </main>
-    </div>
-  );
+  return <SpaceHome room={room} onJoin={() => setJoined(true)} reload={refresh} />;
 }
 
 export function ModeNote({ caps }: { caps: Capabilities }) {

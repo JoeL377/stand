@@ -2,7 +2,9 @@
 // (Google won't sign people in inside an app's own window), and Snap from
 // anywhere: a global shortcut opens a capture toolbar like macOS's ⌘⇧5, and the
 // snap lands in the meeting you're in, pinned to whatever is in focus, and on the clipboard.
-// In a meeting, a small floating bar keeps Snap and the mic one click away from any app.
+// A small floating bar is up whenever the app runs: out of a meeting it holds the space you're
+// in (pick another from it), a note field, its to-dos and Snap; in a meeting, the item in focus
+// and your mic.
 
 const {
   app,
@@ -31,9 +33,13 @@ const STAND_URL = (process.env.STAND_URL || "https://stand-production-3d3f.up.ra
 const STAND_ORIGIN = new URL(STAND_URL).origin;
 /** ⌃⇧S: ⌘⇧S is Save As in most apps, and a global shortcut would take it from them. */
 const SNAP_SHORTCUT = process.env.STAND_SNAP_SHORTCUT || "Control+Shift+S";
+/** A note to the space the bar holds, from any app. */
+const NOTE_SHORTCUT = process.env.STAND_NOTE_SHORTCUT || "Control+Shift+N";
 /** Mute and unmute from any app, during a meeting only. In Stand's window ⌘D does it too. */
 const MUTE_SHORTCUT = process.env.STAND_MUTE_SHORTCUT || "Control+Shift+M";
 const PARTITION = "persist:stand";
+/** Stand's sign-in cookie (src/server/auth.ts). */
+const SESSION_COOKIE = "standup_session";
 const mac = process.platform === "darwin";
 /** No title bar and no window buttons on the Mac: Stand runs edge to edge, the logo
  *  sits in the corner, and ⌘W, ⌘M and ⌃⌘F close, minimize and go full screen. */
@@ -140,11 +146,16 @@ function showWindow(path) {
       win = null;
       // Lets go of the mute shortcut and resets the menus too.
       setMeeting(null);
-      // The bar is a window too: gone with the main one, so closing it still quits off the Mac.
-      bar?.destroy();
+      // On the Mac the app, and its bar, keep running with no window. Elsewhere the bar is a
+      // window too: gone with the main one, so closing it still quits.
+      if (!mac) bar?.destroy();
     });
     // A reload or a crash leaves the meeting page; it says so again when it's back.
-    win.webContents.on("did-navigate", () => setMeeting(null));
+    win.webContents.on("did-navigate", (_e, url) => {
+      setMeeting(null);
+      followPage(url, true);
+    });
+    win.webContents.on("did-navigate-in-page", (_e, url) => followPage(url, false));
     win.webContents.on("render-process-gone", () => setMeeting(null));
     if (!path) void win.loadURL(STAND_URL);
   }
@@ -158,6 +169,14 @@ function showWindow(path) {
     putAwayFull = false;
     win.setFullScreen(true);
   }
+}
+
+/** Opening a space in Stand makes it the one the bar holds. A page load brings the bar up to
+ *  date; moving around within the page does too, at most every few seconds. */
+function followPage(url, load) {
+  const id = spaceInPage(url);
+  if (id && id !== resting?.spaceId) void holdSpace(id, "page");
+  else if (load || Date.now() - restAt > 5000) void refreshRest("page");
 }
 
 /** Every Stand page stays on Stand: other sites open in the browser, and Google sign-in goes the app's own way. */
@@ -389,10 +408,12 @@ function allowMediaAndSharing(ses) {
 // ⌃⇧S puts a capture toolbar like macOS's ⌘⇧5 over the display under the pointer:
 // the entire screen, one window, or a box you move and resize (it's where you left
 // it last time). The snap goes to the meeting you're in, on whatever is in focus,
-// and to the clipboard; Options turns either off and sets a 5 or 10 second timer.
+// and to the clipboard; Options turns either off and sets a 5 or 10 second timer. Out of a
+// meeting it's pinned to a note for the bar's space, in the note card that opens under the bar.
 
-/** What the toolbar remembers between snaps. */
-const SNAP_DEFAULTS = { mode: "portion", toMeeting: true, toClipboard: true, timer: 0, box: null };
+/** What the toolbar remembers between snaps. toMeeting is "to Stand": the meeting you're in,
+ *  or out of a meeting a note for the bar's space; space is the space the bar holds. */
+const SNAP_DEFAULTS = { mode: "portion", toMeeting: true, toClipboard: true, timer: 0, box: null, space: null };
 const prefsFile = () => path.join(app.getPath("userData"), "snap.json");
 
 function snapPrefs() {
@@ -412,8 +433,11 @@ function cleanPrefs(p) {
     toClipboard: p?.toClipboard !== false || p?.toMeeting === false,
     timer: [5, 10].includes(p?.timer) ? p.timer : 0,
     box,
+    space: typeof p?.space === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(p.space) ? p.space : null,
   };
 }
+
+const savePrefs = (p) => fs.promises.writeFile(prefsFile(), JSON.stringify(cleanPrefs(p))).catch(() => {});
 
 /** The space whose meeting the main window is in, if any. The page says which; an older page
  *  doesn't, so then it's read from the address (/s/ and /r/ both open a space). */
@@ -468,9 +492,11 @@ async function snapOn(from, onDisplay) {
   const overlay = makeToolbar(display);
   const others = elsewhere(me, display);
   // The bar is up when Stand is in the background, which is when people snap: keep it out of
-  // the picture. macOS takes it off the screen within a frame or two.
+  // the picture, and the note card with it. macOS takes them off the screen within a frame or two.
   barAway = true;
-  if (bar?.isVisible()) {
+  const noteUp = Boolean(noteWin?.isVisible());
+  if (noteUp) noteWin.hide();
+  if (bar?.isVisible() || noteUp) {
     closeBarList();
     hideBar();
     barSnapped = true;
@@ -490,13 +516,13 @@ async function snapOn(from, onDisplay) {
       trace("front", { front: front?.name });
     });
     for (const o of others) o.showInactive();
-    const choice = await openToolbar(me, overlay, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId), t0 });
+    const choice = await openToolbar(me, overlay, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId), space: resting?.space ?? null, t0 });
     trace("toolbar", { choice: choice && (choice.failed ?? (choice.cancel ? "cancel" : choice.mode)) });
     if (me.switchTo) return { switchTo: me.switchTo };
     // The other displays were only dimmed for choosing one: give them back now, not after saving.
     for (const o of others) if (!o.isDestroyed()) o.close();
     if (choice?.failed) return { title: "Snap's toolbar didn't open", body: choice.failed };
-    if (choice?.prefs) fs.promises.writeFile(prefsFile(), JSON.stringify(cleanPrefs(choice.prefs))).catch(() => {});
+    if (choice?.prefs) void savePrefs(choice.prefs);
     // Snapping from another app leaves Stand in the background (the toolbar never makes it
     // the active app). Should Stand have come forward anyway, give the screen back.
     if (mac && !wasInStand) await handBack();
@@ -513,9 +539,13 @@ async function snapOn(from, onDisplay) {
     }
     const image = await cut(choice, display, shot, await windows);
     trace("cut", { size: image.getSize() });
+    // The text in it, read on this Mac while it saves (or while you pick where it goes).
+    const reading = readText(image);
     // The screen's been read: the bar can come back while the snap saves, and say that it is.
     barAway = false;
     updateBar();
+    // Out of a meeting it's pinned to the note card under the bar, and saved with the note.
+    if (!roomId && prefs.toMeeting) return await pinSnap(image, shotAt, prefs, reading);
     me.saving = true;
     // Where it began says where it's reported: from the page's Snap button, in the page;
     // otherwise on the bar while it's up, else in the page if Stand is in front.
@@ -524,6 +554,7 @@ async function snapOn(from, onDisplay) {
     const inPage = Boolean(roomId && prefs.toMeeting && !onBar && win?.isVisible());
     if (inPage) win.webContents.send("app:command", "saving");
     const report = await deliver(image, shotAt, prefs, roomId).finally(() => inPage && !win.isDestroyed() && win.webContents.send("app:command", "saved"));
+    void addText(report.snapId, reading);
     // The bar said it was saving, so the bar says how it went, wherever the snap began.
     if (onBar && bar && !bar.isDestroyed()) {
       bar.webContents.send("bar:report", report);
@@ -541,6 +572,11 @@ async function snapOn(from, onDisplay) {
     if (picking === me) picking = null;
     barAway = false;
     updateBar();
+    // The note card, if it stepped out of the picture.
+    if (noteUp && noteWin && !noteWin.isDestroyed() && !noteWin.isVisible()) {
+      noteWin.showInactive();
+      noteWin.focus();
+    }
   }
 }
 
@@ -548,7 +584,8 @@ async function snapOn(from, onDisplay) {
  *  shows as a thumbnail in the corner for a moment, as macOS's own screenshots do, and a
  *  problem as a notification. */
 function tell(report) {
-  if (!report) return;
+  // The note card shows a pinned snap.
+  if (!report || report.quiet) return;
   if (bar?.isVisible()) {
     if (!report.onBar) bar.webContents.send("bar:report", report);
   } else if (report.thumb) thumbnail(report);
@@ -759,7 +796,7 @@ function makeToolbar(display) {
 /** The toolbar over a still of one display, in the window makeToolbar made. The window list
  *  follows when it's ready. Resolves to what to snap, or a cancel (with the settings to
  *  keep), or null if it closed some other way. */
-function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, t0 }) {
+function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, space, t0 }) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (choice) => {
@@ -816,7 +853,7 @@ function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, t
       if (failed) return finish({ failed });
       if (!open()) return;
       const accent = mac ? systemPreferences.getAccentColor?.() : null;
-      overlay.webContents.send("snap:open", { image, windows: [], prefs, inMeeting, accent: accent ? `#${accent.slice(0, 6)}` : null });
+      overlay.webContents.send("snap:open", { image, windows: [], prefs, inMeeting, space, accent: accent ? `#${accent.slice(0, 6)}` : null });
       void windows.then(
         (list) => open() && overlay.webContents.send("snap:windows", list.map((w) => ({ id: w.id, x: w.x - b.x, y: w.y - b.y, w: w.w, h: w.h }))),
       );
@@ -906,54 +943,392 @@ async function grabWindow(w, display) {
   return source && !source.thumbnail.isEmpty() ? source.thumbnail : null;
 }
 
-/** To the clipboard and the meeting, as the options say. Out of a meeting it's copied. */
 /** How long saving a snap may take, all tries together. */
 const SAVE_WITHIN_MS = 90_000;
 
-async function deliver(image, at, prefs, roomId) {
-  const toMeeting = Boolean(roomId) && prefs.toMeeting;
-  const copy = prefs.toClipboard || !toMeeting;
-  if (copy) await clipboard.write([new ClipboardItem({ "image/png": new Blob([image.toPNG()], { type: "image/png" }) })]);
-  const thumb = image.resize({ height: 152 }).toDataURL();
-  if (!toMeeting) return { title: "Snapped", body: "It's on your clipboard.", thumb };
+/** A request to Stand as the person signed in to the app, with its cookies. */
+const standFetch = (p, opts = {}) => session.fromPartition(PARTITION).fetch(`${STAND_URL}${p}`, { credentials: "include", ...opts });
+
+const copyImage = (image) => clipboard.write([new ClipboardItem({ "image/png": new Blob([image.toPNG()], { type: "image/png" }) })]);
+
+/** Sends a snap to a space: to its meeting, or with to=space straight to the space (and with
+ *  jot=, pinned to a note). A blip in the connection shouldn't lose it: a few tries, each with a
+ *  time limit, as in the page. extra.key, when given, is the key for every try instead of a new
+ *  one. Resolves to {ok, id} or {ok: false, why}. */
+async function postSnap(image, at, roomId, extra = {}, line = "") {
   const { width: w, height: h } = image.getSize();
   const body = image.toJPEG(90);
   // One key for every try, so a try that got through before timing out isn't saved twice.
-  const key = crypto.randomUUID();
+  const query = new URLSearchParams({ at: String(at), w: String(w), h: String(h), key: crypto.randomUUID(), ...extra });
   // Longer for a bigger picture: at least 15 s, and as long as a slow (50 KB/s) line needs,
   // but all the tries together get 90 s, so Snap is never held up for long.
   const limit = Math.min(SAVE_WITHIN_MS, Math.max(15_000, body.length / 50));
   const deadline = Date.now() + SAVE_WITHIN_MS;
-  // A blip in the connection shouldn't lose it: a few tries, each with a time limit, as in the page.
   let res = null;
   for (const wait of [0, 1000, 3000]) {
     if (wait) await new Promise((r) => setTimeout(r, wait));
     const left = deadline - Date.now();
     if (left < 2000) break;
-    res = await session
-      .fromPartition(PARTITION)
-      .fetch(`${STAND_URL}/api/rooms/${roomId}/snaps?at=${at}&w=${w}&h=${h}&key=${key}`, {
-        method: "POST",
-        headers: { "content-type": "image/jpeg" },
-        body,
-        credentials: "include",
-        signal: AbortSignal.timeout(Math.min(limit, left)),
-      })
-      .catch(() => null);
+    res = await standFetch(`/api/rooms/${encodeURIComponent(roomId)}/snaps?${query}`, {
+      method: "POST",
+      headers: { "content-type": "image/jpeg", ...(line ? { "x-stand-line": encodeURIComponent(line) } : {}) },
+      body,
+      signal: AbortSignal.timeout(Math.min(limit, left)),
+    }).catch(() => null);
     if (res && res.status < 502) break;
   }
-  if (!res?.ok) {
-    const why = (await res?.json().catch(() => null))?.error ?? (res ? `Stand said ${res.status}.` : "Stand didn't answer.");
+  if (!res?.ok) return { ok: false, why: (await res?.json().catch(() => null))?.error ?? (res ? `Stand said ${res.status}.` : "Stand didn't answer.") };
+  return { ok: true, id: (await res.json().catch(() => null))?.id ?? null };
+}
+
+/** To the clipboard and the meeting, as the options say. */
+async function deliver(image, at, prefs, roomId) {
+  const toMeeting = Boolean(roomId) && prefs.toMeeting;
+  const copy = prefs.toClipboard || !toMeeting;
+  if (copy) await copyImage(image);
+  const thumb = image.resize({ height: 152 }).toDataURL();
+  if (!toMeeting) return { title: "Snapped", body: "It's on your clipboard.", thumb };
+  const saved = await postSnap(image, at, roomId);
+  if (!saved.ok) {
     return copy
-      ? { title: "Copied, but not added to the meeting", body: `${why} Paste it into Stand to add it.` }
-      : { title: "Snap didn't save", body: why };
+      ? { title: "Copied, but not added to the meeting", body: `${saved.why} Paste it into Stand to add it.` }
+      : { title: "Snap didn't save", body: saved.why };
   }
   return {
     title: "Snapped",
     body: copy ? "It's on your clipboard and in the meeting, on the item in focus." : "It's in the meeting, on the item in focus. Crop or delete it in Stand.",
-    snapId: (await res.json().catch(() => null))?.id,
+    snapId: saved.id,
     thumb,
   };
+}
+
+/** The Mac's accent color, and black or white text on it, whichever reads. */
+function accentColors() {
+  const a = mac ? systemPreferences.getAccentColor?.() : null;
+  if (!a) return {};
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(a.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return { accent: `#${a.slice(0, 6)}`, onAccent: 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.3 ? "#000" : "#fff" };
+}
+
+// ---- a note to the space -----------------------------------------------------------------
+//
+// From the bar's note field, or the note shortcut in any app: a small card just under the bar
+// (over it, when the bar is low on the screen) where you type the note or say it with the Mac's
+// dictation, and Enter saves it to the space the bar holds (the meeting's, in one). It takes the
+// keyboard without bringing Stand forward (it's a panel), and closing it hands the keyboard back.
+// A snap out of a meeting is pinned to the top of it: Enter saves the note with its pictures, or
+// with nothing written, the pictures by themselves. Nothing leaves the Mac before Enter.
+
+let noteWin = null;
+/** What was written when the card was put away unsaved: it's there again next time. */
+let noteDraft = "";
+/** Snaps pinned to the note, waiting for Enter: {id, image, at, thumb, reading, key}. */
+let notePins = [];
+const MAX_PINS = 6;
+/** A note already saved whose snaps didn't all make it: Enter again adds the rest to it. */
+let noteSaved = null;
+
+/** Pins a snap to the note card, opening it if it's closed. Resolves to a report that says
+ *  nothing (the card shows it), or why it wasn't pinned. */
+async function pinSnap(image, at, prefs, reading) {
+  const thumb = image.resize({ height: 152 }).toDataURL();
+  if (prefs.toClipboard) await copyImage(image);
+  if (notePins.length >= MAX_PINS) {
+    if (!prefs.toClipboard) await copyImage(image);
+    return { title: `${MAX_PINS} snaps are pinned already`, body: "Save the note, or take one off it, then snap again. This one is on your clipboard.", thumb };
+  }
+  // Shown as wide as the bar on a Retina screen.
+  const { width: w } = image.getSize();
+  const shown = w > 800 ? image.resize({ width: 800 }) : image;
+  notePins.push({ id: crypto.randomUUID(), image, at, thumb: `data:image/jpeg;base64,${shown.toJPEG(82).toString("base64")}`, reading, key: crypto.randomUUID() });
+  trace("pin", { pins: notePins.length });
+  sendBarState();
+  if (noteWin && !noteWin.isDestroyed()) {
+    sendPins();
+    return { quiet: true };
+  }
+  const opened = await openNote();
+  // No space to save it to (signed out, say): it's on the clipboard instead.
+  if (opened === false) {
+    notePins.pop();
+    sendBarState();
+    if (!prefs.toClipboard) await copyImage(image);
+    return { title: "Copied, not pinned to a note", body: "Sign in to Stand and make a space; then snaps can go there.", thumb };
+  }
+  return { quiet: true };
+}
+
+const sendPins = () => noteWin && !noteWin.isDestroyed() && noteWin.webContents.send("note:pins", notePins.map(({ id, thumb }) => ({ id, thumb })));
+
+/** Room the card wants over the bar before it opens that way: a snap shown big and a few lines. */
+const NOTE_ROOM = 340;
+
+/** Where the card goes for a given height: joined to the bar's upper edge when there's room over
+ *  it, else its lower edge (the bar at the top of the screen, where it starts), so the two read as
+ *  one piece and the snaps, on the card's far side, are on the outside of it. Once open it stays
+ *  on its side while it fits. Away from the bar (the bar is down): the top of the screen the
+ *  pointer is on. */
+function notePlace(height) {
+  if (bar?.isVisible()) {
+    const [x, y] = bar.getPosition();
+    const a = screen.getDisplayMatching({ x, y, ...BAR }).workArea;
+    // The bar's pill runs from 4 px to BAR.height - 4 px down its window.
+    const roomAbove = y + 4 - a.y;
+    const roomBelow = a.y + a.height - (y + BAR.height - 4);
+    const was = notePlaced?.fused ? notePlaced.above : null;
+    const fits = (up) => height <= (up ? roomAbove : roomBelow);
+    const above = was !== null && fits(was) ? was : roomAbove >= Math.max(height, NOTE_ROOM) || !fits(false);
+    return { x, y: above ? y - height + 4 : y + BAR.height - 4, above, fused: true };
+  }
+  const a = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  return { x: Math.round(a.x + (a.width - BAR.width) / 2), y: a.y + 8, above: false, fused: false };
+}
+
+let noteHeight = 96;
+/** How the card was last told to draw itself: {above, fused}. */
+let notePlaced = null;
+
+/** Puts the card where it goes for its height, as the bar moves or it grows, and tells it and the
+ *  bar when the way they join changes. */
+function placeNote() {
+  if (!noteWin || noteWin.isDestroyed()) return;
+  const place = notePlace(noteHeight);
+  noteWin.setBounds({ x: place.x, y: place.y, width: BAR.width, height: noteHeight });
+  if (notePlaced?.above !== place.above || notePlaced?.fused !== place.fused) {
+    notePlaced = { above: place.above, fused: place.fused };
+    noteWin.webContents.send("note:place", notePlaced);
+  }
+  sendBarNote();
+}
+
+/** The bar squares off the edge the card hangs from while it's open. */
+function sendBarNote() {
+  if (!barLoaded || !bar || bar.isDestroyed()) return;
+  const open = noteWin && !noteWin.isDestroyed() && noteWin.isVisible() && notePlaced?.fused;
+  bar.webContents.send("bar:note", open ? { above: notePlaced.above } : null);
+}
+
+/** Opens the card, or brings the keyboard back to it. False when there's no space to write to. */
+async function openNote() {
+  if (noteWin && !noteWin.isDestroyed()) {
+    noteWin.focus();
+    noteWin.webContents.send("note:focus");
+    return true;
+  }
+  if (!meeting && !resting) await refreshRest("note");
+  const to = meeting ? spaceId() : resting?.spaceId;
+  const space = meeting ? meeting.space : resting?.space;
+  if (!to) {
+    notify(resting ? "No space to save it to" : "Sign in to Stand", resting ? "Make a space in Stand first." : "Then notes can go to your spaces.");
+    return false;
+  }
+  closeBarList();
+  noteHeight = notePins.length ? 320 : 96;
+  notePlaced = null;
+  const place = notePlace(noteHeight);
+  notePlaced = { above: place.above, fused: place.fused };
+  const card = new BrowserWindow({
+    x: place.x,
+    y: place.y,
+    width: BAR.width,
+    height: noteHeight,
+    ...(mac ? { type: "panel" } : {}),
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    acceptFirstMouse: true,
+    webPreferences: { preload: `${__dirname}/note-preload.js`, contextIsolation: true, sandbox: true },
+  });
+  noteWin = card;
+  card.setAlwaysOnTop(true, "floating");
+  card.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  card.setContentProtection(true);
+  staysInBackground(card, "note");
+  const mine = (e) => e.sender === card.webContents;
+  let saving = false;
+  let done = false;
+  // Esc is caught for the card only while it has the keyboard, never from the app you're in.
+  const esc = () => !card.isDestroyed() && card.webContents.send("note:escape");
+  const finish = () => {
+    if (done) return;
+    done = true;
+    for (const [name, fn] of handlers) ipcMain.removeListener(name, fn);
+    if (globalShortcut.isRegistered("Escape")) globalShortcut.unregister("Escape");
+    if (!card.isDestroyed()) card.close();
+    if (noteWin === card) noteWin = null;
+    sendBarNote();
+  };
+  const handlers = [
+    [
+      "note:ready",
+      (e) => {
+        if (!mine(e) || card.isDestroyed()) return;
+        card.showInactive();
+        card.focus();
+        sendBarNote();
+      },
+    ],
+    [
+      "note:size",
+      (e, h) => {
+        if (!mine(e) || card.isDestroyed()) return;
+        noteHeight = Math.max(40, Math.min(520, Math.round(Number(h) || 0)));
+        placeNote();
+      },
+    ],
+    [
+      "note:cancel",
+      (e, draft) => {
+        if (!mine(e) || saving) return;
+        noteDraft = typeof draft === "string" ? draft.slice(0, 2000) : "";
+        finish();
+      },
+    ],
+    [
+      "note:unpin",
+      (e, id) => {
+        if (!mine(e) || saving) return;
+        notePins = notePins.filter((p) => p.id !== id);
+        sendPins();
+        sendBarState();
+      },
+    ],
+    [
+      "note:go",
+      async (e, text) => {
+        if (!mine(e) || saving || typeof text !== "string" || (!text.trim() && !notePins.length)) return;
+        saving = true;
+        const n = notePins.length;
+        const saved = await saveNote(to, text.trim().slice(0, 2000));
+        saving = false;
+        trace("note", { ok: saved.ok, chars: text.length, pins: n, left: notePins.length });
+        sendBarState();
+        if (card.isDestroyed()) return;
+        sendPins();
+        card.webContents.send("note:result", saved.ok ? { ok: true, space, text: Boolean(text.trim()), snaps: n } : { ok: false, why: saved.why });
+        if (!saved.ok) return;
+        noteDraft = "";
+        setTimeout(finish, 1200);
+      },
+    ],
+  ];
+  for (const [name, fn] of handlers) ipcMain.on(name, fn);
+  card.on("focus", () => !globalShortcut.isRegistered("Escape") && globalShortcut.register("Escape", esc));
+  card.on("blur", () => globalShortcut.isRegistered("Escape") && globalShortcut.unregister("Escape"));
+  card.on("closed", finish);
+  card.webContents.once("did-finish-load", () => {
+    card.webContents.send("note:open", { space, draft: noteDraft, ...notePlaced, dictateKey: "🎤, or Fn twice", ...accentColors() });
+    sendPins();
+  });
+  void card.loadFile(`${__dirname}/note.html`);
+  return true;
+}
+
+/** Saves the note to a space with the snaps pinned to it: the note first, then each snap pinned
+ *  to it (with nothing written, each snap by itself). The note's key makes a retry of one that
+ *  got through come back as the same note; a snap that saved comes off the card, so Enter again
+ *  sends only the ones that didn't. Resolves to {ok} or {ok: false, why}. */
+async function saveNote(to, text) {
+  if (noteSaved && noteSaved.to !== to) noteSaved = null;
+  let jot = noteSaved?.id ?? null;
+  if (text && !jot) {
+    const made = await postNote(to, text);
+    if (!made.ok) return made;
+    jot = made.id;
+  } else if (text && text !== noteSaved?.text) {
+    // Saved before with snaps left over, and changed since: the note says what it says now.
+    await standFetch(`/api/jots/${encodeURIComponent(jot)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+  }
+  const failed = [];
+  for (const pin of [...notePins]) {
+    const saved = await postSnap(pin.image, pin.at, to, { to: "space", key: pin.key, ...(jot ? { jot } : {}) });
+    if (!saved.ok) {
+      failed.push(saved.why);
+      continue;
+    }
+    notePins = notePins.filter((p) => p !== pin);
+    void addText(saved.id, pin.reading);
+  }
+  if (!failed.length) {
+    noteSaved = null;
+    return { ok: true };
+  }
+  if (jot) noteSaved = { id: jot, to, text };
+  const of = jot ? `The note saved, but ${failed.length === 1 ? "a snap" : `${failed.length} snaps`} didn't` : failed.length === 1 ? "The snap didn't save" : `${failed.length} snaps didn't save`;
+  return { ok: false, why: `${of}: ${failed[0]} ${failed.length === 1 ? "It's" : "They're"} still here; Enter tries again.` };
+}
+
+/** The note by itself, with a retry for a blip in the connection. Resolves to {ok, id} or {ok: false, why}. */
+async function postNote(to, text) {
+  const body = JSON.stringify({ text, at: Date.now(), key: crypto.randomUUID() });
+  let why = "Stand didn't answer. Try again.";
+  for (let i = 0; i < 2; i++) {
+    const res = await standFetch(`/api/rooms/${encodeURIComponent(to)}/jots`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+    if (res?.ok) return { ok: true, id: (await res.json().catch(() => null))?.id ?? null };
+    if (res) {
+      why = res.status === 401 ? "Sign in to Stand again, then try again." : ((await res.json().catch(() => null))?.error ?? `Stand said ${res.status}.`);
+      if (res.status < 500) break;
+    }
+  }
+  return { ok: false, why: `${why} Your note is still here.` };
+}
+
+// ---- the text in a snap ----------------------------------------------------------------
+
+/** native/stand-ocr, built by scripts/build-native.js; in the built app it's unpacked from the asar. */
+const OCR = path.join(__dirname, "native", "stand-ocr").replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+
+/** The text in a snap, read on this Mac by Apple's Vision. Null when there's none, or it
+ *  can't be read here (stand-ocr didn't build, say): the snap saves without it. */
+async function readText(image) {
+  if (!mac || !fs.existsSync(OCR)) return null;
+  const t0 = Date.now();
+  const file = path.join(app.getPath("temp"), `stand-snap-${crypto.randomUUID()}.png`);
+  try {
+    await fs.promises.writeFile(file, image.toPNG());
+    const out = await new Promise((resolve) =>
+      execFile(OCR, [file], { timeout: 20_000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) trace("text", { error: String(stderr || err.message).trim().slice(0, 200) });
+        resolve(err ? null : stdout);
+      }),
+    );
+    trace("text", { chars: out?.trim().length ?? null, ms: Date.now() - t0 });
+    return out?.trim() || null;
+  } catch (err) {
+    trace("text", { error: String(err?.message ?? err) });
+    return null;
+  } finally {
+    fs.promises.rm(file, { force: true }).catch(() => {});
+  }
+}
+
+/** Once it's read, the text goes on the saved snap, for search and for agents. */
+async function addText(snapId, reading) {
+  const text = await reading;
+  if (!snapId || !text) return;
+  await standFetch(`/api/snaps/${encodeURIComponent(snapId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ screenText: text }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => null);
 }
 
 /** A notification, for problems. With `settings`, a click opens that page of System Settings. */
@@ -1005,10 +1380,12 @@ a{position:absolute;inset:0;display:grid;place-items:center;text-decoration:none
 
 // ---- the floating bar -------------------------------------------------------------
 //
-// In a meeting, when no Stand window is in front (you're presenting a web page, say),
-// a small bar floats over every app and Space: what's in focus, your mic, and Snap. It
-// never takes focus from the app you're in, stays out of snaps (and, where macOS allows,
-// out of screen sharing), and goes wherever you drag it, which it remembers.
+// A small bar floats over every app and Space whenever the app runs and you're signed in.
+// Out of a meeting it holds the space you're in: its name (click to pick another), a field
+// for a note to it, its to-dos, a way to start talking there, and Snap, which goes to it. In a meeting: what's in
+// focus, your mic, and Snap. It never takes focus from the app you're in, stays out of snaps
+// (and, where macOS allows, out of screen sharing), and goes wherever you drag it, which it
+// remembers.
 
 /** The meeting the main window is in, as its page last described it, or null. */
 let meeting = null;
@@ -1016,9 +1393,10 @@ let bar = null;
 let barLoaded = false;
 /** True while a snap reads the screen. */
 let barAway = false;
-/** Hidden from the bar's own menu or the Meeting menu, until the meeting ends. */
-let barOff = false;
-const BAR = { width: 380, height: 48 };
+/** Put away from the bar's own menu: "meeting" until the meeting ends, "always" until it's
+ *  shown again from the View menu (or the app starts again). */
+let barOff = null;
+const BAR = { width: 400, height: 48 };
 const barFile = () => path.join(app.getPath("userData"), "bar.json");
 const short = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
 
@@ -1043,13 +1421,167 @@ function setMeeting(m) {
   const sharing = Boolean(m?.sharing);
   if (sharing !== wasSharing) trace("sharing", { on: sharing, barUp: Boolean(bar?.isVisible()) });
   wasSharing = sharing;
-  // Hidden from its menu, the bar stays down until the meeting ends.
-  if (!meeting) barOff = false;
-  if (!meeting) pulsedFor = null;
+  if (!meeting) {
+    // Hidden for the meeting, the bar comes back when it ends.
+    if (barOff === "meeting") barOff = null;
+    pulsedFor = null;
+  }
   muteKey(Boolean(meeting));
-  if (meeting && barLoaded) bar.webContents.send("bar:state", { ...meeting, muteKey: muteKeyOn ? MUTE_SHORTCUT : null });
+  sendBarState();
   buildMenus();
   updateBar();
+  // Back out of a meeting, the bar shows the space again, with its to-dos as the meeting left them.
+  if (inMeeting && !meeting) void refreshRest("meeting-ended");
+  inMeeting = Boolean(meeting);
+}
+let inMeeting = false;
+
+/** What the bar shows: the meeting, or out of one the space you're in. */
+function sendBarState() {
+  if (!barLoaded) return;
+  const state = meeting
+    ? { ...meeting, muteKey: muteKeyOn ? MUTE_SHORTCUT : null }
+    : resting
+      ? { rest: true, ...resting, pins: notePins.length, snapKey: SNAP_SHORTCUT.replace(/\+/g, " + "), noteKey: NOTE_SHORTCUT.replace(/\+/g, " + ") }
+      : null;
+  bar.webContents.send("bar:state", state);
+}
+
+// ---- the bar out of a meeting ----------------------------------------------------------
+
+/** The space the bar holds out of a meeting, or null when there's none to show (signed out):
+ *  {spaceId, space, live: {names} | null, todos, none}. It's the space snaps go to (snap.json's
+ *  space): the one last picked on the bar, or last opened in Stand. */
+let resting = null;
+/** The spaces you're in, most recently active first, for the bar's space menu. */
+let restSpaces = [];
+let restAt = 0;
+let restLoading = null;
+let restQueued = null;
+
+/** Reads the spaces, and the to-dos of the one the bar holds. Offline, the bar keeps what it
+ *  shows. Asked again while it reads, it reads once more after. */
+function refreshRest(why) {
+  if (restLoading)
+    return (restQueued ??= restLoading.then(() => {
+      restQueued = null;
+      return refreshRest(why);
+    }));
+  restLoading = (async () => {
+    const res = await standFetch("/api/spaces", { signal: AbortSignal.timeout(8000) }).catch(() => null);
+    if (!res) return;
+    const list = res.ok ? await res.json().catch(() => null) : null;
+    if (!Array.isArray(list)) {
+      // Signed out: nothing to hold, so no bar until you sign in.
+      if (res.status === 401 || res.status === 403) {
+        resting = null;
+        restSpaces = [];
+      }
+      return;
+    }
+    restSpaces = list
+      .map((s) => ({
+        id: String(s.id),
+        name: short(s.name) || "Untitled space",
+        at: Number(s.activeAt) || 0,
+        live: s.live && Array.isArray(s.live.people) && s.live.people.length ? { names: s.live.people.slice(0, 6).map((p) => short(p?.name)) } : null,
+      }))
+      .filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s.id))
+      .sort((a, b) => b.at - a.at);
+    if (!restSpaces.length) {
+      resting = { spaceId: null, space: null, live: null, todos: [], none: true };
+      return;
+    }
+    const want = snapPrefs().space;
+    const at = restSpaces.find((s) => s.id === want) ?? restSpaces[0];
+    const room = await roomOf(at.id);
+    // Picked another while this one loaded: that one's answer is the one to show.
+    if (snapPrefs().space && snapPrefs().space !== want) return;
+    resting = { spaceId: at.id, space: at.name, live: at.live, todos: room ? openTodos(room) : (resting?.spaceId === at.id ? resting.todos : []) };
+  })().finally(() => {
+    restLoading = null;
+    restAt = Date.now();
+    trace("rest", { why, space: Boolean(resting?.spaceId), spaces: restSpaces.length, todos: resting?.todos.length ?? null });
+    sendBarState();
+    buildMenus();
+    updateBar();
+  });
+  return restLoading;
+}
+
+/** A space as Stand's page gets it: its items and open to-dos among the rest. */
+async function roomOf(spaceId) {
+  const res = await standFetch(`/api/rooms/${encodeURIComponent(spaceId)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+  return res?.ok ? await res.json().catch(() => null) : null;
+}
+
+/** A space's open to-dos for the bar's list: who has it and the item it's on. */
+function openTodos(room) {
+  const items = new Map((room.items ?? []).map((i) => [i.id, i]));
+  const open = (Array.isArray(room.followUps) ? room.followUps : []).filter((n) => n && !n.doneAt);
+  return todosOf(
+    open.map((n) => {
+      const item = items.get(n.itemId);
+      return { id: n.id, text: n.text, owner: n.owner, itemKey: item ? short(item.externalId) || short(item.title).slice(0, 40) : null };
+    }),
+  );
+}
+
+/** Makes this the space the bar holds, and snaps go to. */
+async function holdSpace(id, why) {
+  if (!id || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return;
+  const prefs = snapPrefs();
+  if (prefs.space === id && resting?.spaceId === id) return;
+  await savePrefs({ ...prefs, space: id });
+  const s = restSpaces.find((x) => x.id === id);
+  // Shown at once; its to-dos follow.
+  if (s && resting) {
+    resting = { ...resting, spaceId: s.id, space: s.name, live: s.live, none: false, todos: resting.spaceId === s.id ? resting.todos : [] };
+    sendBarState();
+  }
+  await refreshRest(why);
+}
+
+/** The bar's space menu: every space you're in (those with people talking say so), then the
+ *  ways into Stand. */
+function spaceMenu() {
+  const here = resting?.spaceId;
+  const name = resting?.space;
+  const template = [
+    ...restSpaces.map((s) => ({
+      label: s.live ? `${s.name}  ·  ${s.live.names.length} talking` : s.name,
+      type: "radio",
+      checked: s.id === here,
+      click: () => void holdSpace(s.id, "picked"),
+    })),
+    ...(restSpaces.length ? [{ type: "separator" }] : []),
+    ...(here ? [{ label: `Open ${name} in Stand`, click: () => goTo(`/s/${here}`) }] : []),
+    { label: restSpaces.length ? "All Spaces" : "Make a Space in Stand", click: () => goTo("/") },
+  ];
+  // Under the space's pill (macOS moves it up when the bar is low on the screen).
+  Menu.buildFromTemplate(template).popup({ window: bar ?? undefined, x: 45, y: 46 });
+}
+
+/** Opens a page of Stand in the main window: in place when Stand is already loaded there
+ *  (nothing reloads), else by loading it. */
+function goTo(p) {
+  const loaded = win && !win.webContents.isLoading() && isStand(win.webContents.getURL());
+  if (!loaded) return showWindow(p);
+  showWindow();
+  void win.webContents
+    .executeJavaScript(`history.pushState(null, "", ${JSON.stringify(p)}); dispatchEvent(new PopStateEvent("popstate")); true`)
+    .catch(() => showWindow(p));
+}
+
+/** The space a Stand page is on, from its address (/s/ and /r/ both open a space). */
+function spaceInPage(url) {
+  try {
+    const u = new URL(url);
+    if (u.origin !== STAND_ORIGIN) return null;
+    return /^\/[sr]\/([A-Za-z0-9_-]{1,64})/.exec(u.pathname)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** The space's open to-dos, as the meeting page lists them for the bar. */
@@ -1067,6 +1599,8 @@ let wasSharing = false;
 let barResizing = false;
 function sizeBar(extra, ask) {
   if (!bar) return false;
+  // The list and the note card would hang from the same edge: the note steps aside, keeping what's written.
+  if (extra && !ask && noteWin && !noteWin.isDestroyed()) noteWin.webContents.send("note:escape");
   const [x, y] = bar.getPosition();
   const top = barList?.up ? y + barList.h : y; // where the bar itself is
   const a = screen.getDisplayMatching({ x, y: top, ...BAR }).workArea;
@@ -1088,14 +1622,13 @@ function closeBarList() {
 /** Puts one of the space's to-dos on the clipboard: the prompt Stand's Copy for agent
  *  makes (its words plus its Stand reference, for Claude Code, Cursor or Codex), or just its words. */
 async function copyTodo(id, plain) {
-  const todo = meeting?.todos.find((t) => t.id === id);
+  const todo = (meeting ?? resting)?.todos.find((t) => t.id === id);
   if (!todo) return false;
   let text = todo.text;
-  if (!plain && win) {
-    // Fetched by the page, signed in as you, the way its own Copy for agent button does.
-    const prompt = await win.webContents
-      .executeJavaScript(`fetch("/api/refs/action/${id}/prompt").then((r) => (r.ok ? r.json() : null)).then((j) => j && j.text, () => null)`)
-      .catch(() => null);
+  if (!plain) {
+    // Signed in as you, the way the page's own Copy for agent button asks.
+    const res = await standFetch(`/api/refs/action/${encodeURIComponent(id)}/prompt`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+    const prompt = res?.ok ? (await res.json().catch(() => null))?.text : null;
     if (typeof prompt === "string" && prompt) text = prompt;
   }
   await clipboard.writeText(text);
@@ -1121,12 +1654,13 @@ function muteKey(on) {
 let menuKey = "";
 function buildMenus() {
   if (!mac) return;
-  const key = JSON.stringify([Boolean(meeting), meeting?.micOn, barOff, muteKeyOn]);
+  const key = JSON.stringify([Boolean(meeting), meeting?.micOn, barOff, muteKeyOn, Boolean(resting)]);
   if (key === menuKey) return;
   menuKey = key;
   const inMeeting = Boolean(meeting);
   const mic = { label: meeting?.micOn === false ? "Unmute" : "Mute", enabled: inMeeting, click: () => win?.webContents.send("app:command", "mic") };
   const snapItem = { label: "Snap…", click: () => void snap("menu").then(tell) };
+  const noteItem = { label: "Note…", accelerator: NOTE_SHORTCUT, registerAccelerator: false, click: () => void openNote() };
   const history = () => win?.webContents.navigationHistory;
   const dev = app.isPackaged ? [] : [{ type: "separator" }, { role: "reload" }, { role: "forceReload" }, { role: "toggleDevTools" }];
   const template = [
@@ -1136,6 +1670,18 @@ function buildMenus() {
     {
       label: "View",
       submenu: [
+        {
+          label: "Show Floating Bar",
+          type: "checkbox",
+          checked: !barOff,
+          enabled: Boolean(meeting || resting),
+          click: (item) => {
+            barOff = item.checked ? null : "always";
+            buildMenus();
+            updateBar();
+          },
+        },
+        { type: "separator" },
         // Off in a meeting: going back would leave the call without asking.
         { label: "Back", accelerator: "Command+[", enabled: !inMeeting, click: () => history()?.canGoBack() && history().goBack() },
         { label: "Forward", accelerator: "Command+]", enabled: !inMeeting, click: () => history()?.canGoForward() && history().goForward() },
@@ -1154,18 +1700,8 @@ function buildMenus() {
         // Shown, not registered: the mute shortcut is global (it works in Stand too), else the page handles ⌘D.
         { ...mic, accelerator: muteKeyOn ? MUTE_SHORTCUT : "Command+D", registerAccelerator: false },
         { ...snapItem, accelerator: SNAP_SHORTCUT, registerAccelerator: false },
+        noteItem,
         { type: "separator" },
-        {
-          label: "Show Floating Bar",
-          type: "checkbox",
-          checked: !barOff,
-          enabled: inMeeting,
-          click: (item) => {
-            barOff = !item.checked;
-            buildMenus();
-            updateBar();
-          },
-        },
         { label: "Meeting Shortcuts", accelerator: "Command+/", enabled: inMeeting, click: () => (showWindow(), win?.webContents.send("app:command", "shortcuts")) },
       ],
     },
@@ -1177,7 +1713,7 @@ function buildMenus() {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-  app.dock?.setMenu(Menu.buildFromTemplate([snapItem, mic]));
+  app.dock?.setMenu(Menu.buildFromTemplate([snapItem, noteItem, mic]));
 }
 
 /** Where the bar goes: where it was left, or the top middle of the screen Stand is on. */
@@ -1221,6 +1757,8 @@ function makeBar() {
     if (barResizing) return;
     const [x, y] = bar.getPosition();
     fs.promises.writeFile(barFile(), JSON.stringify({ x, y: barList?.up ? y + barList.h : y })).catch(() => {});
+    // The note card goes where the bar goes.
+    placeNote();
     // Dragging the bar is a click on it too. On the Mac this fires all through the drag.
     clearTimeout(dragged);
     dragged = setTimeout(() => void giveBack("drag"), 300);
@@ -1235,7 +1773,8 @@ function makeBar() {
   });
   bar.webContents.once("did-finish-load", () => {
     barLoaded = true;
-    setMeeting(meeting);
+    sendBarState();
+    updateBar();
   });
   void bar.loadFile(`${__dirname}/bar.html`);
 }
@@ -1269,10 +1808,11 @@ function native() {
   return nativeCode;
 }
 
-/** Up for the whole meeting, Stand in front or not (joe's call); down while a snap reads the screen. */
+/** Up whenever the app runs and you're signed in, Stand in front or not (joe's call): the
+ *  meeting's bar in one, the space's out of one. Down while a snap reads the screen. */
 function updateBar() {
   if (barHold) return;
-  const want = Boolean(meeting && win && !barAway && !barOff);
+  const want = Boolean((meeting ? win : resting) && !barAway && !barOff);
   if (want && !bar) makeBar();
   if (!barLoaded) return;
   if (want && !bar.isVisible()) {
@@ -1285,7 +1825,7 @@ function updateBar() {
     clearTimeout(barReveal);
     barReveal = setTimeout(revealBar, 300);
     // It catches the eye once, when a meeting starts: not when it's back after a snap.
-    const pulse = !barSnapped && meeting.roomId !== pulsedFor;
+    const pulse = Boolean(meeting) && !barSnapped && meeting.roomId !== pulsedFor;
     if (pulse) pulsedFor = meeting.roomId;
     bar.webContents.send("bar:shown", { pulse });
     barSnapped = false;
@@ -1322,6 +1862,8 @@ async function pressOnBar(button) {
     // A press on the bar can make Stand the active app, and macOS then brings up Stand's
     // window to take the keyboard. While the pointer is on the bar, that window can't.
     if (mac && !barPrevents && win && !win.isFocused()) win.setFocusable(false);
+    // Out of a meeting, what it shows is brought up to date as you reach for it.
+    if (!meeting && Date.now() - restAt > 20_000) void refreshRest("hover");
     return void noteTheirApp();
   }
   if (button === "leave") return void (mac && !barHold && win?.setFocusable(true));
@@ -1331,14 +1873,19 @@ async function pressOnBar(button) {
       { label: "Open Stand", click: () => showWindow() },
       { type: "separator" },
       {
-        label: "Hide Until the Meeting Ends",
+        label: meeting ? "Hide Until the Meeting Ends" : "Hide the Bar",
         click: () => {
-          barOff = true;
+          barOff = meeting ? "meeting" : "always";
           buildMenus();
           updateBar();
+          if (barOff === "always") notify("The bar is hidden", "Bring it back from Stand's View menu: Show Floating Bar.");
         },
       },
     ]).popup({ window: bar ?? undefined });
+  if (button === "note") return void openNote();
+  // Out of a meeting: the space menu, or straight into talking there. Both are meant to bring Stand up.
+  if (button === "spaces") return void (resting?.none ? goTo("/") : spaceMenu());
+  if (button === "talk") return void (resting?.spaceId && goTo(`/s/${resting.spaceId}?join`));
   trace("bar", { button, theirApp: theirApp?.name });
   if (button === "open") return showWindow();
   if (button === "mic" || button === "switch" || button === "undo") win?.webContents.send("app:command", button);
@@ -1441,14 +1988,30 @@ app.whenReady().then(async () => {
     (e, extra, ask) => e.sender === bar?.webContents && sizeBar(Math.max(0, Math.min(600, Math.round(Number(extra) || 0))), Boolean(ask)),
   );
   ipcMain.handle("bar:copy", (e, id, plain) => e.sender === bar?.webContents && copyTodo(String(id), Boolean(plain)));
+  // The note card's mic: the Mac's dictation, started into its text field.
+  ipcMain.handle("note:dictate", (e) => e.sender === noteWin?.webContents && Boolean(native()?.startDictation?.()));
   // The page's way to the right page of System Settings (a blocked mic, say).
   ipcMain.on("app:settings", (e, which) => isStand(e.senderFrame?.url) && openSettings(which));
   buildMenus();
+  // The bar comes up as soon as Stand says who you are, and keeps the space current. Signing
+  // in or out (the session cookie changing) brings it up or takes it down.
+  void refreshRest("start");
+  let signedInOrOut;
+  session.fromPartition(PARTITION).cookies.on("changed", (_e, cookie) => {
+    if (cookie.name !== SESSION_COOKIE) return;
+    clearTimeout(signedInOrOut);
+    signedInOrOut = setTimeout(() => void refreshRest("session"), 300);
+  });
+  setInterval(() => !meeting && void refreshRest("tick"), 30_000);
   nativeTheme.on("updated", () => win?.setBackgroundColor(backdrop()));
   // Focus moving between apps: a blur comes just before the next focus, so look once both have landed.
   for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));
   if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap("shortcut").then(tell)))
     notify("Snap shortcut is taken", `Another app already uses ${SNAP_SHORTCUT}, so Snap from anywhere is off.`);
+  // Again while the card has the keyboard: it's put away, what's written kept.
+  const noteKey = () => (noteWin && !noteWin.isDestroyed() && noteWin.isFocused() ? noteWin.webContents.send("note:escape") : void openNote());
+  if (!globalShortcut.register(NOTE_SHORTCUT, noteKey))
+    notify("Note shortcut is taken", `Another app already uses ${NOTE_SHORTCUT}; the bar's note field still works.`);
   app.on("activate", () => showWindow());
   // ⌘Tab back to Stand while the window is put away in a call: bring it back, as the Dock does.
   // Not for a click on the bar or a snap, which can make Stand active for a moment.

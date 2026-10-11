@@ -10,7 +10,8 @@
     <!--
       The capture toolbar, like macOS's ⌘⇧5, over a still of the display: snap the
       entire screen, one window, or a box you move and resize. Options picks where
-      the snap goes (the meeting, the clipboard) and a timer. Esc closes it.
+      the snap goes (the meeting, or out of one a space you pick next; the clipboard) and a
+      timer. Esc closes it.
     -->
     <style>
       html,
@@ -296,8 +297,9 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const MIN = 8;
-      /** {prefs, inMeeting, windows: [{id, x, y, w, h}] front to back, in this page's pixels}.
-       *  The windows come a moment after the rest. */
+      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+      /** {prefs, inMeeting, space, windows: [{id, x, y, w, h}] front to back, in this page's pixels}.
+       *  The windows come a moment after the rest; space is the bar's, out of a meeting. */
       let st = null;
       let mode = "portion";
       let box = { x: 0, y: 0, w: 0, h: 0 };
@@ -387,15 +389,13 @@
       // ---- the Options menu ----
       function renderMenu() {
         const p = st.prefs;
-        const copyForced = !st.inMeeting;
         const kept = document.activeElement?.dataset?.act;
         const row = (label, on, act, role, disabled = false) =>
           `<button class="item" role="${role}" aria-checked="${on}" tabindex="-1" data-act="${act}"${disabled ? " disabled" : ""}><span class="check" aria-hidden="true">${on ? "✓" : ""}</span>${label}</button>`;
         $("menu").innerHTML =
           `<div role="group" aria-label="Save to"><div class="head" aria-hidden="true">Save to</div>` +
-          row("The meeting, on the item in focus", st.inMeeting && p.toMeeting, "meeting", "menuitemcheckbox", !st.inMeeting) +
-          row("Clipboard", copyForced || p.toClipboard, "clipboard", "menuitemcheckbox", copyForced) +
-          (copyForced ? `<div class="note">You're not in a meeting, so it's copied.</div>` : "") +
+          row(st.inMeeting ? "The meeting, on the item in focus" : st.space ? `A note for ${esc(st.space)}` : "A note for the space", p.toMeeting, "meeting", "menuitemcheckbox") +
+          row("Clipboard", p.toClipboard, "clipboard", "menuitemcheckbox") +
           `</div><hr /><div role="group" aria-label="Timer"><div class="head" aria-hidden="true">Timer</div>` +
           row("None", !p.timer, "t0", "menuitemradio") +
           row("5 Seconds", p.timer === 5, "t5", "menuitemradio") +

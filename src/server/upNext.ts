@@ -20,7 +20,30 @@ export interface UpNextInput {
   dismissed: Map<string, number>;
   /** For a space with no meetings yet: other spaces its people share that still have open to-dos. */
   otherSpaces: Array<{ id: string; name: string; open: number; lastAt: number }>;
+  /** Snaps and notes saved straight to the space, newest first. A note's text is its line. */
+  captures: Array<{
+    kind?: "snap" | "jot";
+    id: string;
+    ts: number;
+    itemId: string | null;
+    by: string;
+    line: string | null;
+    caption: string | null;
+    screenText: string | null;
+  }>;
 }
+
+/** What a capture is about, in a line: what they typed, else what the agent saw, else the first line of its text. */
+export function captureTitle(c: { by: string; line: string | null; caption: string | null; screenText: string | null }): string {
+  const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+  const first = c.screenText?.split("\n").find((l) => l.trim())?.trim();
+  const said = c.line?.split("\n").find((l) => l.trim())?.trim();
+  const t = said ? cut(said, 140) : (c.caption ?? (first ? cut(first, 80) : null));
+  return t ?? `Snap from ${c.by.split(" ")[0]}`;
+}
+
+/** Captures since the last meeting that Up next offers, newest first. */
+const MAX_CAPTURES = 6;
 
 /** Claude's pass over the ranked list (see upNextPolish.ts): a shorter agenda
  *  line, a better reason and an order, per suggestion. Each row remembers what
@@ -36,7 +59,7 @@ export const polishBasis = (s: Pick<UpNextSuggestion, "title" | "reason">) => `$
 /** Meetings with nothing happening on a to-do before it's parked. */
 const QUIET_MEETINGS = 2;
 
-const RANK: Record<UpNextSuggestion["kind"], number> = { needs_people: 0, question: 1, todo: 3 };
+const RANK: Record<UpNextSuggestion["kind"], number> = { needs_people: 0, question: 1, capture: 2, todo: 3 };
 
 export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Record<string, number> } {
   const { notes, items, updates, dismissed } = input;
@@ -183,6 +206,30 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
     });
   }
 
+  // Snaps and notes people saved to the space since the last meeting started, unless their item is on the agenda already.
+  const fresh = input.captures.filter((c) => c.ts >= (since ?? -Infinity)).filter((c) => {
+    const it = c.itemId ? items.get(c.itemId) : undefined;
+    return !it || it.archived || it.deck;
+  });
+  for (const c of fresh.slice(0, MAX_CAPTURES)) {
+    const it = c.itemId ? items.get(c.itemId) : undefined;
+    const kind = c.kind ?? "snap";
+    drafts.set(`${kind}:${c.id}`, {
+      key: `${kind}:${c.id}`,
+      kind: "capture",
+      title: captureTitle(c),
+      reason: `${kind === "jot" ? "Note" : "Snap"} saved by ${c.by}${it ? ` · ${it.title}` : ""}`,
+      noteId: null,
+      itemId: c.itemId,
+      owner: null,
+      carried: 0,
+      merged: [],
+      lastActivity: c.ts,
+      parked: false,
+      order: c.ts,
+    });
+  }
+
   // A new space: offer to bring over what's still open in spaces its people share.
   if (!earlier.length) {
     for (const o of input.otherSpaces) {
@@ -293,6 +340,8 @@ function addOne(db: DB, roomId: string, key: string, meeting: { id: string }): s
   if (!id) return null;
   if (kind === "item") return db.restoreItem(roomId, id) ? id : null;
   if (kind === "space") return carrySpace(db, roomId, id, meeting);
+  if (kind === "snap") return addCapture(db, roomId, id);
+  if (kind === "jot") return addJot(db, roomId, id);
   if (kind !== "note") return null;
   const note = db.getNote(id);
   if (!note || note.roomId !== roomId) return null;
@@ -302,6 +351,37 @@ function addOne(db: DB, roomId: string, key: string, meeting: { id: string }): s
   const created = newAgendaLine(db, roomId, title, from ? `Carried over from “${from.title}”` : "Carried over");
   if (!created) return null;
   db.moveNote(note.id, created);
+  return created;
+}
+
+/** A snap saved to the space goes on the agenda: its item comes back if it came off, otherwise it
+ *  gets an agenda line of its own, and it's pinned there. */
+function addCapture(db: DB, roomId: string, id: string): string | null {
+  const snap = db.getSnap(id);
+  if (!snap || snap.roomId !== roomId) return null;
+  const from = snap.itemId ? db.getItem(snap.itemId) : null;
+  if (from && from.roomId === roomId && !from.deckId && db.restoreItem(roomId, from.id)) {
+    db.setSnapItem(id, from.id);
+    return from.id;
+  }
+  const title = captureTitle({ by: snap.takenBy, line: snap.line, caption: snap.caption, screenText: snap.screenText });
+  const created = newAgendaLine(db, roomId, title.length > 140 ? `${title.slice(0, 139)}…` : title, `From a snap ${snap.takenBy} saved`);
+  if (created) db.setSnapItem(id, created);
+  return created;
+}
+
+/** A note saved to the space goes on the agenda the same way. */
+function addJot(db: DB, roomId: string, id: string): string | null {
+  const jot = db.getJot(id);
+  if (!jot || jot.roomId !== roomId) return null;
+  const from = jot.itemId ? db.getItem(jot.itemId) : null;
+  if (from && from.roomId === roomId && !from.deckId && db.restoreItem(roomId, from.id)) {
+    db.setJotItem(id, from.id);
+    return from.id;
+  }
+  const title = captureTitle({ by: jot.by, line: jot.text, caption: null, screenText: null });
+  const created = newAgendaLine(db, roomId, title, `From a note ${jot.by} saved`);
+  if (created) db.setJotItem(id, created);
   return created;
 }
 

@@ -118,6 +118,16 @@ export interface Agent {
   draftDeck(brief: string): Promise<DraftSlide[]>;
   /** One line on what a snap of the shared screen shows. Null without a model. */
   describeSnap(image: { data: string; mediaType: SnapMedia }, item: Item | null, remarks: string[]): Promise<string | null>;
+  /** A snap saved to a space between meetings: one line on what it shows, and which of the
+   *  space's items it's most likely about (only when it plainly is). Null when it can't tell. */
+  describeCapture(
+    image: { data: string; mediaType: SnapMedia },
+    space: { name: string; purpose: string },
+    items: Array<{ id: string; title: string }>,
+    line: string | null,
+  ): Promise<{ caption: string | null; itemId: string | null } | null>;
+  /** The item a note someone saved to the space is plainly about, or null. */
+  pickItem(space: { name: string; purpose: string }, items: Array<{ id: string; title: string }>, text: string): Promise<string | null>;
   /** Whether the screen the agent was reading backs one of the decisions or
    *  to-dos it just wrote: which one (by key), and a caption. Null when it doesn't. */
   frameBacks(
@@ -135,7 +145,7 @@ export type SnapMedia = "image/jpeg" | "image/png" | "image/webp";
 /** A suggestion as the agent sees it when tidying the agenda, with what it came from. */
 export interface AgendaDraftRow {
   key: string;
-  kind: "needs_people" | "question" | "todo";
+  kind: "needs_people" | "question" | "capture" | "todo";
   title: string;
   reason: string;
   owner: string | null;
@@ -230,6 +240,15 @@ const DeckSchema = z.object({
 
 const SnapSchema = z.object({
   caption: z.string().describe("What's on screen, in one short line under 110 characters, naming the specific thing shown"),
+});
+
+const CaptureSchema = z.object({
+  caption: z.string().describe("What's on screen, in one short line under 110 characters, naming the specific thing shown"),
+  item: z.string().nullable().describe("The key (I1, I2...) of the item this is plainly about, or null when none clearly fits"),
+});
+
+const PickSchema = z.object({
+  item: z.string().nullable().describe("The key (I1, I2...) of the item this note is plainly about, or null when none clearly fits"),
 });
 
 const BacksSchema = z.object({
@@ -504,6 +523,46 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
       "low",
     );
     return out?.caption.trim().slice(0, 160) || null;
+  }
+
+  async describeCapture(
+    image: { data: string; mediaType: SnapMedia },
+    space: { name: string; purpose: string },
+    items: Array<{ id: string; title: string }>,
+    line: string | null,
+  ): Promise<{ caption: string | null; itemId: string | null } | null> {
+    const listed = items.slice(0, 40);
+    const out = await this.parse(
+      CaptureSchema,
+      [
+        { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+        {
+          type: "text",
+          text: `Someone saved this screenshot to their team's space "${space.name}"${space.purpose ? ` (${space.purpose})` : ""} between meetings.${
+            line ? `\nThey wrote with it: ${line}` : ""
+          }\n\nThe space's items:\n${listed.length ? listed.map((it, i) => `I${i + 1}: ${it.title}`).join("\n") : "(none)"}\n\nSay what's on screen, and which item it's about.`,
+        },
+      ],
+      "You caption screenshots people save for their team so people and agents can find them later. Be concrete: name the ticket, file, chart, page or error shown, and the detail that matters. No preamble. Only pick an item when the screenshot or what they wrote is plainly about it.",
+      "low",
+    );
+    if (!out) return null;
+    const pick = out.item ? listed[Number(out.item.replace(/\D/g, "")) - 1] : undefined;
+    return { caption: out.caption.trim().slice(0, 160) || null, itemId: pick?.id ?? null };
+  }
+
+  async pickItem(space: { name: string; purpose: string }, items: Array<{ id: string; title: string }>, text: string): Promise<string | null> {
+    const listed = items.slice(0, 40);
+    if (!listed.length) return null;
+    const out = await this.parse(
+      PickSchema,
+      `Someone saved this note to their team's space "${space.name}"${space.purpose ? ` (${space.purpose})` : ""} between meetings:\n${text}\n\nThe space's items:\n${listed
+        .map((it, i) => `I${i + 1}: ${it.title}`)
+        .join("\n")}\n\nWhich item is it about?`,
+      "You file notes people save for their team under the agenda item they're about. Only pick an item when the note is plainly about it.",
+      "low",
+    );
+    return out?.item ? (listed[Number(out.item.replace(/\D/g, "")) - 1]?.id ?? null) : null;
   }
 
   async frameBacks(
@@ -789,6 +848,27 @@ export class HeuristicAgent implements Agent {
 
   async describeSnap(): Promise<string | null> {
     return null;
+  }
+
+  /** Without a model: the item whose title shares the most words with what they typed. */
+  async describeCapture(
+    _image: unknown,
+    _space: unknown,
+    items: Array<{ id: string; title: string }>,
+    line: string | null,
+  ): Promise<{ caption: string | null; itemId: string | null } | null> {
+    const words = (t: string) => new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3));
+    const said = words(line ?? "");
+    let best: { id: string; n: number } | null = null;
+    for (const it of items) {
+      const n = [...words(it.title)].filter((w) => said.has(w)).length;
+      if (n && (!best || n > best.n)) best = { id: it.id, n };
+    }
+    return best ? { caption: null, itemId: best.id } : null;
+  }
+
+  async pickItem(_space: unknown, items: Array<{ id: string; title: string }>, text: string): Promise<string | null> {
+    return (await this.describeCapture(null, null, items, text))?.itemId ?? null;
   }
 
   async frameBacks(): Promise<{ key: string; caption: string } | null> {

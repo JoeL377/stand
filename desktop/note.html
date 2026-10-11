@@ -1,0 +1,498 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Note</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <!--
+      A note for the space the bar holds, from the bar's note field or Control + Shift + N in any
+      app: type it, or say it with the Mac's dictation, and Enter saves it. Shift + Enter starts a
+      new line, Esc puts it away (what's written waits for next time). It sits just under the
+      bar, or just over it when the bar is low on the screen. A snap out of a meeting is pinned
+      at its top and saved with the note; with nothing written, Enter saves the snaps alone.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+        overflow: hidden;
+        font:
+          13px -apple-system,
+          BlinkMacSystemFont,
+          system-ui,
+          sans-serif;
+        color: #e8e8ee;
+        user-select: none;
+        cursor: default;
+      }
+      :root {
+        --accent: #0a84ff;
+        /* The bar's own edge, so the card reads as more of the bar. */
+        --ring:
+          0 0 0 1.5px rgb(96 150 255 / 0.9),
+          0 0 0 4px rgb(45 108 223 / 0.28),
+          0 2px 4px rgb(0 0 0 / 0.35);
+      }
+      #card {
+        position: relative;
+        overflow: hidden;
+        margin: 4px;
+        padding: 8px;
+        border-radius: 14px;
+        background: rgb(24 25 30 / 0.97);
+        box-shadow:
+          0 0 0 1px rgb(255 255 255 / 0.14),
+          0 2px 4px rgb(0 0 0 / 0.35);
+      }
+      /* Hanging from the bar: one piece with it. The edge against the bar is square, with no gap
+         and no ring (the bar's ring stops there too), and a faint line divides the two. */
+      body.fused #card {
+        margin: 0 4px 4px;
+        border-radius: 0 0 18px 18px;
+        box-shadow: var(--ring);
+        clip-path: inset(0 -8px -8px -8px);
+      }
+      body.fused.above #card {
+        margin: 4px 4px 0;
+        border-radius: 18px 18px 0 0;
+        clip-path: inset(-8px -8px 0 -8px);
+      }
+      body.fused #card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 12px;
+        right: 12px;
+        height: 1px;
+        background: rgb(255 255 255 / 0.08);
+      }
+      body.fused.above #card::before {
+        top: auto;
+        bottom: 0;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        #card {
+          animation: in 0.16s cubic-bezier(0.23, 1, 0.32, 1) both;
+        }
+        @keyframes in {
+          from {
+            opacity: 0;
+            transform: translateY(-4px);
+          }
+        }
+        body.above #card {
+          animation-name: in-up;
+        }
+        /* From the bar, it unfolds out of the bar's edge. */
+        body.fused #card {
+          animation: unfold 0.18s cubic-bezier(0.23, 1, 0.32, 1) both;
+        }
+        body.fused.above #card {
+          animation-name: unfold-up;
+        }
+        @keyframes unfold {
+          from {
+            clip-path: inset(0 -8px 100% -8px);
+          }
+        }
+        @keyframes unfold-up {
+          from {
+            clip-path: inset(100% -8px 0 -8px);
+          }
+        }
+        @keyframes in-up {
+          from {
+            opacity: 0;
+            transform: translateY(4px);
+          }
+        }
+      }
+      #form {
+        display: flex;
+        flex-direction: column;
+      }
+      /* The snap, big: as wide as the bar, edge to edge, on the outside of the bar and the card
+         together (on top when the card opens over the bar, at the bottom when it opens under
+         it). The text stays by the bar. More than one: the one showing, and the others as small
+         pictures along its lower edge to switch to. */
+      #pins {
+        position: relative;
+        margin: -8px -8px 8px;
+        background: rgb(0 0 0 / 0.35);
+      }
+      body.fused:not(.above) #pins {
+        order: 1;
+        margin: 8px -8px -8px;
+      }
+      #pins .big {
+        display: block;
+        width: 100%;
+        height: auto;
+        max-height: 240px;
+        object-fit: contain;
+      }
+      #pins .x {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgb(0 0 0 / 0.66);
+        color: #fff;
+        font-size: 11px;
+        line-height: 1;
+        opacity: 0;
+        transition: opacity 0.12s;
+      }
+      #pins:hover .x,
+      #pins .x:focus-visible {
+        opacity: 1;
+      }
+      #pins .x:hover {
+        background: rgb(0 0 0 / 0.88);
+      }
+      #pins .strip {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        display: flex;
+        gap: 4px;
+      }
+      #pins .strip button {
+        width: 44px;
+        height: 28px;
+        padding: 0;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #000;
+        box-shadow: 0 0 0 1px rgb(255 255 255 / 0.35);
+        opacity: 0.75;
+      }
+      #pins .strip button:hover {
+        opacity: 1;
+      }
+      #pins .strip button.on {
+        box-shadow: 0 0 0 2px #fff;
+        opacity: 1;
+      }
+      #pins .strip img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .row {
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+      }
+      textarea {
+        flex: 1;
+        min-width: 0;
+        height: 20px;
+        max-height: 84px;
+        padding: 6px 10px;
+        border: 0;
+        border-radius: 10px;
+        background: rgb(255 255 255 / 0.08);
+        color: #fff;
+        font: inherit;
+        line-height: 20px;
+        resize: none;
+        outline: none;
+        user-select: text;
+        overflow-y: hidden;
+      }
+      textarea::placeholder {
+        color: rgb(255 255 255 / 0.45);
+      }
+      button {
+        flex: none;
+        height: 32px;
+        border: 0;
+        border-radius: 10px;
+        font: inherit;
+        outline: none;
+      }
+      textarea:focus-visible,
+      button:focus-visible {
+        box-shadow: 0 0 0 2px var(--accent);
+      }
+      #say {
+        width: 32px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        background: rgb(255 255 255 / 0.08);
+        color: #d7d7e0;
+      }
+      #say:hover {
+        background: rgb(255 255 255 / 0.16);
+        color: #fff;
+      }
+      #say svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      #go {
+        padding: 0 14px;
+        background: var(--accent);
+        color: var(--on-accent, #fff);
+        font-weight: 600;
+      }
+      #go:hover:not(:disabled) {
+        filter: brightness(1.12);
+      }
+      #go:disabled {
+        opacity: 0.5;
+      }
+      #why {
+        margin: 6px 2px 0;
+        color: #ff9a8f;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      #hint {
+        margin: 6px 2px 0;
+        color: #a5a5b3;
+        font-size: 12px;
+      }
+      #done {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 32px;
+        padding: 0 2px;
+      }
+      #done span {
+        color: #a5a5b3;
+      }
+      .check {
+        flex: none;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: #30d158;
+        color: #06290f;
+        font-weight: 700;
+        font-size: 12px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (prefers-contrast: more) {
+        :root {
+          --ring: 0 0 0 2px #fff;
+        }
+        #card {
+          background: #1c1c1e;
+          box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.6);
+        }
+        body.fused #card {
+          background: #111214;
+          box-shadow: var(--ring);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="card" role="dialog" aria-label="Note">
+      <div id="form">
+        <div id="pins" role="group" aria-label="Snaps pinned to the note" hidden></div>
+        <div class="row">
+          <textarea id="text" rows="1" maxlength="2000" placeholder="Write or say a note…" aria-label="The note"></textarea>
+          <button id="say" title="Say it (dictation)" aria-label="Say it with dictation">
+            <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+          </button>
+          <button id="go" disabled>Save</button>
+        </div>
+        <div id="hint" hidden></div>
+        <div id="why" role="alert" hidden></div>
+      </div>
+      <div id="done" role="status" hidden>
+        <span class="check" aria-hidden="true">✓</span>
+        <div><b id="done-title"></b> <span>· ✦ Stand picks the item</span></div>
+      </div>
+    </div>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let saving = false;
+      let st = null;
+      /** The snaps pinned to the note: [{id, thumb}], and the one shown big (the newest, unless picked). */
+      let pins = [];
+      let showing = null;
+
+      // The window is as tall as the card, so the rest of the screen stays clickable. Hanging
+      // from the bar it has no margin on the bar's side.
+      const report = () => window.note.size(Math.ceil($("card").getBoundingClientRect().height) + (document.body.classList.contains("fused") ? 4 : 8));
+      function placed(o) {
+        document.body.classList.toggle("above", Boolean(o.above));
+        document.body.classList.toggle("fused", Boolean(o.fused));
+      }
+      new ResizeObserver(report).observe($("card"));
+
+      // Grows with what's written, up to four lines, then scrolls.
+      function grow() {
+        const t = $("text");
+        t.style.height = "20px";
+        const h = Math.min(t.scrollHeight - 12, 84);
+        t.style.height = `${h}px`;
+        t.style.overflowY = t.scrollHeight - 12 > 84 ? "auto" : "hidden";
+        $("go").disabled = saving || (!t.value.trim() && !pins.length);
+      }
+
+      function renderPins() {
+        const box = $("pins");
+        box.hidden = !pins.length;
+        box.dataset.n = pins.length;
+        if (!pins.some((p) => p.id === showing)) showing = pins.at(-1)?.id ?? null;
+        const at = pins.findIndex((p) => p.id === showing);
+        const kids = [];
+        if (at >= 0) {
+          const big = document.createElement("img");
+          big.className = "big";
+          big.src = pins[at].thumb;
+          big.alt = pins.length > 1 ? `Snap ${at + 1} of ${pins.length}` : "The snap";
+          const x = document.createElement("button");
+          x.className = "x";
+          x.textContent = "✕";
+          x.title = "Take it off the note";
+          x.ariaLabel = pins.length > 1 ? `Take snap ${at + 1} off the note` : "Take the snap off the note";
+          x.onclick = () => window.note.unpin(pins[at].id);
+          kids.push(big, x);
+        }
+        if (pins.length > 1) {
+          const strip = document.createElement("div");
+          strip.className = "strip";
+          strip.append(
+            ...pins.map((p, i) => {
+              const b = document.createElement("button");
+              b.className = p.id === showing ? "on" : "";
+              b.ariaLabel = `Show snap ${i + 1}`;
+              b.setAttribute("aria-pressed", String(p.id === showing));
+              const img = document.createElement("img");
+              img.src = p.thumb;
+              img.alt = "";
+              b.append(img);
+              b.onclick = () => {
+                showing = p.id;
+                renderPins();
+                $("text").focus();
+              };
+              return b;
+            }),
+          );
+          kids.push(strip);
+        }
+        box.replaceChildren(...kids);
+        const n = pins.length;
+        // The bar says which space and the keys; away from the bar, the placeholder says the space.
+        const to = st && !document.body.classList.contains("fused") ? ` for ${st.space}` : "";
+        $("text").placeholder = n ? `Add a note about ${n === 1 ? "it" : "them"}, or just Enter` : `Write or say a note${to}…`;
+        $("text").ariaLabel = n ? `A note about the ${n === 1 ? "snap" : `${n} snaps`}` : "The note";
+        grow();
+      }
+
+      window.note.onOpen((o) => {
+        st = o;
+        if (o.accent) document.documentElement.style.setProperty("--accent", o.accent);
+        if (o.onAccent) document.documentElement.style.setProperty("--on-accent", o.onAccent);
+        placed(o);
+        $("card").ariaLabel = `Note to ${o.space}`;
+        $("text").value = o.draft || "";
+        renderPins();
+        $("say").title = `Say it (dictation: ${o.dictateKey})`;
+        grow();
+        $("text").focus();
+        $("text").setSelectionRange($("text").value.length, $("text").value.length);
+        requestAnimationFrame(() => {
+          report();
+          window.note.ready();
+        });
+      });
+      window.note.onFocus(() => $("text").focus());
+      window.note.onPlace((o) => {
+        placed(o);
+        renderPins();
+        report();
+      });
+      window.note.onPins((list) => {
+        // A snap just pinned is the one shown.
+        if (list.length > pins.length) showing = list.at(-1).id;
+        pins = list;
+        $("why").hidden = true;
+        renderPins();
+        $("text").focus();
+      });
+      $("text").addEventListener("input", () => {
+        grow();
+        $("why").hidden = true;
+      });
+
+      function go() {
+        const text = $("text").value.trim();
+        if ((!text && !pins.length) || saving) return;
+        saving = true;
+        $("go").disabled = true;
+        $("go").textContent = "Saving…";
+        $("why").hidden = true;
+        window.note.go(text);
+      }
+      $("go").onclick = go;
+      $("say").onclick = async () => {
+        $("text").focus();
+        // The Mac's own dictation, into the field: started from here when the app can, else its key.
+        const started = await window.note.dictate().catch(() => false);
+        if (!started) {
+          $("hint").textContent = `Press ${st?.dictateKey ?? "the dictation key"} to start dictating, then Enter to save.`;
+          $("hint").hidden = false;
+        }
+      };
+      const cancel = () => !saving && window.note.cancel($("text").value);
+      window.note.onEscape(cancel);
+      addEventListener("keydown", (e) => {
+        if (e.key === "Escape") return cancel();
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.target === $("text")) {
+          e.preventDefault();
+          go();
+        }
+        // Backspace in an empty note takes the last snap off it, as with a list of addresses.
+        if (e.key === "Backspace" && e.target === $("text") && !$("text").value && pins.length && !saving) {
+          e.preventDefault();
+          window.note.unpin(pins[pins.length - 1].id);
+        }
+      });
+
+      window.note.onResult((r) => {
+        saving = false;
+        $("go").textContent = r.ok ? "Save" : "Try again";
+        if (r.ok) {
+          const snaps = r.snaps ? `${r.snaps} snap${r.snaps === 1 ? "" : "s"}` : "";
+          $("form").hidden = true;
+          $("done-title").textContent = snaps ? `${r.text ? `Note and ${snaps}` : snaps} saved to ${r.space}` : `Saved to ${r.space}`;
+          $("done").hidden = false;
+          return;
+        }
+        $("why").textContent = r.why;
+        $("why").hidden = false;
+        grow();
+        $("text").focus();
+      });
+    </script>
+  </body>
+</html>

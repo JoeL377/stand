@@ -5,14 +5,12 @@ import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
 import { Slide } from "../slides.tsx";
 import { CameraIcon, ShareIcon } from "../icons.tsx";
-import { SnapGallery, SnapNotSaved, addImageSnap, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
+import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
 
-/** Snap's shortcut, the same as the Mac app's: a bare letter would fire while people type. */
-const SNAP_KEYS = /Mac/.test(navigator.platform) ? "⌃⇧S" : "Ctrl+Shift+S";
-/** The same, written out where there's room: ⇧ alone reads as an arrow. */
-const SNAP_KEYS_WORDS = /Mac/.test(navigator.platform) ? "Control + Shift + S" : "Ctrl + Shift + S";
+/** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
+const SNAP_KEYS_WORDS = "Control + Shift + S";
 
 export function Stage(props: {
   state: RoomState;
@@ -106,8 +104,9 @@ export function Stage(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, [presenting]);
 
-  // Snap: the camera on the shared screen, or ⌃⇧S. Saves the frame as shared;
-  // cropping waits for the gallery so nobody is pulled out of the talk.
+  // Snaps are taken from the Stand bar only: the Mac app's, or the pop-out bar in a browser,
+  // which snaps the shared screen through here. Saves the frame as shared; cropping waits for
+  // the gallery so nobody is pulled out of the talk.
   const screenRef = useRef<HTMLDivElement>(null);
   const showingScreen = Boolean(localScreen || remoteScreen);
   const [flash, setFlash] = useState(0);
@@ -148,18 +147,6 @@ export function Stage(props: {
     setFlash((f) => f + 1);
     return saving(() => takeSnap(video, state.roomId), "Snapped");
   };
-  // The Mac app's toolbar. Whatever comes of it, including why it couldn't, shows here.
-  const snapInApp = async () => {
-    try {
-      const r = await macApp?.snap();
-      const text = r && `${r.title}. ${r.body}`;
-      // Long ones say what to fix (a permission, say), so they stay up long enough to read.
-      const fix = r?.settings && macApp?.openSettings ? { label: "Open System Settings", run: () => macApp?.openSettings?.(r.settings!) } : null;
-      if (text) toast({ text, ...(r.snapId ? { action: crop(r.snapId) } : fix ? { action: fix } : {}), ms: Math.max(5000, text.length * 60) });
-    } catch {
-      toast({ tone: "error", text: "Quit the Stand app and open it again to use Snap." });
-    }
-  };
   // A snap from the Mac toolbar saving while Stand is in front: say so here, as the bar would.
   useEffect(() => {
     let wait: number | null = null;
@@ -180,65 +167,6 @@ export function Stage(props: {
   useEffect(() => {
     if (props.snapRef) props.snapRef.current = showingScreen ? () => snapRef.current() : null;
   });
-  useEffect(() => {
-    // The Mac app catches the shortcut itself, from any app.
-    if (!showingScreen && macApp) return;
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (!e.ctrlKey || !e.shiftKey || e.metaKey || e.altKey || e.code !== "KeyS" || e.repeat || t.closest("[role=dialog]")) return;
-      e.preventDefault();
-      // Pressing it with nothing on screen says how to get something to snap, rather than doing nothing.
-      if (showingScreen) void snapRef.current();
-      else toast({ text: `Snap works once someone shares a screen. You can also paste or drop an image here.` });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [showingScreen]);
-  // Paste or drop a screenshot of your own: it's kept on the item in focus, like a snap.
-  const [dropping, setDropping] = useState(false);
-  const focusLabel = focusItem ? (keyOf(focusItem) ?? focusItem.title) : "General";
-  const addImages = async (files: File[]) => {
-    for (const f of files.slice(0, 5)) await saving(() => addImageSnap(f, state.roomId), "Added");
-  };
-  const addRef = useRef(addImages);
-  addRef.current = addImages;
-  useEffect(() => {
-    const imagesIn = (dt: DataTransfer | null) => [...(dt?.files ?? [])].filter((f) => f.type.startsWith("image/"));
-    const carriesImage = (dt: DataTransfer | null) => [...(dt?.items ?? [])].some((i) => i.kind === "file" && i.type.startsWith("image/"));
-    const onPaste = (e: ClipboardEvent) => {
-      const files = imagesIn(e.clipboardData);
-      if (!files.length) return;
-      // Pasting into a text box with text on the clipboard pastes the text, as usual.
-      const t = e.target as HTMLElement;
-      if (t.closest("input, textarea, [contenteditable]") && e.clipboardData?.types.includes("text/plain")) return;
-      e.preventDefault();
-      void addRef.current(files);
-    };
-    let leave: ReturnType<typeof setTimeout> | undefined;
-    const onOver = (e: DragEvent) => {
-      if (!carriesImage(e.dataTransfer)) return;
-      e.preventDefault();
-      setDropping(true);
-      clearTimeout(leave);
-      leave = setTimeout(() => setDropping(false), 250);
-    };
-    const onDrop = (e: DragEvent) => {
-      const files = imagesIn(e.dataTransfer);
-      setDropping(false);
-      if (!files.length) return;
-      e.preventDefault();
-      void addRef.current(files);
-    };
-    window.addEventListener("paste", onPaste);
-    window.addEventListener("dragover", onOver);
-    window.addEventListener("drop", onDrop);
-    return () => {
-      clearTimeout(leave);
-      window.removeEventListener("paste", onPaste);
-      window.removeEventListener("dragover", onOver);
-      window.removeEventListener("drop", onDrop);
-    };
-  }, []);
   // Tell whoever is sharing when someone else snaps their screen; they can take it back.
   const seenSnaps = useRef<Set<string> | null>(null);
   useEffect(() => {
@@ -376,24 +304,7 @@ export function Stage(props: {
             </button>
           </div>
         )}
-        {macApp ? (
-          <button className="app-snap" title={`Snap the screen, a window or part of it (${SNAP_KEYS})`} onClick={() => void snapInApp()}>
-            <CameraIcon />
-            Snap
-          </button>
-        ) : (
-          showingScreen && (
-            <button className="snap-btn" title={`Snap this screen (${SNAP_KEYS})`} aria-label="Snap this screen" onClick={() => void snap()}>
-              <CameraIcon />
-            </button>
-          )
-        )}
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
-        {dropping && (
-          <div className="shot-drop" aria-hidden>
-            Drop to add it to {focusLabel}
-          </div>
-        )}
         {cropSnap && (
           <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
         )}
@@ -404,7 +315,7 @@ export function Stage(props: {
         {localScreen ? (
           <Video
             stream={localScreen}
-            label={`You're sharing your screen · ${SNAP_KEYS_WORDS} snaps it${canSteer ? "" : " · The agent reads only the host's screen"}`}
+            label={`You're sharing your screen${macApp ? ` · ${SNAP_KEYS_WORDS} snaps it` : ""}${canSteer ? "" : " · The agent reads only the host's screen"}`}
           />
         ) : remoteScreen ? (
           <RemoteVideo

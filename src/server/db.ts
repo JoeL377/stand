@@ -13,6 +13,7 @@ import type {
   Item,
   ItemSource,
   ItemUpdate,
+  Jot,
   Note,
   NoteKind,
   Segment,
@@ -137,11 +138,17 @@ CREATE TABLE IF NOT EXISTS upnext_dismissed (
   at INTEGER NOT NULL,
   PRIMARY KEY (room_id, key)
 );
--- Stills of the shared screen (snaps.ts). The image is a file named by id.
+-- Stills of a screen (snaps.ts). The image is a file named by id. Taken in a meeting, or
+-- saved straight to the space between meetings (no meeting_id).
 CREATE TABLE IF NOT EXISTS snaps (
   id TEXT PRIMARY KEY,
-  meeting_id TEXT NOT NULL REFERENCES meetings(id),
+  -- Not NOT NULL so an older build sharing this database can still save meeting snaps;
+  -- those get their space from the meeting on the next start.
+  room_id TEXT,
+  meeting_id TEXT REFERENCES meetings(id),
   item_id TEXT,
+  -- The agent picked item_id and nobody has confirmed it yet.
+  item_suggested INTEGER NOT NULL DEFAULT 0,
   ts INTEGER NOT NULL,
   ext TEXT NOT NULL,
   width INTEGER NOT NULL,
@@ -155,9 +162,27 @@ CREATE TABLE IF NOT EXISTS snaps (
   caption TEXT,
   note_id TEXT,
   -- The topic the end-of-meeting recap placed it under, when it backs no note.
-  discussion_id TEXT
+  discussion_id TEXT,
+  -- The line the person typed with it, and the text read off the image on their Mac.
+  line TEXT,
+  screen_text TEXT,
+  -- The note (jots) it was pinned to on the Mac's bar.
+  jot_id TEXT
 );
 CREATE INDEX IF NOT EXISTS snaps_meeting ON snaps(meeting_id, ts);
+-- Notes saved straight to a space from the Mac's bar (captures.ts): a line of text, typed or dictated.
+CREATE TABLE IF NOT EXISTS jots (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL,
+  item_id TEXT,
+  -- The agent picked item_id and nobody has confirmed it yet.
+  item_suggested INTEGER NOT NULL DEFAULT 0,
+  text TEXT NOT NULL,
+  by_id TEXT,
+  by_name TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS jots_room ON jots(room_id, ts);
 CREATE INDEX IF NOT EXISTS snaps_item ON snaps(item_id, ts);
 -- Claude's last pass over a space's suggested agenda (upNext.ts Polish), as JSON.
 CREATE TABLE IF NOT EXISTS upnext_polish (
@@ -288,8 +313,9 @@ const toSegment = (r: Row): Segment => ({
 const toSnapRow = (r: Row): SnapRow => ({
   id: r.id as string,
   roomId: r.room_id as string,
-  meetingId: r.meeting_id as string,
+  meetingId: (r.meeting_id as string) ?? null,
   itemId: (r.item_id as string) ?? null,
+  itemSuggested: !!r.item_suggested,
   ts: r.ts as number,
   ext: r.ext as string,
   version: r.version as number,
@@ -303,6 +329,20 @@ const toSnapRow = (r: Row): SnapRow => ({
   caption: (r.caption as string) ?? null,
   noteId: (r.note_id as string) ?? null,
   topicId: (r.discussion_id as string) ?? null,
+  line: (r.line as string) ?? null,
+  screenText: (r.screen_text as string) ?? null,
+  jotId: (r.jot_id as string) ?? null,
+});
+
+const toJot = (r: Row): Jot => ({
+  id: r.id as string,
+  roomId: r.room_id as string,
+  itemId: (r.item_id as string) ?? null,
+  itemSuggested: !!r.item_suggested,
+  text: r.text as string,
+  byId: (r.by_id as string) ?? null,
+  by: r.by_name as string,
+  ts: r.ts as number,
 });
 
 const toNote = (r: Row): Note => ({
@@ -387,6 +427,32 @@ export function openDb(file?: string) {
   if (!meetingCols.includes("end_requested_at")) db.exec("ALTER TABLE meetings ADD COLUMN end_requested_at INTEGER;");
   const snapCols = (db.prepare("PRAGMA table_info(snaps)").all() as Row[]).map((c) => c.name);
   if (!snapCols.includes("discussion_id")) db.exec("ALTER TABLE snaps ADD COLUMN discussion_id TEXT;");
+  // Snaps used to need a meeting. SQLite can't loosen a column, so the table is rebuilt once,
+  // each row taking its space from its meeting.
+  if (!snapCols.includes("room_id")) {
+    db.exec(`BEGIN;
+      CREATE TABLE snaps_spaces (
+        id TEXT PRIMARY KEY, room_id TEXT, meeting_id TEXT REFERENCES meetings(id), item_id TEXT,
+        item_suggested INTEGER NOT NULL DEFAULT 0, ts INTEGER NOT NULL, ext TEXT NOT NULL, width INTEGER NOT NULL,
+        height INTEGER NOT NULL, version INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL, taken_by_id TEXT,
+        taken_by TEXT NOT NULL, sharer_id TEXT, sharer_name TEXT, caption TEXT, note_id TEXT, discussion_id TEXT,
+        line TEXT, screen_text TEXT
+      );
+      INSERT INTO snaps_spaces (id, room_id, meeting_id, item_id, ts, ext, width, height, version, source, taken_by_id,
+        taken_by, sharer_id, sharer_name, caption, note_id, discussion_id)
+        SELECT s.id, m.room_id, s.meeting_id, s.item_id, s.ts, s.ext, s.width, s.height, s.version, s.source, s.taken_by_id,
+          s.taken_by, s.sharer_id, s.sharer_name, s.caption, s.note_id, s.discussion_id
+        FROM snaps s JOIN meetings m ON m.id = s.meeting_id;
+      DROP TABLE snaps;
+      ALTER TABLE snaps_spaces RENAME TO snaps;
+      CREATE INDEX snaps_meeting ON snaps(meeting_id, ts);
+      CREATE INDEX snaps_item ON snaps(item_id, ts);
+      COMMIT;`);
+  }
+  if (!(db.prepare("PRAGMA table_info(snaps)").all() as Row[]).some((c) => c.name === "jot_id")) db.exec("ALTER TABLE snaps ADD COLUMN jot_id TEXT;");
+  db.exec("CREATE INDEX IF NOT EXISTS snaps_room ON snaps(room_id, ts);");
+  db.exec("CREATE INDEX IF NOT EXISTS snaps_jot ON snaps(jot_id);");
+  db.exec("UPDATE snaps SET room_id = (SELECT room_id FROM meetings WHERE id = snaps.meeting_id) WHERE room_id IS NULL;");
   if (!deckCols.includes("kind"))
     db.exec(
       "ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';",
@@ -495,6 +561,7 @@ export function openDb(file?: string) {
           `SELECT r.id, r.name, r.purpose, r.synthesis_instructions, r.created_by, r.created_at,
              (SELECT MAX(COALESCE(m.ended_at, m.started_at)) FROM meetings m WHERE m.room_id = r.id) AS met_at,
              (SELECT MAX(last_joined_at) FROM room_members x WHERE x.room_id = r.id) AS joined_at,
+             (SELECT MAX(ts) FROM snaps s WHERE s.room_id = r.id AND s.meeting_id IS NULL) AS captured_at,
              EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?) AS following
            FROM rooms r
            WHERE EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?)`,
@@ -513,7 +580,7 @@ export function openDb(file?: string) {
         purpose: (r.purpose as string) ?? "",
         synthesisInstructions: (r.synthesis_instructions as string) ?? "",
         createdBy: (r.created_by as string) ?? null,
-        activeAt: Math.max((r.created_at as number) ?? 0, (r.met_at as number) ?? 0, (r.joined_at as number) ?? 0),
+        activeAt: Math.max((r.created_at as number) ?? 0, (r.met_at as number) ?? 0, (r.joined_at as number) ?? 0, (r.captured_at as number) ?? 0),
         following: Boolean(r.following),
         people: (people.all(r.id as string) as Row[]).map((p) => p.name as string),
         notes: (notes.all(r.id as string) as Row[]).map((n) => ({
@@ -1088,6 +1155,28 @@ export function openDb(file?: string) {
         updates: this.roomUpdates(roomId, 0, 500),
         dismissed,
         otherSpaces: meetings.some((m) => m.endedAt !== null) ? [] : this.sharedSpacesWithOpenWork(roomId),
+        captures: [
+          ...this.spaceSnaps(roomId, 0, 50).map((s) => ({
+            kind: "snap" as const,
+            id: s.id,
+            ts: s.ts,
+            itemId: s.itemId,
+            by: s.takenBy,
+            line: s.line,
+            caption: s.caption,
+            screenText: s.screenText,
+          })),
+          ...this.spaceJots(roomId, 0, 50).map((j) => ({
+            kind: "jot" as const,
+            id: j.id,
+            ts: j.ts,
+            itemId: j.itemId,
+            by: j.by,
+            line: j.text,
+            caption: null,
+            screenText: null,
+          })),
+        ].sort((a, b) => b.ts - a.ts),
       };
     },
     /** Other spaces with open to-dos that everyone in this space is also in,
@@ -1120,14 +1209,20 @@ export function openDb(file?: string) {
           .all(roomId) as Row[]
       ).map(toNote);
     },
-    addSnap(s: Omit<SnapRow, "roomId" | "version" | "caption">): void {
+    addSnap(
+      s: Omit<SnapRow, "version" | "caption" | "itemSuggested" | "line" | "screenText" | "jotId"> &
+        Partial<Pick<SnapRow, "itemSuggested" | "line" | "screenText" | "jotId">>,
+    ): void {
       db.prepare(
-        `INSERT INTO snaps (id, meeting_id, item_id, ts, ext, width, height, source, taken_by_id, taken_by, sharer_id, sharer_name, note_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO snaps (id, room_id, meeting_id, item_id, item_suggested, ts, ext, width, height, source, taken_by_id, taken_by,
+           sharer_id, sharer_name, note_id, line, screen_text, jot_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         s.id,
+        s.roomId,
         s.meetingId,
         s.itemId,
+        s.itemSuggested ? 1 : 0,
         s.ts,
         s.ext,
         s.width,
@@ -1138,30 +1233,78 @@ export function openDb(file?: string) {
         s.sharerId,
         s.sharerName,
         s.noteId,
+        s.line ?? null,
+        s.screenText ?? null,
+        s.jotId ?? null,
       );
     },
     getSnap(id: string): SnapRow | null {
-      const r = db.prepare("SELECT s.*, m.room_id FROM snaps s JOIN meetings m ON m.id = s.meeting_id WHERE s.id = ?").get(id) as
-        | Row
-        | undefined;
+      const r = db.prepare("SELECT * FROM snaps WHERE id = ?").get(id) as Row | undefined;
       return r ? toSnapRow(r) : null;
     },
     meetingSnaps(meetingId: string): SnapRow[] {
-      return (
-        db
-          .prepare("SELECT s.*, m.room_id FROM snaps s JOIN meetings m ON m.id = s.meeting_id WHERE s.meeting_id = ? ORDER BY s.ts")
-          .all(meetingId) as Row[]
-      ).map(toSnapRow);
+      return (db.prepare("SELECT * FROM snaps WHERE meeting_id = ? ORDER BY ts").all(meetingId) as Row[]).map(toSnapRow);
     },
-    /** An item's snaps across meetings, newest first. */
+    /** An item's snaps, in meetings or saved to the space, newest first. */
     itemSnaps(itemId: string, limit = 20): SnapRow[] {
+      return (db.prepare("SELECT * FROM snaps WHERE item_id = ? ORDER BY ts DESC LIMIT ?").all(itemId, limit) as Row[]).map(toSnapRow);
+    },
+    /** Notes of one kind from a space's finished meetings, newest first. */
+    spaceNotes(roomId: string, kind: NoteKind, limit = 20): Note[] {
       return (
         db
           .prepare(
-            "SELECT s.*, m.room_id FROM snaps s JOIN meetings m ON m.id = s.meeting_id WHERE s.item_id = ? ORDER BY s.ts DESC LIMIT ?",
+            `SELECT n.* FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND n.kind = ? ORDER BY n.ts DESC, n.rowid DESC LIMIT ?`,
           )
-          .all(itemId, limit) as Row[]
+          .all(roomId, kind, limit) as Row[]
+      ).map(toNote);
+    },
+    /** A space's finished meetings that had talk, newest first, with what came out of each. */
+    feedMeetings(roomId: string, limit = 30) {
+      return (
+        db
+          .prepare(
+            `SELECT m.id, m.started_at, m.ended_at, m.summary,
+               (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'action') AS todos,
+               (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'decision') AS decided,
+               (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'question') AS open
+             FROM meetings m
+             WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND EXISTS (SELECT 1 FROM segments s WHERE s.meeting_id = m.id)
+             ORDER BY m.started_at DESC LIMIT ?`,
+          )
+          .all(roomId, limit) as Row[]
+      ).map((r) => ({
+        id: r.id as string,
+        startedAt: r.started_at as number,
+        endedAt: r.ended_at as number,
+        summary: (r.summary as string) ?? null,
+        todos: r.todos as number,
+        decided: r.decided as number,
+        open: r.open as number,
+      }));
+    },
+    /** Snaps saved to a space between meetings on their own (not pinned to a note), newest first. */
+    spaceSnaps(roomId: string, since = 0, limit = 100): SnapRow[] {
+      return (
+        db
+          .prepare("SELECT * FROM snaps WHERE room_id = ? AND meeting_id IS NULL AND jot_id IS NULL AND ts >= ? ORDER BY ts DESC LIMIT ?")
+          .all(roomId, since, limit) as Row[]
       ).map(toSnapRow);
+    },
+    /** The snaps pinned to a note, oldest first. */
+    jotSnaps(jotId: string): SnapRow[] {
+      return (db.prepare("SELECT * FROM snaps WHERE jot_id = ? ORDER BY ts").all(jotId) as Row[]).map(toSnapRow);
+    },
+    /** A person picked the item (or none), or the agent suggested one (suggested). */
+    setSnapItem(id: string, itemId: string | null, suggested = false) {
+      db.prepare("UPDATE snaps SET item_id = ?, item_suggested = ? WHERE id = ?").run(itemId, suggested ? 1 : 0, id);
+    },
+    setSnapLine(id: string, line: string | null) {
+      db.prepare("UPDATE snaps SET line = ? WHERE id = ?").run(line, id);
+    },
+    setSnapText(id: string, text: string | null) {
+      db.prepare("UPDATE snaps SET screen_text = ? WHERE id = ?").run(text, id);
     },
     /** Where the recap put a snap: under the note it backs, or the topic it was discussed in. */
     placeSnap(id: string, place: { noteId: string | null; discussionId: string | null; caption: string }) {
@@ -1181,6 +1324,43 @@ export function openDb(file?: string) {
     },
     deleteSnap(id: string) {
       db.prepare("DELETE FROM snaps WHERE id = ?").run(id);
+    },
+    addJot(j: Omit<Jot, "itemSuggested"> & { itemSuggested?: boolean }): void {
+      db.prepare("INSERT INTO jots (id, room_id, item_id, item_suggested, text, by_id, by_name, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+        j.id,
+        j.roomId,
+        j.itemId,
+        j.itemSuggested ? 1 : 0,
+        j.text,
+        j.byId,
+        j.by,
+        j.ts,
+      );
+    },
+    getJot(id: string): Jot | null {
+      const r = db.prepare("SELECT * FROM jots WHERE id = ?").get(id) as Row | undefined;
+      return r ? toJot(r) : null;
+    },
+    /** Notes filed under an item, newest first. */
+    itemJots(itemId: string, limit = 20): Jot[] {
+      return (db.prepare("SELECT * FROM jots WHERE item_id = ? ORDER BY ts DESC LIMIT ?").all(itemId, limit) as Row[]).map(toJot);
+    },
+    /** Notes saved to a space, newest first. */
+    spaceJots(roomId: string, since = 0, limit = 100): Jot[] {
+      return (db.prepare("SELECT * FROM jots WHERE room_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?").all(roomId, since, limit) as Row[]).map(toJot);
+    },
+    /** A person picked the item (or none), or the agent suggested one (suggested). Its snaps go with it. */
+    setJotItem(id: string, itemId: string | null, suggested = false) {
+      db.prepare("UPDATE jots SET item_id = ?, item_suggested = ? WHERE id = ?").run(itemId, suggested ? 1 : 0, id);
+      db.prepare("UPDATE snaps SET item_id = ?, item_suggested = ? WHERE jot_id = ?").run(itemId, suggested ? 1 : 0, id);
+    },
+    setJotText(id: string, text: string) {
+      db.prepare("UPDATE jots SET text = ? WHERE id = ?").run(text, id);
+    },
+    /** Deletes a note and the snaps pinned to it. */
+    deleteJot(id: string) {
+      db.prepare("DELETE FROM snaps WHERE jot_id = ?").run(id);
+      db.prepare("DELETE FROM jots WHERE id = ?").run(id);
     },
     getPolish(roomId: string): Polish | null {
       const r = db.prepare("SELECT at, rows_json FROM upnext_polish WHERE room_id = ?").get(roomId) as Row | undefined;

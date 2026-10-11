@@ -11,9 +11,11 @@ import { AgentError, type AgentApi, type Caller } from "./agents.ts";
 
 const INSTRUCTIONS = `Stand records team meetings and pins what was said to the agenda item it was about: decisions, to-dos with owners, open questions, and the topics they came out of.
 
-References look like stand:action/<id>, stand:decision/<id>, stand:question/<id> and stand:topic/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
+Between meetings people also save notes to a space from the Stand bar on their Mac (typed or dictated), often with snaps of their screen pinned to them.
 
-"What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
+References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
+
+"What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 Report back when you finish or get stuck: complete_action for a to-do you finished (add a note and the PR link), post_update for progress, a blocker, or something people need to decide. Reports show up on that item in Stand.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
@@ -38,10 +40,10 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
   server.registerTool(
     "get",
     {
-      title: "Get one Stand to-do, decision, question or topic",
+      title: "Get one Stand to-do, decision, question, topic or note",
       description:
-        "Returns one thing from Stand by its reference (stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id>, or a Stand /ref/ link) with just enough context to act on it: its text, owner and status, the space and item it belongs to, the topic it came from with each person's position, related decisions and open questions on that item, short quotes, earlier updates, and snaps of the screen that go with it (fetch image_url with this same token).",
-      inputSchema: { ref: z.string().describe("A Stand reference like stand:action/k3m9xq2p, or a Stand link to one") },
+        "Returns one thing from Stand by its reference (stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id>, stand:note/<id>, or a Stand /ref/ link) with just enough context to act on it: its text, owner and status, the space and item it belongs to, the topic it came from with each person's position, related decisions and open questions on that item, short quotes, earlier updates, and snaps of the screen that go with it (fetch image_url with this same token). A note is one saved from the Stand bar, with the snaps pinned to it.",
+      inputSchema: { ref: z.string().describe("A Stand reference like stand:action/k3m9xq2p or stand:note/j8f2kq1z, or a Stand link to one") },
       annotations: READ,
     },
     ({ ref }) => run(() => api.get(caller, ref, baseUrl)),
@@ -81,6 +83,23 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
   );
 
   server.registerTool(
+    "list_notes",
+    {
+      title: "List the notes saved to a Stand space",
+      description:
+        "Notes people saved to one Stand space from the Stand bar on their Mac (typed or dictated), newest first, each with its ref, who wrote it, when, the item it's filed under (the Stand agent files it until a person confirms), and the snaps of the screen pinned to it with the text read off them (fetch image_url with this same token). Also snaps saved without a note. Use it to catch up on a space between meetings.",
+      inputSchema: {
+        space: z.string().describe("The space's id or name (from list_spaces)"),
+        item_id: z.string().optional().describe("Only notes filed under this item"),
+        since: z.string().optional().describe("Only notes saved since this date or time, like 2026-10-11"),
+        limit: z.number().int().optional().describe("Default 30, at most 100"),
+      },
+      annotations: READ,
+    },
+    ({ space, item_id, since, limit }) => run(() => api.listNotes(caller, { space, itemId: item_id, since, limit }, baseUrl)),
+  );
+
+  server.registerTool(
     "get_suggested_agenda",
     {
       title: "Get a Stand space's suggested agenda",
@@ -109,7 +128,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Get the context for a Stand item",
       description:
-        "Everything Stand knows about one agenda item (task, ticket or slide), ranked: decisions, open questions, open and recently done to-dos, the topics discussed with each person's position, updates reported since, and snaps of the shared screen with what's on them (fetch image_url with this same token). Use it before starting work on an item.",
+        "Everything Stand knows about one agenda item (task, ticket or slide), ranked: decisions, open questions, open and recently done to-dos, the topics discussed with each person's position, updates reported since, notes people saved about it from the Stand bar (with their snaps), and snaps of the shared screen with what's on them (fetch image_url with this same token). Use it before starting work on an item.",
       inputSchema: { item_id: z.string().describe("The item's id, from list_spaces, list_my_work or get") },
       annotations: READ,
     },
