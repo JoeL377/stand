@@ -12,7 +12,7 @@
     --ring-lit: 0 0 0 1.5px rgb(150 190 255), 0 0 0 4px rgb(45 108 223 / 0.7), 0 2px 4px rgb(0 0 0 / 0.35);
   }
   /* The pill drags the bar around; its buttons stay clickable. */
-  .pill { position: absolute; inset: 4px; display: flex; align-items: center; gap: 6px; padding: 0 5px; border-radius: 999px; background: rgb(24 25 30 / 0.97); box-shadow: var(--ring); color: #e8e8ee; -webkit-app-region: drag; }
+  .pill { position: absolute; top: 4px; left: 4px; right: 4px; height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 5px; border-radius: 999px; background: rgb(24 25 30 / 0.97); box-shadow: var(--ring); color: #e8e8ee; -webkit-app-region: drag; }
   /* Each time the bar comes up (you've switched away from Stand), it pops in and glows twice. */
   @keyframes arrive { from { transform: scale(0.9); opacity: 0; } }
   @keyframes glow { 50% { box-shadow: var(--ring-lit); } }
@@ -31,6 +31,27 @@
   .mic.off { color: #ff7b7b; }
   .snap { padding: 0 12px 0 10px; background: #2d6cdf; color: #fff; font-size: 12.5px; font-weight: 500; }
   .snap:hover { background: #3d7cf0; }
+  .todos { padding: 0 8px; gap: 4px; color: #a5a5b3; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .todos svg { width: 14px; height: 14px; }
+  .todos.on { background: rgb(255 255 255 / 0.12); color: #e8e8ee; }
+  /* The space's to-dos, under the bar (over it when the bar is low on the screen). Click one
+     to copy it. */
+  .list { position: absolute; top: 50px; left: 4px; right: 4px; padding: 4px; border-radius: 12px; background: rgb(24 25 30 / 0.97); box-shadow: 0 0 0 1px rgb(255 255 255 / 0.12), 0 2px 4px rgb(0 0 0 / 0.35); }
+  body.up .pill { top: auto; bottom: 4px; }
+  body.up .list { top: auto; bottom: 50px; }
+  .list-head { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px 6px; color: #8e8e9c; font-size: 11px; }
+  .list-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9c9d3; font-weight: 600; }
+  .rows { max-height: 240px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+  .todo { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 8px; cursor: pointer; }
+  .todo:hover { background: rgb(255 255 255 / 0.08); }
+  .todo .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e3e3ea; font-size: 12.5px; }
+  .todo .meta { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8e8e9c; font-size: 11px; }
+  .todo .plain { display: none; flex: none; padding: 2px 6px; border-radius: 5px; color: #a5a5b3; font-size: 11px; }
+  .todo .plain:hover { background: rgb(255 255 255 / 0.12); color: #fff; }
+  .todo:hover .plain { display: inline; }
+  .todo:hover .meta { display: none; }
+  .todo.copied .meta, .todo.copied:hover .meta { display: inline; color: #86efac; }
+  .todo.copied .plain { display: none; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -40,6 +61,10 @@
       <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#2d6cdf" /><path d="M9 20v-8M14 23V9M19 19v-6M24 17v-2" stroke="white" stroke-width="3" stroke-linecap="round" /></svg>
     </button>
     <div class="what" id="what"></div>
+    <button class="todos" id="todos" title="To-dos in this space: click one to copy it" hidden>
+      <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4" /><path d="M8.5 12.5l2.5 2.5 4.5-5.5" /></svg>
+      <span id="todo-count"></span>
+    </button>
     <button class="mic" id="mic" aria-label="Mute">
       <svg id="mic-on" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
       <svg id="mic-off" viewBox="0 0 24 24" hidden><path d="M15 9.5V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.6 2.5M5 11a7 7 0 0 0 11.3 5.5M19 11a7 7 0 0 1-.6 2.8M12 18v3M4 4l16 16" /></svg>
@@ -48,6 +73,10 @@
       <svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" /><circle cx="12" cy="13" r="3.5" /></svg>
       Snap
     </button>
+  </div>
+  <div class="list" id="list" hidden>
+    <div class="list-head"><b id="list-space"></b><span>Click to copy for your agent</span></div>
+    <ul class="rows" id="rows"></ul>
   </div>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -74,12 +103,92 @@
     }
     what.append(state.item ?? state.space);
     what.title = state.item ? `${state.space}: ${state.item}` : state.space;
+    const todos = state.todos ?? [];
+    $("todos").hidden = todos.length === 0;
+    $("todo-count").textContent = todos.length;
+    if (listOpen) todos.length ? void showList(true) : void showList(false);
     $("mic").className = state.micOn ? "mic" : "mic off";
     $("mic").title = $("mic").ariaLabel = state.micOn ? "Mute" : "Unmute";
     // SVGs have no .hidden property, so set the attribute.
     $("mic-on").toggleAttribute("hidden", !state.micOn);
     $("mic-off").toggleAttribute("hidden", state.micOn);
   }
+
+  // ---- the space's to-dos ----
+  let listOpen = false;
+  let closing;
+  function renderList() {
+    $("list-space").textContent = `To-dos in ${state?.space ?? "this space"}`;
+    const rows = $("rows");
+    const scroll = rows.scrollTop;
+    rows.replaceChildren(
+      ...(state?.todos ?? []).map((t) => {
+        const li = document.createElement("li");
+        li.className = copied.has(t.id) ? "todo copied" : "todo";
+        li.dataset.id = t.id;
+        li.title = t.text;
+        const text = document.createElement("span");
+        text.className = "t";
+        text.textContent = t.text;
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = copied.has(t.id) ? "✓ Copied" : [t.owner, t.itemKey].filter(Boolean).join(" · ");
+        const plain = document.createElement("span");
+        plain.className = "plain";
+        plain.textContent = "Text only";
+        plain.title = "Copy just the to-do's words";
+        li.append(text, meta, plain);
+        return li;
+      }),
+    );
+    rows.scrollTop = scroll;
+  }
+  async function showList(open) {
+    listOpen = open;
+    clearTimeout(closing);
+    $("list").hidden = !open;
+    $("todos").classList.toggle("on", open);
+    if (!open) {
+      await window.bar.size(0);
+      document.body.classList.remove("up");
+      return;
+    }
+    renderList();
+    const extra = $("list").offsetHeight + 8;
+    // Near the bottom of the screen it opens upward. Lay that out before the window grows,
+    // so the bar itself stays put.
+    document.body.classList.toggle("up", Boolean(await window.bar.size(extra, true)));
+    await window.bar.size(extra);
+  }
+  const copied = new Map();
+  $("rows").addEventListener("pointerdown", async (e) => {
+    const row = e.target.closest(".todo");
+    if (!row || e.button !== 0) return;
+    e.preventDefault();
+    window.bar.press("list");
+    const id = row.dataset.id;
+    if (!(await window.bar.copy(id, Boolean(e.target.closest(".plain"))))) return;
+    clearTimeout(copied.get(id));
+    copied.set(id, setTimeout(() => (copied.delete(id), listOpen && renderList()), 1600));
+    renderList();
+  });
+  $("todos").addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    window.bar.press("list");
+    void showList(!listOpen);
+  });
+  window.bar.onCloseList(() => {
+    listOpen = false;
+    $("list").hidden = true;
+    $("todos").classList.remove("on");
+    document.body.classList.remove("up");
+  });
+  // Off to paste it somewhere: the list folds away a moment after the pointer leaves.
+  document.documentElement.addEventListener("mouseleave", () => {
+    if (listOpen) closing = setTimeout(() => void showList(false), 1500);
+  });
+  document.documentElement.addEventListener("mouseenter", () => clearTimeout(closing));
 
   window.bar.onState((s) => {
     state = s;
