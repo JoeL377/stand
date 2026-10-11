@@ -83,6 +83,7 @@ export interface RoomInfo {
 }
 
 export interface ConxtStatus {
+  liveDeliveries: Array<{ meetingId: string; state: string; error: string | null; sequence: number; streamId: string | null; enabled: number }>;
   destinations: Array<{ key: string; label: string }>;
   connection: { id: string; label: string; destinationKey: string; enabled: number } | null;
   canManage: boolean;
@@ -93,6 +94,7 @@ export const api = {
   conxtStatus: (roomId: string) => call<ConxtStatus>("GET", `/api/rooms/${roomId}/conxt`),
   connectConxt: (roomId: string, destinationKey: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/conxt`, { destinationKey, confirmedTeamAccess: true }),
   disconnectConxt: (roomId: string) => call<{ ok: true }>("DELETE", `/api/rooms/${roomId}/conxt`),
+  retryLiveConxt: (roomId: string, meetingId: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/conxt/live/${meetingId}/retry`, {}),
   retryConxt: (roomId: string, deliveryId: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/conxt/${deliveryId}/retry`, {}),
   tokens: () => call<AgentToken[]>("GET", "/api/tokens"),
   createToken: (label: string, scope: AgentToken["scope"]) => call<{ token: string; info: AgentToken }>("POST", "/api/tokens", { label, scope }),

@@ -1,4 +1,5 @@
 // Shared transcripts travel through a durable SQLite outbox; credentials stay in env.
+import { initConxtLive } from "./conxtLive.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import express, { type Request } from "express";
@@ -59,6 +60,7 @@ export function initConxt(sql: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS conxt_due ON conxt_deliveries(state,next_at);
   `);
   sql.prepare("INSERT OR IGNORE INTO conxt_settings VALUES ('instance_id', ?)").run(randomUUID());
+  initConxtLive(sql);
 }
 
 /** Called inside the same transaction that ends a meeting. No network or model call. */
@@ -257,7 +259,9 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
     const deliveries = db.raw.prepare(`SELECT d.id,d.meeting_id AS meetingId,d.state,d.remote_status AS remoteStatus,d.error,d.attempts,
       d.updated_at AS updatedAt,c.label,c.enabled FROM conxt_deliveries d JOIN conxt_connections c ON c.id=d.connection_id
       WHERE c.room_id=? ORDER BY d.created_at DESC LIMIT 50`).all(id);
-    res.json({ destinations: destinations.map(({ key, label }) => ({ key, label })), connection: connection ?? null,
+    const liveDeliveries = db.raw.prepare(`SELECT d.meeting_id AS meetingId,d.state,d.error,d.sequence,d.stream_id AS streamId,c.enabled
+      FROM conxt_live_deliveries d JOIN conxt_connections c ON c.id=d.connection_id WHERE c.room_id=? ORDER BY d.rowid DESC LIMIT 50`).all(id);
+    res.json({ liveDeliveries, destinations: destinations.map(({ key, label }) => ({ key, label })), connection: connection ?? null,
                deliveries, canManage: owner(req) });
   });
   router.post("/", (req, res) => {
@@ -280,6 +284,13 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
     if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can disconnect from this app" });
     db.raw.prepare("UPDATE conxt_connections SET enabled=0 WHERE room_id=?").run(roomId(req));
     res.json({ ok: true });
+  });
+  router.post("/live/:meetingId/retry", (req, res) => {
+    if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can retry live delivery" });
+    const result=db.raw.prepare(`UPDATE conxt_live_deliveries SET state='queued',attempts=0,next_at=0,error=NULL
+      WHERE meeting_id=? AND state='failed' AND connection_id IN (SELECT id FROM conxt_connections WHERE room_id=? AND enabled=1)`)
+      .run(String(req.params.meetingId),roomId(req));
+    res.status(result.changes?200:409).json(result.changes?{ok:true}:{error:"Live delivery cannot be retried"});
   });
   router.post("/:deliveryId/retry", (req, res) => {
     if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can retry from this app" });
