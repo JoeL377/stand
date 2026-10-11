@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api.ts";
 import { ItemNotes } from "../Discussions.tsx";
@@ -100,7 +100,7 @@ export function ItemHistoryPage() {
               {m.segments.map((s) => (
                 <div key={s.id} className={s.kind === "chat" ? "seg chat" : "seg"}>
                   <div className="seg-head">
-                    <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
+                    <span className="seg-who" style={{ "--who": colorFor(s.speakerId) } as CSSProperties}>
                       {s.speakerName}
                     </span>
                     {s.kind === "chat" && <span className="seg-kind">chat</span>}

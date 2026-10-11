@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
-import { type AlignmentDraft, type AlignmentInput, applyAlignment, boardText, carryOver, emptyAlignment, heuristicAlignment, matchAttendee } from "./alignment.ts";
+import { type AlignmentDraft, type AlignmentInput, applyAlignment, boardText, carryOver, emptyAlignment, heuristicAlignment, matchAttendee, sameQuestion } from "./alignment.ts";
 import { HeuristicAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { briefToMarkdown, buildBrief } from "./brief.ts";
@@ -372,4 +372,66 @@ test("a kept question picks up the earlier meeting's board", () => {
   assert.equal(s.positions[0].movedAt, null);
   assert.equal(s.agreed.length, 1);
   assert.equal(s.landing, null);
+});
+
+test("a small fix to the question is the same question; a different one isn't", () => {
+  assert.ok(sameQuestion("Should Connect and Stand be one prodcut?", "Should Connect and Stand be one product?"));
+  assert.ok(sameQuestion("Should Connect and Stand be one product?", "Should Connect and Stand be one product, or two?"));
+  assert.ok(!sameQuestion("Ship on Friday?", "Ship on Monday?"));
+  assert.ok(!sameQuestion("Should Connect and Stand be one product?", "Who owns live transcript ingestion?"));
+  assert.ok(!sameQuestion("", "Anything?"));
+});
+
+test("a question changed while the agent reads the old one keeps none of what the run said about the old one", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("CoNxt");
+  db.setMeetingSetup(room.id, "alignment", { text: "Should Connect and Stand be one product?", by: "Joe Liang", carry: null });
+  let release = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  class SlowAgent extends HeuristicAgent {
+    override async alignmentFor(input: AlignmentInput): Promise<AlignmentDraft> {
+      await gate;
+      return { ...none, question: { text: input.state.question!.text, askedBy: null, whyNow: "Ingestion has to live in one of them", line: null } };
+    }
+  }
+  const session = new RoomSession(db, new SlowAgent(), db.getRoom(room.id)!, () => {});
+  const joe = await join(session, { id: "u1", name: "Joe Liang" });
+  session.addSpeech("u1", "Joe Liang", "We need to decide where ingestion lives", Date.now());
+  await say(joe, { type: "align.wrap" });
+  assert.equal(session.state().alignment?.busy, true);
+  await say(joe, { type: "align.question", text: "Who owns live transcript ingestion?" });
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  const q = session.state().alignment!.state.question!;
+  assert.equal(q.text, "Who owns live transcript ingestion?");
+  assert.equal(q.whyNow, null);
+  assert.equal(session.state().alignment?.wrapFailed, false);
+});
+
+test("a wrap-up that fails says so, and the next one clears it", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("CoNxt");
+  db.setMeetingSetup(room.id, "alignment", null);
+  let fail = true;
+  class FlakyAgent extends ScriptedAgent {
+    override async alignmentFor(input: AlignmentInput): Promise<AlignmentDraft> {
+      if (fail) throw new Error("down");
+      return super.alignmentFor(input);
+    }
+  }
+  const session = new RoomSession(db, new FlakyAgent(), db.getRoom(room.id)!, () => {});
+  const joe = await join(session, { id: "u1", name: "Joe Liang" });
+  session.addSpeech("u1", "Joe Liang", "Let's keep them apart for now", Date.now());
+  await say(joe, { type: "align.wrap" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(session.state().alignment?.wrapFailed, true);
+  assert.equal(session.state().alignment?.state.landing, null);
+  fail = false;
+  await say(joe, { type: "align.wrap" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(session.state().alignment?.wrapFailed, false);
+  assert.equal(session.state().alignment?.state.landing?.text, "Separate for now");
+  // What the board has read is sent along, so a browser can tell "up to date" from "behind".
+  assert.equal(session.state().alignment?.read?.length, "Let's keep them apart for now".length);
+  assert.ok((session.state().alignment?.updatedAgoMs ?? -1) >= 0);
 });

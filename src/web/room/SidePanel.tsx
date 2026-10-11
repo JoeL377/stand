@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type { ClientMessage, Discussion, Item, ItemUpdate, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
@@ -263,8 +263,8 @@ function ChatBox({ send }: { send: (m: ClientMessage) => boolean }) {
       onSubmit={(e) => {
         e.preventDefault();
         if (!text.trim()) return;
-        send({ type: "chat", text });
-        setText("");
+        // Kept in the box when it couldn't go, so it can be sent once Stand reconnects.
+        if (send({ type: "chat", text })) setText("");
       }}
     >
       <input placeholder="Message everyone" value={text} onChange={(e) => setText(e.target.value)} />
@@ -300,7 +300,7 @@ function LiveSliver(props: { segments: Segment[]; interims: Record<string, Inter
       {rows.map((r) => (
         <span key={r.key} className={r.live ? "side-sliver-row live" : "side-sliver-row"}>
           <span className="side-sliver-dot" aria-hidden />
-          <span className="side-sliver-who" style={{ color: colorFor(r.id) }}>
+          <span className="side-sliver-who" style={{ "--who": colorFor(r.id) } as CSSProperties}>
             {r.who}
           </span>
           <span className="side-sliver-text">{r.text}</span>
@@ -339,7 +339,7 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
       ))}
       {interimList.map((i) => (
         <div key={i.speakerId} className="seg interim">
-          <span className="seg-who" style={{ color: colorFor(i.speakerId) }}>
+          <span className="seg-who" style={{ "--who": colorFor(i.speakerId) } as CSSProperties}>
             {i.speakerName}
           </span>
           <span className="seg-text">{i.text}…</span>
@@ -354,7 +354,7 @@ function SegmentRow({ segment: s, items, send, movable }: { segment: Segment; it
   return (
     <div className={s.kind === "chat" ? "seg chat" : "seg"}>
       <div className="seg-head">
-        <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
+        <span className="seg-who" style={{ "--who": colorFor(s.speakerId) } as CSSProperties}>
           {s.speakerName}
         </span>
         {s.kind === "chat" && <span className="seg-kind">chat</span>}

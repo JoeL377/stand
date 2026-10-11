@@ -321,6 +321,12 @@ export interface AlignmentView {
   wrapping: boolean;
   /** The agent's last try failed; what's shown is as of the try before. */
   failing: boolean;
+  /** The last wrap-up failed: where it landed wasn't written. */
+  wrapFailed: boolean;
+  /** The last line the board has read, so a client can tell whether talk came since. */
+  read: { id: string; ts: number; length: number } | null;
+  /** How long ago it was brought up to date, by the server's clock. */
+  updatedAgoMs: number | null;
   /** Each person's answer to "Are you aligned with this?". */
   votes: Array<{ userId: string; name: string; vote: AlignmentVote; at: number }>;
 }

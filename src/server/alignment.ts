@@ -32,6 +32,23 @@ export function carryOver(prev: AlignmentState): AlignmentState {
   };
 }
 
+/** Whether an edited question is still the same one: a typo or a word changed, not a new
+ *  question. Compares the words, so it doesn't matter how long the question is. */
+export function sameQuestion(a: string, b: string) {
+  const words = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  const x = words(a);
+  const y = words(b);
+  if (!x.length || !y.length) return false;
+  // Edit distance over words.
+  let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= y.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    prev = row;
+  }
+  return prev[y.length] / Math.max(x.length, y.length) < 0.3;
+}
+
 /** What one run says changed. `line` numbers point into the lines the run was given (1-based). */
 export interface AlignmentDraft {
   /** Only when no question is set (a suggestion), or to add why it matters now. */

@@ -118,11 +118,14 @@ export function Stage(props: {
   // Alignment meetings have one more: the board ("align"), on when nobody is sharing.
   const [tabs, setTabs] = useState<string[]>([]);
   const [tab, setTab] = useState<string | null>(() => (aligning && !showingScreen ? ALIGN_TAB : null));
-  // A share starting takes the middle; when it stops, the board comes back.
+  // A share starting takes the middle; when it stops, the board comes back. Not while someone
+  // is typing on the board: the share waits a click away.
   const hadScreen = useRef(showingScreen);
+  const boardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!aligning || hadScreen.current === showingScreen) return;
     hadScreen.current = showingScreen;
+    if (boardRef.current?.contains(document.activeElement) && document.activeElement !== document.body) return;
     setTab((t) => (showingScreen ? null : t === null ? ALIGN_TAB : t));
   }, [showingScreen, aligning]);
   useEffect(() => {
@@ -226,13 +229,33 @@ export function Stage(props: {
   const ghosts = Object.values(interims).filter((i) => !state.participants.some((p) => p.id === i.speakerId));
 
   const align = state.alignment;
+  // While you're on another tab, the board tab gets a dot when the board changes, and a new
+  // landing says so, with a way back to answer it.
+  const [boardUnseen, setBoardUnseen] = useState(false);
+  const landingText = align?.state.landing?.text ?? null;
+  const onBoardRef = useRef(onBoard);
+  onBoardRef.current = onBoard;
+  useEffect(() => {
+    if (onBoard) setBoardUnseen(false);
+  }, [onBoard]);
+  useEffect(() => {
+    if (aligning && align?.updatedAt && !onBoardRef.current) setBoardUnseen(true);
+  }, [align?.updatedAt, aligning]);
+  const shownLanding = useRef(landingText);
+  useEffect(() => {
+    if (shownLanding.current === landingText) return;
+    shownLanding.current = landingText;
+    if (!landingText || onBoardRef.current) return;
+    toast({ text: "Where you landed is up", action: { label: "Answer", run: () => setTab(ALIGN_TAB) } });
+  }, [landingText]);
   return (
     <main className="stage">
       {aligning && align ? (
         <div className="now align-now">
           <span className="stage-tabs" role="tablist" aria-label="The board, the main screen and the snaps you opened">
             <button role="tab" aria-selected={onBoard} className={onBoard ? "stage-tab on" : "stage-tab"} onClick={() => setTab(ALIGN_TAB)}>
-              <span className="agent-mark small">✦</span> Alignment
+              <span className="agent-mark small">✦</span> Board
+              {boardUnseen && <span className="tab-dot" aria-label="Changed since you looked" />}
             </button>
             <button role="tab" aria-selected={!onBoard && !openSnap} className={!onBoard && !openSnap ? "stage-tab on" : "stage-tab"} onClick={() => setTab(null)}>
               {mainLabel}
@@ -250,7 +273,7 @@ export function Stage(props: {
             ))}
           </span>
           <span className="spacer" />
-          <BoardFreshness view={align} talk={props.segments.length > 0} />
+          <BoardFreshness view={align} segments={props.segments} onRetry={canSteer && !props.ending ? () => send({ type: "align.wrap" }) : undefined} />
         </div>
       ) : (
       <div className="now">
@@ -313,17 +336,19 @@ export function Stage(props: {
       )}
 
       <div className="screen" ref={screenRef}>
-        {onBoard && align && (
-          <div className="align-tab" role="tabpanel">
+        {/* Kept open behind the other tabs, so a share doesn't lose a half-typed question or where you'd scrolled to. */}
+        {aligning && align && (
+          <div className="align-tab" role="tabpanel" hidden={!onBoard} ref={boardRef}>
             <AlignmentBoard
               state={align.state}
               votes={align.votes}
               people={state.participants}
               me={props.participantId}
               now={Date.now()}
-              onQuestion={props.ending ? undefined : (text) => void send({ type: "align.question", text })}
+              wrapping={align.wrapping}
+              onQuestion={props.ending ? undefined : (text) => send({ type: "align.question", text })}
               onKeep={() => void send({ type: "align.keep" })}
-              onVote={(vote) => void send({ type: "align.vote", vote })}
+              onVote={(vote) => send({ type: "align.vote", vote })}
             />
           </div>
         )}
@@ -541,18 +566,37 @@ export function Avatar({ id, name, picture, size = 44 }: { id: string; name: str
 const ALIGN_TAB = "align";
 
 /** "Updated 4s ago" beside the tabs, so nobody has to ask whether the board is keeping up. */
-function BoardFreshness({ view, talk }: { view: NonNullable<RoomState["alignment"]>; talk: boolean }) {
+/** How current the board is: "Updating…" while the agent reads, "Up to date" when it has read
+ *  everything said, else how long ago it last caught up. Ages count from the server's clock. */
+function BoardFreshness({ view, segments, onRetry }: { view: NonNullable<RoomState["alignment"]>; segments: Segment[]; onRetry?: () => void }) {
   const [, tick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 5_000);
+    const t = setInterval(() => tick((n) => n + 1), 10_000);
     return () => clearInterval(t);
   }, []);
+  // When it was last brought up to date, on this browser's clock.
+  const at = useMemo(() => (view.updatedAgoMs === null ? null : Date.now() - view.updatedAgoMs), [view.updatedAt, view.updatedAgoMs]);
   if (view.wrapping) return <span className="align-fresh">Writing where you landed…</span>;
+  if (view.wrapFailed)
+    return (
+      <span className="align-fresh warn">
+        Couldn't write where you landed
+        {onRetry && (
+          <button className="link" onClick={onRetry}>
+            Try again
+          </button>
+        )}
+      </span>
+    );
   if (view.failing) return <span className="align-fresh warn">Couldn't update just now · trying again as you talk</span>;
   if (view.busy) return <span className="align-fresh">Updating…</span>;
-  if (!view.updatedAt) return talk ? <span className="align-fresh">Listening…</span> : null;
-  const s = Math.max(0, Math.round((Date.now() - view.updatedAt) / 1000));
-  return <span className="align-fresh">Updated {s < 5 ? "just now" : s < 60 ? `${Math.round(s / 5) * 5}s ago` : `${Math.round(s / 60)} min ago`}</span>;
+  const last = segments.at(-1);
+  if (!at) return last ? <span className="align-fresh">Listening…</span> : null;
+  const read = view.read;
+  const behind = Boolean(last && (!read || last.ts > read.ts || (last.id === read.id && last.text.length > read.length)));
+  if (!behind) return <span className="align-fresh">Up to date</span>;
+  const s = Math.max(0, (Date.now() - at) / 1000);
+  return <span className="align-fresh">Updated {s < 30 ? "just now" : s < 90 ? "a minute ago" : `${Math.round(s / 60)} min ago`}</span>;
 }
 
 /** "Joe 2:44": who took a snap and when, for its tab. */

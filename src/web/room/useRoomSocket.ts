@@ -101,6 +101,13 @@ function patchNotes(notes: Note[], { cid, msg }: Outgoing): Note[] {
   }
 }
 function patchState(state: RoomState, { msg }: Outgoing): RoomState {
+  // The question shows as changed right away; the server's copy (who asked, why it matters) follows.
+  if ((msg.type === "align.question" || msg.type === "align.keep") && state.alignment) {
+    const was = state.alignment.state.question;
+    const text = msg.type === "align.question" ? msg.text.trim().replace(/\s+/g, " ").slice(0, 300) : was?.text;
+    const question = !text ? null : was && was.text === text ? { ...was, suggested: false } : { text, askedBy: null, at: Date.now(), whyNow: null, suggested: false };
+    return { ...state, alignment: { ...state.alignment, state: { ...state.alignment.state, question } } };
+  }
   if (msg.type !== "followup.done") return state;
   return {
     ...state,

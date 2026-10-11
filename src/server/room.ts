@@ -28,7 +28,7 @@ import { settle } from "./settle.ts";
 import { newId } from "./ids.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
-import { type AlignmentDraft, applyAlignment, carryOver, emptyAlignment } from "./alignment.ts";
+import { type AlignmentDraft, applyAlignment, carryOver, emptyAlignment, sameQuestion } from "./alignment.ts";
 import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 /** Below this the agent keeps its guess to itself. */
@@ -176,6 +176,7 @@ export class RoomSession implements SpeechSink {
   private alignBusy = false;
   private alignWrapping = false;
   private alignFailing = false;
+  private alignWrapFailed = false;
   /** The last line the board has read, and how long it was then (a turn keeps growing). */
   private alignRead: { id: string; ts: number; length: number } | null = null;
   private alignTimer: NodeJS.Timeout | null = null;
@@ -329,6 +330,9 @@ export class RoomSession implements SpeechSink {
               busy: this.alignBusy,
               wrapping: this.alignWrapping,
               failing: this.alignFailing,
+              wrapFailed: this.alignWrapFailed,
+              read: this.alignRead,
+              updatedAgoMs: this.alignAt ? Date.now() - this.alignAt : null,
               votes: this.db.alignmentVotes(this.meetingId),
             }
           : null,
@@ -653,7 +657,8 @@ export class RoomSession implements SpeechSink {
       case "align.question": {
         if (this.kind !== "alignment" || this.ended) return;
         const text = String(msg.text ?? "").trim().replace(/\s+/g, " ").slice(0, 300);
-        const same = this.align.question?.text === text;
+        // A small fix (a typo, a word) is the same question: who asked it and since when stay.
+        const same = Boolean(this.align.question && sameQuestion(this.align.question.text, text));
         this.align.question = text
           ? { text, askedBy: same ? this.align.question!.askedBy : conn.name, at: same ? this.align.question!.at : Date.now(), whyNow: same ? this.align.question!.whyNow : null, suggested: false }
           : null;
@@ -1388,6 +1393,7 @@ export class RoomSession implements SpeechSink {
       const startedAt = Date.now();
       this.alignBusy = true;
       this.broadcastState();
+      const asked = this.align.question?.text ?? null;
       const room = this.db.getRoom(this.roomId);
       const attendees = [
         ...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName), ...this.align.positions.map((p) => p.person)]),
@@ -1403,7 +1409,9 @@ export class RoomSession implements SpeechSink {
         });
         // Where it landed is written when the host wraps up, not along the way.
         if (!closing) draft.landing = null;
-        // A person changed the question while the run read the old one: theirs stands.
+        // A person changed the question while the run read the old one: theirs stands, and
+        // what the run said about the old one (why it matters now) isn't about theirs.
+        if ((this.align.question?.text ?? null) !== asked) draft.question = null;
         const question = this.align.question;
         const landed = JSON.stringify(this.align.landing);
         this.align = applyAlignment(this.align, draft, lines, attendees);
@@ -1437,12 +1445,14 @@ export class RoomSession implements SpeechSink {
   private async wrapUp() {
     if (this.alignWrapping) return;
     this.alignWrapping = true;
+    this.alignWrapFailed = false;
     if (this.alignTimer) clearTimeout(this.alignTimer);
     this.alignTimer = null;
     this.alignPendingSince = null;
     this.broadcastState();
     try {
       await this.runAlign(true);
+      this.alignWrapFailed = this.alignFailing;
     } finally {
       this.alignWrapping = false;
       this.broadcastState();

@@ -571,9 +571,11 @@ export function Meeting(props: {
             className="control pill"
             disabled={writingUp || !room.connected || Boolean(state.alignment?.wrapping)}
             title={
-              state.alignment?.state.landing
-                ? "Write where you landed again, with what was said since"
-                : "Stand writes where you landed, and everyone says whether they're aligned with it. The meeting keeps going."
+              !room.connected
+                ? "You can wrap up once Stand reconnects"
+                : state.alignment?.state.landing
+                  ? "Write where you landed again, with what was said since. Everyone answers again."
+                  : "Stand writes where you landed, and everyone says whether they're aligned with it. The meeting keeps going."
             }
             onClick={() => send({ type: "align.wrap" })}
           >

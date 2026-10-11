@@ -10,7 +10,8 @@ export const fmtDuration = (ms: number) => {
 
 export const itemLabel = (it: Item | null | undefined) => (it ? it.title : "General discussion");
 
-const palette = ["#5b5bd6", "#0d9488", "#d97706", "#db2777", "#2563eb", "#65a30d", "#9333ea", "#dc2626"];
+// Dark enough for white initials on top, and for names on a light page.
+const palette = ["#5b5bd6", "#0f766e", "#b45309", "#be185d", "#2563eb", "#4d7c0f", "#9333ea", "#dc2626"];
 export function colorFor(id: string) {
   let h = 0;
   for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0;

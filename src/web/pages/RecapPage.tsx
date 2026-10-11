@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
@@ -103,8 +103,8 @@ export function RecapPage() {
   const topicIds = new Set(groups.flatMap((g) => (g.discussions ?? []).map((d) => d.id)));
   const shots = (n: Note) => <SnapFigures snaps={onNote(n.id)} />;
 
-  // An alignment meeting's recap opens with where it landed and who's aligned with it; the
-  // summary and the notes follow.
+  // An alignment meeting's recap opens with where it landed and who's aligned with it, in place
+  // of the summary and the counts (which count notes, not where people stand); the notes follow.
   const align = data.alignment;
   const alignFirst = Boolean(align && (align.state.question || align.state.positions.length > 0 || align.state.landing));
   const overview = (
@@ -164,16 +164,18 @@ export function RecapPage() {
             onVote={
               data.alignment.state.landing
                 ? (vote) =>
-                    void api.alignmentVote(data.meetingId, vote).then(
+                    api.alignmentVote(data.meetingId, vote).then(
                       (r) => setData((d) => d && d.alignment && { ...d, alignment: { ...d.alignment, votes: r.votes } }),
-                      errorToast("Couldn't save your answer"),
+                      (err) => {
+                        errorToast("Couldn't save your answer")(err);
+                        throw err;
+                      },
                     )
                 : undefined
             }
           />
         </section>
       )}
-      {alignFirst && <div className="rc-overview">{overview}</div>}
 
       <ConxtPanel roomId={data.roomId} meetingId={data.meetingId} />
 
@@ -384,7 +386,7 @@ function Turns({ segments }: { segments: Segment[] }) {
       {segments.map((s) => (
         <div key={s.id} className={s.kind === "chat" ? "seg chat" : "seg"}>
           <div className="seg-head">
-            <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
+            <span className="seg-who" style={{ "--who": colorFor(s.speakerId) } as CSSProperties}>
               {s.speakerName}
             </span>
             {s.kind === "chat" && <span className="seg-kind">chat</span>}

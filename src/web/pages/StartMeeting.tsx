@@ -20,6 +20,8 @@ export function StartMeeting(props: { room: RoomInfo; onJoin: () => void }) {
   const carry = room.openAlignment;
   const [question, setQuestion] = useState(carry?.question ?? "");
   const [starting, setStarting] = useState(false);
+  /** Turned down picking up where the last one stood. */
+  const [fresh, setFresh] = useState(false);
   const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -30,9 +32,10 @@ export function StartMeeting(props: { room: RoomInfo; onJoin: () => void }) {
     if (!open) {
       setKind(room.defaultKind ?? "notes");
       setQuestion(carry?.question ?? "");
+      setFresh(false);
     }
   }, [room.defaultKind, carry?.question, open]);
-  const carried = Boolean(carry && question.trim() === carry.question);
+  const carried = Boolean(carry && !fresh && question.trim() === carry.question);
 
   const start = () => {
     if (starting) return;
@@ -64,27 +67,23 @@ export function StartMeeting(props: { room: RoomInfo; onJoin: () => void }) {
             start();
           }}
         >
-          <span className="start-label">What kind of meeting?</span>
-          <div className="start-kinds" role="radiogroup" aria-label="Kind of meeting">
+          <div className="start-kinds" role="radiogroup" aria-label="What kind of meeting?">
             {KINDS.map((k) => (
-              <button key={k.kind} type="button" role="radio" aria-checked={kind === k.kind} className={kind === k.kind ? "on" : ""} onClick={() => setKind(k.kind)}>
+              <button key={k.kind} type="button" role="radio" aria-checked={kind === k.kind} className={kind === k.kind ? "on" : ""} title={k.what} onClick={() => setKind(k.kind)}>
                 {k.label}
               </button>
             ))}
           </div>
-          <span className="start-what">{KINDS.find((k) => k.kind === kind)!.what}</span>
           {kind === "alignment" && (
             <>
-              <label className="start-label" htmlFor="start-question">
-                What are we aligning on?
-              </label>
               <textarea
                 id="start-question"
                 ref={input}
                 rows={2}
                 value={question}
                 maxLength={300}
-                placeholder="Leave empty and Stand suggests one from the talk"
+                aria-label="What are we aligning on?"
+                placeholder="What are we aligning on? Leave empty and Stand suggests one"
                 onChange={(e) => setQuestion(e.target.value.replace(/\n/g, " "))}
                 onKeyDown={(e) => {
                   if (e.key !== "Enter") return;
@@ -93,16 +92,21 @@ export function StartMeeting(props: { room: RoomInfo; onJoin: () => void }) {
                 }}
               />
               {carried && (
-                <span className="start-carry">
-                  <span className="agent-mark small">✦</span> Still open from last time. Starts from where it stood
-                  {carry!.positions + carry!.agreed > 0 || carry!.test ? ": " : "."}
-                  {[
-                    carry!.positions > 0 && `${carry!.positions} position${carry!.positions === 1 ? "" : "s"}`,
-                    carry!.agreed > 0 && `${carry!.agreed} agreed`,
-                    carry!.test && "1 test to settle it",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                <span className="start-carry" title="Still open from last time">
+                  <span>
+                    <span className="agent-mark small">✦</span> Picks up where it stood
+                    {carry!.positions + carry!.agreed > 0 || carry!.test ? ": " : ""}
+                    {[
+                      carry!.positions > 0 && `${carry!.positions} position${carry!.positions === 1 ? "" : "s"}`,
+                      carry!.agreed > 0 && `${carry!.agreed} agreed`,
+                      carry!.test && "1 test",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                  <button type="button" className="start-fresh" aria-label="Start fresh" title="Start fresh" onClick={() => setFresh(true)}>
+                    ✕
+                  </button>
                 </span>
               )}
             </>
