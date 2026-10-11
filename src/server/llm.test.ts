@@ -99,3 +99,50 @@ test("a rate limit or an empty account says so, so notes can wait or ask for a t
   });
   await assert.rejects(other.agent.notesFor(null, said(3)), (err) => !(err instanceof NotesTrouble));
 });
+
+test("settled topics go before the transcript as lines with their notes, and the model can go back to one", async () => {
+  const { agent, calls } = withApi(() => ({
+    ...noteReply,
+    parsed_output: {
+      ...noteReply.parsed_output,
+      discussions: [{ ...noteReply.parsed_output.discussions[0], turns: [1], picks_up: "T1" }, { ...noteReply.parsed_output.discussions[0], turns: [2], picks_up: "T9" }],
+    },
+  }));
+  const settled = [{ key: "T1", topic: "Conflict page", outcome: "action" as const, notes: [{ kind: "action" as const, text: "Make Keep stand out", owner: "Joe" }] }];
+  const draft = await agent.notesFor(null, said(3), [], [], [], { settled });
+  const { body, opts } = calls[0];
+  const blocks = body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
+  assert.match(blocks[0].text, /gone quiet.*\n- T1 \(action\) Conflict page\n  To do: Make Keep stand out \(Joe\)\n\nWhat was said since/s);
+  assert.deepEqual(draft.discussions.map((d) => d.picksUp), ["T1", null], "an unknown key is ignored");
+  assert.equal(body.output_config?.effort, "low");
+  assert.equal(opts?.timeout, 120_000);
+});
+
+test("a long topic still going shows where it stood, positions and all, and is carried on", async () => {
+  const { agent, calls } = withApi(() => ({
+    ...noteReply,
+    parsed_output: { ...noteReply.parsed_output, discussions: [{ ...noteReply.parsed_output.discussions[0], turns: [1, 2], picks_up: "T1" }] },
+  }));
+  const settled = [
+    {
+      key: "T1",
+      topic: "Pricing",
+      outcome: "open" as const,
+      going: true,
+      positions: [{ speaker: "Huy", position: "Per seat is simplest" }],
+      notes: [{ kind: "question" as const, text: "Per seat or per space?", owner: null }],
+    },
+  ];
+  const draft = await agent.notesFor(null, said(3), [], [], [], { settled });
+  const blocks = calls[0].body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
+  assert.match(blocks[0].text, /still going.*\n- T1 \(open\) Pricing\n  Huy: Per seat is simplest\n  Open: Per seat or per space\?\n\nWhat was said since/s);
+  assert.doesNotMatch(blocks[0].text, /gone quiet/);
+  assert.equal(draft.discussions[0].picksUp, "T1");
+});
+
+test("the run as the meeting ends reads more carefully and has longer", async () => {
+  const { agent, calls } = withApi(() => noteReply);
+  await agent.notesFor(null, said(3), [], [], [], { tidy: true });
+  assert.equal(calls[0].body.output_config?.effort, "medium");
+  assert.equal(calls[0].opts?.timeout, 240_000);
+});

@@ -241,7 +241,8 @@ CREATE INDEX IF NOT EXISTS updates_note ON updates(note_id);
 const DISCUSSION_SELECT = `SELECT d.*, c.meeting_id AS c_meeting_id, c.topic AS c_topic, cm.started_at AS c_started_at
   FROM discussions d LEFT JOIN discussions c ON c.id = d.continues_id LEFT JOIN meetings cm ON cm.id = c.meeting_id`;
 
-export type DraftDiscussion = Pick<Discussion, "topic" | "positions" | "outcome" | "segmentIds"> & { continuesId: string | null };
+/** id: keep this one's id, for a topic carried over as it was (see settle.ts). */
+export type DraftDiscussion = Pick<Discussion, "topic" | "positions" | "outcome" | "segmentIds"> & { continuesId: string | null; id?: string };
 
 type Row = Record<string, unknown>;
 
@@ -909,7 +910,7 @@ export function openDb(file?: string) {
           note.kind,
           note.text,
           note.owner,
-          ts,
+          note.ts,
           note.doneAt,
           note.doneBy,
           note.discussionId,
@@ -1004,10 +1005,10 @@ export function openDb(file?: string) {
         "INSERT INTO discussions (id, meeting_id, item_id, topic, positions_json, outcome, segment_ids_json, continues_id, position, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const ts = Date.now();
-      const used = new Set<string>();
+      const used = new Set(drafts.flatMap((d) => (d.id ? [d.id] : [])));
       const ids = drafts.map((d, i) => {
         const prior = sameTopic.get(d.topic.trim().toLowerCase());
-        const id = prior && !used.has(prior) ? prior : newId(12);
+        const id = d.id ?? (prior && !used.has(prior) ? prior : newId(12));
         used.add(id);
         st.run(id, meetingId, itemId, d.topic, JSON.stringify(d.positions), d.outcome, JSON.stringify(d.segmentIds), d.continuesId, i, ts);
         return id;
