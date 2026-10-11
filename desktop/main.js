@@ -280,6 +280,7 @@ async function snap(from) {
   barAway = true;
   if (bar?.isVisible()) {
     bar.hide();
+    barSnapped = true;
     await new Promise((r) => setTimeout(r, 50));
   }
   try {
@@ -768,6 +769,9 @@ function updateBar() {
   if (!barLoaded) return;
   if (want && !bar.isVisible()) {
     bar.showInactive();
+    // It catches the eye when you've just left Stand, not when it's back after a snap.
+    bar.webContents.send("bar:shown", { pulse: !barSnapped });
+    barSnapped = false;
     void noteTheirApp();
   } else if (!want && bar.isVisible()) bar.hide();
 }
@@ -809,6 +813,8 @@ async function noteTheirApp() {
 let barHold = false;
 /** Clicks on the bar leave Stand in the background (staysInBackground), so there's nothing to undo. */
 let barPrevents = false;
+/** The bar went down for a snap, so it comes back up quietly. */
+let barSnapped = false;
 let dragged;
 
 /** macOS makes an app active when one of its windows is clicked, and Electron's panels
