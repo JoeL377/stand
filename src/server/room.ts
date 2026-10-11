@@ -331,8 +331,6 @@ export class RoomSession implements SpeechSink {
               wrapping: this.alignWrapping,
               failing: this.alignFailing,
               wrapFailed: this.alignWrapFailed,
-              read: this.alignRead,
-              updatedAgoMs: this.alignAt ? Date.now() - this.alignAt : null,
               votes: this.db.alignmentVotes(this.meetingId),
             }
           : null,

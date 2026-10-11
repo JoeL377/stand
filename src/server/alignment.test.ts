@@ -431,7 +431,4 @@ test("a wrap-up that fails says so, and the next one clears it", async () => {
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(session.state().alignment?.wrapFailed, false);
   assert.equal(session.state().alignment?.state.landing?.text, "Separate for now");
-  // What the board has read is sent along, so a browser can tell "up to date" from "behind".
-  assert.equal(session.state().alignment?.read?.length, "Let's keep them apart for now".length);
-  assert.ok((session.state().alignment?.updatedAgoMs ?? -1) >= 0);
 });

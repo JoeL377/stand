@@ -273,7 +273,7 @@ export function Stage(props: {
             ))}
           </span>
           <span className="spacer" />
-          <BoardFreshness view={align} segments={props.segments} onRetry={canSteer && !props.ending ? () => send({ type: "align.wrap" }) : undefined} />
+          <BoardFreshness view={align} onRetry={canSteer && !props.ending ? () => send({ type: "align.wrap" }) : undefined} />
         </div>
       ) : (
       <div className="now">
@@ -566,16 +566,9 @@ export function Avatar({ id, name, picture, size = 44 }: { id: string; name: str
 const ALIGN_TAB = "align";
 
 /** "Updated 4s ago" beside the tabs, so nobody has to ask whether the board is keeping up. */
-/** How current the board is: "Updating…" while the agent reads, "Up to date" when it has read
- *  everything said, else how long ago it last caught up. Ages count from the server's clock. */
-function BoardFreshness({ view, segments, onRetry }: { view: NonNullable<RoomState["alignment"]>; segments: Segment[]; onRetry?: () => void }) {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 10_000);
-    return () => clearInterval(t);
-  }, []);
-  // When it was last brought up to date, on this browser's clock.
-  const at = useMemo(() => (view.updatedAgoMs === null ? null : Date.now() - view.updatedAgoMs), [view.updatedAt, view.updatedAgoMs]);
+/** The board's corner only speaks up when it matters: while it writes where you landed, and
+ *  when it couldn't. Otherwise the board's own changes show it's keeping up. */
+function BoardFreshness({ view, onRetry }: { view: NonNullable<RoomState["alignment"]>; onRetry?: () => void }) {
   if (view.wrapping) return <span className="align-fresh">Writing where you landed…</span>;
   if (view.wrapFailed)
     return (
@@ -589,14 +582,7 @@ function BoardFreshness({ view, segments, onRetry }: { view: NonNullable<RoomSta
       </span>
     );
   if (view.failing) return <span className="align-fresh warn">Couldn't update just now · trying again as you talk</span>;
-  if (view.busy) return <span className="align-fresh">Updating…</span>;
-  const last = segments.at(-1);
-  if (!at) return last ? <span className="align-fresh">Listening…</span> : null;
-  const read = view.read;
-  const behind = Boolean(last && (!read || last.ts > read.ts || (last.id === read.id && last.text.length > read.length)));
-  if (!behind) return <span className="align-fresh">Up to date</span>;
-  const s = Math.max(0, (Date.now() - at) / 1000);
-  return <span className="align-fresh">Updated {s < 30 ? "just now" : s < 90 ? "a minute ago" : `${Math.round(s / 60)} min ago`}</span>;
+  return null;
 }
 
 /** "Joe 2:44": who took a snap and when, for its tab. */

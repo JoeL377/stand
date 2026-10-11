@@ -1,8 +1,9 @@
-// The alignment board: what an alignment meeting shows in the middle of the screen. The
-// question, where each person stands, where they differ and what would settle it, what they
-// already agree on, and what's waiting on an answer. Once the host wraps up, where it landed
-// comes first, as one card with the question it answers and each person's answer to "Are you
-// aligned with this?". The recap shows the same board, as it ended.
+// The alignment board: what an alignment meeting shows in the middle of the screen. By default
+// only what matters most right now: the question, each person's stance, where they differ and
+// what would settle it. Once the host wraps up: where it landed, who does what next, and each
+// person's answer to "Are you aligned with this?". Everything else (reasons, why someone moved,
+// what's agreed, waiting and parked, the terms, how it stood) is one click away under More.
+// The recap shows the same board, as it ended.
 import { type CSSProperties, createContext, type ReactNode, type RefObject, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AlignmentState, AlignmentVote, AlignmentView } from "../../shared/protocol.ts";
 import { toast, undoing } from "../Toasts.tsx";
@@ -30,12 +31,14 @@ type Person = { id: string; name: string };
 const first = (name: string) => name.split(/\s+/)[0];
 
 /** Live boards mark what just changed. Things already on the board when it opens don't count. */
-const Live = createContext<{ live: boolean; opened: RefObject<boolean> }>({ live: false, opened: { current: false } });
+const Live = createContext<{ live: boolean; opened: RefObject<boolean>; more: boolean }>({ live: false, opened: { current: false }, more: false });
+/** Until when things appearing are only being revealed (More was clicked), not new. */
+let revealing = 0;
 
 /** True for a moment after `text` changes (or the thing first appears, once the board is open). */
 function useFlash(text: string) {
   const { live, opened } = useContext(Live);
-  const prev = useRef<string | null>(opened.current ? null : text);
+  const prev = useRef<string | null>(opened.current && Date.now() > revealing ? null : text);
   const [on, setOn] = useState(false);
   useEffect(() => {
     if (prev.current === text) return;
@@ -73,56 +76,67 @@ export function AlignmentBoard(props: {
   useEffect(() => {
     opened.current = true;
   }, []);
+  const [more, setMore] = useState(() => readMore());
+  const toggle = () => {
+    revealing = Date.now() + 300;
+    setMore((m) => {
+      writeMore(!m);
+      return !m;
+    });
+  };
   // The color for a person: by their id when they're here, else by name.
   const idOf = (name: string) => props.people.find((p) => p.name === name || first(p.name) === first(name))?.id ?? name;
-  // Live, before anyone's made their case: a place for each person, filled in as they do.
-  const unheard = live && !s.landing && props.people.length <= 8 ? props.people.filter((p) => !s.positions.some((x) => first(x.person) === first(p.name))) : [];
+  const crux = more ? s.differ : s.differ.slice(0, 1);
+  // What More would add, live: shown as counts so it's clear what's behind it.
+  const counts = [
+    s.agreed.length > 0 && `✓ ${s.agreed.length} agreed`,
+    s.unanswered.length > 0 && `${s.unanswered.length} unanswered`,
+    s.parked.length > 0 && `${s.parked.length} parked`,
+  ].filter(Boolean);
+  const hidden =
+    counts.length > 0 ||
+    s.differ.length > 1 ||
+    s.differ.some((d) => d.sides.length > 0) ||
+    s.positions.some((p) => p.reasons.length > 0 || p.movedBecause) ||
+    Boolean(s.question?.whyNow || s.question?.askedBy) ||
+    Boolean(s.landing);
+  const board = !s.landing || more;
   return (
-    <Live.Provider value={{ live, opened }}>
+    <Live.Provider value={{ live, opened, more }}>
       <div className="align-board">
         {s.landing ? <Landing {...props} idOf={idOf} /> : <Question state={s} now={now} live={live} onQuestion={props.onQuestion} onKeep={props.onKeep} />}
-        {(s.positions.length > 0 || unheard.length > 0) && (
-          <section className="align-group" aria-label="Where each person stands">
-            {s.landing && <h3 className="align-label">How it stood</h3>}
-            <div className="align-positions">
-              {s.positions.map((p) => (
-                <Position key={p.person} p={p} id={idOf(p.person)} />
-              ))}
-              {unheard.map((p) => (
-                <div key={p.id} className="align-card align-person unheard" title={`Where ${first(p.name)} stands shows up here once they make their case`}>
-                  <div className="align-person-head">
-                    <Dot id={p.id} name={p.name} />
-                    <strong>{first(p.name)}</strong>
-                  </div>
-                </div>
-              ))}
-            </div>
+        {board && s.landing && <h3 className="align-label align-stood">How it stood</h3>}
+        {board && s.positions.length > 0 && (
+          <section className="align-positions" aria-label="Where each person stands">
+            {s.positions.map((p) => (
+              <Position key={p.person} p={p} id={idOf(p.person)} />
+            ))}
           </section>
         )}
-        {(s.differ.length > 0 || s.settleTest || s.agreed.length > 0) && (
+        {board && (crux.length > 0 || s.settleTest) && (
           <section className="align-pair">
-            {(s.differ.length > 0 || s.settleTest) && (
+            {crux.length > 0 && (
               <div className="align-col" aria-label="Where you differ">
-                {s.differ.length > 0 && <span className="align-label differ">Where you differ</span>}
-                {s.differ.map((d) => (
+                <span className="align-label differ">Where you differ</span>
+                {crux.map((d) => (
                   <Differ key={d.question} d={d} />
                 ))}
-                {s.settleTest && <Settle t={s.settleTest} ruled={s.differ.length > 0} />}
               </div>
             )}
-            {s.agreed.length > 0 && (
-              <div className="align-col" aria-label="Agreed so far">
-                <span className="align-label agreed">Agreed so far · {s.agreed.length}</span>
-                <ul className="align-agreed">
-                  {s.agreed.map((a) => (
-                    <Agreed key={a.text} a={a} />
-                  ))}
-                </ul>
-              </div>
-            )}
+            {s.settleTest && <Settle t={s.settleTest} />}
           </section>
         )}
-        {(s.unanswered.length > 0 || s.parked.length > 0) && (
+        {board && more && s.agreed.length > 0 && (
+          <section className="align-col" aria-label="Agreed so far">
+            <span className="align-label agreed">Agreed so far · {s.agreed.length}</span>
+            <ul className="align-agreed">
+              {s.agreed.map((a) => (
+                <Agreed key={a.text} a={a} />
+              ))}
+            </ul>
+          </section>
+        )}
+        {board && more && (s.unanswered.length > 0 || s.parked.length > 0) && (
           <section className="align-chips" aria-label="Asked, not answered, and parked">
             {s.unanswered.length > 0 && <span className="align-meta">Waiting on an answer</span>}
             {s.unanswered.map((u) => (
@@ -139,9 +153,32 @@ export function AlignmentBoard(props: {
             ))}
           </section>
         )}
+        {hidden && (
+          <button className="align-more" onClick={toggle} aria-expanded={more}>
+            {!more && !s.landing && counts.length > 0 && <span>{counts.join(" · ")}</span>}
+            <span className="align-more-label">{more ? "Less" : "More"}</span>
+          </button>
+        )}
       </div>
     </Live.Provider>
   );
+}
+
+// Whether you keep More open: yours alone, remembered in this browser.
+const MORE_KEY = "stand.alignMore";
+function readMore() {
+  try {
+    return localStorage.getItem(MORE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeMore(on: boolean) {
+  try {
+    localStorage.setItem(MORE_KEY, on ? "1" : "0");
+  } catch {
+    // Private windows: More just isn't remembered.
+  }
 }
 
 function Dot({ id, name, size = 22, title }: { id: string; name: string; size?: number; title?: string }) {
@@ -158,6 +195,7 @@ function Dot({ id, name, size = 22, title }: { id: string; name: string; size?: 
 }
 
 function Position({ p, id }: { p: AlignmentState["positions"][number]; id: string }) {
+  const { more } = useContext(Live);
   const flash = useFlash(p.stance + (p.movedAt ?? ""));
   return (
     <div className={flash ? "align-card align-person align-new" : "align-card align-person"}>
@@ -165,14 +203,14 @@ function Position({ p, id }: { p: AlignmentState["positions"][number]; id: strin
         <Dot id={id} name={p.person} />
         <strong>{first(p.person)}</strong>
         {p.movedAt && (
-          <span className="align-moved" title={`Moved at ${fmtTime(p.movedAt)}`}>
+          <span className="align-moved" title={[`Moved at ${fmtTime(p.movedAt)}`, p.movedBecause].filter(Boolean).join(": ")}>
             ↻ Moved
           </span>
         )}
       </div>
       <p className="align-stance">{p.stance}</p>
-      {p.movedBecause && <p className="align-because">{p.movedBecause}</p>}
-      {p.reasons.length > 0 && (
+      {more && p.movedBecause && <p className="align-because">{p.movedBecause}</p>}
+      {more && p.reasons.length > 0 && (
         <ul className="align-reasons">
           {p.reasons.map((r) => (
             <li key={r}>{r}</li>
@@ -184,25 +222,27 @@ function Position({ p, id }: { p: AlignmentState["positions"][number]; id: strin
 }
 
 function Differ({ d }: { d: AlignmentState["differ"][number] }) {
+  const { more } = useContext(Live);
   const flash = useFlash(d.question + d.sides.map((x) => x.gist).join());
   return (
     <div className={flash ? "align-differ align-new" : "align-differ"}>
       <p>{d.question}</p>
-      {d.sides.length > 0 && <span className="align-meta">{d.sides.map((x) => `${first(x.person)}: ${x.gist}`).join(" · ")}</span>}
+      {more && d.sides.length > 0 && <span className="align-meta">{d.sides.map((x) => `${first(x.person)}: ${x.gist}`).join(" · ")}</span>}
     </div>
   );
 }
 
-function Settle({ t, ruled }: { t: NonNullable<AlignmentState["settleTest"]>; ruled: boolean }) {
+function Settle({ t }: { t: NonNullable<AlignmentState["settleTest"]> }) {
+  const { more } = useContext(Live);
   const flash = useFlash(t.text + t.answered);
   return (
-    <div className={["align-settle", ruled && "ruled", flash && "align-new"].filter(Boolean).join(" ")}>
+    <div className={flash ? "align-col align-settle align-new" : "align-col align-settle"} aria-label="What would settle it">
       <div className="align-head">
         <span className="align-label">Would settle it</span>
         <span className={t.answered ? "align-state ok" : "align-state warn"}>{t.answered ? "Answered" : "Not answered yet"}</span>
       </div>
       <p>{t.text}</p>
-      {t.proposedBy && (
+      {more && t.proposedBy && (
         <span className="align-meta" title={t.at ? `Proposed at ${fmtTime(t.at)}` : undefined}>
           {first(t.proposedBy)}'s test
         </span>
@@ -265,30 +305,34 @@ function Question(props: { state: AlignmentState; now: number; live: boolean; on
     setText(q?.text ?? "");
     setEditing(true);
   };
+  const { more } = useContext(Live);
   const on = q?.at && props.live ? fmtSpan(props.now - q.at) : null;
   const meta = q && [q.askedBy && `Asked by ${first(q.askedBy)}`, on && `${on} on it`].filter(Boolean);
+  const showHead = more || q?.suggested;
   return (
     <section className={flash ? "align-question align-new" : "align-question"} aria-label="The question">
-      <div className="align-head">
-        <span className="align-label">Aligning on</span>
-        {q?.suggested ? (
-          <span className="align-meta">
-            <span className="agent-mark small">✦</span> Suggested from the talk
-            {props.onKeep && (
-              <button className="link" onClick={props.onKeep}>
-                Keep
-              </button>
-            )}
-          </span>
-        ) : (
-          meta &&
-          meta.length > 0 && (
-            <span className="align-meta" title={q.at ? `Asked at ${fmtTime(q.at)}` : undefined}>
-              {meta.join(" · ")}
+      {showHead && (
+        <div className="align-head">
+          <span className="align-label">Aligning on</span>
+          {q?.suggested ? (
+            <span className="align-meta">
+              <span className="agent-mark small">✦</span> Suggested from the talk
+              {props.onKeep && (
+                <button className="link" onClick={props.onKeep}>
+                  Keep
+                </button>
+              )}
             </span>
-          )
-        )}
-      </div>
+          ) : (
+            meta &&
+            meta.length > 0 && (
+              <span className="align-meta" title={q.at ? `Asked at ${fmtTime(q.at)}` : undefined}>
+                {meta.join(" · ")}
+              </span>
+            )
+          )}
+        </div>
+      )}
       {editing ? (
         <textarea
           ref={input}
@@ -312,7 +356,7 @@ function Question(props: { state: AlignmentState; now: number; live: boolean; on
       ) : (
         <h2 className="align-question-h">
           {q && props.onQuestion ? (
-            <button className="align-question-text editable" onClick={open} title="Change the question">
+            <button className="align-question-text editable" onClick={open} title={[...(meta ?? []), "Click to change"].join(" · ")}>
               {q.text}
             </button>
           ) : q ? (
@@ -326,7 +370,7 @@ function Question(props: { state: AlignmentState; now: number; live: boolean; on
           )}
         </h2>
       )}
-      {q?.whyNow && <p className="align-why">Why it matters now: {q.whyNow}</p>}
+      {more && q?.whyNow && <p className="align-why">Why it matters now: {q.whyNow}</p>}
     </section>
   );
 }
@@ -356,6 +400,7 @@ function Landing(props: {
     box?.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [l.text, live]);
   const fresh = useFlash(l.text);
+  const { more } = useContext(Live);
   // Your answer shows as soon as you click; the server's copy replaces it.
   const [picked, setPicked] = useState<AlignmentVote | null>(null);
   const saved = props.votes.find((v) => v.userId === props.me)?.vote;
@@ -383,12 +428,13 @@ function Landing(props: {
   return (
     <section ref={ref} className={fresh ? "align-card align-landing align-in" : "align-card align-landing"} aria-label="Where we landed">
       <div className="align-head">
-        <span className="align-label">Aligning on</span>
-        <span className="align-landing-q">{q?.text ?? "No question was set"}</span>
         <span className={`align-outcome ${l.outcome}`}>{OUTCOME[l.outcome]}</span>
+        {more && <span className="align-landing-q">{q?.text ?? "No question was set"}</span>}
       </div>
-      <h2 className="align-headline">{l.text}</h2>
-      {(l.reopens || l.changesIf || l.stillOpen) && (
+      <h2 className="align-headline" title={q ? `Aligning on: ${q.text}` : undefined}>
+        {l.text}
+      </h2>
+      {more && (l.reopens || l.changesIf || l.stillOpen) && (
         <dl className="align-terms">
           {l.reopens && (
             <div>
@@ -411,10 +457,8 @@ function Landing(props: {
         </dl>
       )}
       {l.nextSteps.length > 0 && (
-        <div className="align-landing-part" aria-label="Next steps">
-          <span className="align-label">
-            {l.outcome === "decided" ? "Next steps" : "Before it reopens"} · {l.nextSteps.length}
-          </span>
+        <div className="align-landing-part" aria-label={l.outcome === "decided" ? "Next steps" : "Before it reopens"}>
+          {more && <span className="align-label">{l.outcome === "decided" ? "Next steps" : "Before it reopens"}</span>}
           <ul className="align-steps">
             {l.nextSteps.map((s) => (
               <li key={s.text}>
