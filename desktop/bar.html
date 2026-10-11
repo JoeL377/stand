@@ -12,7 +12,12 @@
     --ring-lit: 0 0 0 1.5px rgb(150 190 255), 0 0 0 4px rgb(45 108 223 / 0.7), 0 2px 4px rgb(0 0 0 / 0.35);
   }
   /* The pill drags the bar around; its buttons stay clickable. */
-  .pill { position: absolute; top: 4px; left: 4px; right: 4px; height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 5px; border-radius: 999px; background: rgb(24 25 30 / 0.97); box-shadow: var(--ring); color: #e8e8ee; -webkit-app-region: drag; }
+  .pill { position: absolute; top: 4px; left: 4px; right: 4px; height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 5px; border-radius: 20px; background: rgb(24 25 30 / 0.97); box-shadow: var(--ring); color: #e8e8ee; -webkit-app-region: drag; transition: border-radius 0.14s cubic-bezier(0.23, 1, 0.32, 1); }
+  /* The note card hangs from the bar's lower edge (upper, when the bar is low on the screen) as
+     one piece: that edge goes square and its ring stops there, where the card's carries on. */
+  body.noting .pill { border-radius: 18px 18px 0 0; clip-path: inset(-8px -8px 0 -8px); }
+  body.noting.noting-up .pill { border-radius: 0 0 18px 18px; clip-path: inset(0 -8px -8px -8px); }
+  @media (prefers-reduced-motion: reduce) { .pill { transition: none; } }
   /* While you talk the ring brightens with your voice (--v, 0 to 1), and settles when you stop. */
   .pill.voice {
     box-shadow:
@@ -66,6 +71,9 @@
   .note svg { flex: none; width: 13px; height: 13px; }
   .note span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .note.pinned { color: rgb(255 255 255 / 0.8); }
+  /* With the card open the typing is down there: the field turns into its keys. */
+  body.noting .note, body.noting .note:hover { background: none; box-shadow: none; color: #8e8e9c; font-size: 11.5px; cursor: default; }
+  body.noting .note svg { display: none; }
   /* Out of a meeting Snap is just its camera, so the note field has the room. */
   body.rest .snap { width: 30px; padding: 0; }
   body.rest .snap .label { display: none; }
@@ -147,6 +155,8 @@
 <script>
   const $ = (id) => document.getElementById(id);
   let state = null;
+  /** The note card hanging from the bar, {above}, while it's open. */
+  let noting = null;
   let saying = null;
   // Talking while muted (see "your voice" below).
   let mutedTalk = false;
@@ -322,7 +332,9 @@
     $("space").title = s.none ? "Open Stand to make a space" : `${s.space}: snaps go here. Click to pick another space.`;
     $("space").ariaLabel = s.none ? "Make a space in Stand" : `Space: ${s.space}${s.live ? `, ${s.live.names.length} talking` : ""}. Pick another`;
     const who = s.live ? s.live.names.filter(Boolean).join(", ") : "";
-    $("mic").hidden = Boolean(s.none);
+    // Writing a note, the bar is the note's top line: the space, the keys and Snap. The talk mic
+    // and the to-dos step out of the way (one mic, the dictation one, is less confusing).
+    $("mic").hidden = Boolean(s.none) || Boolean(noting);
     $("mic").className = s.live ? "mic live" : "mic";
     $("mic").ariaLabel = s.live ? `Join ${who || "them"} in ${s.space}` : `Start talking in ${s.space}`;
     $("mic").title = $("mic").ariaLabel;
@@ -333,12 +345,12 @@
     $("snap").ariaLabel = s.none ? "Snap" : `Snap onto a note for ${s.space}`;
     // Snaps pinned to a note that was put away unsaved: the field says they're waiting.
     const pins = s.pins ? `${s.pins} snap${s.pins === 1 ? "" : "s"} pinned` : "";
-    $("note-text").textContent = pins ? `${pins} · add a note…` : "Write a note…";
+    $("note-text").textContent = noting ? "Enter saves · Esc closes" : pins ? `${pins}…` : "Write a note…";
     $("note").classList.toggle("pinned", Boolean(pins));
     $("note").title = `Write or say a note for ${s.space} (${s.noteKey}, from any app)`;
     $("note").ariaLabel = pins ? `${pins}: add a note for ${s.space} and save` : `Write a note for ${s.space}`;
     const todos = s.todos ?? [];
-    $("todos").hidden = todos.length === 0;
+    $("todos").hidden = todos.length === 0 || Boolean(noting);
     $("todo-count").textContent = todos.length;
     $("todos").ariaLabel = `${todos.length} to-do${todos.length === 1 ? "" : "s"} in ${s.space}`;
     if (listOpen) todos.length ? void showList(true) : void showList(false);
@@ -434,6 +446,13 @@
     toggleList();
   });
   $("todos").addEventListener("click", (e) => e.detail === 0 && toggleList());
+  // The note card open under (or over) the bar: the two are drawn as one piece.
+  window.bar.onNote((o) => {
+    noting = o;
+    document.body.classList.toggle("noting", Boolean(o));
+    document.body.classList.toggle("noting-up", Boolean(o?.above));
+    if (state?.rest) renderRest();
+  });
   window.bar.onCloseList(() => {
     listOpen = false;
     $("todos").setAttribute("aria-expanded", "false");

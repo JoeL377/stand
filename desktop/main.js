@@ -1057,17 +1057,43 @@ async function pinSnap(image, at, prefs, reading) {
 
 const sendPins = () => noteWin && !noteWin.isDestroyed() && noteWin.webContents.send("note:pins", notePins.map(({ id, thumb }) => ({ id, thumb })));
 
-/** Where the card goes for a given height: under the bar, over it, or at the top of the screen
- *  the pointer is on when the bar is down. */
+/** Where the card goes for a given height: joined to the bar's lower edge (its upper edge, when
+ *  the bar is low on the screen), so the two read as one piece; or at the top of the screen the
+ *  pointer is on when the bar is down. */
 function notePlace(height) {
   if (bar?.isVisible()) {
     const [x, y] = bar.getPosition();
     const a = screen.getDisplayMatching({ x, y, ...BAR }).workArea;
     const above = y + BAR.height + height > a.y + a.height;
-    return { x, y: above ? y - height + 4 : y + BAR.height - 4, above };
+    // The bar's pill runs from 4 px to BAR.height - 4 px down its window.
+    return { x, y: above ? y - height + 4 : y + BAR.height - 4, above, fused: true };
   }
   const a = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-  return { x: Math.round(a.x + (a.width - BAR.width) / 2), y: a.y + 8, above: false };
+  return { x: Math.round(a.x + (a.width - BAR.width) / 2), y: a.y + 8, above: false, fused: false };
+}
+
+let noteHeight = 96;
+/** How the card was last told to draw itself: {above, fused}. */
+let notePlaced = null;
+
+/** Puts the card where it goes for its height, as the bar moves or it grows, and tells it and the
+ *  bar when the way they join changes. */
+function placeNote() {
+  if (!noteWin || noteWin.isDestroyed()) return;
+  const place = notePlace(noteHeight);
+  noteWin.setBounds({ x: place.x, y: place.y, width: BAR.width, height: noteHeight });
+  if (notePlaced?.above !== place.above || notePlaced?.fused !== place.fused) {
+    notePlaced = { above: place.above, fused: place.fused };
+    noteWin.webContents.send("note:place", notePlaced);
+  }
+  sendBarNote();
+}
+
+/** The bar squares off the edge the card hangs from while it's open. */
+function sendBarNote() {
+  if (!barLoaded || !bar || bar.isDestroyed()) return;
+  const open = noteWin && !noteWin.isDestroyed() && noteWin.isVisible() && notePlaced?.fused;
+  bar.webContents.send("bar:note", open ? { above: notePlaced.above } : null);
 }
 
 /** Opens the card, or brings the keyboard back to it. False when there's no space to write to. */
@@ -1085,13 +1111,14 @@ async function openNote() {
     return false;
   }
   closeBarList();
-  let height = notePins.length ? 170 : 96;
-  let place = notePlace(height);
+  noteHeight = notePins.length ? 170 : 96;
+  const place = notePlace(noteHeight);
+  notePlaced = { above: place.above, fused: place.fused };
   const card = new BrowserWindow({
     x: place.x,
     y: place.y,
     width: BAR.width,
-    height,
+    height: noteHeight,
     ...(mac ? { type: "panel" } : {}),
     show: false,
     frame: false,
@@ -1123,6 +1150,7 @@ async function openNote() {
     if (globalShortcut.isRegistered("Escape")) globalShortcut.unregister("Escape");
     if (!card.isDestroyed()) card.close();
     if (noteWin === card) noteWin = null;
+    sendBarNote();
   };
   const handlers = [
     [
@@ -1131,15 +1159,15 @@ async function openNote() {
         if (!mine(e) || card.isDestroyed()) return;
         card.showInactive();
         card.focus();
+        sendBarNote();
       },
     ],
     [
       "note:size",
       (e, h) => {
         if (!mine(e) || card.isDestroyed()) return;
-        height = Math.max(40, Math.min(300, Math.round(Number(h) || 0)));
-        place = notePlace(height);
-        card.setBounds({ x: place.x, y: place.y, width: BAR.width, height });
+        noteHeight = Math.max(40, Math.min(300, Math.round(Number(h) || 0)));
+        placeNote();
       },
     ],
     [
@@ -1183,7 +1211,7 @@ async function openNote() {
   card.on("blur", () => globalShortcut.isRegistered("Escape") && globalShortcut.unregister("Escape"));
   card.on("closed", finish);
   card.webContents.once("did-finish-load", () => {
-    card.webContents.send("note:open", { space, draft: noteDraft, above: place.above, dictateKey: "🎤, or Fn twice", ...accentColors() });
+    card.webContents.send("note:open", { space, draft: noteDraft, ...notePlaced, dictateKey: "🎤, or Fn twice", ...accentColors() });
     sendPins();
   });
   void card.loadFile(`${__dirname}/note.html`);
@@ -1558,6 +1586,8 @@ let wasSharing = false;
 let barResizing = false;
 function sizeBar(extra, ask) {
   if (!bar) return false;
+  // The list and the note card would hang from the same edge: the note steps aside, keeping what's written.
+  if (extra && !ask && noteWin && !noteWin.isDestroyed()) noteWin.webContents.send("note:escape");
   const [x, y] = bar.getPosition();
   const top = barList?.up ? y + barList.h : y; // where the bar itself is
   const a = screen.getDisplayMatching({ x, y: top, ...BAR }).workArea;
@@ -1714,6 +1744,8 @@ function makeBar() {
     if (barResizing) return;
     const [x, y] = bar.getPosition();
     fs.promises.writeFile(barFile(), JSON.stringify({ x, y: barList?.up ? y + barList.h : y })).catch(() => {});
+    // The note card goes where the bar goes.
+    placeNote();
     // Dragging the bar is a click on it too. On the Mac this fires all through the drag.
     clearTimeout(dragged);
     dragged = setTimeout(() => void giveBack("drag"), 300);

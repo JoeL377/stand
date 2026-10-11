@@ -14,4 +14,6 @@ contextBridge.exposeInMainWorld("bar", {
   size: (extra, ask) => ipcRenderer.invoke("bar:size", extra, ask),
   copy: (id, plain) => ipcRenderer.invoke("bar:copy", id, plain),
   onCloseList: (fn) => ipcRenderer.on("bar:close-list", () => fn()),
+  // The note card hanging from the bar: {above} while it's open, null when it closes.
+  onNote: (fn) => ipcRenderer.on("bar:note", (_e, o) => fn(o)),
 });

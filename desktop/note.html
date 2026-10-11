@@ -31,8 +31,14 @@
       }
       :root {
         --accent: #0a84ff;
+        /* The bar's own edge, so the card reads as more of the bar. */
+        --ring:
+          0 0 0 1.5px rgb(96 150 255 / 0.9),
+          0 0 0 4px rgb(45 108 223 / 0.28),
+          0 2px 4px rgb(0 0 0 / 0.35);
       }
       #card {
+        position: relative;
         margin: 4px;
         padding: 8px;
         border-radius: 14px;
@@ -40,6 +46,36 @@
         box-shadow:
           0 0 0 1px rgb(255 255 255 / 0.14),
           0 2px 4px rgb(0 0 0 / 0.35);
+      }
+      /* Hanging from the bar: one piece with it. The edge against the bar is square, with no gap
+         and no ring (the bar's ring stops there too), and a faint line divides the two. */
+      body.fused #card {
+        margin: 0 4px 4px;
+        border-radius: 0 0 18px 18px;
+        box-shadow: var(--ring);
+        clip-path: inset(0 -8px -8px -8px);
+      }
+      body.fused.above #card {
+        margin: 4px 4px 0;
+        border-radius: 18px 18px 0 0;
+        clip-path: inset(-8px -8px 0 -8px);
+      }
+      body.fused #card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 12px;
+        right: 12px;
+        height: 1px;
+        background: rgb(255 255 255 / 0.08);
+      }
+      body.fused.above #card::before {
+        top: auto;
+        bottom: 0;
+      }
+      /* The bar already says which space, and its field says the keys. */
+      body.fused .head {
+        display: none;
       }
       @media (prefers-reduced-motion: no-preference) {
         #card {
@@ -53,6 +89,23 @@
         }
         body.above #card {
           animation-name: in-up;
+        }
+        /* From the bar, it unfolds out of the bar's edge. */
+        body.fused #card {
+          animation: unfold 0.18s cubic-bezier(0.23, 1, 0.32, 1) both;
+        }
+        body.fused.above #card {
+          animation-name: unfold-up;
+        }
+        @keyframes unfold {
+          from {
+            clip-path: inset(0 -8px 100% -8px);
+          }
+        }
+        @keyframes unfold-up {
+          from {
+            clip-path: inset(100% -8px 0 -8px);
+          }
         }
         @keyframes in-up {
           from {
@@ -137,7 +190,7 @@
         max-height: 84px;
         padding: 6px 10px;
         border: 0;
-        border-radius: 8px;
+        border-radius: 10px;
         background: rgb(255 255 255 / 0.08);
         color: #fff;
         font: inherit;
@@ -154,7 +207,7 @@
         flex: none;
         height: 32px;
         border: 0;
-        border-radius: 8px;
+        border-radius: 10px;
         font: inherit;
         outline: none;
       }
@@ -232,9 +285,16 @@
         display: none !important;
       }
       @media (prefers-contrast: more) {
+        :root {
+          --ring: 0 0 0 2px #fff;
+        }
         #card {
           background: #1c1c1e;
           box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.6);
+        }
+        body.fused #card {
+          background: #111214;
+          box-shadow: var(--ring);
         }
       }
     </style>
@@ -266,8 +326,13 @@
       /** The snaps pinned to the note: [{id, thumb}]. */
       let pins = [];
 
-      // The window is as tall as the card, so the rest of the screen stays clickable.
-      const report = () => window.note.size(Math.ceil($("card").getBoundingClientRect().height) + 8);
+      // The window is as tall as the card, so the rest of the screen stays clickable. Hanging
+      // from the bar it has no margin on the bar's side.
+      const report = () => window.note.size(Math.ceil($("card").getBoundingClientRect().height) + (document.body.classList.contains("fused") ? 4 : 8));
+      function placed(o) {
+        document.body.classList.toggle("above", Boolean(o.above));
+        document.body.classList.toggle("fused", Boolean(o.fused));
+      }
       new ResizeObserver(report).observe($("card"));
 
       // Grows with what's written, up to four lines, then scrolls.
@@ -311,7 +376,7 @@
         st = o;
         if (o.accent) document.documentElement.style.setProperty("--accent", o.accent);
         if (o.onAccent) document.documentElement.style.setProperty("--on-accent", o.onAccent);
-        document.body.classList.toggle("above", Boolean(o.above));
+        placed(o);
         $("space").textContent = o.space;
         $("text").value = o.draft || "";
         $("say").title = `Say it (dictation: ${o.dictateKey})`;
@@ -324,6 +389,10 @@
         });
       });
       window.note.onFocus(() => $("text").focus());
+      window.note.onPlace((o) => {
+        placed(o);
+        report();
+      });
       window.note.onPins((list) => {
         pins = list;
         $("why").hidden = true;
