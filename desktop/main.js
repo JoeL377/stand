@@ -8,11 +8,14 @@ const {
   app,
   BrowserWindow,
   ClipboardItem,
+  Menu,
   Notification,
   clipboard,
   desktopCapturer,
+  dialog,
   globalShortcut,
   ipcMain,
+  nativeTheme,
   screen,
   session,
   shell,
@@ -28,6 +31,8 @@ const STAND_URL = (process.env.STAND_URL || "https://stand-production-3d3f.up.ra
 const STAND_ORIGIN = new URL(STAND_URL).origin;
 /** ⌃⇧S: ⌘⇧S is Save As in most apps, and a global shortcut would take it from them. */
 const SNAP_SHORTCUT = process.env.STAND_SNAP_SHORTCUT || "Control+Shift+S";
+/** Mute and unmute from any app, during a meeting only. In Stand's window ⌘D does it too. */
+const MUTE_SHORTCUT = process.env.STAND_MUTE_SHORTCUT || "Control+Shift+M";
 const PARTITION = "persist:stand";
 const mac = process.platform === "darwin";
 /** No title bar and no window buttons on the Mac: Stand runs edge to edge, the logo
@@ -38,6 +43,8 @@ const chrome = mac ? { titleBarStyle: "hidden" } : {};
 let win = null;
 /** The browser sign-in in flight, if any. */
 let signingIn = null;
+/** Quitting for real (asked and answered): ⌘W in a meeting only puts the window away. */
+let quitting = false;
 
 // ---- one instance -----------------------------------------------------------------
 
@@ -65,21 +72,74 @@ async function replaceRunningCopy() {
 
 // ---- the window -----------------------------------------------------------------
 
+/** Behind the page while it loads: Stand's own light or dark, so the window doesn't flash. */
+const backdrop = () => (nativeTheme.shouldUseDarkColors ? "#191919" : "#ffffff");
+
+const windowFile = () => path.join(app.getPath("userData"), "window.json");
+/** Where the window was last time, if that's still on a display. */
+function savedPlace() {
+  try {
+    const { x, y, width, height, fullScreen } = JSON.parse(fs.readFileSync(windowFile(), "utf8"));
+    if (![x, y, width, height].every(Number.isFinite)) return {};
+    // Enough of the top edge on some display to grab it.
+    const onScreen = screen
+      .getAllDisplays()
+      .some(({ workArea: a }) => x + width - 80 > a.x && x + 80 < a.x + a.width && y >= a.y - 10 && y + 40 < a.y + a.height);
+    return onScreen ? { bounds: { x, y, width: Math.max(width, 960), height: Math.max(height, 600) }, fullScreen: Boolean(fullScreen) } : {};
+  } catch {
+    return {};
+  }
+}
+function savePlace() {
+  if (!win || win.isDestroyed() || win.isMinimized()) return;
+  const place = { ...win.getNormalBounds(), fullScreen: win.isFullScreen() || putAwayFull };
+  fs.promises.writeFile(windowFile(), JSON.stringify(place)).catch(() => {});
+}
+let placeTimer;
+/** Put away from full screen during a call: it goes back to full screen when shown. */
+let putAwayFull = false;
+
 function showWindow(path) {
   if (!win) {
+    const place = savedPlace();
     win = new BrowserWindow({
       width: 1440,
       height: 900,
+      ...place.bounds,
       minWidth: 960,
       minHeight: 600,
       title: "Stand",
-      backgroundColor: "#191919",
+      backgroundColor: backdrop(),
+      fullscreen: place.fullScreen || undefined,
       ...chrome,
       webPreferences: { partition: PARTITION, preload: `${__dirname}/preload.js`, contextIsolation: true, sandbox: true },
     });
+    // The window buttons are hidden on the main window only; Stand's logo sits in that corner.
+    if (mac) win.setWindowButtonVisibility(false);
+    for (const change of ["resized", "moved", "enter-full-screen", "leave-full-screen"])
+      win.on(change, () => {
+        if (putAwayFull) return;
+        clearTimeout(placeTimer);
+        placeTimer = setTimeout(savePlace, 500);
+      });
+    win.on("close", (e) => {
+      savePlace();
+      // In a meeting, ⌘W puts the window away rather than leaving the call, as call apps do:
+      // the floating bar takes over, and the Dock, ⌘Tab or the bar's logo bring it back.
+      if (!meeting || quitting) return;
+      e.preventDefault();
+      if (win.isFullScreen()) {
+        // Back in full screen when it's brought back, and the saved place keeps it.
+        putAwayFull = true;
+        win.once("leave-full-screen", () => win?.hide());
+        win.setFullScreen(false);
+      } else win.hide();
+      setTimeout(updateBar, 50);
+    });
     win.on("closed", () => {
       win = null;
-      meeting = null;
+      // Lets go of the mute shortcut and resets the menus too.
+      setMeeting(null);
       // The bar is a window too: gone with the main one, so closing it still quits off the Mac.
       bar?.destroy();
     });
@@ -94,6 +154,10 @@ function showWindow(path) {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+  if (putAwayFull) {
+    putAwayFull = false;
+    win.setFullScreen(true);
+  }
 }
 
 /** Every Stand page stays on Stand: other sites open in the browser, and Google sign-in goes the app's own way. */
@@ -107,8 +171,9 @@ function keepOnStand(wc) {
   wc.setWindowOpenHandler(({ url }) => {
     if (signIn(url) !== false) return { action: "deny" };
     // Stand's own links (the recap, a brief) open as another app window.
+    // They keep a normal title bar and window buttons; only the main window goes without.
     if (new URL(url).origin === STAND_ORIGIN)
-      return { action: "allow", overrideBrowserWindowOptions: { width: 1100, height: 800, ...chrome } };
+      return { action: "allow", overrideBrowserWindowOptions: { ...cascade(otherSize()), minWidth: 640, minHeight: 480, backgroundColor: backdrop() } };
     void shell.openExternal(url);
     return { action: "deny" };
   });
@@ -119,6 +184,107 @@ function keepOnStand(wc) {
       void shell.openExternal(url);
     }
   });
+  // A page with changes that haven't reached Stand holds the window open; say so instead of
+  // ⌘W or ⌘Q silently doing nothing.
+  wc.on("will-prevent-unload", (e) => {
+    const w = BrowserWindow.fromWebContents(wc);
+    const choice = dialog.showMessageBoxSync(w ?? undefined, {
+      type: "warning",
+      message: "Leave with changes that haven't been saved?",
+      detail: "Some of your changes haven't reached Stand yet. If you leave now, they're lost.",
+      buttons: ["Leave", "Stay"],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (choice === 0) e.preventDefault();
+    // Staying also calls off a quit that was under way.
+    else quitting = false;
+  });
+  wc.on("context-menu", (_e, p) => contextMenu(wc, p));
+  // Windows it opens come back where they were last left, at that size.
+  wc.on("did-create-window", (w) => {
+    const keep = () => {
+      if (w.isDestroyed() || w.isFullScreen() || w.isMaximized()) return;
+      fs.promises.writeFile(path.join(app.getPath("userData"), "other-window.json"), JSON.stringify(w.getBounds())).catch(() => {});
+    };
+    w.on("resized", keep);
+    w.on("moved", keep);
+  });
+}
+
+/** Where Stand's other windows (a recap, a brief) were last left, and their size. The place
+ *  only if it's still on a screen. */
+function otherSize() {
+  try {
+    const { x, y, width, height } = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "other-window.json"), "utf8"));
+    if ([width, height].every((n) => Number.isFinite(n) && n >= 480)) {
+      const onScreen =
+        [x, y].every(Number.isFinite) &&
+        screen.getAllDisplays().some(({ workArea: a }) => x >= a.x - 40 && y >= a.y - 40 && x + 200 <= a.x + a.width && y + 100 <= a.y + a.height);
+      return onScreen ? { x, y, width, height } : { width, height };
+    }
+  } catch {}
+  return { width: 1100, height: 800 };
+}
+
+/** A window opening where another of Stand's already is goes a little down and right, as Mac apps do. */
+function cascade(b) {
+  if (!Number.isFinite(b.x)) return b;
+  const taken = (x, y) => BrowserWindow.getAllWindows().some((w) => w !== win && w !== bar && !w.isDestroyed() && w.getBounds().x === x && w.getBounds().y === y);
+  let { x, y } = b;
+  for (let i = 0; i < 10 && taken(x, y); i++) (x += 24), (y += 24);
+  return { ...b, x, y };
+}
+
+/** Help outside a meeting: what Stand is for and its shortcuts, in a sheet. */
+async function howStandWorks() {
+  const opts = {
+    type: "info",
+    message: "How Stand works",
+    detail: [
+      "Open a space and press Start talking. Stand records what's said against the agenda item in focus, and writes notes, to-dos and decisions as you go.",
+      "",
+      "In a meeting:",
+      `• Snap: ${SNAP_SHORTCUT.replace(/\+/g, " + ")}, from any app`,
+      `• Mute: ${MUTE_SHORTCUT.replace(/\+/g, " + ")}, from any app (Command + D in Stand)`,
+      "• Next or previous agenda item: Option + Down or Up",
+      "• All shortcuts: ? in the meeting",
+    ].join("\n"),
+    buttons: ["OK"],
+  };
+  await (win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts));
+}
+
+/** Right-click: spelling, the edit commands, and links and images, as in any Mac app. */
+function contextMenu(wc, p) {
+  const groups = [];
+  if (p.misspelledWord)
+    groups.push([
+      ...p.dictionarySuggestions.slice(0, 5).map((word) => ({ label: word, click: () => wc.replaceMisspelling(word) })),
+      ...(p.dictionarySuggestions.length ? [] : [{ label: "No Guesses Found", enabled: false }]),
+      { label: "Learn Spelling", click: () => wc.session.addWordToSpellCheckerDictionary(p.misspelledWord) },
+    ]);
+  if (p.linkURL && !p.linkURL.startsWith("javascript:"))
+    groups.push([
+      { label: "Open Link in Browser", click: () => void shell.openExternal(p.linkURL) },
+      { label: "Copy Link", click: () => clipboard.writeText(p.linkURL) },
+    ]);
+  if (p.mediaType === "image") groups.push([{ label: "Copy Image", click: () => wc.copyImageAt(p.x, p.y) }]);
+  if (p.isEditable)
+    groups.push([
+      { role: "cut", enabled: p.editFlags.canCut },
+      { role: "copy", enabled: p.editFlags.canCopy },
+      { role: "paste", enabled: p.editFlags.canPaste },
+      { role: "selectAll", enabled: p.editFlags.canSelectAll },
+    ]);
+  else if (p.selectionText.trim()) groups.push([{ role: "copy" }]);
+  if (mac && p.selectionText.trim()) {
+    const words = p.selectionText.trim().replace(/\s+/g, " ");
+    groups.push([{ label: `Look Up “${words.length > 24 ? `${words.slice(0, 24)}…` : words}”`, click: () => wc.showDefinitionForSelection() }]);
+  }
+  if (!groups.length) return;
+  const items = groups.flatMap((g, i) => (i ? [{ type: "separator" }, ...g] : g));
+  Menu.buildFromTemplate(items).popup({ window: BrowserWindow.fromWebContents(wc) ?? undefined });
 }
 
 // ---- signing in through the browser ---------------------------------------------
@@ -196,11 +362,24 @@ function allowMediaAndSharing(ses) {
   );
   ses.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && isStand(origin));
   // Where macOS has its own window-and-screen picker (15 and later) it's used; otherwise the screen.
+  // With more than one display there, it asks which.
   ses.setDisplayMediaRequestHandler(
     async (_req, done) => {
-      const [first] = await desktopCapturer.getSources({ types: ["screen"] });
-      trace("share", { picker: "fallback", source: first?.name ?? null });
-      done(first ? { video: first } : {});
+      const sources = await desktopCapturer.getSources({ types: ["screen"] });
+      if (sources.length < 2) {
+        trace("share", { picker: "fallback", source: sources[0]?.name ?? null });
+        return done(sources[0] ? { video: sources[0] } : {});
+      }
+      const displays = screen.getAllDisplays();
+      const name = (s, i) => displays.find((d) => String(d.id) === s.display_id)?.label || `Screen ${i + 1}`;
+      const { response } = await dialog.showMessageBox(win ?? undefined, {
+        message: "Share which screen?",
+        buttons: [...sources.map(name), "Cancel"],
+        defaultId: 0,
+        cancelId: sources.length,
+      });
+      trace("share", { picker: "fallback", source: sources[response]?.name ?? null });
+      done(response < sources.length ? { video: sources[response] } : {});
     },
     { useSystemPicker: true },
   );
@@ -236,10 +415,12 @@ function cleanPrefs(p) {
   };
 }
 
-/** The space the main window is in, if any. */
+/** The space whose meeting the main window is in, if any. The page says which; an older page
+ *  doesn't, so then it's read from the address (/s/ and /r/ both open a space). */
 function spaceId() {
-  if (!win) return null;
-  const m = /^\/s\/([A-Za-z0-9_-]+)/.exec(new URL(win.webContents.getURL()).pathname);
+  if (!win || !meeting) return null;
+  if (meeting.roomId) return meeting.roomId;
+  const m = /^\/[sr]\/([A-Za-z0-9_-]+)/.exec(new URL(win.webContents.getURL()).pathname);
   return m ? m[1] : null;
 }
 
@@ -249,13 +430,23 @@ let picking = null;
 /** Snaps, and resolves to what to tell the person ({ title, body }), or nothing when they
  *  cancelled. The shortcut shows it as a notification; the page's Snap button shows it in
  *  the page, where it can't be missed. */
-async function snap(from) {
+async function snap(from, onDisplay) {
+  const report = await snapOn(from, onDisplay);
+  // A click on another display moves the toolbar there.
+  return report?.switchTo ? snap(from, report.switchTo) : report;
+}
+
+async function snapOn(from, onDisplay) {
   // Pressed again while the screen is still being read (macOS asking for permission, say):
   // give up on this one and free the shortcut, so it can never get stuck.
   if (picking) {
+    // The last one is past the toolbar and only saving: say so rather than doing nothing.
+    if (picking.saving) return { title: "Still saving the last snap", body: "Try again in a moment." };
     trace("cancel");
     return picking.cancel();
   }
+  // The "Snapped" corner from the last one mustn't end up in this picture.
+  if (hud && !hud.isDestroyed()) hud.close();
   const me = {
     cancelled: false,
     cancel: () => {
@@ -266,7 +457,7 @@ async function snap(from) {
   picking = me;
   const t0 = Date.now();
   const wasInStand = BrowserWindow.getFocusedWindow() != null;
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const display = onDisplay ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   // What doesn't need the bar out of the way starts now, so the toolbar can show as soon as
   // the screen is read: the toolbar's window (hidden until then), the window list, the app in front.
   const windows = within(windowsOn(display), 8000).then((w) => {
@@ -275,12 +466,13 @@ async function snap(from) {
   });
   const asked = frontInfo();
   const overlay = makeToolbar(display);
+  const others = elsewhere(me, display);
   // The bar is up when Stand is in the background, which is when people snap: keep it out of
   // the picture. macOS takes it off the screen within a frame or two.
   barAway = true;
   if (bar?.isVisible()) {
     closeBarList();
-    bar.hide();
+    hideBar();
     barSnapped = true;
     await new Promise((r) => setTimeout(r, 50));
   }
@@ -297,8 +489,12 @@ async function snap(from) {
       if (!wasInStand && front?.pid && front.pid !== process.pid) theirApp = front;
       trace("front", { front: front?.name });
     });
+    for (const o of others) o.showInactive();
     const choice = await openToolbar(me, overlay, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId), t0 });
     trace("toolbar", { choice: choice && (choice.failed ?? (choice.cancel ? "cancel" : choice.mode)) });
+    if (me.switchTo) return { switchTo: me.switchTo };
+    // The other displays were only dimmed for choosing one: give them back now, not after saving.
+    for (const o of others) if (!o.isDestroyed()) o.close();
     if (choice?.failed) return { title: "Snap's toolbar didn't open", body: choice.failed };
     if (choice?.prefs) fs.promises.writeFile(prefsFile(), JSON.stringify(cleanPrefs(choice.prefs))).catch(() => {});
     // Snapping from another app leaves Stand in the background (the toolbar never makes it
@@ -317,7 +513,23 @@ async function snap(from) {
     }
     const image = await cut(choice, display, shot, await windows);
     trace("cut", { size: image.getSize() });
-    return await deliver(image, shotAt, prefs, roomId);
+    // The screen's been read: the bar can come back while the snap saves, and say that it is.
+    barAway = false;
+    updateBar();
+    me.saving = true;
+    // Where it began says where it's reported: from the page's Snap button, in the page;
+    // otherwise on the bar while it's up, else in the page if Stand is in front.
+    const onBar = Boolean(roomId && prefs.toMeeting && from !== "page" && bar?.isVisible());
+    if (onBar) bar.webContents.send("bar:report", { title: "Saving snap…", pending: true });
+    const inPage = Boolean(roomId && prefs.toMeeting && !onBar && win?.isVisible());
+    if (inPage) win.webContents.send("app:command", "saving");
+    const report = await deliver(image, shotAt, prefs, roomId).finally(() => inPage && !win.isDestroyed() && win.webContents.send("app:command", "saved"));
+    // The bar said it was saving, so the bar says how it went, wherever the snap began.
+    if (onBar && bar && !bar.isDestroyed()) {
+      bar.webContents.send("bar:report", report);
+      report.onBar = true;
+    }
+    return report;
   } catch (err) {
     trace("error", { error: String(err?.stack ?? err), permission: screenStatus() });
     // Without the permission, reading the screen can fail outright instead of coming back blank.
@@ -325,17 +537,68 @@ async function snap(from) {
     return { title: "Snap didn't work", body: String(err?.message ?? err) };
   } finally {
     if (!overlay.isDestroyed()) overlay.close();
+    for (const o of others) if (!o.isDestroyed()) o.close();
     if (picking === me) picking = null;
     barAway = false;
     updateBar();
   }
 }
 
-/** Shows what snap() came back with: on the floating bar when it's up, else as a notification. */
+/** Shows what snap() came back with: on the floating bar when it's up; else a snap that worked
+ *  shows as a thumbnail in the corner for a moment, as macOS's own screenshots do, and a
+ *  problem as a notification. */
 function tell(report) {
   if (!report) return;
-  if (bar?.isVisible()) bar.webContents.send("bar:report", report);
-  else notify(report.title, report.body);
+  if (bar?.isVisible()) {
+    if (!report.onBar) bar.webContents.send("bar:report", report);
+  } else if (report.thumb) thumbnail(report);
+  else notify(report.title, report.body, report.settings);
+}
+
+/** "Snapped" with a small picture, bottom right, for a few seconds. A click opens Stand. */
+let hud = null;
+function thumbnail(report) {
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const [width, height] = [260, 84];
+  if (hud && !hud.isDestroyed()) hud.close();
+  hud = new BrowserWindow({
+    x: d.x + d.width - width - 16,
+    y: d.y + d.height - height - 16,
+    width,
+    height,
+    ...(mac ? { type: "panel" } : {}),
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    acceptFirstMouse: true,
+    webPreferences: { contextIsolation: true, sandbox: true, javascript: false },
+  });
+  hud.setAlwaysOnTop(true, "floating");
+  hud.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  staysInBackground(hud, "thumbnail");
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const html = `<!doctype html><meta charset="utf-8"><title>Snapped</title>
+<style>html,body{margin:0;height:100%;background:transparent;font:12px -apple-system,system-ui;color:#e8e8ee;user-select:none;cursor:default}
+a{position:absolute;inset:4px;display:flex;gap:10px;align-items:center;padding:6px;border-radius:12px;background:rgb(24 25 30 / .97);box-shadow:0 0 0 1px rgb(255 255 255 / .14),0 6px 18px rgb(0 0 0 / .35);color:inherit;text-decoration:none}
+img{height:100%;max-width:110px;border-radius:6px;object-fit:cover}strong{display:block;margin-bottom:2px;font-size:12.5px}span{color:#a5a5b3}
+@keyframes fade{to{opacity:0}}a{animation:fade .2s ease-out 3.8s forwards}
+@media (prefers-reduced-motion:no-preference){a{animation:in .18s cubic-bezier(.23,1,.32,1) 60ms both,out .2s cubic-bezier(.23,1,.32,1) 3.8s forwards}@keyframes in{from{opacity:0;transform:translateY(6px)}}@keyframes out{to{opacity:0;transform:translateY(6px)}}}</style>
+<a href="https://stand.invalid/open"><img src="${report.thumb}" alt=""><div role="status"><strong>${esc(report.title)}</strong><span>${esc(report.snapId ? "In the meeting. Click to open Stand." : report.body)}</span></div></a>`;
+  hud.webContents.on("will-navigate", (e) => {
+    e.preventDefault();
+    if (!hud.isDestroyed()) hud.close();
+    showWindow();
+  });
+  hud.webContents.once("did-finish-load", () => hud.showInactive());
+  void hud.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  const mine = hud;
+  setTimeout(() => !mine.isDestroyed() && mine.close(), 4100);
 }
 
 /** Run from source, each Snap step goes to desktop/snap-debug.log, so a snap that
@@ -381,11 +644,17 @@ const screenStatus = () => (mac ? systemPreferences.getMediaAccessStatus("screen
 /** Without the permission, macOS hands back a still of just the wallpaper, so ask it directly. */
 const screenAllowed = () => !["denied", "restricted"].includes(screenStatus());
 
-/** Opens the right page of System Settings, and says what's missing. Run from source,
- *  macOS asks on behalf of the terminal app it was started from, not Stand. */
+/** Says what's missing, with the way to the right page of System Settings (opened only when
+ *  the person asks: macOS may be showing its own prompt right now). Run from source, macOS
+ *  asks on behalf of the terminal app it was started from, not Stand. */
+const SETTINGS = {
+  screen: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+  microphone: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+};
+const openSettings = (which) => SETTINGS[which] && mac && void shell.openExternal(SETTINGS[which]);
 function cantSee() {
-  if (mac) void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
   return {
+    settings: "screen",
     title: "Stand can't see your screen",
     body: app.isPackaged
       ? "Turn on Stand in Screen & System Audio Recording, then quit and reopen Stand."
@@ -497,13 +766,18 @@ function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, t
       if (done) return;
       done = true;
       clearTimeout(slow);
+      clearTimeout(escTimer);
       ipcMain.removeListener("snap:done", onDone);
       ipcMain.removeListener("snap:ready", onReady);
+      ipcMain.removeListener("snap:kept", onKept);
       globalShortcut.unregister("Escape");
       if (!overlay.isDestroyed()) overlay.close();
       resolve(choice);
     };
     const onDone = (e, choice) => e.sender === overlay.webContents && finish(choice);
+    // The page handles Esc (it closes Options before the toolbar); this is in case it can't.
+    let escTimer;
+    const onKept = (e) => e.sender === overlay.webContents && clearTimeout(escTimer);
     const onReady = (e) => {
       if (e.sender !== overlay.webContents || overlay.isDestroyed()) return;
       clearTimeout(slow);
@@ -524,8 +798,14 @@ function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, t
     me.cancel = () => finish(null);
     ipcMain.on("snap:done", onDone);
     ipcMain.on("snap:ready", onReady);
+    ipcMain.on("snap:kept", onKept);
     // Esc works even if the toolbar didn't get keyboard focus.
-    globalShortcut.register("Escape", () => finish(null));
+    globalShortcut.register("Escape", () => {
+      if (overlay.isDestroyed()) return finish(null);
+      overlay.webContents.send("snap:escape");
+      clearTimeout(escTimer);
+      escTimer = setTimeout(() => finish(null), 400);
+    });
     overlay.on("closed", () => finish(null));
     const b = display.bounds;
     const t1 = Date.now();
@@ -535,7 +815,8 @@ function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, t
     void overlay.loaded.then((failed) => {
       if (failed) return finish({ failed });
       if (!open()) return;
-      overlay.webContents.send("snap:open", { image, windows: [], prefs, inMeeting });
+      const accent = mac ? systemPreferences.getAccentColor?.() : null;
+      overlay.webContents.send("snap:open", { image, windows: [], prefs, inMeeting, accent: accent ? `#${accent.slice(0, 6)}` : null });
       void windows.then(
         (list) => open() && overlay.webContents.send("snap:windows", list.map((w) => ({ id: w.id, x: w.x - b.x, y: w.y - b.y, w: w.w, h: w.h }))),
       );
@@ -570,7 +851,7 @@ function countdown(me, display, seconds) {
     let left = seconds;
     let timer = null;
     const page = (n) =>
-      `data:text/html;charset=utf-8,${encodeURIComponent(`<body style="margin:0;height:100vh;display:grid;place-items:center;background:#1f1f21;color:#fff;font:14px -apple-system,system-ui;user-select:none">Snapping in ${n}…</body>`)}`;
+      `data:text/html;charset=utf-8,${encodeURIComponent(`<title>Snap timer</title><body role="timer" aria-live="polite" style="margin:0;height:100vh;display:grid;place-items:center;background:#1f1f21;color:#fff;font:14px -apple-system,system-ui;user-select:none">Snapping in ${n}…</body>`)}`;
     const end = (go) => {
       clearInterval(timer);
       globalShortcut.unregister("Escape");
@@ -585,7 +866,8 @@ function countdown(me, display, seconds) {
     timer = setInterval(() => {
       left -= 1;
       if (left <= 0) return end(true);
-      if (!tick.isDestroyed()) void tick.loadURL(page(left));
+      // In place: reloading the page each second can flicker.
+      if (!tick.isDestroyed()) void tick.webContents.executeJavaScript(`document.body.textContent = "Snapping in ${left}…"`).catch(() => {});
     }, 1000);
   });
 }
@@ -625,34 +907,100 @@ async function grabWindow(w, display) {
 }
 
 /** To the clipboard and the meeting, as the options say. Out of a meeting it's copied. */
+/** How long saving a snap may take, all tries together. */
+const SAVE_WITHIN_MS = 90_000;
+
 async function deliver(image, at, prefs, roomId) {
   const toMeeting = Boolean(roomId) && prefs.toMeeting;
   const copy = prefs.toClipboard || !toMeeting;
   if (copy) await clipboard.write([new ClipboardItem({ "image/png": new Blob([image.toPNG()], { type: "image/png" }) })]);
-  if (!toMeeting) return { title: "Snapped", body: "It's on your clipboard." };
+  const thumb = image.resize({ height: 152 }).toDataURL();
+  if (!toMeeting) return { title: "Snapped", body: "It's on your clipboard.", thumb };
   const { width: w, height: h } = image.getSize();
-  const res = await session
-    .fromPartition(PARTITION)
-    .fetch(`${STAND_URL}/api/rooms/${roomId}/snaps?at=${at}&w=${w}&h=${h}`, {
-      method: "POST",
-      headers: { "content-type": "image/jpeg" },
-      body: image.toJPEG(90),
-      credentials: "include",
-    })
-    .catch(() => null);
+  const body = image.toJPEG(90);
+  // One key for every try, so a try that got through before timing out isn't saved twice.
+  const key = crypto.randomUUID();
+  // Longer for a bigger picture: at least 15 s, and as long as a slow (50 KB/s) line needs,
+  // but all the tries together get 90 s, so Snap is never held up for long.
+  const limit = Math.min(SAVE_WITHIN_MS, Math.max(15_000, body.length / 50));
+  const deadline = Date.now() + SAVE_WITHIN_MS;
+  // A blip in the connection shouldn't lose it: a few tries, each with a time limit, as in the page.
+  let res = null;
+  for (const wait of [0, 1000, 3000]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    const left = deadline - Date.now();
+    if (left < 2000) break;
+    res = await session
+      .fromPartition(PARTITION)
+      .fetch(`${STAND_URL}/api/rooms/${roomId}/snaps?at=${at}&w=${w}&h=${h}&key=${key}`, {
+        method: "POST",
+        headers: { "content-type": "image/jpeg" },
+        body,
+        credentials: "include",
+        signal: AbortSignal.timeout(Math.min(limit, left)),
+      })
+      .catch(() => null);
+    if (res && res.status < 502) break;
+  }
   if (!res?.ok) {
     const why = (await res?.json().catch(() => null))?.error ?? (res ? `Stand said ${res.status}.` : "Stand didn't answer.");
-    return { title: copy ? "Copied, but not added to the meeting" : "Snap didn't save", body: why };
+    return copy
+      ? { title: "Copied, but not added to the meeting", body: `${why} Paste it into Stand to add it.` }
+      : { title: "Snap didn't save", body: why };
   }
   return {
     title: "Snapped",
     body: copy ? "It's on your clipboard and in the meeting, on the item in focus." : "It's in the meeting, on the item in focus. Crop or delete it in Stand.",
     snapId: (await res.json().catch(() => null))?.id,
+    thumb,
   };
 }
 
-function notify(title, body) {
-  if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
+/** A notification, for problems. With `settings`, a click opens that page of System Settings. */
+function notify(title, body, settings) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title, body: settings ? `${body} Click to open System Settings.` : body, silent: true });
+  if (settings) n.on("click", () => openSettings(settings));
+  n.show();
+}
+
+/** On each other display while the toolbar is up: dimmed, and a click there moves the toolbar
+ *  to it, so any screen can be snapped, as with ⌘⇧5. */
+function elsewhere(me, display) {
+  return screen
+    .getAllDisplays()
+    .filter((d) => d.id !== display.id)
+    .map((d) => {
+      const w = new BrowserWindow({
+        ...d.bounds,
+        ...(mac ? { type: "panel" } : {}),
+        show: false,
+        frame: false,
+        transparent: true,
+        resizable: false,
+        movable: false,
+        focusable: false,
+        hasShadow: false,
+        enableLargerThanScreen: true,
+        acceptFirstMouse: true,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        webPreferences: { contextIsolation: true, sandbox: true, javascript: false },
+      });
+      w.setAlwaysOnTop(true, "screen-saver");
+      w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+      staysInBackground(w, "elsewhere");
+      w.webContents.on("will-navigate", (e) => {
+        e.preventDefault();
+        me.switchTo = d;
+        me.cancel();
+      });
+      const html = `<!doctype html><title>Snap another screen</title><style>html,body{margin:0;height:100%;background:rgb(0 0 0 / .42);font:13px -apple-system,system-ui;user-select:none}
+a{position:absolute;inset:0;display:grid;place-items:center;text-decoration:none;cursor:pointer}span{padding:8px 14px;border-radius:10px;background:rgb(30 30 32 / .92);color:#fff}</style>
+<a href="https://stand.invalid/here"><span>Click to snap this screen</span></a>`;
+      void w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      return w;
+    });
 }
 
 // ---- the floating bar -------------------------------------------------------------
@@ -668,6 +1016,8 @@ let bar = null;
 let barLoaded = false;
 /** True while a snap reads the screen. */
 let barAway = false;
+/** Hidden from the bar's own menu or the Meeting menu, until the meeting ends. */
+let barOff = false;
 const BAR = { width: 380, height: 48 };
 const barFile = () => path.join(app.getPath("userData"), "bar.json");
 const short = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
@@ -675,12 +1025,30 @@ const short = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
 function setMeeting(m) {
   meeting =
     m && typeof m === "object"
-      ? { space: short(m.space), itemKey: short(m.itemKey) || null, item: short(m.item) || null, micOn: m.micOn !== false, todos: todosOf(m.todos) }
+      ? {
+          roomId: typeof m.roomId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(m.roomId) ? m.roomId : null,
+          space: short(m.space),
+          itemKey: short(m.itemKey) || null,
+          item: short(m.item) || null,
+          micOn: m.micOn !== false,
+          todos: todosOf(m.todos),
+          nudge: short(m.nudge) || null,
+          nudgeFromTalk: m.nudgeFromTalk === true,
+          switched: short(m.switched) || null,
+          notRecording: m.notRecording === true,
+          offline: m.offline === true,
+          ending: m.ending === true,
+        }
       : null;
   const sharing = Boolean(m?.sharing);
   if (sharing !== wasSharing) trace("sharing", { on: sharing, barUp: Boolean(bar?.isVisible()) });
   wasSharing = sharing;
-  if (meeting && barLoaded) bar.webContents.send("bar:state", meeting);
+  // Hidden from its menu, the bar stays down until the meeting ends.
+  if (!meeting) barOff = false;
+  if (!meeting) pulsedFor = null;
+  muteKey(Boolean(meeting));
+  if (meeting && barLoaded) bar.webContents.send("bar:state", { ...meeting, muteKey: muteKeyOn ? MUTE_SHORTCUT : null });
+  buildMenus();
   updateBar();
 }
 
@@ -733,6 +1101,83 @@ async function copyTodo(id, plain) {
   await clipboard.writeText(text);
   trace("copied", { plain: Boolean(plain), agent: text !== todo.text });
   return true;
+}
+
+/** The mute shortcut works from any app while there's a meeting, and is let go after.
+ *  muteKeyOn is false if another app has it. */
+let muteKeyWanted = false;
+let muteKeyOn = false;
+function muteKey(on) {
+  if (on === muteKeyWanted) return;
+  muteKeyWanted = on;
+  if (on) muteKeyOn = globalShortcut.register(MUTE_SHORTCUT, () => win?.webContents.send("app:command", "mic"));
+  else if (muteKeyOn) {
+    globalShortcut.unregister(MUTE_SHORTCUT);
+    muteKeyOn = false;
+  }
+}
+
+/** The menu bar and the Dock menu, which follow the meeting (Mute or Unmute, say). */
+let menuKey = "";
+function buildMenus() {
+  if (!mac) return;
+  const key = JSON.stringify([Boolean(meeting), meeting?.micOn, barOff, muteKeyOn]);
+  if (key === menuKey) return;
+  menuKey = key;
+  const inMeeting = Boolean(meeting);
+  const mic = { label: meeting?.micOn === false ? "Unmute" : "Mute", enabled: inMeeting, click: () => win?.webContents.send("app:command", "mic") };
+  const snapItem = { label: "Snap…", click: () => void snap("menu").then(tell) };
+  const history = () => win?.webContents.navigationHistory;
+  const dev = app.isPackaged ? [] : [{ type: "separator" }, { role: "reload" }, { role: "forceReload" }, { role: "toggleDevTools" }];
+  const template = [
+    { role: "appMenu" },
+    { label: "File", submenu: [{ role: "close" }] },
+    { role: "editMenu" },
+    {
+      label: "View",
+      submenu: [
+        // Off in a meeting: going back would leave the call without asking.
+        { label: "Back", accelerator: "Command+[", enabled: !inMeeting, click: () => history()?.canGoBack() && history().goBack() },
+        { label: "Forward", accelerator: "Command+]", enabled: !inMeeting, click: () => history()?.canGoForward() && history().goForward() },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+        ...dev,
+      ],
+    },
+    {
+      label: "Meeting",
+      submenu: [
+        // Shown, not registered: the mute shortcut is global (it works in Stand too), else the page handles ⌘D.
+        { ...mic, accelerator: muteKeyOn ? MUTE_SHORTCUT : "Command+D", registerAccelerator: false },
+        { ...snapItem, accelerator: SNAP_SHORTCUT, registerAccelerator: false },
+        { type: "separator" },
+        {
+          label: "Show Floating Bar",
+          type: "checkbox",
+          checked: !barOff,
+          enabled: inMeeting,
+          click: (item) => {
+            barOff = !item.checked;
+            buildMenus();
+            updateBar();
+          },
+        },
+        { label: "Meeting Shortcuts", accelerator: "Command+/", enabled: inMeeting, click: () => (showWindow(), win?.webContents.send("app:command", "shortcuts")) },
+      ],
+    },
+    { role: "windowMenu" },
+    // The help Stand has is the meeting's "How Stand works" sheet.
+    {
+      role: "help",
+      submenu: [{ label: "How Stand Works", click: () => (inMeeting ? (showWindow(), win?.webContents.send("app:command", "shortcuts")) : void howStandWorks()) }],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  app.dock?.setMenu(Menu.buildFromTemplate([snapItem, mic]));
 }
 
 /** Where the bar goes: where it was left, or the top middle of the screen Stand is on. */
@@ -827,24 +1272,52 @@ function native() {
 /** Up for the whole meeting, Stand in front or not (joe's call); down while a snap reads the screen. */
 function updateBar() {
   if (barHold) return;
-  const want = Boolean(meeting && win && !barAway);
+  const want = Boolean(meeting && win && !barAway && !barOff);
   if (want && !bar) makeBar();
   if (!barLoaded) return;
   if (want && !bar.isVisible()) {
     trace("bar-up", {});
+    // Shown see-through until the page has drawn its first frame of arriving, so macOS
+    // can't flash the bar as it was when it went away.
+    bar.setOpacity(0);
+    barRevealed = false;
     bar.showInactive();
-    // It catches the eye when a meeting starts, not when it's back after a snap.
-    bar.webContents.send("bar:shown", { pulse: !barSnapped });
+    clearTimeout(barReveal);
+    barReveal = setTimeout(revealBar, 300);
+    // It catches the eye once, when a meeting starts: not when it's back after a snap.
+    const pulse = !barSnapped && meeting.roomId !== pulsedFor;
+    if (pulse) pulsedFor = meeting.roomId;
+    bar.webContents.send("bar:shown", { pulse });
     barSnapped = false;
     void noteTheirApp();
   } else if (!want && bar.isVisible()) {
     trace("bar-down", { meeting: Boolean(meeting), barAway });
     closeBarList();
-    bar.hide();
+    hideBar();
   }
+}
+let barReveal;
+let barRevealed = false;
+/** The bar's page has drawn itself, still see-through: show the window, then let it arrive,
+ *  so the whole arrival is seen. */
+function revealBar() {
+  clearTimeout(barReveal);
+  if (!bar || bar.isDestroyed() || barRevealed) return;
+  barRevealed = true;
+  bar.setOpacity(1);
+  bar.webContents.send("bar:visible");
+}
+/** The meeting whose bar has had its glow. */
+let pulsedFor = null;
+function hideBar() {
+  bar.setOpacity(0);
+  bar.hide();
+  // The pointer can't be on a bar that's gone, and no "leave" will come to say so.
+  barPointer = false;
 }
 
 async function pressOnBar(button) {
+  if (button === "hover" || button === "leave") barPointer = button === "hover";
   if (button === "hover") {
     // A press on the bar can make Stand the active app, and macOS then brings up Stand's
     // window to take the keyboard. While the pointer is on the bar, that window can't.
@@ -852,9 +1325,23 @@ async function pressOnBar(button) {
     return void noteTheirApp();
   }
   if (button === "leave") return void (mac && !barHold && win?.setFocusable(true));
+  if (button === "settings") return openSettings("screen");
+  if (button === "menu")
+    return Menu.buildFromTemplate([
+      { label: "Open Stand", click: () => showWindow() },
+      { type: "separator" },
+      {
+        label: "Hide Until the Meeting Ends",
+        click: () => {
+          barOff = true;
+          buildMenus();
+          updateBar();
+        },
+      },
+    ]).popup({ window: bar ?? undefined });
   trace("bar", { button, theirApp: theirApp?.name });
   if (button === "open") return showWindow();
-  if (button === "mic") win?.webContents.send("app:command", "mic");
+  if (button === "mic" || button === "switch" || button === "undo") win?.webContents.send("app:command", button);
   // Without the native code, the press made Stand the active app; keep the bar up while that's undone.
   if (!barPrevents) {
     barHold = true;
@@ -879,6 +1366,8 @@ async function noteTheirApp() {
 
 /** While a click on the bar is being undone, the bar stays put rather than blinking off. */
 let barHold = false;
+/** The pointer is on the bar. */
+let barPointer = false;
 /** Clicks on the bar leave Stand in the background (staysInBackground), so there's nothing to undo. */
 let barPrevents = false;
 /** The bar went down for a snap, so it comes back up quietly. */
@@ -923,8 +1412,6 @@ async function giveBack(why) {
 
 // ---- start ----------------------------------------------------------------------
 
-if (mac) app.on("browser-window-created", (_e, w) => w.setWindowButtonVisibility(false));
-
 app.on("web-contents-created", (_e, wc) => {
   if (wc.session === session.fromPartition(PARTITION)) keepOnStand(wc);
   else wc.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -948,16 +1435,40 @@ app.whenReady().then(async () => {
     bar.webContents.send("bar:level", Math.max(0, Math.min(1, v)));
   });
   ipcMain.on("bar:press", (e, button) => e.sender === bar?.webContents && void pressOnBar(button));
+  ipcMain.on("bar:painted", (e) => e.sender === bar?.webContents && revealBar());
   ipcMain.handle(
     "bar:size",
     (e, extra, ask) => e.sender === bar?.webContents && sizeBar(Math.max(0, Math.min(600, Math.round(Number(extra) || 0))), Boolean(ask)),
   );
   ipcMain.handle("bar:copy", (e, id, plain) => e.sender === bar?.webContents && copyTodo(String(id), Boolean(plain)));
+  // The page's way to the right page of System Settings (a blocked mic, say).
+  ipcMain.on("app:settings", (e, which) => isStand(e.senderFrame?.url) && openSettings(which));
+  buildMenus();
+  nativeTheme.on("updated", () => win?.setBackgroundColor(backdrop()));
   // Focus moving between apps: a blur comes just before the next focus, so look once both have landed.
   for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));
   if (!globalShortcut.register(SNAP_SHORTCUT, () => void snap("shortcut").then(tell)))
     notify("Snap shortcut is taken", `Another app already uses ${SNAP_SHORTCUT}, so Snap from anywhere is off.`);
   app.on("activate", () => showWindow());
+  // ⌘Tab back to Stand while the window is put away in a call: bring it back, as the Dock does.
+  // Not for a click on the bar or a snap, which can make Stand active for a moment.
+  app.on("did-become-active", () => {
+    if (meeting && win && !win.isVisible() && !barPointer && !barHold && !picking) showWindow();
+  });
+});
+// Quitting in a meeting leaves the call, so it asks first.
+app.on("before-quit", (e) => {
+  if (quitting || !meeting) return void (quitting = true);
+  const choice = dialog.showMessageBoxSync(win?.isVisible() ? win : undefined, {
+    type: "question",
+    message: "Leave the meeting and quit Stand?",
+    detail: `You're in a meeting in ${meeting.space}.`,
+    buttons: ["Quit", "Cancel"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (choice === 1) return e.preventDefault();
+  quitting = true;
 });
 app.on("will-quit", () => globalShortcut.unregisterAll());
 app.on("window-all-closed", () => {

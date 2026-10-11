@@ -396,6 +396,9 @@ export function openDb(file?: string) {
 
     /** Finds the user by Google subject (or email, for accounts created by the
      *  stand-in sign-in) and refreshes their profile. */
+    userName(id: string): string | null {
+      return ((db.prepare("SELECT name FROM users WHERE id = ?").get(id) as Row | undefined)?.name as string | undefined) ?? null;
+    },
     upsertUser(u: { googleSub: string | null; email: string; name: string; picture: string | null }): User {
       const email = u.email.toLowerCase();
       const existing =
@@ -800,7 +803,7 @@ export function openDb(file?: string) {
     /** Re-pins speech in [from, now] that was attached to `fromItem` onto `toItem`.
      *  Used when someone confirms an agent suggestion: the screen changed at
      *  `from`, so what was said since then belongs to the new item. */
-    repinSince(meetingId: string, from: number, fromItem: string | null, toItem: string): Segment[] {
+    repinSince(meetingId: string, from: number, fromItem: string | null, toItem: string | null): Segment[] {
       const rows = db
         .prepare("SELECT * FROM segments WHERE meeting_id = ? AND ts >= ? AND item_id IS ?")
         .all(meetingId, from, fromItem) as Row[];

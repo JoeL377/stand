@@ -71,7 +71,8 @@ export function RoomPage() {
         onEnded={(meetingId) => nav(`/meetings/${meetingId}`)}
         onLeave={() => {
           setJoined(false);
-          load();
+          // After the room hears we've gone, so the lobby doesn't show us as still here.
+          setTimeout(load, 500);
         }}
       />
     );
@@ -80,6 +81,8 @@ export function RoomPage() {
 
   const past = room.meetings.filter((m) => m.endedAt && m.segmentCount > 0).slice(0, 5);
   const live = !!room.liveMeetingId;
+  // A meeting nobody's in any more: it ends by itself unless someone comes back.
+  const wrapping = live && room.people.length === 0;
 
   // The agenda as the meeting shows it: tasks and tickets, with a deck's
   // slides folded into one line.
@@ -131,13 +134,14 @@ export function RoomPage() {
 
       <main className="lobby-main">
         <section className="lobby-card">
-          <span className={live ? "lobby-status live" : "lobby-status"}>
+          <span className={live && !wrapping ? "lobby-status live" : "lobby-status"}>
             <span className="dot" />
-            {live ? "Talking now" : "Quiet right now"}
+            {wrapping ? "Wrapping up" : live ? "Talking now" : "Quiet right now"}
           </span>
           <h1>{room.name}</h1>
           {room.purpose && <p className="lobby-purpose">{room.purpose}</p>}
           <SynthesisLine roomId={room.id} instructions={room.synthesisInstructions} onSaved={(v) => setRoom({ ...room, synthesisInstructions: v })} />
+          {wrapping && <p className="muted lobby-wrapping">Nobody's in the meeting now. It ends by itself in about 2 minutes, and the notes are written up, unless someone joins.</p>}
           {live && room.people.length > 0 && (
             <div className="lobby-people">
               <span className="stack">
@@ -152,7 +156,7 @@ export function RoomPage() {
           )}
           <div className="lobby-actions">
             <button className="primary lobby-join" autoFocus onClick={() => setJoined(true)}>
-              {live ? "Join them" : "Start talking"}
+              {wrapping ? "Join" : live ? "Join them" : "Start talking"}
             </button>
             <button className="lobby-copy" onClick={copy} title="Copy a link others can join with">
               <LinkIcon />

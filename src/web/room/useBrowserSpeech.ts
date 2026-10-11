@@ -24,9 +24,11 @@ export function useBrowserSpeech(
   onFinal: (text: string, startedAt: number) => void,
   onInterim: (text: string) => void,
   onError?: (msg: string) => void,
+  /** Recognition stopped for a reason that may pass (the network, the mic), or null once it's back. */
+  onTrouble?: (msg: string | null) => void,
 ) {
-  const cb = useRef({ onFinal, onInterim, onError });
-  cb.current = { onFinal, onInterim, onError };
+  const cb = useRef({ onFinal, onInterim, onError, onTrouble });
+  cb.current = { onFinal, onInterim, onError, onTrouble };
 
   useEffect(() => {
     if (!enabled || !browserSpeechSupported()) return;
@@ -37,8 +39,19 @@ export function useBrowserSpeech(
     rec.lang = navigator.language || "en-US";
     let active = true;
     let utteranceStart: number | null = null;
+    // After a network or mic error, restarts slow down, and the trouble is reported until a try works.
+    let wait = 0;
+    let troubled = false;
+    let restart: ReturnType<typeof setTimeout> | undefined;
+    let cleared: ReturnType<typeof setTimeout> | undefined;
+    const fine = () => {
+      wait = 0;
+      if (troubled) cb.current.onTrouble?.(null);
+      troubled = false;
+    };
 
     rec.onresult = (e) => {
+      fine();
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
@@ -56,24 +69,39 @@ export function useBrowserSpeech(
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         active = false;
         cb.current.onError?.("Speech recognition was blocked. Allow the microphone for this site.");
+      } else if (e.error === "network" || e.error === "audio-capture") {
+        clearTimeout(cleared);
+        wait = Math.min(30_000, wait ? wait * 2 : 2_000);
+        troubled = true;
+        cb.current.onTrouble?.(
+          e.error === "network" ? "the browser's speech service can't be reached" : "the browser can't hear your mic",
+        );
       }
+    };
+    const start = () => {
+      try {
+        rec.start();
+      } catch {
+        /* already started */
+      }
+      // No new error a few seconds into a retry: it's working again.
+      if (troubled) cleared = setTimeout(fine, 6_000);
     };
     // Chrome stops recognition after a pause; keep it running while the mic is on.
     rec.onend = () => {
-      if (active) {
-        try {
-          rec.start();
-        } catch {
-          /* already started */
-        }
-      }
+      if (!active) return;
+      if (wait) restart = setTimeout(start, wait);
+      else start();
     };
     rec.start();
     return () => {
       active = false;
+      clearTimeout(restart);
+      clearTimeout(cleared);
       rec.onend = null;
       rec.abort();
       cb.current.onInterim("");
+      if (troubled) cb.current.onTrouble?.(null);
     };
   }, [enabled]);
 }

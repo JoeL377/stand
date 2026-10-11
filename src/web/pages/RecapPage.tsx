@@ -19,6 +19,7 @@ export function RecapPage() {
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [upNext, setUpNext] = useState<UpNext | null>(null);
 
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     api
       .meeting(meetingId)
@@ -31,9 +32,27 @@ export function RecapPage() {
         return api.room(m.roomId).then(setRoom);
       })
       .catch((e) => setError(e.message));
-  }, [meetingId]);
+  }, [meetingId, attempt]);
 
-  if (error) return <div className="loading error">{error}</div>;
+  if (error)
+    return (
+      <div className="home">
+        <div className="home-card">
+          <p className="error">{error}</p>
+          <div className="row">
+            <button
+              onClick={() => {
+                setError(null);
+                setAttempt((n) => n + 1);
+              }}
+            >
+              Try again
+            </button>
+            <Link to="/">Back to spaces</Link>
+          </div>
+        </div>
+      </div>
+    );
   if (!data) return <div className="loading">Loading…</div>;
   const people = [...new Set(data.items.flatMap((g) => g.segments.map((s) => s.speakerName)))];
   const actions = data.items.flatMap((g) => g.notes.filter((n) => n.kind === "action"));

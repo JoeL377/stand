@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Stand</title>
+<title>Stand meeting bar</title>
 <style>
   :root { color-scheme: dark; font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; cursor: default; }
@@ -24,11 +24,21 @@
   /* Talking while muted: amber, and the title says so. */
   .pill.muted-talk { box-shadow: 0 0 0 1.5px rgb(251 191 36), 0 0 0 4px rgb(245 158 11 / 0.4), 0 2px 4px rgb(0 0 0 / 0.35); }
   .pill.muted-talk .mic { background: rgb(245 158 11 / 0.22); color: #fbbf24; }
-  /* Each time the bar comes up (you've switched away from Stand), it pops in and glows twice. */
-  @keyframes arrive { from { transform: scale(0.9); opacity: 0; } }
+  /* The bar settles in quickly whenever it comes up, and glows once when a meeting starts. */
+  @keyframes arrive { from { transform: scale(0.96); opacity: 0; } }
+  @keyframes fade { from { opacity: 0; } }
   @keyframes glow { 50% { box-shadow: var(--ring-lit); } }
-  .pill.arrive { animation: arrive 0.2s ease-out, glow 0.8s ease-in-out 0.2s 2; }
-  @media (prefers-reduced-motion: reduce) { .pill.arrive { animation: glow 0.8s ease-in-out 1; } }
+  .pill.waiting { opacity: 0; }
+  .pill.arrive { animation: arrive 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+  .pill.arrive.first { animation: arrive 180ms cubic-bezier(0.23, 1, 0.32, 1), glow 800ms ease-in-out 180ms 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .pill.arrive { animation: fade 150ms ease-out; }
+    .pill.arrive.first { animation: fade 150ms ease-out, glow 800ms ease-in-out 1; }
+  }
+  /* Pressed: a little give, answering before the click completes. */
+  button { transition: background 0.12s, scale 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+  button.down { scale: 0.97; }
+  @media (prefers-reduced-motion: reduce) { button.down { scale: none; filter: brightness(0.85); } }
   button { -webkit-app-region: no-drag; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 30px; padding: 0; border: 0; border-radius: 999px; background: none; color: inherit; font: inherit; cursor: pointer; }
   button:hover { background: rgb(255 255 255 / 0.1); }
   svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -36,8 +46,11 @@
   .open svg { width: 22px; height: 22px; stroke: none; }
   .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d7d7e0; font-size: 12.5px; }
   .what .key { margin-right: 6px; padding: 1px 5px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2); color: #a5a5b3; font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .what.said { color: #86efac; }
+  .what.said { display: flex; align-items: center; color: #86efac; }
+  .what .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .what.said.bad, .what.warn { color: #fcd34d; }
+  /* Still going: neither good nor bad yet. */
+  .what.said.pending { color: #d7d7e0; }
   .mic { width: 30px; }
   .mic.off { color: #ff7b7b; }
   .snap { padding: 0 12px 0 10px; background: #2d6cdf; color: #fff; font-size: 12.5px; font-weight: 500; }
@@ -54,15 +67,31 @@
   .list-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9c9d3; font-weight: 600; }
   .rows { max-height: 240px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
   .todo { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 8px; cursor: pointer; }
-  .todo:hover { background: rgb(255 255 255 / 0.08); }
+  .todo:is(:hover, :focus-within) { background: rgb(255 255 255 / 0.08); }
+  .todo .copy { flex: 1; min-width: 0; height: 100%; margin: 0 -4px; padding: 0 4px; gap: 8px; justify-content: flex-start; border-radius: 0; background: none; text-align: left; }
+  .todo .copy:focus-visible, .todo .plain:focus-visible { outline: 2px solid #8fb2ff; outline-offset: -2px; border-radius: 6px; }
   .todo .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e3e3ea; font-size: 12.5px; }
   .todo .meta { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8e8e9c; font-size: 11px; }
-  .todo .plain { display: none; flex: none; padding: 2px 6px; border-radius: 5px; color: #a5a5b3; font-size: 11px; }
+  .todo .plain { flex: none; height: 22px; padding: 2px 6px; border-radius: 5px; color: #a5a5b3; font-size: 11px; }
+  /* Out of sight until the row is hovered or focused, but still there for VoiceOver. */
+  .todo:not(:hover, :focus-within) .plain { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
   .todo .plain:hover { background: rgb(255 255 255 / 0.12); color: #fff; }
-  .todo:hover .plain { display: inline; }
-  .todo:hover .meta { display: none; }
-  .todo.copied .meta, .todo.copied:hover .meta { display: inline; color: #86efac; }
-  .todo.copied .plain { display: none; }
+  .todo:is(:hover, :focus-within) .meta { display: none; }
+  .todo.copied .meta, .todo.copied:is(:hover, :focus-within) .meta { display: inline; color: #86efac; }
+  .todo.copied:not(:focus-within) .plain { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+  .what .fix { height: 22px; margin-left: 8px; padding: 0 9px; background: rgb(255 255 255 / 0.14); color: #fff; font-size: 12px; }
+  /* Something the person should know, ahead of the item: red for not recording, amber for the connection. */
+  .what .flag { margin-right: 6px; color: #fcd34d; font-weight: 500; }
+  .what .flag.bad { color: #ff8a8a; }
+  .what.nudge { display: flex; align-items: center; color: #c9d7ff; }
+  .what.nudge .go { min-width: 0; max-width: 100%; margin-left: 0; gap: 5px; justify-content: flex-start; }
+  .what.nudge .mark { color: #8fb2ff; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  /* Increase Contrast in System Settings: a firmer edge, no glow. */
+  @media (prefers-contrast: more) {
+    :root { --ring: 0 0 0 2px #fff; --ring-lit: 0 0 0 2px #fff; }
+    .pill { background: #111214; }
+  }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -72,10 +101,11 @@
       <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#2d6cdf" /><path d="M9 20v-8M14 23V9M19 19v-6M24 17v-2" stroke="white" stroke-width="3" stroke-linecap="round" /></svg>
     </button>
     <div class="what" id="what"></div>
-    <button class="todos" id="todos" title="To-dos in this space: click one to copy it" hidden>
+    <button class="todos" id="todos" title="To-dos in this space: click one to copy it" aria-expanded="false" hidden>
       <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4" /><path d="M8.5 12.5l2.5 2.5 4.5-5.5" /></svg>
       <span id="todo-count"></span>
     </button>
+    <div class="sr" id="said" role="status"></div>
     <button class="mic" id="mic" aria-label="Mute">
       <svg id="mic-on" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
       <svg id="mic-off" viewBox="0 0 24 24" hidden><path d="M15 9.5V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.6 2.5M5 11a7 7 0 0 0 11.3 5.5M19 11a7 7 0 0 1-.6 2.8M12 18v3M4 4l16 16" /></svg>
@@ -93,41 +123,159 @@
   const $ = (id) => document.getElementById(id);
   let state = null;
   let saying = null;
+  // Talking while muted (see "your voice" below).
+  let mutedTalk = false;
+
+  // VoiceOver doesn't follow text that changes in place, so changes worth knowing are read out.
+  let spoken = "";
+  function speak() {
+    const s = state;
+    const now = !s
+      ? ""
+      : s.ending
+        ? "The meeting has ended. Stand is writing the notes."
+        : mutedTalk
+          ? "You're muted."
+          : s.offline
+          ? "Stand is reconnecting."
+          : s.notRecording
+            ? "Not recording. What you say isn't being recorded."
+            : s.switched
+              ? `Switched to ${s.switched}. Undo is on the bar.`
+              : s.nudge
+                ? `Stand suggests switching to ${s.nudge}.`
+                : "";
+    if (now === spoken) return;
+    // Coming back after a problem is worth saying too.
+    const wasTrouble = spoken.startsWith("Stand is reconnecting") || spoken.startsWith("Not recording");
+    spoken = now;
+    const say = now || (wasTrouble && s ? "Stand is connected and recording again." : "");
+    // While a snap's result is being read out, this waits its turn.
+    if (saying) owed = say;
+    else if (say) $("said").textContent = say;
+  }
+  let owed = "";
 
   function render() {
+    speak();
     const what = $("what");
+    // The mic first: it can be pressed while a snap's result shows, and has to show the change.
+    if (state) {
+      $("mic").className = state.micOn ? "mic" : "mic off";
+      $("mic").ariaLabel = state.micOn ? "Mute" : "Unmute";
+      $("mic").title = `${$("mic").ariaLabel}${state.muteKey ? ` (${state.muteKey.replace(/\+/g, " + ")}, from any app)` : ""}`;
+      // SVGs have no .hidden property, so set the attribute.
+      $("mic-on").toggleAttribute("hidden", !state.micOn);
+      $("mic-off").toggleAttribute("hidden", state.micOn);
+      // Once the meeting has ended there's nothing to snap into.
+      $("snap").hidden = Boolean(state.ending);
+      const todos = state.todos ?? [];
+      // For the few seconds the bar says where Switch went, the count steps aside so it fits.
+      const switching = Boolean(state.switched && !state.offline && !state.notRecording);
+      $("todos").hidden = todos.length === 0 || (switching && !listOpen);
+      $("todo-count").textContent = todos.length;
+      $("todos").ariaLabel = `${todos.length} to-do${todos.length === 1 ? "" : "s"} in this space`;
+      if (listOpen) todos.length ? void showList(true) : void showList(false);
+    }
     what.className = "what";
     what.textContent = "";
     what.title = "";
+    $("pill").classList.toggle("muted-talk", Boolean(mutedTalk));
     if (saying) {
-      what.className = saying.ok ? "what said" : "what said bad";
-      what.textContent = saying.text;
+      what.className = saying.pending ? "what said pending" : saying.ok ? "what said" : "what said bad";
+      const text = document.createElement("span");
+      text.className = "t";
+      text.textContent = saying.text;
+      what.replaceChildren(text);
       what.title = saying.body ?? "";
-    } else if (mutedTalk) {
+      // A missing permission comes with the way to it.
+      if (saying.settings) {
+        const fix = document.createElement("button");
+        fix.className = "fix";
+        fix.textContent = "Open Settings";
+        press(fix, "settings");
+        what.append(fix);
+      }
+      return;
+    }
+    if (!state) return;
+    if (state.ending) {
+      what.textContent = "Writing notes…";
+      what.title = "The meeting has ended. Stand is writing the notes; the recap shows up in the space.";
+      return;
+    }
+    // Talking while muted: said here, where you'd look, until a moment after you stop.
+    if (mutedTalk) {
       what.className = "what warn";
       what.textContent = "You're muted";
       what.title = "Click the mic to unmute";
-    } else if (state) {
-      if (state.itemKey) {
-        const key = document.createElement("span");
-        key.className = "key";
-        key.textContent = state.itemKey;
-        what.append(key);
-      }
-      what.append(state.item ?? state.space);
-      what.title = state.item ? `${state.space}: ${state.item}` : state.space;
+      return;
     }
-    $("pill").classList.toggle("muted-talk", Boolean(mutedTalk));
-    if (!state) return;
-    const todos = state.todos ?? [];
-    $("todos").hidden = todos.length === 0;
-    $("todo-count").textContent = todos.length;
-    if (listOpen) todos.length ? void showList(true) : void showList(false);
-    $("mic").className = state.micOn ? "mic" : "mic off";
-    $("mic").title = $("mic").ariaLabel = state.micOn ? "Mute" : "Unmute";
-    // SVGs have no .hidden property, so set the attribute.
-    $("mic-on").toggleAttribute("hidden", !state.micOn);
-    $("mic-off").toggleAttribute("hidden", state.micOn);
+    // Just switched from the bar: where to, and the way back, here where it was pressed.
+    // A problem (reconnecting, not recording) still comes first.
+    if (state.switched && !state.offline && !state.notRecording) {
+      what.className = "what said";
+      const text = document.createElement("span");
+      text.className = "t";
+      text.textContent = `✓ ${state.switched}`;
+      const undo = document.createElement("button");
+      undo.className = "fix";
+      undo.textContent = "Undo";
+      press(undo, "undo");
+      what.replaceChildren(text, undo);
+      what.title = `Switched to ${state.switched}`;
+      return;
+    }
+    // The host's nudge, which otherwise only shows in the Stand window.
+    // One button, so the item's name is what gets the room.
+    // Not recording comes first for a nudge from the talk: it means little when nothing is heard.
+    if (state.nudge && !state.offline && !(state.notRecording && state.nudgeFromTalk)) {
+      what.className = "what nudge";
+      const go = document.createElement("button");
+      go.className = "fix go";
+      const mark = document.createElement("span");
+      mark.className = "mark";
+      mark.textContent = "✦";
+      mark.ariaHidden = "true";
+      const text = document.createElement("span");
+      text.className = "t";
+      // Beside "Not recording" there's room only for the item's name; it's still the Switch button.
+      text.textContent = state.notRecording ? state.nudge : `Switch to ${state.nudge}`;
+      go.ariaLabel = `Switch to ${state.nudge}`;
+      go.append(mark, text);
+      go.title = `The talk or the screen seems to be about ${state.nudge}. Switch the meeting to it.`;
+      press(go, "switch");
+      // Nothing being recorded still shows, in front.
+      if (state.notRecording) {
+        const f = document.createElement("span");
+        f.className = "flag bad";
+        f.textContent = "Not recording";
+        what.append(f);
+      }
+      what.append(go);
+      return;
+    }
+    const flag = state.offline ? ["Reconnecting…", ""] : state.notRecording ? ["Not recording", "bad"] : null;
+    if (flag) {
+      const f = document.createElement("span");
+      f.className = `flag ${flag[1]}`;
+      f.textContent = flag[0];
+      what.append(f);
+    }
+    if (state.itemKey) {
+      const key = document.createElement("span");
+      key.className = "key";
+      key.textContent = state.itemKey;
+      what.append(key);
+    }
+    what.append(state.item ?? state.space);
+    what.title = [
+      state.offline && "Stand is reconnecting. Edits wait and go through when it's back.",
+      state.notRecording && "What you say isn't being recorded. Open Stand to see why.",
+      state.item ? `${state.space}: ${state.item}` : state.space,
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
 
   // ---- the space's to-dos ----
@@ -137,30 +285,42 @@
     $("list-space").textContent = `To-dos in ${state?.space ?? "this space"}`;
     const rows = $("rows");
     const scroll = rows.scrollTop;
+    // Rebuilt on every update: the keyboard stays on the same row and button.
+    const had = rows.contains(document.activeElement) ? document.activeElement : null;
+    const focusId = had?.closest(".todo")?.dataset.id;
+    const focusKind = had?.classList.contains("plain") ? "plain" : "copy";
     rows.replaceChildren(
       ...(state?.todos ?? []).map((t) => {
         const li = document.createElement("li");
         li.className = copied.has(t.id) ? "todo copied" : "todo";
         li.dataset.id = t.id;
         li.title = t.text;
+        // Real buttons, so the keyboard and VoiceOver can copy too.
+        const copy = document.createElement("button");
+        copy.className = "copy";
+        copy.ariaLabel = `Copy for your agent: ${t.text}`;
         const text = document.createElement("span");
         text.className = "t";
         text.textContent = t.text;
         const meta = document.createElement("span");
         meta.className = "meta";
         meta.textContent = copied.has(t.id) ? "✓ Copied" : [t.owner, t.itemKey].filter(Boolean).join(" · ");
-        const plain = document.createElement("span");
+        copy.append(text, meta);
+        const plain = document.createElement("button");
         plain.className = "plain";
         plain.textContent = "Text only";
         plain.title = "Copy just the to-do's words";
-        li.append(text, meta, plain);
+        plain.ariaLabel = `Copy just the words: ${t.text}`;
+        li.append(copy, plain);
         return li;
       }),
     );
     rows.scrollTop = scroll;
+    if (focusId) rows.querySelector(`[data-id="${CSS.escape(focusId)}"] .${focusKind}`)?.focus();
   }
   async function showList(open) {
     listOpen = open;
+    $("todos").setAttribute("aria-expanded", String(open));
     clearTimeout(closing);
     $("list").hidden = !open;
     $("todos").classList.toggle("on", open);
@@ -177,25 +337,40 @@
     await window.bar.size(extra);
   }
   const copied = new Map();
-  $("rows").addEventListener("pointerdown", async (e) => {
+  async function copyRow(row, plain) {
+    const id = row.dataset.id;
+    if (!(await window.bar.copy(id, plain))) return;
+    clearTimeout(copied.get(id));
+    copied.set(id, setTimeout(() => (copied.delete(id), listOpen && renderList()), 1600));
+    renderList();
+    $("said").textContent = plain ? "Copied the to-do's words." : "Copied the to-do for your agent.";
+  }
+  $("rows").addEventListener("pointerdown", (e) => {
     const row = e.target.closest(".todo");
     if (!row || e.button !== 0) return;
     e.preventDefault();
     window.bar.press("list");
-    const id = row.dataset.id;
-    if (!(await window.bar.copy(id, Boolean(e.target.closest(".plain"))))) return;
-    clearTimeout(copied.get(id));
-    copied.set(id, setTimeout(() => (copied.delete(id), listOpen && renderList()), 1600));
-    renderList();
+    void copyRow(row, Boolean(e.target.closest(".plain")));
   });
+  // The keyboard and VoiceOver click without a pointer.
+  $("rows").addEventListener("click", (e) => {
+    const row = e.target.closest(".todo");
+    if (!row || e.detail !== 0) return;
+    void copyRow(row, Boolean(e.target.closest(".plain")));
+  });
+  const toggleList = () => {
+    void showList(!listOpen);
+  };
   $("todos").addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
     window.bar.press("list");
-    void showList(!listOpen);
+    toggleList();
   });
+  $("todos").addEventListener("click", (e) => e.detail === 0 && toggleList());
   window.bar.onCloseList(() => {
     listOpen = false;
+    $("todos").setAttribute("aria-expanded", "false");
     $("list").hidden = true;
     $("todos").classList.remove("on");
     document.body.classList.remove("up");
@@ -219,7 +394,6 @@
   // ---- your voice ----
   // The ring follows your mic while you talk. Talk while muted (loud for a moment, so a cough
   // doesn't count) and the bar turns amber and says "You're muted" until a while after you stop.
-  let mutedTalk = false;
   let loudSince = 0;
   let quiet;
   window.bar.onLevel((v) => {
@@ -247,33 +421,69 @@
   // How the snap went, in place of the title for a few seconds.
   window.bar.onReport((r) => {
     clearTimeout(saying?.timer);
-    const ok = Boolean(r.snapId) || r.title === "Snapped";
+    const ok = Boolean(r.snapId) || r.title === "Snapped" || r.pending;
     saying = {
       ok,
-      text: r.snapId ? "✓ Snapped for everyone" : ok ? "✓ Snapped to your clipboard" : r.title,
+      pending: Boolean(r.pending),
+      text: r.pending ? r.title : r.snapId ? "✓ Snapped for everyone" : ok ? "✓ Snapped to your clipboard" : r.title,
       body: r.body,
+      settings: r.settings,
+      // Saving waits for its result, but not forever.
       timer: setTimeout(() => {
         saying = null;
         render();
-      }, ok ? 3500 : 6000),
+        if (owed) $("said").textContent = owed;
+        owed = "";
+      }, r.pending ? 100_000 : ok ? 3500 : 6000),
     };
     render();
+    // Read out by VoiceOver, which doesn't follow the text that changes in place.
+    $("said").textContent = `${saying.text}. ${r.body ?? ""}`;
   });
+  // Coming up: the pill waits, unseen, until the app has made the window visible, then
+  // arrives, so none of the arrival is spent out of sight.
+  let pulseNext = false;
   window.bar.onShown(({ pulse }) => {
-    if (!pulse) return;
+    up();
+    pulseNext = pulse;
     const pill = $("pill");
-    pill.classList.remove("arrive");
+    pill.classList.remove("arrive", "first");
+    pill.classList.add("waiting");
+    requestAnimationFrame(() => requestAnimationFrame(() => (window.bar.painted ? window.bar.painted() : arrive())));
+  });
+  function arrive() {
+    const pill = $("pill");
+    // Once per showing: a second "visible" doesn't start it over.
+    if (!pill.classList.contains("waiting")) return;
+    pill.classList.remove("waiting", "arrive", "first");
     void pill.offsetWidth; // restarts the animation
     pill.classList.add("arrive");
-  });
+    if (pulseNext) pill.classList.add("first");
+  }
+  window.bar.onVisible?.(arrive);
+  addEventListener("blur", () => up());
   // On press, not on click: a press on the bar can bring Stand forward, which used to hide
-  // the bar before the click finished, so the click was lost.
-  for (const button of ["open", "mic", "snap"])
-    $(button).addEventListener("pointerdown", (e) => {
+  // the bar before the click finished, so the click was lost. A click with no pointer behind
+  // it (the keyboard, VoiceOver) still works.
+  function press(el, button) {
+    el.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
       window.bar.press(button);
     });
+    el.addEventListener("click", (e) => e.detail === 0 && window.bar.press(button));
+  }
+  for (const button of ["open", "mic", "snap"]) press($(button), button);
+  // Presses are taken over on pointerdown, so :active never applies: the give is set by hand.
+  const up = () => document.querySelectorAll("button.down").forEach((b) => b.classList.remove("down"));
+  document.addEventListener("pointerdown", (e) => e.button === 0 && e.target.closest?.("button")?.classList.add("down"), true);
+  for (const end of ["pointerup", "pointercancel"]) document.addEventListener(end, up, true);
+  document.documentElement.addEventListener("mouseleave", up);
+  // Right-click: open Stand, or put the bar away until the meeting ends.
+  addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    window.bar.press("menu");
+  });
   // So the app knows which app you're in before a click on the bar can change that.
   document.documentElement.addEventListener("mouseenter", () => window.bar.press("hover"));
   document.documentElement.addEventListener("mouseleave", () => window.bar.press("leave"));
