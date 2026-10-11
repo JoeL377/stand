@@ -409,10 +409,10 @@ function allowMediaAndSharing(ses) {
 // the entire screen, one window, or a box you move and resize (it's where you left
 // it last time). The snap goes to the meeting you're in, on whatever is in focus,
 // and to the clipboard; Options turns either off and sets a 5 or 10 second timer. Out of a
-// meeting it goes to a space, picked on the save card that comes up after the cut.
+// meeting it's pinned to a note for the bar's space, in the note card that opens under the bar.
 
 /** What the toolbar remembers between snaps. toMeeting is "to Stand": the meeting you're in,
- *  or out of a meeting the space you pick on the save card; space is the last one picked. */
+ *  or out of a meeting a note for the bar's space; space is the space the bar holds. */
 const SNAP_DEFAULTS = { mode: "portion", toMeeting: true, toClipboard: true, timer: 0, box: null, space: null };
 const prefsFile = () => path.join(app.getPath("userData"), "snap.json");
 
@@ -492,9 +492,11 @@ async function snapOn(from, onDisplay) {
   const overlay = makeToolbar(display);
   const others = elsewhere(me, display);
   // The bar is up when Stand is in the background, which is when people snap: keep it out of
-  // the picture. macOS takes it off the screen within a frame or two.
+  // the picture, and the note card with it. macOS takes them off the screen within a frame or two.
   barAway = true;
-  if (bar?.isVisible()) {
+  const noteUp = Boolean(noteWin?.isVisible());
+  if (noteUp) noteWin.hide();
+  if (bar?.isVisible() || noteUp) {
     closeBarList();
     hideBar();
     barSnapped = true;
@@ -514,7 +516,7 @@ async function snapOn(from, onDisplay) {
       trace("front", { front: front?.name });
     });
     for (const o of others) o.showInactive();
-    const choice = await openToolbar(me, overlay, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId), t0 });
+    const choice = await openToolbar(me, overlay, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId), space: resting?.space ?? null, t0 });
     trace("toolbar", { choice: choice && (choice.failed ?? (choice.cancel ? "cancel" : choice.mode)) });
     if (me.switchTo) return { switchTo: me.switchTo };
     // The other displays were only dimmed for choosing one: give them back now, not after saving.
@@ -542,8 +544,8 @@ async function snapOn(from, onDisplay) {
     // The screen's been read: the bar can come back while the snap saves, and say that it is.
     barAway = false;
     updateBar();
-    // Out of a meeting, a card in the corner asks which space it goes to before anything leaves the Mac.
-    if (!roomId && prefs.toMeeting) return await saveToSpace(me, display, image, shotAt, prefs, reading);
+    // Out of a meeting it's pinned to the note card under the bar, and saved with the note.
+    if (!roomId && prefs.toMeeting) return await pinSnap(image, shotAt, prefs, reading);
     me.saving = true;
     // Where it began says where it's reported: from the page's Snap button, in the page;
     // otherwise on the bar while it's up, else in the page if Stand is in front.
@@ -570,6 +572,11 @@ async function snapOn(from, onDisplay) {
     if (picking === me) picking = null;
     barAway = false;
     updateBar();
+    // The note card, if it stepped out of the picture.
+    if (noteUp && noteWin && !noteWin.isDestroyed() && !noteWin.isVisible()) {
+      noteWin.showInactive();
+      noteWin.focus();
+    }
   }
 }
 
@@ -577,7 +584,7 @@ async function snapOn(from, onDisplay) {
  *  shows as a thumbnail in the corner for a moment, as macOS's own screenshots do, and a
  *  problem as a notification. */
 function tell(report) {
-  // The save card already showed how it went.
+  // The note card shows a pinned snap.
   if (!report || report.quiet) return;
   if (bar?.isVisible()) {
     if (!report.onBar) bar.webContents.send("bar:report", report);
@@ -789,7 +796,7 @@ function makeToolbar(display) {
 /** The toolbar over a still of one display, in the window makeToolbar made. The window list
  *  follows when it's ready. Resolves to what to snap, or a cancel (with the settings to
  *  keep), or null if it closed some other way. */
-function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, t0 }) {
+function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, space, t0 }) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (choice) => {
@@ -846,7 +853,7 @@ function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, t
       if (failed) return finish({ failed });
       if (!open()) return;
       const accent = mac ? systemPreferences.getAccentColor?.() : null;
-      overlay.webContents.send("snap:open", { image, windows: [], prefs, inMeeting, accent: accent ? `#${accent.slice(0, 6)}` : null });
+      overlay.webContents.send("snap:open", { image, windows: [], prefs, inMeeting, space, accent: accent ? `#${accent.slice(0, 6)}` : null });
       void windows.then(
         (list) => open() && overlay.webContents.send("snap:windows", list.map((w) => ({ id: w.id, x: w.x - b.x, y: w.y - b.y, w: w.w, h: w.h }))),
       );
@@ -944,9 +951,10 @@ const standFetch = (p, opts = {}) => session.fromPartition(PARTITION).fetch(`${S
 
 const copyImage = (image) => clipboard.write([new ClipboardItem({ "image/png": new Blob([image.toPNG()], { type: "image/png" }) })]);
 
-/** Sends a snap to a space: to its meeting, or with to=space straight to the space. A blip in
- *  the connection shouldn't lose it: a few tries, each with a time limit, as in the page.
- *  Resolves to {ok, id} or {ok: false, why}. */
+/** Sends a snap to a space: to its meeting, or with to=space straight to the space (and with
+ *  jot=, pinned to a note). A blip in the connection shouldn't lose it: a few tries, each with a
+ *  time limit, as in the page. extra.key, when given, is the key for every try instead of a new
+ *  one. Resolves to {ok, id} or {ok: false, why}. */
 async function postSnap(image, at, roomId, extra = {}, line = "") {
   const { width: w, height: h } = image.getSize();
   const body = image.toJPEG(90);
@@ -994,36 +1002,6 @@ async function deliver(image, at, prefs, roomId) {
   };
 }
 
-// ---- out of a meeting: the save card ------------------------------------------------
-//
-// A snap taken with no meeting on goes to a space, which everyone in it sees once it's saved.
-// Before anything leaves the Mac, a small card in the corner says where: the space (the last
-// one picked), the item (or Stand picks one, marked ✦ until someone confirms it) and a line,
-// all optional but the space. Enter saves, Esc doesn't. It stays up while it saves, shows a
-// check, and goes.
-
-/** The spaces you're in, most recently active first, or why there are none to pick from. */
-async function spacesToSaveTo() {
-  const res = await standFetch("/api/spaces", { signal: AbortSignal.timeout(8000) }).catch(() => null);
-  if (!res) return { why: "Stand didn't answer, so it isn't saved to a space." };
-  if (res.status === 401) return { why: "Sign in to Stand to save snaps to a space." };
-  if (!res.ok) return { why: `Stand said ${res.status}, so it isn't saved to a space.` };
-  const list = (await res.json().catch(() => null)) ?? [];
-  if (!list.length) return { why: "Make a space in Stand first; then snaps can go there." };
-  return {
-    spaces: list
-      .map((s) => ({ id: String(s.id), name: short(s.name) || "Untitled space", at: Number(s.activeAt) || 0 }))
-      .sort((a, b) => b.at - a.at)
-      .map(({ id, name }) => ({ id, name })),
-  };
-}
-
-/** A space's agenda items a snap can be about (not single slides). */
-async function itemsOf(spaceId) {
-  const room = await roomOf(spaceId);
-  return (room?.items ?? []).filter((i) => !i.deckId).map((i) => ({ id: String(i.id), title: short(i.title) }));
-}
-
 /** The Mac's accent color, and black or white text on it, whichever reads. */
 function accentColors() {
   const a = mac ? systemPreferences.getAccentColor?.() : null;
@@ -1032,126 +1010,52 @@ function accentColors() {
   return { accent: `#${a.slice(0, 6)}`, onAccent: 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.3 ? "#000" : "#fff" };
 }
 
-async function saveToSpace(me, display, image, at, prefs, reading) {
-  const thumb = image.resize({ height: 152 }).toDataURL();
-  if (prefs.toClipboard) await copyImage(image);
-  const found = await spacesToSaveTo();
-  if (!found.spaces) {
-    if (!prefs.toClipboard) await copyImage(image);
-    return { title: "Copied, not saved to a space", body: found.why, thumb };
-  }
-  const { spaces } = found;
-  const space = spaces.find((s) => s.id === prefs.space)?.id ?? spaces[0].id;
-  const upload = async ({ spaceId, itemId, itemTitle, line }) => {
-    const to = spaces.find((s) => s.id === spaceId) ?? spaces[0];
-    const saved = await postSnap(image, at, to.id, { to: "space", ...(itemId ? { item: String(itemId) } : {}) }, short(line).slice(0, 300));
-    trace("space", { ok: saved.ok, item: Boolean(itemId), line: Boolean(line) });
-    if (!saved.ok) {
-      if (!prefs.toClipboard) await copyImage(image);
-      return { result: { ok: false, why: `${saved.why} It's on your clipboard.` } };
-    }
-    void savePrefs({ ...snapPrefs(), space: to.id }).then(() => refreshRest("saved"));
-    void addText(saved.id, reading);
-    const item = itemId ? short(itemTitle) || null : null;
-    return {
-      result: { ok: true, space: to.name, item },
-      report: { title: `Saved to ${to.name}`, body: item ?? "Stand suggests the item it's about.", snapId: saved.id, thumb, quiet: true },
-    };
-  };
-  return saveCard(me, display, { thumb, spaces, space, items: null, ...accentColors() }, upload);
-}
-
-/** The card itself, in the corner of the display that was snapped. Resolves to the report
- *  once it's saved, or null when it's closed without saving. */
-let saveCardWin = null;
-function saveCard(me, display, data, upload) {
-  return new Promise((resolve) => {
-    const d = display.workArea;
-    const [width, height] = [440, 150];
-    const card = new BrowserWindow({
-      x: d.x + d.width - width - 10,
-      y: d.y + d.height - height - 10,
-      width,
-      height,
-      ...(mac ? { type: "panel" } : {}),
-      show: false,
-      frame: false,
-      transparent: true,
-      resizable: false,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      skipTaskbar: true,
-      alwaysOnTop: true,
-      hasShadow: false,
-      acceptFirstMouse: true,
-      webPreferences: { preload: `${__dirname}/save-preload.js`, contextIsolation: true, sandbox: true },
-    });
-    saveCardWin = card;
-    card.setAlwaysOnTop(true, "floating");
-    card.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-    staysInBackground(card, "save card");
-    let done = false;
-    let saving = false;
-    const mine = (e) => e.sender === card.webContents;
-    // Esc is caught for the card only while it has the keyboard, never from the app you're in.
-    const esc = () => !card.isDestroyed() && card.webContents.send("save:escape");
-    const finish = (report) => {
-      if (done) return;
-      done = true;
-      ipcMain.removeListener("save:ready", onReady);
-      ipcMain.removeListener("save:go", onGo);
-      ipcMain.removeListener("save:cancel", onCancel);
-      if (globalShortcut.isRegistered("Escape")) globalShortcut.unregister("Escape");
-      if (!card.isDestroyed()) card.close();
-      if (saveCardWin === card) saveCardWin = null;
-      resolve(report);
-    };
-    const onReady = (e) => {
-      if (!mine(e) || card.isDestroyed()) return;
-      card.show();
-      card.focus();
-    };
-    const onCancel = (e) => mine(e) && !saving && finish(null);
-    const onGo = async (e, choice) => {
-      if (!mine(e) || saving || typeof choice?.spaceId !== "string") return;
-      saving = true;
-      me.saving = true;
-      const r = await upload(choice).catch((err) => ({ result: { ok: false, why: String(err?.message ?? err) } }));
-      me.saving = false;
-      saving = false;
-      if (done) return;
-      if (card.isDestroyed()) return finish(r.report ?? null);
-      card.webContents.send("save:result", r.result);
-      if (r.result.ok) setTimeout(() => finish(r.report), 1300);
-    };
-    // The snap shortcut again, or the app quitting, closes it unsaved.
-    me.cancel = () => !saving && finish(null);
-    ipcMain.on("save:ready", onReady);
-    ipcMain.on("save:go", onGo);
-    ipcMain.on("save:cancel", onCancel);
-    card.on("focus", () => !globalShortcut.isRegistered("Escape") && globalShortcut.register("Escape", esc));
-    card.on("blur", () => globalShortcut.isRegistered("Escape") && globalShortcut.unregister("Escape"));
-    card.on("closed", () => finish(null));
-    card.webContents.once("did-finish-load", () => {
-      card.webContents.send("save:open", data);
-      // The items for the space it starts on follow when they come.
-      void itemsOf(data.space).then((items) => !card.isDestroyed() && card.webContents.send("save:first-items", { space: data.space, items }));
-    });
-    void card.loadFile(`${__dirname}/save.html`);
-  });
-}
-
 // ---- a note to the space -----------------------------------------------------------------
 //
 // From the bar's note field, or the note shortcut in any app: a small card just under the bar
 // (over it, when the bar is low on the screen) where you type the note or say it with the Mac's
 // dictation, and Enter saves it to the space the bar holds (the meeting's, in one). It takes the
 // keyboard without bringing Stand forward (it's a panel), and closing it hands the keyboard back.
+// A snap out of a meeting is pinned to the top of it: Enter saves the note with its pictures, or
+// with nothing written, the pictures by themselves. Nothing leaves the Mac before Enter.
 
 let noteWin = null;
 /** What was written when the card was put away unsaved: it's there again next time. */
 let noteDraft = "";
+/** Snaps pinned to the note, waiting for Enter: {id, image, at, thumb, reading, key}. */
+let notePins = [];
+const MAX_PINS = 6;
+/** A note already saved whose snaps didn't all make it: Enter again adds the rest to it. */
+let noteSaved = null;
+
+/** Pins a snap to the note card, opening it if it's closed. Resolves to a report that says
+ *  nothing (the card shows it), or why it wasn't pinned. */
+async function pinSnap(image, at, prefs, reading) {
+  const thumb = image.resize({ height: 152 }).toDataURL();
+  if (prefs.toClipboard) await copyImage(image);
+  if (notePins.length >= MAX_PINS) {
+    if (!prefs.toClipboard) await copyImage(image);
+    return { title: `${MAX_PINS} snaps are pinned already`, body: "Save the note, or take one off it, then snap again. This one is on your clipboard.", thumb };
+  }
+  notePins.push({ id: crypto.randomUUID(), image, at, thumb: image.resize({ height: 112 }).toDataURL(), reading, key: crypto.randomUUID() });
+  trace("pin", { pins: notePins.length });
+  sendBarState();
+  if (noteWin && !noteWin.isDestroyed()) {
+    sendPins();
+    return { quiet: true };
+  }
+  const opened = await openNote();
+  // No space to save it to (signed out, say): it's on the clipboard instead.
+  if (opened === false) {
+    notePins.pop();
+    sendBarState();
+    if (!prefs.toClipboard) await copyImage(image);
+    return { title: "Copied, not pinned to a note", body: "Sign in to Stand and make a space; then snaps can go there.", thumb };
+  }
+  return { quiet: true };
+}
+
+const sendPins = () => noteWin && !noteWin.isDestroyed() && noteWin.webContents.send("note:pins", notePins.map(({ id, thumb }) => ({ id, thumb })));
 
 /** Where the card goes for a given height: under the bar, over it, or at the top of the screen
  *  the pointer is on when the bar is down. */
@@ -1166,17 +1070,22 @@ function notePlace(height) {
   return { x: Math.round(a.x + (a.width - BAR.width) / 2), y: a.y + 8, above: false };
 }
 
+/** Opens the card, or brings the keyboard back to it. False when there's no space to write to. */
 async function openNote() {
   if (noteWin && !noteWin.isDestroyed()) {
     noteWin.focus();
-    return noteWin.webContents.send("note:focus");
+    noteWin.webContents.send("note:focus");
+    return true;
   }
   if (!meeting && !resting) await refreshRest("note");
   const to = meeting ? spaceId() : resting?.spaceId;
   const space = meeting ? meeting.space : resting?.space;
-  if (!to) return notify(resting ? "No space to save it to" : "Sign in to Stand", resting ? "Make a space in Stand first." : "Then notes can go to your spaces.");
+  if (!to) {
+    notify(resting ? "No space to save it to" : "Sign in to Stand", resting ? "Make a space in Stand first." : "Then notes can go to your spaces.");
+    return false;
+  }
   closeBarList();
-  let height = 96;
+  let height = notePins.length ? 170 : 96;
   let place = notePlace(height);
   const card = new BrowserWindow({
     x: place.x,
@@ -1242,15 +1151,27 @@ async function openNote() {
       },
     ],
     [
+      "note:unpin",
+      (e, id) => {
+        if (!mine(e) || saving) return;
+        notePins = notePins.filter((p) => p.id !== id);
+        sendPins();
+        sendBarState();
+      },
+    ],
+    [
       "note:go",
       async (e, text) => {
-        if (!mine(e) || saving || typeof text !== "string" || !text.trim()) return;
+        if (!mine(e) || saving || typeof text !== "string" || (!text.trim() && !notePins.length)) return;
         saving = true;
-        const saved = await saveNote(to, text.slice(0, 2000));
+        const n = notePins.length;
+        const saved = await saveNote(to, text.trim().slice(0, 2000));
         saving = false;
-        trace("note", { ok: saved.ok, chars: text.length });
+        trace("note", { ok: saved.ok, chars: text.length, pins: n, left: notePins.length });
+        sendBarState();
         if (card.isDestroyed()) return;
-        card.webContents.send("note:result", saved.ok ? { ok: true, space } : { ok: false, why: saved.why });
+        sendPins();
+        card.webContents.send("note:result", saved.ok ? { ok: true, space, text: Boolean(text.trim()), snaps: n } : { ok: false, why: saved.why });
         if (!saved.ok) return;
         noteDraft = "";
         setTimeout(finish, 1200);
@@ -1261,15 +1182,55 @@ async function openNote() {
   card.on("focus", () => !globalShortcut.isRegistered("Escape") && globalShortcut.register("Escape", esc));
   card.on("blur", () => globalShortcut.isRegistered("Escape") && globalShortcut.unregister("Escape"));
   card.on("closed", finish);
-  card.webContents.once("did-finish-load", () =>
-    card.webContents.send("note:open", { space, draft: noteDraft, above: place.above, dictateKey: "🎤, or Fn twice", ...accentColors() }),
-  );
+  card.webContents.once("did-finish-load", () => {
+    card.webContents.send("note:open", { space, draft: noteDraft, above: place.above, dictateKey: "🎤, or Fn twice", ...accentColors() });
+    sendPins();
+  });
   void card.loadFile(`${__dirname}/note.html`);
+  return true;
 }
 
-/** Saves a note to a space, with a retry for a blip in the connection (the key makes a retry
- *  of one that got through come back as the same note). Resolves to {ok} or {ok: false, why}. */
+/** Saves the note to a space with the snaps pinned to it: the note first, then each snap pinned
+ *  to it (with nothing written, each snap by itself). The note's key makes a retry of one that
+ *  got through come back as the same note; a snap that saved comes off the card, so Enter again
+ *  sends only the ones that didn't. Resolves to {ok} or {ok: false, why}. */
 async function saveNote(to, text) {
+  if (noteSaved && noteSaved.to !== to) noteSaved = null;
+  let jot = noteSaved?.id ?? null;
+  if (text && !jot) {
+    const made = await postNote(to, text);
+    if (!made.ok) return made;
+    jot = made.id;
+  } else if (text && text !== noteSaved?.text) {
+    // Saved before with snaps left over, and changed since: the note says what it says now.
+    await standFetch(`/api/jots/${encodeURIComponent(jot)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+  }
+  const failed = [];
+  for (const pin of [...notePins]) {
+    const saved = await postSnap(pin.image, pin.at, to, { to: "space", key: pin.key, ...(jot ? { jot } : {}) });
+    if (!saved.ok) {
+      failed.push(saved.why);
+      continue;
+    }
+    notePins = notePins.filter((p) => p !== pin);
+    void addText(saved.id, pin.reading);
+  }
+  if (!failed.length) {
+    noteSaved = null;
+    return { ok: true };
+  }
+  if (jot) noteSaved = { id: jot, to, text };
+  const of = jot ? `The note saved, but ${failed.length === 1 ? "a snap" : `${failed.length} snaps`} didn't` : failed.length === 1 ? "The snap didn't save" : `${failed.length} snaps didn't save`;
+  return { ok: false, why: `${of}: ${failed[0]} ${failed.length === 1 ? "It's" : "They're"} still here; Enter tries again.` };
+}
+
+/** The note by itself, with a retry for a blip in the connection. Resolves to {ok, id} or {ok: false, why}. */
+async function postNote(to, text) {
   const body = JSON.stringify({ text, at: Date.now(), key: crypto.randomUUID() });
   let why = "Stand didn't answer. Try again.";
   for (let i = 0; i < 2; i++) {
@@ -1279,7 +1240,7 @@ async function saveNote(to, text) {
       body,
       signal: AbortSignal.timeout(10_000),
     }).catch(() => null);
-    if (res?.ok) return { ok: true };
+    if (res?.ok) return { ok: true, id: (await res.json().catch(() => null))?.id ?? null };
     if (res) {
       why = res.status === 401 ? "Sign in to Stand again, then try again." : ((await res.json().catch(() => null))?.error ?? `Stand said ${res.status}.`);
       if (res.status < 500) break;
@@ -1440,7 +1401,7 @@ function sendBarState() {
   const state = meeting
     ? { ...meeting, muteKey: muteKeyOn ? MUTE_SHORTCUT : null }
     : resting
-      ? { rest: true, ...resting, snapKey: SNAP_SHORTCUT.replace(/\+/g, " + "), noteKey: NOTE_SHORTCUT.replace(/\+/g, " + ") }
+      ? { rest: true, ...resting, pins: notePins.length, snapKey: SNAP_SHORTCUT.replace(/\+/g, " + "), noteKey: NOTE_SHORTCUT.replace(/\+/g, " + ") }
       : null;
   bar.webContents.send("bar:state", state);
 }
@@ -1449,7 +1410,7 @@ function sendBarState() {
 
 /** The space the bar holds out of a meeting, or null when there's none to show (signed out):
  *  {spaceId, space, live: {names} | null, todos, none}. It's the space snaps go to (snap.json's
- *  space): the one last picked on the bar or the save card, or last opened in Stand. */
+ *  space): the one last picked on the bar, or last opened in Stand. */
 let resting = null;
 /** The spaces you're in, most recently active first, for the bar's space menu. */
 let restSpaces = [];
@@ -1984,8 +1945,6 @@ app.whenReady().then(async () => {
   ipcMain.handle("bar:copy", (e, id, plain) => e.sender === bar?.webContents && copyTodo(String(id), Boolean(plain)));
   // The note card's mic: the Mac's dictation, started into its text field.
   ipcMain.handle("note:dictate", (e) => e.sender === noteWin?.webContents && Boolean(native()?.startDictation?.()));
-  // The save card's item pill, when another space is picked.
-  ipcMain.handle("save:items", (e, id) => (e.sender === saveCardWin?.webContents && typeof id === "string" ? itemsOf(id) : []));
   // The page's way to the right page of System Settings (a blocked mic, say).
   ipcMain.on("app:settings", (e, which) => isStand(e.senderFrame?.url) && openSettings(which));
   buildMenus();

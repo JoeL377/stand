@@ -12,4 +12,7 @@ contextBridge.exposeInMainWorld("note", {
   onResult: (fn) => ipcRenderer.on("note:result", (_e, r) => fn(r)),
   onEscape: (fn) => ipcRenderer.on("note:escape", () => fn()),
   onFocus: (fn) => ipcRenderer.on("note:focus", () => fn()),
+  // The snaps pinned to the note, [{id, thumb}], whenever they change.
+  onPins: (fn) => ipcRenderer.on("note:pins", (_e, list) => fn(list)),
+  unpin: (id) => ipcRenderer.send("note:unpin", id),
 });

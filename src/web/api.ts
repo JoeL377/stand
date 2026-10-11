@@ -96,6 +96,8 @@ export const api = {
   saveJot: (roomId: string, jot: { text: string; itemId?: string | null; at?: number }) => call<Jot>("POST", `/api/rooms/${roomId}/jots`, jot),
   updateJot: (id: string, patch: { itemId?: string | null; text?: string }) => call<Jot>("PATCH", `/api/jots/${id}`, patch),
   deleteJot: (id: string) => call<{ ok: true }>("DELETE", `/api/jots/${id}`),
+  /** Brings back a note deleted in the last minute, with its snaps. */
+  restoreJot: (id: string) => call<Jot>("POST", `/api/jots/${id}/restore`),
   addAgenda: (roomId: string, titles: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items`, { titles }),
   importLinear: (roomId: string, input: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/linear`, { input }, SLOW_REQUEST_MS),
   renameItem: (roomId: string, itemId: string, title: string) =>

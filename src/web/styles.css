@@ -1679,7 +1679,9 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .sh-row-link { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; color: inherit; text-decoration: none; }
 .sh-row-link:hover { text-decoration: none; }
 .sh-thumb { flex: none; width: 60px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel-2); cursor: zoom-in; }
+.sh-thumb { position: relative; }
 .sh-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sh-thumb-more { position: absolute; right: 3px; bottom: 3px; padding: 0 4px; border-radius: 4px; background: rgb(0 0 0 / 0.62); color: #fff; font-size: 10.5px; font-weight: 600; line-height: 15px; }
 .sh-icon { flex: none; width: 60px; display: inline-flex; justify-content: center; color: var(--muted); }
 .sh-icon svg { width: 16px; height: 16px; }
 .sh-icon.agent { color: var(--accent-text); font-size: 14px; }
@@ -1732,6 +1734,9 @@ a.sh-pill:hover { text-decoration: none; }
 .sh-view-head strong { flex: 1; min-width: 0; font-weight: 500; }
 .sh-view-img { width: 100%; max-height: 68vh; object-fit: contain; border-radius: 8px; background: var(--panel-2); }
 .sh-view-line { margin: 0; font-size: 15px; }
+.sh-view-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sh-view-step { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
+.sh-view-step .icon-btn { font-size: 18px; line-height: 1; }
 .sh-view-caption { margin: 0; font-size: 13px; color: var(--muted); }
 .sh-view-text summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .sh-view-text pre { margin: 6px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }

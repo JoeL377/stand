@@ -65,6 +65,7 @@
   .note:hover { background: rgb(255 255 255 / 0.09); color: rgb(255 255 255 / 0.7); }
   .note svg { flex: none; width: 13px; height: 13px; }
   .note span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note.pinned { color: rgb(255 255 255 / 0.8); }
   /* Out of a meeting Snap is just its camera, so the note field has the room. */
   body.rest .snap { width: 30px; padding: 0; }
   body.rest .snap .label { display: none; }
@@ -122,7 +123,7 @@
     </button>
     <button class="note" id="note" hidden>
       <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16Z" /><path d="m13.5 6.5 4 4" /></svg>
-      <span>Write a note…</span>
+      <span id="note-text">Write a note…</span>
     </button>
     <div class="what" id="what"></div>
     <button class="todos" id="todos" title="To-dos in this space: click one to copy it" aria-expanded="false" hidden>
@@ -328,10 +329,14 @@
     $("mic-on").removeAttribute("hidden");
     $("mic-off").setAttribute("hidden", "");
     $("snap").hidden = false;
-    $("snap").title = s.none ? `Snap the screen, a window or part of it (${s.snapKey})` : `Snap the screen, a window or part of it, to ${s.space} (${s.snapKey})`;
-    $("snap").ariaLabel = s.none ? "Snap" : `Snap to ${s.space}`;
+    $("snap").title = s.none ? `Snap the screen, a window or part of it (${s.snapKey})` : `Snap the screen, a window or part of it, onto a note for ${s.space} (${s.snapKey})`;
+    $("snap").ariaLabel = s.none ? "Snap" : `Snap onto a note for ${s.space}`;
+    // Snaps pinned to a note that was put away unsaved: the field says they're waiting.
+    const pins = s.pins ? `${s.pins} snap${s.pins === 1 ? "" : "s"} pinned` : "";
+    $("note-text").textContent = pins ? `${pins} · add a note…` : "Write a note…";
+    $("note").classList.toggle("pinned", Boolean(pins));
     $("note").title = `Write or say a note for ${s.space} (${s.noteKey}, from any app)`;
-    $("note").ariaLabel = `Write a note for ${s.space}`;
+    $("note").ariaLabel = pins ? `${pins}: add a note for ${s.space} and save` : `Write a note for ${s.space}`;
     const todos = s.todos ?? [];
     $("todos").hidden = todos.length === 0;
     $("todo-count").textContent = todos.length;

@@ -148,3 +148,38 @@ test("a note saved to the space shows in its feed, filed under the item it's abo
   assert.equal(db.getItem(itemId)?.title, "Okta wants a call about SSO for the first team");
   assert.equal(db.getJot(id)?.itemId, itemId);
 });
+
+test("snaps pinned to a note show with it, not on their own, and go where it goes", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Growth");
+  const [chart, sso] = db.addItems(
+    room.id,
+    ["Signup chart", "SSO for the first team"].map((title) => ({ source: "agenda" as const, externalId: null, title, url: null, description: null })),
+  );
+  const jot = saveJot(db, new HeuristicAgent(), { roomId: room.id, text: "The signup chart dipped on Tuesday", at: Date.now(), byId: "u1", by: "Joe Liang", itemId: null });
+  await settle();
+  assert.deepEqual([db.getJot(jot)?.itemId, db.getJot(jot)?.itemSuggested], [chart.id, true]);
+  const pin = (line: string | null) =>
+    saveCapture(db, new HeuristicAgent(), { roomId: room.id, buf: JPEG, ext: "jpg", width: 10, height: 10, at: Date.now(), takenById: "u1", takenBy: "Joe Liang", itemId: db.getJot(jot)!.itemId, line, jotId: jot });
+  const [a, b] = [pin(null), pin("SSO for the first team")];
+  // One on its own, for comparison.
+  const alone = saveCapture(db, new HeuristicAgent(), { roomId: room.id, buf: JPEG, ext: "jpg", width: 10, height: 10, at: Date.now(), takenById: "u1", takenBy: "Joe Liang", itemId: null, line: null });
+  await settle();
+  const feed = spaceFeed(db, room.id);
+  assert.deepEqual(feed.captures.map((s) => s.id), [alone]);
+  assert.deepEqual(feed.jots[0].snaps?.map((s) => [s.id, s.itemId, s.itemSuggested, s.jotId]), [
+    [a, chart.id, true, jot],
+    // The agent doesn't move a pinned snap to another item, whatever it shows.
+    [b, chart.id, true, jot],
+  ]);
+  // Someone files the note under another item: its snaps follow.
+  db.setJotItem(jot, sso.id);
+  assert.deepEqual(db.jotSnaps(jot).map((s) => [s.itemId, s.itemSuggested]), [[sso.id, false], [sso.id, false]]);
+  // Up next offers the note, not its snaps.
+  const live = db.startMeeting(room.id);
+  db.setJotItem(jot, null);
+  const keys = computeUpNext(db.upNextInput(room.id, live.startedAt - 60_000)).upNext.suggestions.map((s) => s.key);
+  assert.deepEqual(keys.filter((k) => k.startsWith("jot:") || k.startsWith("snap:")).sort(), [`jot:${jot}`, `snap:${alone}`].sort());
+  db.deleteJot(jot);
+  assert.deepEqual([db.getSnap(a), db.getSnap(b), db.getSnap(alone)?.id], [null, null, alone]);
+});

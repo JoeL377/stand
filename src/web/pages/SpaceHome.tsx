@@ -36,7 +36,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
   const [upNext, setUpNext] = useState<UpNext | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<Snap | null>(null);
+  // The snap open big: one on its own, or a note's pictures with the note.
+  const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(() => {
@@ -78,17 +79,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       errorToast("Couldn't move it")(err);
     });
   };
-  // Deleted at once; Undo saves it again as it was.
+  // Deleted at once, with its pictures; Undo brings both back for a minute.
   const deleteJot = (jot: Jot) => {
     setFeed((f) => f && { ...f, jots: f.jots.filter((j) => j.id !== jot.id) });
     api.deleteJot(jot.id).then(
       () =>
         toast({
           text: "Note deleted",
-          action: {
-            label: "Undo",
-            run: () => void api.saveJot(room.id, { text: jot.text, itemId: jot.itemSuggested ? null : jot.itemId, at: jot.ts }).then(load, errorToast("Couldn't bring the note back")),
-          },
+          action: { label: "Undo", run: () => void api.restoreJot(jot.id).then(load, errorToast("Couldn't bring the note back")) },
         }),
       (err) => {
         load();
@@ -204,9 +202,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                 <ul className="sh-rows">
                   {d.entries.map((e) =>
                     e.kind === "snap" ? (
-                      <SnapRow key={e.snap.id} snap={e.snap} room={room} me={user.id} onOpen={() => setViewing(e.snap)} onPick={(id) => pickItem(e.snap, id)} />
+                      <SnapRow key={e.snap.id} snap={e.snap} room={room} me={user.id} onOpen={() => setViewing({ snaps: [e.snap], i: 0 })} onPick={(id) => pickItem(e.snap, id)} />
                     ) : e.kind === "jot" ? (
-                      <JotRow key={e.jot.id} jot={e.jot} room={room} me={user.id} onPick={(id) => pickJotItem(e.jot, id)} onDelete={() => deleteJot(e.jot)} />
+                      <JotRow
+                        key={e.jot.id}
+                        jot={e.jot}
+                        room={room}
+                        me={user.id}
+                        onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
+                        onPick={(id) => pickJotItem(e.jot, id)}
+                        onDelete={() => deleteJot(e.jot)}
+                      />
                     ) : e.kind === "meeting" ? (
                       <MeetingRow key={e.meeting.id} m={e.meeting} />
                     ) : (
@@ -266,7 +272,16 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </Card>
           </aside>
         </div>
-        {viewing && <SnapView snap={viewing} me={user.id} room={room} onClose={() => setViewing(null)} onDeleted={load} />}
+        {viewing && viewing.snaps[viewing.i] && (
+          <SnapView
+            snap={viewing.snaps[viewing.i]}
+            of={viewing.jot && { jot: viewing.jot, i: viewing.i, n: viewing.snaps.length, go: (i) => setViewing({ ...viewing, i }) }}
+            me={user.id}
+            room={room}
+            onClose={() => setViewing(null)}
+            onDeleted={load}
+          />
+        )}
       </main>
     </SpacesShell>
   );
@@ -305,17 +320,28 @@ function SnapRow(props: { snap: Snap; room: RoomInfo; me: string; onOpen: () => 
   );
 }
 
-/** A note saved from the bar: its first line, all of it when clicked. Whoever wrote it can delete it. */
-function JotRow(props: { jot: Jot; room: RoomInfo; me: string; onPick: (itemId: string | null) => void; onDelete: () => void }) {
+/**
+ * A note saved from the bar: its first line, all of it when clicked, and the snaps pinned to it
+ * (the first as the thumbnail, "+2" for more). Whoever wrote it can delete it.
+ */
+function JotRow(props: { jot: Jot; room: RoomInfo; me: string; onOpen: () => void; onPick: (itemId: string | null) => void; onDelete: () => void }) {
   const { jot } = props;
   const [open, setOpen] = useState(false);
   const mine = jot.byId === props.me;
   const long = jot.text.length > 90 || jot.text.includes("\n");
+  const snaps = jot.snaps ?? [];
   return (
     <li className="sh-row">
-      <span className="sh-icon" aria-hidden>
-        <EditIcon size={16} />
-      </span>
+      {snaps.length ? (
+        <button className="sh-thumb" onClick={props.onOpen} aria-label={snaps.length > 1 ? `Open its ${snaps.length} snaps` : "Open its snap"}>
+          <img src={snaps[0].url} alt="" loading="lazy" />
+          {snaps.length > 1 && <span className="sh-thumb-more">+{snaps.length - 1}</span>}
+        </button>
+      ) : (
+        <span className="sh-icon" aria-hidden>
+          <EditIcon size={16} />
+        </span>
+      )}
       <span className="sh-row-text">
         <span className="sh-who">{mine ? "You" : firstName(jot.by)}</span>
         {long ? (
@@ -327,7 +353,12 @@ function JotRow(props: { jot: Jot; room: RoomInfo; me: string; onPick: (itemId: 
         )}
       </span>
       {mine && (
-        <button className="sh-row-del" onClick={props.onDelete} aria-label="Delete the note" title="Delete the note">
+        <button
+          className="sh-row-del"
+          onClick={props.onDelete}
+          aria-label={snaps.length ? "Delete the note and its snaps" : "Delete the note"}
+          title={snaps.length ? "Delete the note and its snaps" : "Delete the note"}
+        >
           <TrashIcon />
         </button>
       )}
@@ -476,25 +507,54 @@ function NoteCard(props: { title: string; notes: Note[]; room: RoomInfo; empty: 
   );
 }
 
-/** One snap, big: what was typed with it, the agent's line, and the text read off it. */
-function SnapView(props: { snap: Snap; me: string; room: RoomInfo; onClose: () => void; /** Something changed: load the feed again. */ onDeleted: () => void }) {
-  const { snap, onClose } = props;
+/**
+ * One snap, big: what was typed with it, the agent's line, and the text read off it. A note's
+ * snaps open with the note in place of the line, Left and Right stepping through them.
+ */
+function SnapView(props: {
+  snap: Snap;
+  of?: { jot: Jot; i: number; n: number; go: (i: number) => void };
+  me: string;
+  room: RoomInfo;
+  onClose: () => void;
+  /** Something changed: load the feed again. */
+  onDeleted: () => void;
+}) {
+  const { snap, of, onClose } = props;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (!of || (e.target as HTMLElement).closest("input, textarea")) return;
+      if (e.key === "ArrowLeft" && of.i > 0) of.go(of.i - 1);
+      if (e.key === "ArrowRight" && of.i < of.n - 1) of.go(of.i + 1);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, of]);
   const item = props.room.items.find((i) => i.id === snap.itemId);
   const mine = snap.takenById === props.me;
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog sh-view" role="dialog" aria-modal="true" aria-label="Snap">
+      <div className="dialog sh-view" role="dialog" aria-modal="true" aria-label={of ? "Note" : "Snap"}>
         <div className="sh-view-head">
           <strong>
             {mine ? "You" : snap.takenBy} · {fmtDate(snap.ts)} {fmtTime(snap.ts)}
             {item && <span className="muted"> · {item.title}</span>}
           </strong>
-          {mine && (
+          {of && of.n > 1 && (
+            <span className="sh-view-step">
+              <button className="icon-btn" aria-label="Previous snap" disabled={of.i === 0} onClick={() => of.go(of.i - 1)}>
+                ‹
+              </button>
+              <span className="muted">
+                {of.i + 1} of {of.n}
+              </span>
+              <button className="icon-btn" aria-label="Next snap" disabled={of.i === of.n - 1} onClick={() => of.go(of.i + 1)}>
+                ›
+              </button>
+            </span>
+          )}
+          {mine && !of && (
             <button
               className="icon-btn"
               title="Delete"
@@ -512,8 +572,10 @@ function SnapView(props: { snap: Snap; me: string; room: RoomInfo; onClose: () =
             <CloseIcon />
           </button>
         </div>
-        <img className="sh-view-img" src={snap.url} alt={snap.line ?? snap.caption ?? "Snap"} />
-        {mine ? (
+        <img className="sh-view-img" src={snap.url} alt={of?.jot.text ?? snap.line ?? snap.caption ?? "Snap"} />
+        {of ? (
+          <p className="sh-view-line sh-view-note">{of.jot.text}</p>
+        ) : mine ? (
           <input
             className="sh-view-line edit"
             defaultValue={snap.line ?? ""}

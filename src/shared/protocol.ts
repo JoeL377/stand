@@ -134,6 +134,8 @@ export interface Snap {
   line: string | null;
   /** The text in the image, read on the Mac that took it; null until read, or when it wasn't. */
   screenText: string | null;
+  /** The note it was pinned to on the Mac's bar: it shows with that note, and takes its item. */
+  jotId?: string | null;
   /** The to-do, decision or open question it backs: the agent's own snaps when
    *  kept, and any snap once the end-of-meeting recap has looked at it. */
   noteId: string | null;
@@ -412,6 +414,8 @@ export interface Jot {
   byId: string | null;
   by: string;
   ts: number;
+  /** The snaps pinned to it on the bar, oldest first (in the feed). */
+  snaps?: Snap[];
 }
 
 export interface SpaceFeed {

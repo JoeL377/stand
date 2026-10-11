@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { type WebSocket, WebSocketServer } from "ws";
-import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
+import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, Jot, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } from "./auth.ts";
 import { handleMcp } from "./mcp.ts";
@@ -29,7 +29,7 @@ import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
-import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile } from "./snaps.ts";
+import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { toSpaceSummary } from "./spaces.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
@@ -205,7 +205,8 @@ const canChangeSnap = (userId: string, snap: { roomId: string; takenById: string
 
 // Taken in the meeting: the image is the raw body, at the size it was shared.
 // ?pasted=1 for a screenshot someone pasted or dropped in, which is nobody's shared screen.
-// ?to=space saves it straight to the space instead, between meetings, on ?item when given.
+// ?to=space saves it straight to the space instead, between meetings, on ?item when given, or
+// pinned to ?jot, a note of yours in the space (saved first, from the Mac's bar).
 // The line typed with it comes URI-encoded in the X-Stand-Line header.
 app.post(
   "/api/rooms/:id/snaps",
@@ -239,8 +240,15 @@ app.post(
       takenBy: req.user!.name,
       line,
     };
+    const jot = toSpace && typeof req.query.jot === "string" ? db.getJot(req.query.jot) : null;
+    if (toSpace && req.query.jot && (!jot || jot.roomId !== room.id || jot.byId !== req.user!.id))
+      return res.status(400).json({ error: "That note isn't yours in this space." });
     let id: string;
-    if (toSpace) {
+    if (jot) {
+      db.touchMembership(room.id, req.user!.id);
+      id = saveCapture(db, agent, { ...shot, roomId: room.id, itemId: jot.itemId, jotId: jot.id }, () => live(room.id)?.snapsChanged());
+      live(room.id)?.snapsChanged();
+    } else if (toSpace) {
       db.touchMembership(room.id, req.user!.id);
       // A meeting going on in the space sees it in its suggested agenda.
       id = saveCapture(db, agent, { ...shot, roomId: room.id, itemId: itemIn(db, room.id, req.query.item) }, () => live(room.id)?.snapsChanged());
@@ -391,14 +399,41 @@ app.patch(
   }),
 );
 
+const deletedJots = new Map<string, { jot: Jot; snaps: SnapRow[]; timer: ReturnType<typeof setTimeout> }>();
+
 app.delete(
   "/api/jots/:id",
   route((req, res) => {
     const jot = db.getJot(req.params.id);
     if (!jot || !db.isMember(jot.roomId, req.user!.id)) return notFound(res);
     if (jot.byId !== req.user!.id) return res.status(403).json({ error: "Only whoever wrote it can delete it." });
+    const snaps = db.jotSnaps(jot.id);
     db.deleteJot(jot.id);
+    // Its pictures stay for a minute, so Undo can bring the note back whole.
+    const timer = setTimeout(() => {
+      deletedJots.delete(jot.id);
+      for (const s of snaps) removeSnapFile(s.id, s.ext);
+    }, SNAP_UNDO_MS);
+    timer.unref?.();
+    deletedJots.set(jot.id, { jot, snaps, timer });
     live(jot.roomId)?.snapsChanged();
+    res.json({ ok: true });
+  }),
+);
+
+app.post(
+  "/api/jots/:id/restore",
+  route((req, res) => {
+    const deleted = deletedJots.get(req.params.id);
+    if (!deleted || deleted.jot.byId !== req.user!.id) return res.status(404).json({ error: "It's been too long to bring it back." });
+    clearTimeout(deleted.timer);
+    deletedJots.delete(req.params.id);
+    db.addJot(deleted.jot);
+    for (const { version: _version, caption, ...row } of deleted.snaps) {
+      db.addSnap(row);
+      if (caption) db.setSnapCaption(row.id, caption);
+    }
+    live(deleted.jot.roomId)?.snapsChanged();
     res.json({ ok: true });
   }),
 );

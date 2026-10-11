@@ -165,7 +165,9 @@ CREATE TABLE IF NOT EXISTS snaps (
   discussion_id TEXT,
   -- The line the person typed with it, and the text read off the image on their Mac.
   line TEXT,
-  screen_text TEXT
+  screen_text TEXT,
+  -- The note (jots) it was pinned to on the Mac's bar.
+  jot_id TEXT
 );
 CREATE INDEX IF NOT EXISTS snaps_meeting ON snaps(meeting_id, ts);
 -- Notes saved straight to a space from the Mac's bar (captures.ts): a line of text, typed or dictated.
@@ -329,6 +331,7 @@ const toSnapRow = (r: Row): SnapRow => ({
   topicId: (r.discussion_id as string) ?? null,
   line: (r.line as string) ?? null,
   screenText: (r.screen_text as string) ?? null,
+  jotId: (r.jot_id as string) ?? null,
 });
 
 const toJot = (r: Row): Jot => ({
@@ -443,7 +446,9 @@ export function openDb(file?: string) {
       CREATE INDEX snaps_item ON snaps(item_id, ts);
       COMMIT;`);
   }
+  if (!(db.prepare("PRAGMA table_info(snaps)").all() as Row[]).some((c) => c.name === "jot_id")) db.exec("ALTER TABLE snaps ADD COLUMN jot_id TEXT;");
   db.exec("CREATE INDEX IF NOT EXISTS snaps_room ON snaps(room_id, ts);");
+  db.exec("CREATE INDEX IF NOT EXISTS snaps_jot ON snaps(jot_id);");
   db.exec("UPDATE snaps SET room_id = (SELECT room_id FROM meetings WHERE id = snaps.meeting_id) WHERE room_id IS NULL;");
   if (!deckCols.includes("kind"))
     db.exec(
@@ -1189,13 +1194,13 @@ export function openDb(file?: string) {
       ).map(toNote);
     },
     addSnap(
-      s: Omit<SnapRow, "version" | "caption" | "itemSuggested" | "line" | "screenText"> &
-        Partial<Pick<SnapRow, "itemSuggested" | "line" | "screenText">>,
+      s: Omit<SnapRow, "version" | "caption" | "itemSuggested" | "line" | "screenText" | "jotId"> &
+        Partial<Pick<SnapRow, "itemSuggested" | "line" | "screenText" | "jotId">>,
     ): void {
       db.prepare(
         `INSERT INTO snaps (id, room_id, meeting_id, item_id, item_suggested, ts, ext, width, height, source, taken_by_id, taken_by,
-           sharer_id, sharer_name, note_id, line, screen_text)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           sharer_id, sharer_name, note_id, line, screen_text, jot_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         s.id,
         s.roomId,
@@ -1214,6 +1219,7 @@ export function openDb(file?: string) {
         s.noteId,
         s.line ?? null,
         s.screenText ?? null,
+        s.jotId ?? null,
       );
     },
     getSnap(id: string): SnapRow | null {
@@ -1262,13 +1268,17 @@ export function openDb(file?: string) {
         open: r.open as number,
       }));
     },
-    /** Snaps saved to a space between meetings, newest first. */
+    /** Snaps saved to a space between meetings on their own (not pinned to a note), newest first. */
     spaceSnaps(roomId: string, since = 0, limit = 100): SnapRow[] {
       return (
         db
-          .prepare("SELECT * FROM snaps WHERE room_id = ? AND meeting_id IS NULL AND ts >= ? ORDER BY ts DESC LIMIT ?")
+          .prepare("SELECT * FROM snaps WHERE room_id = ? AND meeting_id IS NULL AND jot_id IS NULL AND ts >= ? ORDER BY ts DESC LIMIT ?")
           .all(roomId, since, limit) as Row[]
       ).map(toSnapRow);
+    },
+    /** The snaps pinned to a note, oldest first. */
+    jotSnaps(jotId: string): SnapRow[] {
+      return (db.prepare("SELECT * FROM snaps WHERE jot_id = ? ORDER BY ts").all(jotId) as Row[]).map(toSnapRow);
     },
     /** A person picked the item (or none), or the agent suggested one (suggested). */
     setSnapItem(id: string, itemId: string | null, suggested = false) {
@@ -1319,14 +1329,17 @@ export function openDb(file?: string) {
     spaceJots(roomId: string, since = 0, limit = 100): Jot[] {
       return (db.prepare("SELECT * FROM jots WHERE room_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?").all(roomId, since, limit) as Row[]).map(toJot);
     },
-    /** A person picked the item (or none), or the agent suggested one (suggested). */
+    /** A person picked the item (or none), or the agent suggested one (suggested). Its snaps go with it. */
     setJotItem(id: string, itemId: string | null, suggested = false) {
       db.prepare("UPDATE jots SET item_id = ?, item_suggested = ? WHERE id = ?").run(itemId, suggested ? 1 : 0, id);
+      db.prepare("UPDATE snaps SET item_id = ?, item_suggested = ? WHERE jot_id = ?").run(itemId, suggested ? 1 : 0, id);
     },
     setJotText(id: string, text: string) {
       db.prepare("UPDATE jots SET text = ? WHERE id = ?").run(text, id);
     },
+    /** Deletes a note and the snaps pinned to it. */
     deleteJot(id: string) {
+      db.prepare("DELETE FROM snaps WHERE jot_id = ?").run(id);
       db.prepare("DELETE FROM jots WHERE id = ?").run(id);
     },
     getPolish(roomId: string): Polish | null {

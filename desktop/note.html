@@ -11,7 +11,8 @@
       A note for the space the bar holds, from the bar's note field or Control + Shift + N in any
       app: type it, or say it with the Mac's dictation, and Enter saves it. Shift + Enter starts a
       new line, Esc puts it away (what's written waits for next time). It sits just under the
-      bar, or just over it when the bar is low on the screen.
+      bar, or just over it when the bar is low on the screen. A snap out of a meeting is pinned
+      at its top and saved with the note; with nothing written, Enter saves the snaps alone.
     -->
     <style>
       html,
@@ -79,6 +80,50 @@
       .head .keys {
         margin-left: auto;
         flex: none;
+      }
+      #pins {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 0 0 8px;
+      }
+      .pin {
+        position: relative;
+        width: 84px;
+        height: 56px;
+        border-radius: 6px;
+        overflow: hidden;
+        background: rgb(255 255 255 / 0.06);
+        box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+      }
+      .pin img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .pin .x {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgb(0 0 0 / 0.7);
+        color: #fff;
+        font-size: 10px;
+        line-height: 1;
+        opacity: 0;
+      }
+      .pin:hover .x,
+      .pin .x:focus-visible {
+        opacity: 1;
+      }
+      .pin .x:hover {
+        background: rgb(0 0 0 / 0.9);
       }
       .row {
         display: flex;
@@ -198,6 +243,7 @@
     <div id="card" role="dialog" aria-labelledby="to">
       <div id="form">
         <div class="head"><span id="to">Note to <b id="space"></b></span><span class="keys">Enter saves · Esc</span></div>
+        <div id="pins" role="list" aria-label="Snaps pinned to the note" hidden></div>
         <div class="row">
           <textarea id="text" rows="1" maxlength="2000" placeholder="Write or say a note…" aria-label="The note"></textarea>
           <button id="say" title="Say it (dictation)" aria-label="Say it with dictation">
@@ -217,6 +263,8 @@
       const $ = (id) => document.getElementById(id);
       let saving = false;
       let st = null;
+      /** The snaps pinned to the note: [{id, thumb}]. */
+      let pins = [];
 
       // The window is as tall as the card, so the rest of the screen stays clickable.
       const report = () => window.note.size(Math.ceil($("card").getBoundingClientRect().height) + 8);
@@ -229,7 +277,34 @@
         const h = Math.min(t.scrollHeight - 12, 84);
         t.style.height = `${h}px`;
         t.style.overflowY = t.scrollHeight - 12 > 84 ? "auto" : "hidden";
-        $("go").disabled = saving || !t.value.trim();
+        $("go").disabled = saving || (!t.value.trim() && !pins.length);
+      }
+
+      function renderPins() {
+        const box = $("pins");
+        box.hidden = !pins.length;
+        box.replaceChildren(
+          ...pins.map((p, i) => {
+            const pin = document.createElement("div");
+            pin.className = "pin";
+            pin.setAttribute("role", "listitem");
+            const img = document.createElement("img");
+            img.src = p.thumb;
+            img.alt = `Snap ${i + 1}`;
+            const x = document.createElement("button");
+            x.className = "x";
+            x.textContent = "✕";
+            x.title = "Take it off the note";
+            x.ariaLabel = `Take snap ${i + 1} off the note`;
+            x.onclick = () => window.note.unpin(p.id);
+            pin.append(img, x);
+            return pin;
+          }),
+        );
+        const n = pins.length;
+        $("text").placeholder = n ? `Add a note about ${n === 1 ? "it" : "them"}, or just Enter` : "Write or say a note…";
+        $("text").ariaLabel = n ? `A note about the ${n === 1 ? "snap" : `${n} snaps`}` : "The note";
+        grow();
       }
 
       window.note.onOpen((o) => {
@@ -249,6 +324,12 @@
         });
       });
       window.note.onFocus(() => $("text").focus());
+      window.note.onPins((list) => {
+        pins = list;
+        $("why").hidden = true;
+        renderPins();
+        $("text").focus();
+      });
       $("text").addEventListener("input", () => {
         grow();
         $("why").hidden = true;
@@ -256,7 +337,7 @@
 
       function go() {
         const text = $("text").value.trim();
-        if (!text || saving) return;
+        if ((!text && !pins.length) || saving) return;
         saving = true;
         $("go").disabled = true;
         $("go").textContent = "Saving…";
@@ -281,14 +362,20 @@
           e.preventDefault();
           go();
         }
+        // Backspace in an empty note takes the last snap off it, as with a list of addresses.
+        if (e.key === "Backspace" && e.target === $("text") && !$("text").value && pins.length && !saving) {
+          e.preventDefault();
+          window.note.unpin(pins[pins.length - 1].id);
+        }
       });
 
       window.note.onResult((r) => {
         saving = false;
         $("go").textContent = r.ok ? "Save" : "Try again";
         if (r.ok) {
+          const snaps = r.snaps ? `${r.snaps} snap${r.snaps === 1 ? "" : "s"}` : "";
           $("form").hidden = true;
-          $("done-title").textContent = `Saved to ${r.space}`;
+          $("done-title").textContent = snaps ? `${r.text ? `Note and ${snaps}` : snaps} saved to ${r.space}` : `Saved to ${r.space}`;
           $("done").hidden = false;
           return;
         }

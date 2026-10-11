@@ -1,6 +1,6 @@
-// Captures: what people save straight to a space between meetings, from the Mac's bar. A snap
-// of a screen, with the line they typed and the text their Mac read off it; or a note, typed or
-// dictated. Everyone in the space sees it once it's saved. The agent captions a snap and, when
+// Captures: what people save straight to a space between meetings, from the Mac's bar: a note,
+// typed or dictated, with any snaps of the screen pinned to it (each with the text the Mac read
+// off it), or snaps on their own. Everyone in the space sees it once it's saved. The agent captions a snap and, when
 // nobody picked an item, suggests one, marked ✦ until someone confirms it. A capture never
 // becomes a to-do or decision by itself.
 
@@ -53,6 +53,8 @@ export function saveCapture(
     takenBy: string;
     itemId: string | null;
     line: string | null;
+    /** The note it's pinned to: it takes the note's item rather than the agent picking one. */
+    jotId?: string | null;
   },
   /** Called once the agent has captioned it or picked an item. */
   changed: () => void = () => {},
@@ -75,6 +77,8 @@ export function saveCapture(
     sharerName: null,
     noteId: null,
     line: c.line,
+    jotId: c.jotId ?? null,
+    itemSuggested: c.jotId ? (db.getJot(c.jotId)?.itemSuggested ?? false) : false,
   });
   void describe(db, agent, id, c.buf, c.ext).then((did) => did && changed());
   return id;
@@ -120,13 +124,17 @@ async function describe(db: DB, agent: Agent, id: string, buf: Buffer, ext: stri
     if (!snap || !room) return false;
     const items = db.listItems(room.id).filter((i) => !i.deckId);
     const mediaType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
-    const out = await agent.describeCapture({ data: buf.toString("base64"), mediaType }, room, items, snap.line);
+    // Pinned to a note, what the note says is what was written about it.
+    const said = snap.line ?? (snap.jotId ? (db.getJot(snap.jotId)?.text ?? null) : null);
+    const out = await agent.describeCapture({ data: buf.toString("base64"), mediaType }, room, items, said);
     // Someone may have deleted it, or picked an item, while the agent was looking.
     const now = db.getSnap(id);
     if (!out || !now) return false;
     if (out.caption) db.setSnapCaption(id, out.caption);
-    if (out.itemId && !now.itemId) db.setSnapItem(id, out.itemId, true);
-    return Boolean(out.caption || (out.itemId && !now.itemId));
+    // Pinned to a note, it goes where the note goes.
+    const pick = out.itemId && !now.itemId && !now.jotId;
+    if (pick) db.setSnapItem(id, out.itemId, true);
+    return Boolean(out.caption || pick);
   } catch (err) {
     console.error("[agent] capture caption failed:", err);
     return false;
@@ -138,7 +146,7 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
   const latest = meetings.find((m) => m.todos + m.decided + m.open > 0);
   return {
     captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES), [], [], baseUrl),
-    jots: db.spaceJots(roomId, 0, FEED_CAPTURES),
+    jots: db.spaceJots(roomId, 0, FEED_CAPTURES).map((j) => ({ ...j, snaps: linkSnaps(db.jotSnaps(j.id), [], [], baseUrl) })),
     meetings,
     updates: db.roomUpdates(roomId, 0, FEED_UPDATES),
     decided: db.spaceNotes(roomId, "decision", 20),
