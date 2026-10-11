@@ -2,7 +2,8 @@
 // (Google won't sign people in inside an app's own window), and Snap from
 // anywhere: a global shortcut opens a capture toolbar like macOS's ⌘⇧5, and the
 // snap lands in the meeting you're in, pinned to whatever is in focus, and on the clipboard.
-// In a meeting, a small floating bar keeps Snap and the mic one click away from any app.
+// A small floating bar is up whenever the app runs: out of a meeting it holds the space you're
+// in (pick another from it), its to-dos and Snap; in a meeting, the item in focus and your mic.
 
 const {
   app,
@@ -34,6 +35,8 @@ const SNAP_SHORTCUT = process.env.STAND_SNAP_SHORTCUT || "Control+Shift+S";
 /** Mute and unmute from any app, during a meeting only. In Stand's window ⌘D does it too. */
 const MUTE_SHORTCUT = process.env.STAND_MUTE_SHORTCUT || "Control+Shift+M";
 const PARTITION = "persist:stand";
+/** Stand's sign-in cookie (src/server/auth.ts). */
+const SESSION_COOKIE = "standup_session";
 const mac = process.platform === "darwin";
 /** No title bar and no window buttons on the Mac: Stand runs edge to edge, the logo
  *  sits in the corner, and ⌘W, ⌘M and ⌃⌘F close, minimize and go full screen. */
@@ -140,11 +143,16 @@ function showWindow(path) {
       win = null;
       // Lets go of the mute shortcut and resets the menus too.
       setMeeting(null);
-      // The bar is a window too: gone with the main one, so closing it still quits off the Mac.
-      bar?.destroy();
+      // On the Mac the app, and its bar, keep running with no window. Elsewhere the bar is a
+      // window too: gone with the main one, so closing it still quits.
+      if (!mac) bar?.destroy();
     });
     // A reload or a crash leaves the meeting page; it says so again when it's back.
-    win.webContents.on("did-navigate", () => setMeeting(null));
+    win.webContents.on("did-navigate", (_e, url) => {
+      setMeeting(null);
+      followPage(url, true);
+    });
+    win.webContents.on("did-navigate-in-page", (_e, url) => followPage(url, false));
     win.webContents.on("render-process-gone", () => setMeeting(null));
     if (!path) void win.loadURL(STAND_URL);
   }
@@ -158,6 +166,14 @@ function showWindow(path) {
     putAwayFull = false;
     win.setFullScreen(true);
   }
+}
+
+/** Opening a space in Stand makes it the one the bar holds. A page load brings the bar up to
+ *  date; moving around within the page does too, at most every few seconds. */
+function followPage(url, load) {
+  const id = spaceInPage(url);
+  if (id && id !== resting?.spaceId) void holdSpace(id, "page");
+  else if (load || Date.now() - restAt > 5000) void refreshRest("page");
 }
 
 /** Every Stand page stays on Stand: other sites open in the browser, and Google sign-in goes the app's own way. */
@@ -1001,8 +1017,7 @@ async function spacesToSaveTo() {
 
 /** A space's agenda items a snap can be about (not single slides). */
 async function itemsOf(spaceId) {
-  const res = await standFetch(`/api/rooms/${encodeURIComponent(spaceId)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
-  const room = res?.ok ? await res.json().catch(() => null) : null;
+  const room = await roomOf(spaceId);
   return (room?.items ?? []).filter((i) => !i.deckId).map((i) => ({ id: String(i.id), title: short(i.title) }));
 }
 
@@ -1032,7 +1047,7 @@ async function saveToSpace(me, display, image, at, prefs, reading) {
       if (!prefs.toClipboard) await copyImage(image);
       return { result: { ok: false, why: `${saved.why} It's on your clipboard.` } };
     }
-    void savePrefs({ ...prefs, space: to.id });
+    void savePrefs({ ...snapPrefs(), space: to.id }).then(() => refreshRest("saved"));
     void addText(saved.id, reading);
     const item = itemId ? short(itemTitle) || null : null;
     return {
@@ -1214,10 +1229,12 @@ a{position:absolute;inset:0;display:grid;place-items:center;text-decoration:none
 
 // ---- the floating bar -------------------------------------------------------------
 //
-// In a meeting, when no Stand window is in front (you're presenting a web page, say),
-// a small bar floats over every app and Space: what's in focus, your mic, and Snap. It
-// never takes focus from the app you're in, stays out of snaps (and, where macOS allows,
-// out of screen sharing), and goes wherever you drag it, which it remembers.
+// A small bar floats over every app and Space whenever the app runs and you're signed in.
+// Out of a meeting it holds the space you're in: its name (click to pick another), its
+// to-dos, a way to start talking there, and Snap, which goes to it. In a meeting: what's in
+// focus, your mic, and Snap. It never takes focus from the app you're in, stays out of snaps
+// (and, where macOS allows, out of screen sharing), and goes wherever you drag it, which it
+// remembers.
 
 /** The meeting the main window is in, as its page last described it, or null. */
 let meeting = null;
@@ -1225,8 +1242,9 @@ let bar = null;
 let barLoaded = false;
 /** True while a snap reads the screen. */
 let barAway = false;
-/** Hidden from the bar's own menu or the Meeting menu, until the meeting ends. */
-let barOff = false;
+/** Put away from the bar's own menu: "meeting" until the meeting ends, "always" until it's
+ *  shown again from the View menu (or the app starts again). */
+let barOff = null;
 const BAR = { width: 380, height: 48 };
 const barFile = () => path.join(app.getPath("userData"), "bar.json");
 const short = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
@@ -1252,13 +1270,167 @@ function setMeeting(m) {
   const sharing = Boolean(m?.sharing);
   if (sharing !== wasSharing) trace("sharing", { on: sharing, barUp: Boolean(bar?.isVisible()) });
   wasSharing = sharing;
-  // Hidden from its menu, the bar stays down until the meeting ends.
-  if (!meeting) barOff = false;
-  if (!meeting) pulsedFor = null;
+  if (!meeting) {
+    // Hidden for the meeting, the bar comes back when it ends.
+    if (barOff === "meeting") barOff = null;
+    pulsedFor = null;
+  }
   muteKey(Boolean(meeting));
-  if (meeting && barLoaded) bar.webContents.send("bar:state", { ...meeting, muteKey: muteKeyOn ? MUTE_SHORTCUT : null });
+  sendBarState();
   buildMenus();
   updateBar();
+  // Back out of a meeting, the bar shows the space again, with its to-dos as the meeting left them.
+  if (inMeeting && !meeting) void refreshRest("meeting-ended");
+  inMeeting = Boolean(meeting);
+}
+let inMeeting = false;
+
+/** What the bar shows: the meeting, or out of one the space you're in. */
+function sendBarState() {
+  if (!barLoaded) return;
+  const state = meeting
+    ? { ...meeting, muteKey: muteKeyOn ? MUTE_SHORTCUT : null }
+    : resting
+      ? { rest: true, ...resting, snapKey: SNAP_SHORTCUT.replace(/\+/g, " + ") }
+      : null;
+  bar.webContents.send("bar:state", state);
+}
+
+// ---- the bar out of a meeting ----------------------------------------------------------
+
+/** The space the bar holds out of a meeting, or null when there's none to show (signed out):
+ *  {spaceId, space, live: {names} | null, todos, none}. It's the space snaps go to (snap.json's
+ *  space): the one last picked on the bar or the save card, or last opened in Stand. */
+let resting = null;
+/** The spaces you're in, most recently active first, for the bar's space menu. */
+let restSpaces = [];
+let restAt = 0;
+let restLoading = null;
+let restQueued = null;
+
+/** Reads the spaces, and the to-dos of the one the bar holds. Offline, the bar keeps what it
+ *  shows. Asked again while it reads, it reads once more after. */
+function refreshRest(why) {
+  if (restLoading)
+    return (restQueued ??= restLoading.then(() => {
+      restQueued = null;
+      return refreshRest(why);
+    }));
+  restLoading = (async () => {
+    const res = await standFetch("/api/spaces", { signal: AbortSignal.timeout(8000) }).catch(() => null);
+    if (!res) return;
+    const list = res.ok ? await res.json().catch(() => null) : null;
+    if (!Array.isArray(list)) {
+      // Signed out: nothing to hold, so no bar until you sign in.
+      if (res.status === 401 || res.status === 403) {
+        resting = null;
+        restSpaces = [];
+      }
+      return;
+    }
+    restSpaces = list
+      .map((s) => ({
+        id: String(s.id),
+        name: short(s.name) || "Untitled space",
+        at: Number(s.activeAt) || 0,
+        live: s.live && Array.isArray(s.live.people) && s.live.people.length ? { names: s.live.people.slice(0, 6).map((p) => short(p?.name)) } : null,
+      }))
+      .filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s.id))
+      .sort((a, b) => b.at - a.at);
+    if (!restSpaces.length) {
+      resting = { spaceId: null, space: null, live: null, todos: [], none: true };
+      return;
+    }
+    const want = snapPrefs().space;
+    const at = restSpaces.find((s) => s.id === want) ?? restSpaces[0];
+    const room = await roomOf(at.id);
+    // Picked another while this one loaded: that one's answer is the one to show.
+    if (snapPrefs().space && snapPrefs().space !== want) return;
+    resting = { spaceId: at.id, space: at.name, live: at.live, todos: room ? openTodos(room) : (resting?.spaceId === at.id ? resting.todos : []) };
+  })().finally(() => {
+    restLoading = null;
+    restAt = Date.now();
+    trace("rest", { why, space: Boolean(resting?.spaceId), spaces: restSpaces.length, todos: resting?.todos.length ?? null });
+    sendBarState();
+    buildMenus();
+    updateBar();
+  });
+  return restLoading;
+}
+
+/** A space as Stand's page gets it: its items and open to-dos among the rest. */
+async function roomOf(spaceId) {
+  const res = await standFetch(`/api/rooms/${encodeURIComponent(spaceId)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+  return res?.ok ? await res.json().catch(() => null) : null;
+}
+
+/** A space's open to-dos for the bar's list: who has it and the item it's on. */
+function openTodos(room) {
+  const items = new Map((room.items ?? []).map((i) => [i.id, i]));
+  const open = (Array.isArray(room.followUps) ? room.followUps : []).filter((n) => n && !n.doneAt);
+  return todosOf(
+    open.map((n) => {
+      const item = items.get(n.itemId);
+      return { id: n.id, text: n.text, owner: n.owner, itemKey: item ? short(item.externalId) || short(item.title).slice(0, 40) : null };
+    }),
+  );
+}
+
+/** Makes this the space the bar holds, and snaps go to. */
+async function holdSpace(id, why) {
+  if (!id || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return;
+  const prefs = snapPrefs();
+  if (prefs.space === id && resting?.spaceId === id) return;
+  await savePrefs({ ...prefs, space: id });
+  const s = restSpaces.find((x) => x.id === id);
+  // Shown at once; its to-dos follow.
+  if (s && resting) {
+    resting = { ...resting, spaceId: s.id, space: s.name, live: s.live, none: false, todos: resting.spaceId === s.id ? resting.todos : [] };
+    sendBarState();
+  }
+  await refreshRest(why);
+}
+
+/** The bar's space menu: every space you're in (those with people talking say so), then the
+ *  ways into Stand. */
+function spaceMenu() {
+  const here = resting?.spaceId;
+  const name = resting?.space;
+  const template = [
+    ...restSpaces.map((s) => ({
+      label: s.live ? `${s.name}  ·  ${s.live.names.length} talking` : s.name,
+      type: "radio",
+      checked: s.id === here,
+      click: () => void holdSpace(s.id, "picked"),
+    })),
+    ...(restSpaces.length ? [{ type: "separator" }] : []),
+    ...(here ? [{ label: `Open ${name} in Stand`, click: () => goTo(`/s/${here}`) }] : []),
+    { label: restSpaces.length ? "All Spaces" : "Make a Space in Stand", click: () => goTo("/") },
+  ];
+  // Under the space's pill (macOS moves it up when the bar is low on the screen).
+  Menu.buildFromTemplate(template).popup({ window: bar ?? undefined, x: 45, y: 46 });
+}
+
+/** Opens a page of Stand in the main window: in place when Stand is already loaded there
+ *  (nothing reloads), else by loading it. */
+function goTo(p) {
+  const loaded = win && !win.webContents.isLoading() && isStand(win.webContents.getURL());
+  if (!loaded) return showWindow(p);
+  showWindow();
+  void win.webContents
+    .executeJavaScript(`history.pushState(null, "", ${JSON.stringify(p)}); dispatchEvent(new PopStateEvent("popstate")); true`)
+    .catch(() => showWindow(p));
+}
+
+/** The space a Stand page is on, from its address (/s/ and /r/ both open a space). */
+function spaceInPage(url) {
+  try {
+    const u = new URL(url);
+    if (u.origin !== STAND_ORIGIN) return null;
+    return /^\/[sr]\/([A-Za-z0-9_-]{1,64})/.exec(u.pathname)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** The space's open to-dos, as the meeting page lists them for the bar. */
@@ -1297,14 +1469,13 @@ function closeBarList() {
 /** Puts one of the space's to-dos on the clipboard: the prompt Stand's Copy for agent
  *  makes (its words plus its Stand reference, for Claude Code, Cursor or Codex), or just its words. */
 async function copyTodo(id, plain) {
-  const todo = meeting?.todos.find((t) => t.id === id);
+  const todo = (meeting ?? resting)?.todos.find((t) => t.id === id);
   if (!todo) return false;
   let text = todo.text;
-  if (!plain && win) {
-    // Fetched by the page, signed in as you, the way its own Copy for agent button does.
-    const prompt = await win.webContents
-      .executeJavaScript(`fetch("/api/refs/action/${id}/prompt").then((r) => (r.ok ? r.json() : null)).then((j) => j && j.text, () => null)`)
-      .catch(() => null);
+  if (!plain) {
+    // Signed in as you, the way the page's own Copy for agent button asks.
+    const res = await standFetch(`/api/refs/action/${encodeURIComponent(id)}/prompt`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+    const prompt = res?.ok ? (await res.json().catch(() => null))?.text : null;
     if (typeof prompt === "string" && prompt) text = prompt;
   }
   await clipboard.writeText(text);
@@ -1330,7 +1501,7 @@ function muteKey(on) {
 let menuKey = "";
 function buildMenus() {
   if (!mac) return;
-  const key = JSON.stringify([Boolean(meeting), meeting?.micOn, barOff, muteKeyOn]);
+  const key = JSON.stringify([Boolean(meeting), meeting?.micOn, barOff, muteKeyOn, Boolean(resting)]);
   if (key === menuKey) return;
   menuKey = key;
   const inMeeting = Boolean(meeting);
@@ -1345,6 +1516,18 @@ function buildMenus() {
     {
       label: "View",
       submenu: [
+        {
+          label: "Show Floating Bar",
+          type: "checkbox",
+          checked: !barOff,
+          enabled: Boolean(meeting || resting),
+          click: (item) => {
+            barOff = item.checked ? null : "always";
+            buildMenus();
+            updateBar();
+          },
+        },
+        { type: "separator" },
         // Off in a meeting: going back would leave the call without asking.
         { label: "Back", accelerator: "Command+[", enabled: !inMeeting, click: () => history()?.canGoBack() && history().goBack() },
         { label: "Forward", accelerator: "Command+]", enabled: !inMeeting, click: () => history()?.canGoForward() && history().goForward() },
@@ -1364,17 +1547,6 @@ function buildMenus() {
         { ...mic, accelerator: muteKeyOn ? MUTE_SHORTCUT : "Command+D", registerAccelerator: false },
         { ...snapItem, accelerator: SNAP_SHORTCUT, registerAccelerator: false },
         { type: "separator" },
-        {
-          label: "Show Floating Bar",
-          type: "checkbox",
-          checked: !barOff,
-          enabled: inMeeting,
-          click: (item) => {
-            barOff = !item.checked;
-            buildMenus();
-            updateBar();
-          },
-        },
         { label: "Meeting Shortcuts", accelerator: "Command+/", enabled: inMeeting, click: () => (showWindow(), win?.webContents.send("app:command", "shortcuts")) },
       ],
     },
@@ -1444,7 +1616,8 @@ function makeBar() {
   });
   bar.webContents.once("did-finish-load", () => {
     barLoaded = true;
-    setMeeting(meeting);
+    sendBarState();
+    updateBar();
   });
   void bar.loadFile(`${__dirname}/bar.html`);
 }
@@ -1478,10 +1651,11 @@ function native() {
   return nativeCode;
 }
 
-/** Up for the whole meeting, Stand in front or not (joe's call); down while a snap reads the screen. */
+/** Up whenever the app runs and you're signed in, Stand in front or not (joe's call): the
+ *  meeting's bar in one, the space's out of one. Down while a snap reads the screen. */
 function updateBar() {
   if (barHold) return;
-  const want = Boolean(meeting && win && !barAway && !barOff);
+  const want = Boolean((meeting ? win : resting) && !barAway && !barOff);
   if (want && !bar) makeBar();
   if (!barLoaded) return;
   if (want && !bar.isVisible()) {
@@ -1494,7 +1668,7 @@ function updateBar() {
     clearTimeout(barReveal);
     barReveal = setTimeout(revealBar, 300);
     // It catches the eye once, when a meeting starts: not when it's back after a snap.
-    const pulse = !barSnapped && meeting.roomId !== pulsedFor;
+    const pulse = Boolean(meeting) && !barSnapped && meeting.roomId !== pulsedFor;
     if (pulse) pulsedFor = meeting.roomId;
     bar.webContents.send("bar:shown", { pulse });
     barSnapped = false;
@@ -1531,6 +1705,8 @@ async function pressOnBar(button) {
     // A press on the bar can make Stand the active app, and macOS then brings up Stand's
     // window to take the keyboard. While the pointer is on the bar, that window can't.
     if (mac && !barPrevents && win && !win.isFocused()) win.setFocusable(false);
+    // Out of a meeting, what it shows is brought up to date as you reach for it.
+    if (!meeting && Date.now() - restAt > 20_000) void refreshRest("hover");
     return void noteTheirApp();
   }
   if (button === "leave") return void (mac && !barHold && win?.setFocusable(true));
@@ -1540,14 +1716,18 @@ async function pressOnBar(button) {
       { label: "Open Stand", click: () => showWindow() },
       { type: "separator" },
       {
-        label: "Hide Until the Meeting Ends",
+        label: meeting ? "Hide Until the Meeting Ends" : "Hide the Bar",
         click: () => {
-          barOff = true;
+          barOff = meeting ? "meeting" : "always";
           buildMenus();
           updateBar();
+          if (barOff === "always") notify("The bar is hidden", "Bring it back from Stand's View menu: Show Floating Bar.");
         },
       },
     ]).popup({ window: bar ?? undefined });
+  // Out of a meeting: the space menu, or straight into talking there. Both are meant to bring Stand up.
+  if (button === "spaces") return void (resting?.none ? goTo("/") : spaceMenu());
+  if (button === "talk") return void (resting?.spaceId && goTo(`/s/${resting.spaceId}?join`));
   trace("bar", { button, theirApp: theirApp?.name });
   if (button === "open") return showWindow();
   if (button === "mic" || button === "switch" || button === "undo") win?.webContents.send("app:command", button);
@@ -1655,6 +1835,16 @@ app.whenReady().then(async () => {
   // The page's way to the right page of System Settings (a blocked mic, say).
   ipcMain.on("app:settings", (e, which) => isStand(e.senderFrame?.url) && openSettings(which));
   buildMenus();
+  // The bar comes up as soon as Stand says who you are, and keeps the space current. Signing
+  // in or out (the session cookie changing) brings it up or takes it down.
+  void refreshRest("start");
+  let signedInOrOut;
+  session.fromPartition(PARTITION).cookies.on("changed", (_e, cookie) => {
+    if (cookie.name !== SESSION_COOKIE) return;
+    clearTimeout(signedInOrOut);
+    signedInOrOut = setTimeout(() => void refreshRest("session"), 300);
+  });
+  setInterval(() => !meeting && void refreshRest("tick"), 30_000);
   nativeTheme.on("updated", () => win?.setBackgroundColor(backdrop()));
   // Focus moving between apps: a blur comes just before the next focus, so look once both have landed.
   for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));

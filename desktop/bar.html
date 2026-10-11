@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Stand meeting bar</title>
+<title>Stand bar</title>
 <style>
   :root { color-scheme: dark; font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; cursor: default; }
@@ -53,6 +53,13 @@
   .what.said.pending { color: #d7d7e0; }
   .mic { width: 30px; }
   .mic.off { color: #ff7b7b; }
+  /* Out of a meeting: the space the bar holds, and a way to start talking there. */
+  .space { min-width: 0; max-width: 200px; margin-right: auto; padding: 0 8px 0 10px; gap: 6px; background: rgb(255 255 255 / 0.08); color: #e8e8ee; font-size: 12.5px; font-weight: 500; }
+  .space:hover { background: rgb(255 255 255 / 0.14); }
+  .space .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .space svg { flex: none; width: 10px; height: 10px; color: #a5a5b3; }
+  .space .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #34d399; }
+  .mic.live { color: #34d399; }
   .snap { padding: 0 12px 0 10px; background: #2d6cdf; color: #fff; font-size: 12.5px; font-weight: 500; }
   .snap:hover { background: #3d7cf0; }
   .todos { padding: 0 8px; gap: 4px; color: #a5a5b3; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -99,6 +106,11 @@
   <div class="pill" id="pill">
     <button class="open" id="open" title="Open Stand" aria-label="Open Stand">
       <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#2d6cdf" /><path d="M9 20v-8M14 23V9M19 19v-6M24 17v-2" stroke="white" stroke-width="3" stroke-linecap="round" /></svg>
+    </button>
+    <button class="space" id="space" aria-haspopup="menu" hidden>
+      <span class="dot" id="space-live" hidden></span>
+      <span class="name" id="space-name"></span>
+      <svg viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" /></svg>
     </button>
     <div class="what" id="what"></div>
     <button class="todos" id="todos" title="To-dos in this space: click one to copy it" aria-expanded="false" hidden>
@@ -159,8 +171,14 @@
   function render() {
     speak();
     const what = $("what");
+    const rest = Boolean(state?.rest);
+    // Out of a meeting the space takes the middle, unless a snap's result is showing there.
+    $("space").hidden = !rest || Boolean(saying);
+    what.hidden = rest && !saying;
+    if (rest) renderRest();
     // The mic first: it can be pressed while a snap's result shows, and has to show the change.
-    if (state) {
+    else if (state) {
+      $("mic").hidden = false;
       $("mic").className = state.micOn ? "mic" : "mic off";
       $("mic").ariaLabel = state.micOn ? "Mute" : "Unmute";
       $("mic").title = `${$("mic").ariaLabel}${state.muteKey ? ` (${state.muteKey.replace(/\+/g, " + ")}, from any app)` : ""}`;
@@ -169,6 +187,7 @@
       $("mic-off").toggleAttribute("hidden", state.micOn);
       // Once the meeting has ended there's nothing to snap into.
       $("snap").hidden = Boolean(state.ending);
+      $("snap").title = "Snap the screen, a window or part of it, for everyone in the meeting (Control + Shift + S)";
       const todos = state.todos ?? [];
       // For the few seconds the bar says where Switch went, the count steps aside so it fits.
       const switching = Boolean(state.switched && !state.offline && !state.notRecording);
@@ -180,7 +199,7 @@
     what.className = "what";
     what.textContent = "";
     what.title = "";
-    $("pill").classList.toggle("muted-talk", Boolean(mutedTalk));
+    $("pill").classList.toggle("muted-talk", Boolean(mutedTalk && !rest));
     if (saying) {
       what.className = saying.pending ? "what said pending" : saying.ok ? "what said" : "what said bad";
       const text = document.createElement("span");
@@ -198,7 +217,7 @@
       }
       return;
     }
-    if (!state) return;
+    if (!state || rest) return;
     if (state.ending) {
       what.textContent = "Writing notes…";
       what.title = "The meeting has ended. Stand is writing the notes; the recap shows up in the space.";
@@ -276,6 +295,30 @@
     ]
       .filter(Boolean)
       .join(" ");
+  }
+
+  // Out of a meeting: the space, who's talking there, its to-dos, and Snap to it.
+  function renderRest() {
+    const s = state;
+    const name = s.none ? "Make a space" : s.space;
+    $("space-name").textContent = name;
+    $("space-live").hidden = !s.live;
+    $("space").title = s.none ? "Open Stand to make a space" : `${s.space}: snaps go here. Click to pick another space.`;
+    $("space").ariaLabel = s.none ? "Make a space in Stand" : `Space: ${s.space}${s.live ? `, ${s.live.names.length} talking` : ""}. Pick another`;
+    const who = s.live ? s.live.names.filter(Boolean).join(", ") : "";
+    $("mic").hidden = Boolean(s.none);
+    $("mic").className = s.live ? "mic live" : "mic";
+    $("mic").ariaLabel = s.live ? `Join ${who || "them"} in ${s.space}` : `Start talking in ${s.space}`;
+    $("mic").title = $("mic").ariaLabel;
+    $("mic-on").removeAttribute("hidden");
+    $("mic-off").setAttribute("hidden", "");
+    $("snap").hidden = false;
+    $("snap").title = s.none ? `Snap the screen, a window or part of it (${s.snapKey})` : `Snap the screen, a window or part of it, to ${s.space} (${s.snapKey})`;
+    const todos = s.todos ?? [];
+    $("todos").hidden = todos.length === 0;
+    $("todo-count").textContent = todos.length;
+    $("todos").ariaLabel = `${todos.length} to-do${todos.length === 1 ? "" : "s"} in ${s.space}`;
+    if (listOpen) todos.length ? void showList(true) : void showList(false);
   }
 
   // ---- the space's to-dos ----
@@ -465,21 +508,26 @@
   // On press, not on click: a press on the bar can bring Stand forward, which used to hide
   // the bar before the click finished, so the click was lost. A click with no pointer behind
   // it (the keyboard, VoiceOver) still works.
+  // `button` can be a function, for a button that does something else out of a meeting.
   function press(el, button) {
+    const which = () => (typeof button === "function" ? button() : button);
     el.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      window.bar.press(button);
+      window.bar.press(which());
     });
-    el.addEventListener("click", (e) => e.detail === 0 && window.bar.press(button));
+    el.addEventListener("click", (e) => e.detail === 0 && window.bar.press(which()));
   }
-  for (const button of ["open", "mic", "snap"]) press($(button), button);
+  for (const button of ["open", "snap"]) press($(button), button);
+  // In a meeting the mic mutes; out of one it starts talking in the space (or joins whoever is).
+  press($("mic"), () => (state?.rest ? "talk" : "mic"));
+  press($("space"), "spaces");
   // Presses are taken over on pointerdown, so :active never applies: the give is set by hand.
   const up = () => document.querySelectorAll("button.down").forEach((b) => b.classList.remove("down"));
   document.addEventListener("pointerdown", (e) => e.button === 0 && e.target.closest?.("button")?.classList.add("down"), true);
   for (const end of ["pointerup", "pointercancel"]) document.addEventListener(end, up, true);
   document.documentElement.addEventListener("mouseleave", up);
-  // Right-click: open Stand, or put the bar away until the meeting ends.
+  // Right-click: open Stand, or put the bar away (until the meeting ends, in one).
   addEventListener("contextmenu", (e) => {
     e.preventDefault();
     window.bar.press("menu");
