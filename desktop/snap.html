@@ -58,21 +58,23 @@
         border-radius: 50%;
         background: #fff;
         box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+        pointer-events: none;
       }
-      #box .h[data-h="nw"],
-      #box .h[data-h="se"] {
+      /* Every edge of the box resizes it, not just the dots (edgeAt below). */
+      body.portion:is([data-edge="nw"], [data-edge="se"]),
+      body.portion:is([data-edge="nw"], [data-edge="se"]) #box {
         cursor: nwse-resize;
       }
-      #box .h[data-h="ne"],
-      #box .h[data-h="sw"] {
+      body.portion:is([data-edge="ne"], [data-edge="sw"]),
+      body.portion:is([data-edge="ne"], [data-edge="sw"]) #box {
         cursor: nesw-resize;
       }
-      #box .h[data-h="n"],
-      #box .h[data-h="s"] {
+      body.portion:is([data-edge="n"], [data-edge="s"]),
+      body.portion:is([data-edge="n"], [data-edge="s"]) #box {
         cursor: ns-resize;
       }
-      #box .h[data-h="e"],
-      #box .h[data-h="w"] {
+      body.portion:is([data-edge="e"], [data-edge="w"]),
+      body.portion:is([data-edge="e"], [data-edge="w"]) #box {
         cursor: ew-resize;
       }
       #size {
@@ -234,10 +236,10 @@
     <img id="shot" alt="" draggable="false" />
     <div id="win"></div>
     <div id="box">
-      <i class="h" data-h="nw" style="left: 0; top: 0"></i><i class="h" data-h="n" style="left: 50%; top: 0"></i
-      ><i class="h" data-h="ne" style="left: 100%; top: 0"></i><i class="h" data-h="e" style="left: 100%; top: 50%"></i
-      ><i class="h" data-h="se" style="left: 100%; top: 100%"></i><i class="h" data-h="s" style="left: 50%; top: 100%"></i
-      ><i class="h" data-h="sw" style="left: 0; top: 100%"></i><i class="h" data-h="w" style="left: 0; top: 50%"></i>
+      <i class="h" style="left: 0; top: 0"></i><i class="h" style="left: 50%; top: 0"></i
+      ><i class="h" style="left: 100%; top: 0"></i><i class="h" style="left: 100%; top: 50%"></i
+      ><i class="h" style="left: 100%; top: 100%"></i><i class="h" style="left: 50%; top: 100%"></i
+      ><i class="h" style="left: 0; top: 100%"></i><i class="h" style="left: 0; top: 50%"></i>
     </div>
     <div id="size"></div>
     <div id="hint"></div>
@@ -401,6 +403,26 @@
       // ---- the screen ----
       const windowAt = (x, y) => st.windows.find((w) => x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h) ?? null;
       const inBox = (x, y) => x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
+      // Which edge or corner of the box is under the pointer ("n", "se", ...), or "". An edge
+      // can be grabbed anywhere along it, a few pixels either side, and corners from a little
+      // further along. Inside a small box, the middle stays free for moving it.
+      const GRAB = 8;
+      const CORNER = 18;
+      function edgeAt(x, y) {
+        if (mode !== "portion" || !box.w) return "";
+        const [l, t, r, b] = [box.x, box.y, box.x + box.w, box.y + box.h];
+        const inX = Math.min(GRAB, box.w / 4);
+        const inY = Math.min(GRAB, box.h / 4);
+        if (x <= l - GRAB || x >= r + GRAB || y <= t - GRAB || y >= b + GRAB) return "";
+        let v = y < t + inY ? "n" : y > b - inY ? "s" : "";
+        let h = x < l + inX ? "w" : x > r - inX ? "e" : "";
+        const cornerX = Math.min(CORNER, box.w / 4);
+        const cornerY = Math.min(CORNER, box.h / 4);
+        if (v && !h) h = x < l + cornerX ? "w" : x > r - cornerX ? "e" : "";
+        if (h && !v) v = y < t + cornerY ? "n" : y > b - cornerY ? "s" : "";
+        return v + h;
+      }
+      const showEdge = (x, y) => (document.body.dataset.edge = edgeAt(x, y));
       addEventListener("mousedown", (e) => {
         if (!st || e.button !== 0 || e.target.closest("#bar, #menu")) return;
         if (menuOpen()) return closeMenu();
@@ -409,8 +431,8 @@
           hover = windowAt(e.clientX, e.clientY);
           return capture();
         }
-        const handle = e.target.dataset?.h;
-        drag = { kind: handle || (inBox(e.clientX, e.clientY) ? "move" : "new"), x: e.clientX, y: e.clientY, from: { ...box } };
+        const edge = showEdge(e.clientX, e.clientY);
+        drag = { kind: edge || (inBox(e.clientX, e.clientY) ? "move" : "new"), x: e.clientX, y: e.clientY, from: { ...box } };
       });
       addEventListener("mousemove", (e) => {
         if (!st) return;
@@ -422,7 +444,7 @@
           }
           return;
         }
-        if (!drag) return;
+        if (!drag) return void showEdge(e.clientX, e.clientY);
         const dx = e.clientX - drag.x;
         const dy = e.clientY - drag.y;
         const f = drag.from;
@@ -442,7 +464,10 @@
         fit();
         render();
       });
-      addEventListener("mouseup", () => (drag = null));
+      addEventListener("mouseup", (e) => {
+        drag = null;
+        showEdge(e.clientX, e.clientY);
+      });
       // Dragging is ours: no picking up the still as an image.
       addEventListener("dragstart", (e) => e.preventDefault());
       addEventListener("dblclick", (e) => mode === "portion" && inBox(e.clientX, e.clientY) && capture());
