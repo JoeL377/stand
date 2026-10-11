@@ -423,7 +423,7 @@ A long topic that is still going is listed with its key too, with where it stood
 
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
       tidy ? "medium" : "low",
-      config.notesModel,
+      tidy ? config.notesTidyModel : config.notesModel,
       { timeout: tidy ? NOTES_TIDY_TIMEOUT_MS : NOTES_TIMEOUT_MS, maxTokens: NOTES_MAX_TOKENS },
     ).catch((err) => {
       throw notesTrouble(err) ?? err;
@@ -552,7 +552,7 @@ For each suggestion, write a short agenda line (what to talk about, not a copy o
 
 Order: things blocked or waiting on a decision first, then open questions, then to-dos that moved since, then the rest. Return every key exactly once. Do not invent anything.`,
       "low",
-      config.notesModel,
+      config.notesTidyModel,
     );
     if (!out) return null;
     const known = new Set(suggestions.map((s) => s.key));

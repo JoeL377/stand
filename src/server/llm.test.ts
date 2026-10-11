@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
+import { config } from "./config.ts";
 import { ClaudeAgent, NotesTrouble, notesPrompt } from "./llm.ts";
 import type { Segment } from "../shared/protocol.ts";
 
@@ -78,6 +79,19 @@ test("a notes run has room to think and to list a long meeting's lines, and a ti
   assert.match(blocks.at(-1)!.text, /Already captured.*A1 action item: Close the app/s);
   assert.deepEqual(draft.discussions[0].segmentIndexes, [0, 1, 69]);
   assert.equal(draft.notes[0].text, "Make the Keep button stand out");
+});
+
+test("live notes run on the small model, the run as the meeting ends on the bigger one", async () => {
+  if (!process.env.NOTES_MODEL) assert.equal(config.notesModel, "claude-haiku-5-5");
+  if (!process.env.NOTES_TIDY_MODEL) assert.equal(config.notesTidyModel, "claude-sonnet-5-5");
+  const { agent, calls } = withApi(() => noteReply);
+  await agent.notesFor(null, said(3));
+  await agent.notesFor(null, said(3), [], [], {}, { tidy: true });
+  const [live, tidy] = calls.map((c) => c.body as Anthropic.Beta.MessageCreateParams & { fallbacks?: unknown });
+  assert.equal(live.model, config.notesModel);
+  assert.equal(tidy.model, config.notesTidyModel);
+  // Haiku has no server-side fallback, and asking for one is refused.
+  if (config.notesModel.startsWith("claude-haiku")) assert.equal(live.fallbacks, undefined);
 });
 
 test("a declined notes run fails instead of wiping the notes", async () => {
