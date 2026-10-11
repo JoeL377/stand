@@ -526,6 +526,8 @@ app.get(
               people: state.participants.map(({ name, picture }) => ({ name, picture })),
               focusTitle: state.items.find((i) => i.id === state.focusItemId)?.title ?? null,
               since: state.meetingStartedAt,
+              // You're in this call yourself (from the Mac app or a browser).
+              you: Boolean(live?.has(user.id)),
             }
           : null,
       );

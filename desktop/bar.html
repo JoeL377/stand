@@ -74,8 +74,10 @@
   /* With the card open the typing is down there, so the field steps aside. */
   body.noting .note { display: none; }
   /* Out of a meeting Snap is just its camera, so the note field has the room. */
-  body.rest .snap { width: 30px; padding: 0; }
-  body.rest .snap .label { display: none; }
+  body.rest:not(.call) .snap { width: 30px; padding: 0; }
+  body.rest:not(.call) .snap .label { display: none; }
+  /* In a call in a browser: the bar is the meeting's, with a dot for the call. */
+  .what .live { display: inline-block; width: 7px; height: 7px; margin: 0 7px 1px 2px; border-radius: 50%; background: #34d399; }
   .snap { padding: 0 12px 0 10px; background: #2d6cdf; color: #fff; font-size: 12.5px; font-weight: 500; }
   .snap:hover { background: #3d7cf0; }
   .todos { padding: 0 8px; gap: 4px; color: #a5a5b3; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -195,10 +197,13 @@
     const what = $("what");
     const rest = Boolean(state?.rest);
     // Out of a meeting the space and the note field take the middle, unless a snap's result is showing there.
+    // In a call in a browser it's the meeting's bar, as in a call here: what's in focus, to-dos, Snap.
+    const call = rest && Boolean(state.call);
     document.body.classList.toggle("rest", rest);
-    $("space").hidden = !rest || Boolean(saying);
-    $("note").hidden = !rest || Boolean(saying) || Boolean(state?.none);
-    what.hidden = rest && !saying;
+    document.body.classList.toggle("call", call);
+    $("space").hidden = !rest || call || Boolean(saying);
+    $("note").hidden = !rest || call || Boolean(saying) || Boolean(state?.none);
+    what.hidden = rest && !call && !saying;
     if (rest) renderRest();
     // The mic first: it can be pressed while a snap's result shows, and has to show the change.
     else if (state) {
@@ -240,6 +245,13 @@
         press(fix, "settings");
         what.append(fix);
       }
+      return;
+    }
+    if (call) {
+      const dot = document.createElement("span");
+      dot.className = "live";
+      what.append(dot, state.call.focus ?? state.space);
+      what.title = `You're in the call in ${state.space}, in your browser. Snaps go into it, on the item in focus.`;
       return;
     }
     if (!state || rest) return;
@@ -333,15 +345,20 @@
     const who = s.live ? s.live.names.filter(Boolean).join(", ") : "";
     // Writing a note, the bar is the note's top line: the space and Snap. The talk mic
     // and the to-dos step out of the way (one mic, the dictation one, is less confusing).
-    $("mic").hidden = Boolean(s.none) || Boolean(noting);
+    // In a call in a browser, the mic is the browser's.
+    $("mic").hidden = Boolean(s.none) || Boolean(noting) || Boolean(s.call);
     $("mic").className = s.live ? "mic live" : "mic";
     $("mic").ariaLabel = s.live ? `Join ${who || "them"} in ${s.space}` : `Start talking in ${s.space}`;
     $("mic").title = $("mic").ariaLabel;
     $("mic-on").removeAttribute("hidden");
     $("mic-off").setAttribute("hidden", "");
     $("snap").hidden = false;
-    $("snap").title = s.none ? `Snap the screen, a window or part of it (${s.snapKey})` : `Snap the screen, a window or part of it, onto a note for ${s.space} (${s.snapKey})`;
-    $("snap").ariaLabel = s.none ? "Snap" : `Snap onto a note for ${s.space}`;
+    $("snap").title = s.none
+      ? `Snap the screen, a window or part of it (${s.snapKey})`
+      : s.call
+        ? `Snap the screen, a window or part of it, for everyone in the meeting (${s.snapKey})`
+        : `Snap the screen, a window or part of it, onto a note for ${s.space} (${s.snapKey})`;
+    $("snap").ariaLabel = s.none ? "Snap" : s.call ? "Snap for everyone in the meeting" : `Snap onto a note for ${s.space}`;
     // Snaps pinned to a note that was put away unsaved: the field says they're waiting.
     const pins = s.pins ? `${s.pins} snap${s.pins === 1 ? "" : "s"} pinned` : "";
     $("note-text").textContent = pins ? `${pins}…` : "Write a note…";

@@ -451,6 +451,13 @@ function spaceId() {
 /** The toolbar or the timer, while either is up: the shortcut again closes it. */
 let picking = null;
 
+/** The space of a call you're in outside this app (in a browser), or null. Asked fresh, but
+ *  never waited on for long: without an answer, it's what the bar last knew. */
+async function callElsewhere() {
+  await Promise.race([refreshRest("snap"), new Promise((r) => setTimeout(r, 2500))]);
+  return !meeting && resting?.call ? resting.spaceId : null;
+}
+
 /** Snaps, and resolves to what to tell the person ({ title, body }), or nothing when they
  *  cancelled. The shortcut shows it as a notification; the page's Snap button shows it in
  *  the page, where it can't be missed. */
@@ -489,6 +496,8 @@ async function snapOn(from, onDisplay) {
     return w ?? [];
   });
   const asked = frontInfo();
+  // Joined a call in a browser since the bar last looked? Asked now, answered by the time you've picked.
+  const call = meeting ? null : callElsewhere();
   const overlay = makeToolbar(display);
   const others = elsewhere(me, display);
   // The bar is up when Stand is in the background, which is when people snap: keep it out of
@@ -510,13 +519,15 @@ async function snapOn(from, onDisplay) {
     if (!still || !screenAllowed()) return cantSee();
     const at = Date.now();
     const roomId = spaceId();
+    // In a call in a browser, a snap goes into that call, as it does in one here.
+    const callId = roomId ? null : resting?.call ? resting.spaceId : null;
     void asked.then((front) => {
       // Snapped from another app: that's the app to hand the screen back to afterwards.
       if (!wasInStand && front?.pid && front.pid !== process.pid) theirApp = front;
       trace("front", { front: front?.name });
     });
     for (const o of others) o.showInactive();
-    const choice = await openToolbar(me, overlay, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId), space: resting?.space ?? null, t0 });
+    const choice = await openToolbar(me, overlay, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId || callId), space: resting?.space ?? null, t0 });
     trace("toolbar", { choice: choice && (choice.failed ?? (choice.cancel ? "cancel" : choice.mode)) });
     if (me.switchTo) return { switchTo: me.switchTo };
     // The other displays were only dimmed for choosing one: give them back now, not after saving.
@@ -544,16 +555,17 @@ async function snapOn(from, onDisplay) {
     // The screen's been read: the bar can come back while the snap saves, and say that it is.
     barAway = false;
     updateBar();
+    const to = roomId ?? (await call);
     // Out of a meeting it's pinned to the note card under the bar, and saved with the note.
-    if (!roomId && prefs.toMeeting) return await pinSnap(image, shotAt, prefs, reading);
+    if (!to && prefs.toMeeting) return await pinSnap(image, shotAt, prefs, reading);
     me.saving = true;
     // Where it began says where it's reported: from the page's Snap button, in the page;
-    // otherwise on the bar while it's up, else in the page if Stand is in front.
-    const onBar = Boolean(roomId && prefs.toMeeting && from !== "page" && bar?.isVisible());
+    // otherwise on the bar while it's up, else in the page if Stand is in front (and in the meeting).
+    const onBar = Boolean(to && prefs.toMeeting && from !== "page" && bar?.isVisible());
     if (onBar) bar.webContents.send("bar:report", { title: "Saving snap…", pending: true });
     const inPage = Boolean(roomId && prefs.toMeeting && !onBar && win?.isVisible());
     if (inPage) win.webContents.send("app:command", "saving");
-    const report = await deliver(image, shotAt, prefs, roomId).finally(() => inPage && !win.isDestroyed() && win.webContents.send("app:command", "saved"));
+    const report = await deliver(image, shotAt, prefs, to).finally(() => inPage && !win.isDestroyed() && win.webContents.send("app:command", "saved"));
     void addText(report.snapId, reading);
     // The bar said it was saving, so the bar says how it went, wherever the snap began.
     if (onBar && bar && !bar.isDestroyed()) {
@@ -576,6 +588,7 @@ async function snapOn(from, onDisplay) {
     if (noteUp && noteWin && !noteWin.isDestroyed() && !noteWin.isVisible()) {
       noteWin.showInactive();
       noteWin.focus();
+      tieNote();
     }
   }
 }
@@ -1084,6 +1097,24 @@ function notePlace(height) {
   return { x: Math.round(a.x + (a.width - BAR.width) / 2), y: a.y + 8, above: false, fused: false };
 }
 
+/** On the Mac the card is the bar's child window while it hangs from the bar, so macOS moves the
+ *  two together, in the same frame, as the bar is dragged: following the bar's "moved" events
+ *  lagged a frame or two behind, and the card came apart from the bar. */
+let noteTied = false;
+function tieNote() {
+  if (!mac || !noteWin || noteWin.isDestroyed()) return;
+  const tie = Boolean(notePlaced?.fused && bar && !bar.isDestroyed() && bar.isVisible() && noteWin.isVisible());
+  if (tie === noteTied) return;
+  noteTied = tie;
+  noteWin.setParentWindow(tie ? bar : null);
+}
+/** Before the bar goes away: macOS would take its child, the card, with it. */
+function untieNote() {
+  if (!noteTied) return;
+  noteTied = false;
+  if (noteWin && !noteWin.isDestroyed()) noteWin.setParentWindow(null);
+}
+
 let noteHeight = 96;
 /** How the card was last told to draw itself: {above, fused}. */
 let notePlaced = null;
@@ -1098,6 +1129,7 @@ function placeNote() {
     notePlaced = { above: place.above, fused: place.fused };
     noteWin.webContents.send("note:place", notePlaced);
   }
+  tieNote();
   sendBarNote();
 }
 
@@ -1161,6 +1193,7 @@ async function openNote() {
     done = true;
     for (const [name, fn] of handlers) ipcMain.removeListener(name, fn);
     if (globalShortcut.isRegistered("Escape")) globalShortcut.unregister("Escape");
+    if (noteWin === card) untieNote();
     if (!card.isDestroyed()) card.close();
     if (noteWin === card) noteWin = null;
     sendBarNote();
@@ -1172,6 +1205,7 @@ async function openNote() {
         if (!mine(e) || card.isDestroyed()) return;
         card.showInactive();
         card.focus();
+        tieNote();
         sendBarNote();
       },
     ],
@@ -1485,6 +1519,8 @@ function refreshRest(why) {
         name: short(s.name) || "Untitled space",
         at: Number(s.activeAt) || 0,
         live: s.live && Array.isArray(s.live.people) && s.live.people.length ? { names: s.live.people.slice(0, 6).map((p) => short(p?.name)) } : null,
+        // You're in its call: the meeting isn't in this app (it would be `meeting`), so a browser.
+        call: s.live?.you ? { focus: short(s.live.focusTitle) || null } : null,
       }))
       .filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s.id))
       .sort((a, b) => b.at - a.at);
@@ -1493,11 +1529,12 @@ function refreshRest(why) {
       return;
     }
     const want = snapPrefs().space;
-    const at = restSpaces.find((s) => s.id === want) ?? restSpaces[0];
+    // In a call in a browser, the bar is about that call, as it is about one in this app.
+    const at = restSpaces.find((s) => s.call) ?? restSpaces.find((s) => s.id === want) ?? restSpaces[0];
     const room = await roomOf(at.id);
     // Picked another while this one loaded: that one's answer is the one to show.
-    if (snapPrefs().space && snapPrefs().space !== want) return;
-    resting = { spaceId: at.id, space: at.name, live: at.live, todos: room ? openTodos(room) : (resting?.spaceId === at.id ? resting.todos : []) };
+    if (snapPrefs().space && snapPrefs().space !== want && !at.call) return;
+    resting = { spaceId: at.id, space: at.name, live: at.live, call: at.call, todos: room ? openTodos(room) : (resting?.spaceId === at.id ? resting.todos : []) };
   })().finally(() => {
     restLoading = null;
     restAt = Date.now();
@@ -1757,7 +1794,8 @@ function makeBar() {
     if (barResizing) return;
     const [x, y] = bar.getPosition();
     fs.promises.writeFile(barFile(), JSON.stringify({ x, y: barList?.up ? y + barList.h : y })).catch(() => {});
-    // The note card goes where the bar goes.
+    // The note card goes where the bar goes. Tied to it on the Mac, it's there already and this
+    // changes nothing, unless it has to change sides.
     placeNote();
     // Dragging the bar is a click on it too. On the Mac this fires all through the drag.
     clearTimeout(dragged);
@@ -1767,6 +1805,7 @@ function makeBar() {
   bar.on("hide", () => trace("bar-hidden", { meeting: Boolean(meeting), barAway, appHidden: mac && !win?.isVisible() }));
   bar.on("show", () => trace("bar-shown", {}));
   bar.on("closed", () => {
+    untieNote();
     bar = null;
     barLoaded = false;
     barList = null;
@@ -1829,6 +1868,7 @@ function updateBar() {
     if (pulse) pulsedFor = meeting.roomId;
     bar.webContents.send("bar:shown", { pulse });
     barSnapped = false;
+    tieNote();
     void noteTheirApp();
   } else if (!want && bar.isVisible()) {
     trace("bar-down", { meeting: Boolean(meeting), barAway });
@@ -1850,6 +1890,7 @@ function revealBar() {
 /** The meeting whose bar has had its glow. */
 let pulsedFor = null;
 function hideBar() {
+  untieNote();
   bar.setOpacity(0);
   bar.hide();
   // The pointer can't be on a bar that's gone, and no "leave" will come to say so.
@@ -2002,7 +2043,8 @@ app.whenReady().then(async () => {
     clearTimeout(signedInOrOut);
     signedInOrOut = setTimeout(() => void refreshRest("session"), 300);
   });
-  setInterval(() => !meeting && void refreshRest("tick"), 30_000);
+  // Often enough to notice a call joined in a browser.
+  setInterval(() => !meeting && void refreshRest("tick"), 15_000);
   nativeTheme.on("updated", () => win?.setBackgroundColor(backdrop()));
   // Focus moving between apps: a blur comes just before the next focus, so look once both have landed.
   for (const change of ["browser-window-focus", "browser-window-blur"]) app.on(change, () => setTimeout(updateBar, 50));

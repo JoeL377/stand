@@ -458,7 +458,7 @@ export interface SpaceSummary {
   following: boolean;
   /** Latest thing that happened in it: created, a meeting, someone entering. */
   activeAt: number;
-  live: { people: Array<{ name: string; picture: string | null }>; focusTitle: string | null; since: number } | null;
+  live: { people: Array<{ name: string; picture: string | null }>; focusTitle: string | null; since: number; you: boolean } | null;
   /** Open questions from its latest meeting with notes. */
   toDecide: number;
   /** Open to-dos from its meetings. */
