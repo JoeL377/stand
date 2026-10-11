@@ -22,7 +22,7 @@ const args = [
   "clang++",
   ...["-x", "objective-c++", "-std=c++17", "-fobjc-arc", "-O2"],
   ...["-arch", "arm64", "-arch", "x86_64", "-mmacosx-version-min=13.0"],
-  ...["-bundle", "-undefined", "dynamic_lookup", "-framework", "AppKit"],
+  ...["-bundle", "-undefined", "dynamic_lookup", "-framework", "AppKit", "-framework", "CoreGraphics"],
   ...["-o", OUT, SRC],
 ];
 const r = spawnSync("xcrun", args, { encoding: "utf8" });

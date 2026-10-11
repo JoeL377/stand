@@ -264,27 +264,38 @@ async function snap(from) {
     },
   };
   picking = me;
-  // The bar is up when Stand is in the background, which is when people snap: keep it out of the picture.
+  const t0 = Date.now();
+  const wasInStand = BrowserWindow.getFocusedWindow() != null;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  // What doesn't need the bar out of the way starts now, so the toolbar can show as soon as
+  // the screen is read: the toolbar's window (hidden until then), the window list, the app in front.
+  const windows = within(windowsOn(display), 8000).then((w) => {
+    trace("windows", { count: w?.length ?? null, ms: Date.now() - t0 });
+    return w ?? [];
+  });
+  const asked = frontInfo();
+  const overlay = makeToolbar(display);
+  // The bar is up when Stand is in the background, which is when people snap: keep it out of
+  // the picture. macOS takes it off the screen within a frame or two.
   barAway = true;
   if (bar?.isVisible()) {
     bar.hide();
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 50));
   }
-  const wasInStand = BrowserWindow.getFocusedWindow() != null;
   try {
-    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     trace("start", { from, display: display.bounds, scale: display.scaleFactor, permission: screenStatus(), wasInStand });
-    const asked = frontInfo();
-    const [still, windows] = (await within(Promise.all([grabDisplay(display), windowsOn(display)]), 8000)) ?? [null, []];
-    const front = await asked;
-    // Snapped from another app: that's the app to hand the screen back to afterwards.
-    if (!wasInStand && front?.pid && front.pid !== process.pid) theirApp = front;
-    trace("grabbed", { still: still?.getSize() ?? null, windows: windows.length, permission: screenStatus(), cancelled: me.cancelled, front: front?.name });
+    const still = await within(grabDisplay(display), 8000);
+    trace("grabbed", { still: still?.getSize() ?? null, permission: screenStatus(), cancelled: me.cancelled, ms: Date.now() - t0 });
     if (me.cancelled) return;
     if (!still || !screenAllowed()) return cantSee();
     const at = Date.now();
     const roomId = spaceId();
-    const choice = await openToolbar(me, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId) });
+    void asked.then((front) => {
+      // Snapped from another app: that's the app to hand the screen back to afterwards.
+      if (!wasInStand && front?.pid && front.pid !== process.pid) theirApp = front;
+      trace("front", { front: front?.name });
+    });
+    const choice = await openToolbar(me, overlay, display, still, windows, { prefs: snapPrefs(), inMeeting: Boolean(roomId), t0 });
     trace("toolbar", { choice: choice && (choice.failed ?? (choice.cancel ? "cancel" : choice.mode)) });
     if (choice?.failed) return { title: "Snap's toolbar didn't open", body: choice.failed };
     if (choice?.prefs) fs.promises.writeFile(prefsFile(), JSON.stringify(cleanPrefs(choice.prefs))).catch(() => {});
@@ -302,7 +313,7 @@ async function snap(from) {
       shotAt = Date.now();
       if (!shot) return cantSee();
     }
-    const image = await cut(choice, display, shot, windows);
+    const image = await cut(choice, display, shot, await windows);
     trace("cut", { size: image.getSize() });
     return await deliver(image, shotAt, prefs, roomId);
   } catch (err) {
@@ -311,6 +322,7 @@ async function snap(from) {
     if (mac && screenStatus() !== "granted") return cantSee();
     return { title: "Snap didn't work", body: String(err?.message ?? err) };
   } finally {
+    if (!overlay.isDestroyed()) overlay.close();
     if (picking === me) picking = null;
     barAway = false;
     updateBar();
@@ -399,8 +411,9 @@ async function windowsOn(display) {
   return all.filter((w) => w.w >= 40 && w.h >= 40 && w.x < b.x + b.width && w.x + w.w > b.x && w.y < b.y + b.height && w.y + w.h > b.y);
 }
 
-/** On the Mac, from CoreGraphics through osascript: no extra permission, and the
- *  window ids match desktopCapturer's. Elsewhere (trying the app on Linux), xdotool if it's there. */
+/** On the Mac, from CoreGraphics: through the native code, or osascript if that didn't
+ *  build. No extra permission, and the window ids match desktopCapturer's. Elsewhere
+ *  (trying the app on Linux), xdotool if it's there. */
 const WINDOWS_JXA = `ObjC.import("CoreGraphics");
 const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1 | 16, 0))) || [];
 JSON.stringify(list.filter((w) => w.kCGWindowLayer === 0 && w.kCGWindowAlpha > 0).map((w) => ({
@@ -415,10 +428,19 @@ function run(cmd, args) {
 }
 
 async function listWindows() {
+  if (mac && native()?.windows) return JSON.parse(native().windows());
   if (mac) return JSON.parse(await run("osascript", ["-l", "JavaScript", "-e", WINDOWS_JXA]));
   if (process.platform !== "linux") return [];
   // xdotool lists top-level windows bottom to top.
-  const ids = (await run("xdotool", ["search", "--onlyvisible", "--name", "."])).split("\n").filter(Boolean).reverse();
+  // A window coming or going mid-search (Snap's own toolbar, say) can make it fail: once more
+  // then, leaving out Stand's own windows other than the main one.
+  const search = () => run("xdotool", ["search", "--onlyvisible", "--name", "."]);
+  const found = await search().catch(() => new Promise((r) => setTimeout(r, 50)).then(search));
+  const ours = new Set(BrowserWindow.getAllWindows().filter((w) => w !== win).map((w) => w.getNativeWindowHandle().readUInt32LE(0)));
+  const ids = found
+    .split("\n")
+    .filter((id) => id && !ours.has(Number(id)))
+    .reverse();
   const geo = await Promise.all(ids.map((id) => run("xdotool", ["getwindowgeometry", "--shell", id]).catch(() => "")));
   return geo
     .map((g, i) => {
@@ -428,34 +450,46 @@ async function listWindows() {
     .filter((w) => Number.isFinite(w.w));
 }
 
-/** The toolbar over a still of one display. Resolves to what to snap, or a cancel
- *  (with the settings to keep), or null if it closed some other way. */
-function openToolbar(me, display, still, windows, { prefs, inMeeting }) {
-  return new Promise((resolve) => {
-    const overlay = new BrowserWindow({
-      ...display.bounds,
-      ...(mac ? { type: "panel" } : {}),
-      show: false,
-      frame: false,
-      transparent: true,
-      resizable: false,
-      movable: false,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      hasShadow: false,
-      roundedCorners: false,
-      enableLargerThanScreen: true,
-      acceptFirstMouse: true,
-      skipTaskbar: true,
-      alwaysOnTop: true,
-      webPreferences: { preload: `${__dirname}/snap-preload.js`, contextIsolation: true, sandbox: true },
-    });
-    overlay.setAlwaysOnTop(true, "screen-saver");
-    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-    overlay.setBounds(display.bounds);
-    staysInBackground(overlay, "toolbar");
+/** The toolbar's window over one display, hidden, with its page loading. `loaded` resolves
+ *  to null once it's ready, or to why it couldn't load. */
+function makeToolbar(display) {
+  const overlay = new BrowserWindow({
+    ...display.bounds,
+    ...(mac ? { type: "panel" } : {}),
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    hasShadow: false,
+    roundedCorners: false,
+    enableLargerThanScreen: true,
+    acceptFirstMouse: true,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: { preload: `${__dirname}/snap-preload.js`, contextIsolation: true, sandbox: true },
+  });
+  overlay.setAlwaysOnTop(true, "screen-saver");
+  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  overlay.setBounds(display.bounds);
+  staysInBackground(overlay, "toolbar");
+  overlay.loaded = new Promise((resolve) => {
+    overlay.webContents.once("did-finish-load", () => resolve(null));
+    overlay.webContents.once("did-fail-load", (_e, code, why) => resolve(`It couldn't load (${why || code}).`));
+  });
+  overlay.webContents.on("console-message", (e, ...old) => trace("toolbar-console", { message: e.message ?? old[1] }));
+  void overlay.loadFile(`${__dirname}/snap.html`);
+  return overlay;
+}
 
+/** The toolbar over a still of one display, in the window makeToolbar made. The window list
+ *  follows when it's ready. Resolves to what to snap, or a cancel (with the settings to
+ *  keep), or null if it closed some other way. */
+function openToolbar(me, overlay, display, still, windows, { prefs, inMeeting, t0 }) {
+  return new Promise((resolve) => {
     let done = false;
     const finish = (choice) => {
       if (done) return;
@@ -476,16 +510,15 @@ function openToolbar(me, display, still, windows, { prefs, inMeeting }) {
       // Stand's Space when that app is full screen or on another desktop.
       overlay.show();
       overlay.focus();
+      const ms = Date.now() - t0;
       void frontApp().then((front) =>
-        trace("shown", { visible: overlay.isDestroyed() ? null : overlay.isVisible(), focused: !overlay.isDestroyed() && overlay.isFocused(), front }),
+        trace("shown", { visible: overlay.isDestroyed() ? null : overlay.isVisible(), focused: !overlay.isDestroyed() && overlay.isFocused(), front, ms, jpegMs }),
       );
     };
     // The toolbar shows once its still has loaded. If that never happens, say so rather
     // than leave an invisible toolbar holding Snap.
     const slow = setTimeout(() => finish({ failed: "It didn't finish loading. Try again, or quit and reopen Stand." }), 10_000);
-    overlay.webContents.on("did-fail-load", (_e, code, why) => finish({ failed: `It couldn't load (${why || code}).` }));
     overlay.webContents.on("render-process-gone", (_e, d) => finish({ failed: `It stopped (${d.reason}).` }));
-    overlay.webContents.on("console-message", (e, ...old) => trace("toolbar-console", { message: e.message ?? old[1] }));
     me.cancel = () => finish(null);
     ipcMain.on("snap:done", onDone);
     ipcMain.on("snap:ready", onReady);
@@ -493,15 +526,18 @@ function openToolbar(me, display, still, windows, { prefs, inMeeting }) {
     globalShortcut.register("Escape", () => finish(null));
     overlay.on("closed", () => finish(null));
     const b = display.bounds;
-    overlay.webContents.once("did-finish-load", () =>
-      overlay.webContents.send("snap:open", {
-        image: `data:image/jpeg;base64,${still.toJPEG(90).toString("base64")}`,
-        windows: windows.map((w) => ({ id: w.id, x: w.x - b.x, y: w.y - b.y, w: w.w, h: w.h })),
-        prefs,
-        inMeeting,
-      }),
-    );
-    void overlay.loadFile(`${__dirname}/snap.html`);
+    const t1 = Date.now();
+    const image = `data:image/jpeg;base64,${still.toJPEG(90).toString("base64")}`;
+    const jpegMs = Date.now() - t1;
+    const open = () => !done && !overlay.isDestroyed();
+    void overlay.loaded.then((failed) => {
+      if (failed) return finish({ failed });
+      if (!open()) return;
+      overlay.webContents.send("snap:open", { image, windows: [], prefs, inMeeting });
+      void windows.then(
+        (list) => open() && overlay.webContents.send("snap:windows", list.map((w) => ({ id: w.id, x: w.x - b.x, y: w.y - b.y, w: w.w, h: w.h }))),
+      );
+    });
   });
 }
 
@@ -675,7 +711,7 @@ function makeBar() {
   bar.setAlwaysOnTop(true, "floating");
   bar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   // If this doesn't take, giveBack() undoes what a click on the bar does.
-  staysInBackground(bar, "bar");
+  barPrevents = staysInBackground(bar, "bar");
   bar.setContentProtection(true);
   bar.on("moved", () => {
     const [x, y] = bar.getPosition();
@@ -699,7 +735,7 @@ function makeBar() {
  *  front. Electron's panels don't fully opt out of macOS making the clicked app active;
  *  native/stand-native.mm does. */
 function staysInBackground(w, name) {
-  if (!mac) return;
+  if (!mac) return false;
   let prevents = false;
   try {
     prevents = Boolean(native()?.preventActivation(w.getNativeWindowHandle()));
@@ -707,6 +743,7 @@ function staysInBackground(w, name) {
     trace("native", { error: String(err?.message || err) });
   }
   trace("window", { name, prevents });
+  return prevents;
 }
 
 /** Stand's native Mac code (native/stand-native.mm), when scripts/build-native.js built it. */
@@ -739,20 +776,22 @@ async function pressOnBar(button) {
   if (button === "hover") {
     // A press on the bar can make Stand the active app, and macOS then brings up Stand's
     // window to take the keyboard. While the pointer is on the bar, that window can't.
-    if (mac && win && !win.isFocused()) win.setFocusable(false);
+    if (mac && !barPrevents && win && !win.isFocused()) win.setFocusable(false);
     return void noteTheirApp();
   }
   if (button === "leave") return void (mac && !barHold && win?.setFocusable(true));
   trace("bar", { button, theirApp: theirApp?.name });
   if (button === "open") return showWindow();
   if (button === "mic") win?.webContents.send("app:command", "mic");
-  // The press may have just made Stand the active app; keep the bar up while that's undone.
-  barHold = true;
-  try {
-    await giveBack(button);
-  } finally {
-    barHold = false;
-    if (mac) win?.setFocusable(true);
+  // Without the native code, the press made Stand the active app; keep the bar up while that's undone.
+  if (!barPrevents) {
+    barHold = true;
+    try {
+      await giveBack(button);
+    } finally {
+      barHold = false;
+      if (mac) win?.setFocusable(true);
+    }
   }
   if (button === "snap") tell(await snap("bar"));
   else updateBar();
@@ -768,6 +807,8 @@ async function noteTheirApp() {
 
 /** While a click on the bar is being undone, the bar stays put rather than blinking off. */
 let barHold = false;
+/** Clicks on the bar leave Stand in the background (staysInBackground), so there's nothing to undo. */
+let barPrevents = false;
 let dragged;
 
 /** macOS makes an app active when one of its windows is clicked, and Electron's panels

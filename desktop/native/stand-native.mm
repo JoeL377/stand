@@ -6,6 +6,10 @@
 // non-activating to AppKit's own code, not to the window server, so a click on the floating
 // bar still made Stand the active app and brought its window up. Returns whether the window
 // now prevents activation.
+//
+// windows() lists the app windows on screen, front to back, as JSON: what Snap's Window mode
+// picks from. Asking CoreGraphics here takes a few milliseconds; through osascript it took
+// a few hundred, and the toolbar waited on it.
 
 #import <AppKit/AppKit.h>
 #import <objc/message.h>
@@ -24,6 +28,7 @@ napi_status napi_get_cb_info(napi_env env, napi_callback_info cbinfo, size_t* ar
                              napi_value* this_arg, void** data);
 napi_status napi_get_buffer_info(napi_env env, napi_value value, void** data, size_t* length);
 napi_status napi_get_boolean(napi_env env, bool value, napi_value* result);
+napi_status napi_create_string_utf8(napi_env env, const char* str, size_t length, napi_value* result);
 napi_status napi_create_function(napi_env env, const char* utf8name, size_t length, napi_callback cb, void* data,
                                  napi_value* result);
 napi_status napi_set_named_property(napi_env env, napi_value object, const char* utf8name, napi_value value);
@@ -56,10 +61,43 @@ static napi_value PreventActivation(napi_env env, napi_callback_info info) {
   return result;
 }
 
-extern "C" __attribute__((visibility("default"))) napi_value napi_register_module_v1(napi_env env, napi_value exports) {
+static napi_value Windows(napi_env env, napi_callback_info info) {
+  NSMutableArray* out = [NSMutableArray array];
+  CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+                                               kCGNullWindowID);
+  if (list) {
+    for (NSDictionary* w in (__bridge NSArray*)list) {
+      // Ordinary windows only: not the menu bar, the Dock, or floating panels like Stand's bar.
+      if ([w[(__bridge NSString*)kCGWindowLayer] intValue] != 0) continue;
+      if ([w[(__bridge NSString*)kCGWindowAlpha] doubleValue] <= 0) continue;
+      CGRect r;
+      NSDictionary* bounds = w[(__bridge NSString*)kCGWindowBounds];
+      if (!bounds || !CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)bounds, &r)) continue;
+      [out addObject:@{
+        @"id" : w[(__bridge NSString*)kCGWindowNumber] ?: @0,
+        @"app" : w[(__bridge NSString*)kCGWindowOwnerName] ?: @"",
+        @"x" : @(r.origin.x),
+        @"y" : @(r.origin.y),
+        @"w" : @(r.size.width),
+        @"h" : @(r.size.height),
+      }];
+    }
+    CFRelease(list);
+  }
+  NSData* json = [NSJSONSerialization dataWithJSONObject:out options:0 error:nil] ?: [@"[]" dataUsingEncoding:NSUTF8StringEncoding];
+  napi_value result = nullptr;
+  napi_create_string_utf8(env, (const char*)json.bytes, json.length, &result);
+  return result;
+}
+
+static void Export(napi_env env, napi_value exports, const char* name, napi_callback cb) {
   napi_value fn = nullptr;
-  if (napi_create_function(env, "preventActivation", SIZE_MAX, PreventActivation, nullptr, &fn) == 0)
-    napi_set_named_property(env, exports, "preventActivation", fn);
+  if (napi_create_function(env, name, SIZE_MAX, cb, nullptr, &fn) == 0) napi_set_named_property(env, exports, name, fn);
+}
+
+extern "C" __attribute__((visibility("default"))) napi_value napi_register_module_v1(napi_env env, napi_value exports) {
+  Export(env, exports, "preventActivation", PreventActivation);
+  Export(env, exports, "windows", Windows);
   return exports;
 }
 
