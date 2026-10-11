@@ -112,8 +112,11 @@ export interface Discussion {
  *  one (source "agent") only when the frame backs a decision or to-do it wrote. */
 export interface Snap {
   id: string;
-  meetingId: string;
+  /** Null for a snap saved straight to the space between meetings. */
+  meetingId: string | null;
   itemId: string | null;
+  /** The agent picked the item and nobody has confirmed it yet (shown with ✦). */
+  itemSuggested: boolean;
   ts: number;
   /** The image, at the size it was shared (cropped if someone cropped it). */
   url: string;
@@ -127,6 +130,12 @@ export interface Snap {
   sharerName: string | null;
   /** The agent's one line on what's on screen; null until it has looked. */
   caption: string | null;
+  /** The line the person typed with it, if any. */
+  line: string | null;
+  /** The text in the image, read on the Mac that took it; null until read, or when it wasn't. */
+  screenText: string | null;
+  /** The note it was pinned to on the Mac's bar: it shows with that note, and takes its item. */
+  jotId?: string | null;
   /** The to-do, decision or open question it backs: the agent's own snaps when
    *  kept, and any snap once the end-of-meeting recap has looked at it. */
   noteId: string | null;
@@ -175,9 +184,10 @@ export interface FollowUp extends Note {
 /** One thing the agent proposes for the agenda, with why. Nothing joins the
  *  agenda until someone adds it. */
 export interface UpNextSuggestion {
-  /** "note:<id>", "item:<id>" or "space:<id>" (open to-dos in another space); what add and dismiss refer to. */
+  /** "note:<id>", "item:<id>", "space:<id>" (open to-dos in another space) or "snap:<id>" (saved
+   *  to the space since the last meeting); what add and dismiss refer to. */
   key: string;
-  kind: "needs_people" | "question" | "todo";
+  kind: "needs_people" | "question" | "capture" | "todo";
   title: string;
   /** One line shown on hover, e.g. "Open question from Thu 9 Oct". */
   reason: string;
@@ -218,6 +228,8 @@ export interface Participant {
   /** The host drives the meeting: whatever item they open is what's being discussed. */
   isHost: boolean;
   isSharing: boolean;
+  /** Browser transcription can't hear this person (blocked, or a browser without it). */
+  notRecording?: boolean;
 }
 
 export interface Suggestion {
@@ -268,8 +280,17 @@ export interface RoomState {
   pinnedBy: string | null;
   /** The host's name while their connection is down and they can still come back as host. */
   hostAway?: string | null;
+  /** How long until the seat held for that host goes to someone else, as of sending.
+   *  A duration, so a viewer's clock being off doesn't matter. */
+  hostAwayMs?: number | null;
+  /** Items whose notes the agent couldn't write on its last try (null: General). */
+  notesFailing?: Array<string | null>;
+  /** Why, when it's the account and not one run: its rate limit, or its credit ran out. */
+  notesTrouble?: "busy" | "credit" | null;
   /** The server's transcriber stopped: talk isn't being recorded until someone rejoins. */
   transcriptionDown?: boolean;
+  /** While down: Stand is about to start it again by itself. */
+  transcriptionRestarting?: boolean;
   suggestion: Suggestion | null;
   items: Item[];
   decks: Deck[];
@@ -298,7 +319,8 @@ export type ClientMessage = (
   | { type: "focus"; itemId: string | null }
   | { type: "pin"; itemId: string }
   | { type: "unpin" }
-  | { type: "suggestion.accept" }
+  /** `itemId`: the suggestion the host saw, so a newer one isn't accepted by mistake. */
+  | { type: "suggestion.accept"; itemId?: string }
   /** Host: put an agent suggestion on the agenda, all of them, or wave one off. */
   | { type: "upnext.add"; key: string }
   | { type: "upnext.addAll" }
@@ -310,6 +332,12 @@ export type ClientMessage = (
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */
   | { type: "host.give"; participantId: string }
   | { type: "sharing"; on: boolean }
+  /** Browser transcription: whether this person's words are being picked up. */
+  | { type: "recording"; on: boolean }
+  /** Try the notes for an item again now, after the agent failed. */
+  | { type: "notes.retry"; itemId: string | null }
+  /** Take back the last "Switch and move": the focus and the remarks go back, with what was said since. */
+  | { type: "suggestion.undo" }
   | { type: "chat"; text: string }
   /** Browser transcription: a finished utterance from this participant's mic. */
   | { type: "speech"; text: string; startedAt: number }
@@ -379,6 +407,45 @@ export interface MeetingRecap {
 export const MAX_SYNTHESIS_INSTRUCTIONS = 2000;
 
 /** One space (a room) as the home page lists it. */
+/** The space page's feed: what came into the space, newest first, and where it stands. */
+/** A note someone saved straight to the space between meetings, typed or dictated on the
+ *  Mac's bar. Like a snap, the agent suggests its item (✦) when nobody picked one. */
+export interface Jot {
+  id: string;
+  roomId: string;
+  itemId: string | null;
+  itemSuggested: boolean;
+  text: string;
+  byId: string | null;
+  by: string;
+  ts: number;
+  /** The snaps pinned to it on the bar, oldest first (in the feed). */
+  snaps?: Snap[];
+}
+
+export interface SpaceFeed {
+  /** Snaps saved straight to the space, newest first. */
+  captures: Snap[];
+  /** Notes saved straight to the space, newest first. */
+  jots: Jot[];
+  /** Meetings that ended, newest first, each as one row. */
+  meetings: Array<{
+    id: string;
+    startedAt: number;
+    endedAt: number;
+    summary: string | null;
+    todos: number;
+    decided: number;
+    open: number;
+  }>;
+  /** What agents and people reported through the MCP, newest first. */
+  updates: ItemUpdate[];
+  /** Decisions from the space's meetings, newest first. */
+  decided: Note[];
+  /** Open questions from its latest meeting with notes. */
+  open: Note[];
+}
+
 export interface SpaceSummary {
   id: string;
   name: string;

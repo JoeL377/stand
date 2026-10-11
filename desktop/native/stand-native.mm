@@ -10,6 +10,9 @@
 // windows() lists the app windows on screen, front to back, as JSON: what Snap's Window mode
 // picks from. Asking CoreGraphics here takes a few milliseconds; through osascript it took
 // a few hundred, and the toolbar waited on it.
+//
+// startDictation() starts the Mac's dictation in the text field that has the keyboard (the
+// bar's note card), as Edit > Start Dictation does. Returns whether anything took it.
 
 #import <AppKit/AppKit.h>
 #import <objc/message.h>
@@ -52,6 +55,8 @@ static napi_value PreventActivation(napi_env env, napi_callback_info info) {
   // What NSPanel uses for its non-activating style: it tags the window with the window server.
   SEL set = NSSelectorFromString(@"_setPreventsActivation:");
   SEL get = NSSelectorFromString(@"_preventsActivation");
+  // And it stays up when Stand is hidden (⌘H): the bar is what's left of Stand then.
+  if (window) [window setCanHide:NO];
   if (window && [window respondsToSelector:set]) {
     ((void (*)(id, SEL, BOOL))objc_msgSend)(window, set, YES);
     done = [window respondsToSelector:get] ? ((BOOL (*)(id, SEL))objc_msgSend)(window, get) : true;
@@ -90,6 +95,13 @@ static napi_value Windows(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value StartDictation(napi_env env, napi_callback_info info) {
+  BOOL done = [NSApp sendAction:NSSelectorFromString(@"startDictation:") to:nil from:nil];
+  napi_value result = nullptr;
+  napi_get_boolean(env, done, &result);
+  return result;
+}
+
 static void Export(napi_env env, napi_value exports, const char* name, napi_callback cb) {
   napi_value fn = nullptr;
   if (napi_create_function(env, name, SIZE_MAX, cb, nullptr, &fn) == 0) napi_set_named_property(env, exports, name, fn);
@@ -98,6 +110,7 @@ static void Export(napi_env env, napi_value exports, const char* name, napi_call
 extern "C" __attribute__((visibility("default"))) napi_value napi_register_module_v1(napi_env env, napi_value exports) {
   Export(env, exports, "preventActivation", PreventActivation);
   Export(env, exports, "windows", Windows);
+  Export(env, exports, "startDictation", StartDictation);
   return exports;
 }
 

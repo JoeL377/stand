@@ -82,6 +82,7 @@ test("get brings the snaps that go with a topic or a note", () => {
   const snap = (id: string) =>
     db.addSnap({
       id,
+      roomId: item.roomId,
       meetingId,
       itemId: item.id,
       ts: Date.now(),
@@ -232,4 +233,60 @@ test("a new space offers the open to-dos of a space everyone in it shares, and c
   db.touchMembership(side.id, joe.id);
   db.touchMembership(side.id, andy.id);
   assert.deepEqual(db.sharedSpacesWithOpenWork(side.id), []);
+});
+
+test("notes saved from the bar reach agents: list_notes, get on stand:note, the item's context and the agenda", () => {
+  const { db, api, joe, andy, room, item } = setup();
+  const me = { user: joe, token: null };
+  const at = Date.parse("2026-10-11T08:00:00Z");
+  db.addJot({ id: "jotchart1", roomId: room.id, itemId: item.id, itemSuggested: true, text: "Lag spikes when two people talk", byId: joe.id, by: "Joe Liang", ts: at });
+  db.addJot({ id: "jotolder1", roomId: room.id, itemId: null, text: "Ask Okta about SSO", byId: joe.id, by: "Joe Liang", ts: at - 2 * 86_400_000 });
+  const snap = (id: string, jotId: string | null, ts: number) =>
+    db.addSnap({
+      id,
+      roomId: room.id,
+      meetingId: null,
+      itemId: jotId ? item.id : null,
+      ts,
+      ext: "jpg",
+      width: 800,
+      height: 500,
+      source: "person",
+      takenById: joe.id,
+      takenBy: "Joe Liang",
+      sharerId: null,
+      sharerName: null,
+      noteId: null,
+      screenText: "p95 1.8s",
+      jotId,
+    });
+  snap("pinnedsnap", "jotchart1", at - 1000);
+  snap("alonesnap1", null, at - 5000);
+
+  const all = api.listNotes(me, { space: "checkout" }, "http://stand.test");
+  assert.deepEqual(all.notes.map((n) => [n.ref, n.text, n.item?.title ?? null]), [
+    ["stand:note/jotchart1", "Lag spikes when two people talk", "Transcript lag"],
+    ["stand:note/jotolder1", "Ask Okta about SSO", null],
+  ]);
+  assert.equal(all.notes[0].item?.filed_by, "the Stand agent (not confirmed yet)");
+  assert.deepEqual(all.notes[0].snaps?.map((s) => [s.image_url, s.text_on_screen]), [["http://stand.test/api/snaps/pinnedsnap.jpg?v=1", "p95 1.8s"]]);
+  // A snap pinned to a note shows with it, not again on its own.
+  assert.deepEqual(all.snaps_on_their_own?.map((s) => s.image_url), ["http://stand.test/api/snaps/alonesnap1.jpg?v=1"]);
+  assert.deepEqual(api.listNotes(me, { space: room.id, since: "2026-10-10" }, "x").notes.map((n) => n.ref), ["stand:note/jotchart1"]);
+  assert.deepEqual(api.listNotes(me, { space: room.id, itemId: item.id }, "x").notes.map((n) => n.ref), ["stand:note/jotchart1"]);
+  assert.throws(() => api.listNotes(me, { space: room.id, since: "last week" }, "x"), AgentError);
+
+  const got = api.get(me, "stand:note/jotchart1", "http://stand.test") as Record<string, any>;
+  assert.equal(got.kind, "note");
+  assert.equal(got.space.name, "Checkout v2");
+  assert.equal(got.snaps.length, 1);
+  assert.deepEqual(got.on_this_item.decisions.map((d: { text: string }) => d.text), ["Keep LiveKit; drop the browser fallback"]);
+  assert.equal(got.url, `http://stand.test/s/${room.id}`);
+  // Spaces are invite only: Andy's agents can't read it.
+  assert.throws(() => api.get({ user: andy, token: null }, "stand:note/jotchart1", "x"), AgentError);
+  assert.throws(() => api.listNotes({ user: andy, token: null }, { space: room.id }, "x"), AgentError);
+
+  const ctx = api.itemContext(me, item.id, "http://stand.test");
+  assert.deepEqual(ctx.saved_notes?.map((n) => n.ref), ["stand:note/jotchart1"]);
+  assert.equal(ctx.snaps.some((s) => s.image_url.includes("pinnedsnap")), false);
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Capabilities, User } from "../../shared/protocol.ts";
 import { useRoomSocket } from "./useRoomSocket.ts";
 import { useMedia } from "./useMedia.ts";
@@ -10,8 +10,9 @@ import { SidePanel } from "./SidePanel.tsx";
 import { fmtDuration, keyOf } from "../util.ts";
 import { macApp } from "../macApp.ts";
 import { useMicLevel } from "./micLevel.ts";
+import { PopOutBar, canPopOut, usePopOut } from "./PopOutBar.tsx";
 import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
-import { toast } from "../Toasts.tsx";
+import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 
 export function Meeting(props: {
@@ -52,9 +53,11 @@ export function Meeting(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.endedMeetingId]);
 
-  // Browser transcription when the server can't transcribe.
-  const browserTranscribe = caps.transcription === "browser" && media.micOn;
+  // Browser transcription when the server can't transcribe. It stops once the notes are being written:
+  // nothing said after that is kept, so nothing is shown as heard.
+  const browserTranscribe = caps.transcription === "browser" && media.micOn && !state?.ending;
   const [speechBlocked, setSpeechBlocked] = useState(false);
+  const [speechTrouble, setSpeechTrouble] = useState<string | null>(null);
   useEffect(() => {
     if (media.micOn) setSpeechBlocked(false);
   }, [media.micOn]);
@@ -66,7 +69,26 @@ export function Meeting(props: {
       setSpeechBlocked(true);
       room.setError(msg);
     },
+    setSpeechTrouble,
   );
+
+  // Why nothing said is being kept, while that lasts. A toast says it once; this stays until it's fixed.
+  const notRecording = state?.transcriptionRestarting
+    ? "Stand stopped transcribing and is starting it again. What was said before is saved."
+    : state?.transcriptionDown
+    ? "Stand stopped transcribing. Leave and rejoin to start it again; what was said before is saved."
+    : caps.transcription === "browser" && media.micOn && !browserSpeechSupported()
+      ? "This browser can't transcribe, so what you say isn't recorded. Use Chrome, Edge or Safari."
+      : caps.transcription === "browser" && media.micOn && speechBlocked
+        ? "Speech recognition is blocked, so what you say isn't recorded. Allow the microphone for this site, then click Mute and Unmute."
+        : caps.transcription === "browser" && media.micOn && speechTrouble && !state?.ending
+          ? `Not recording: ${speechTrouble}. Stand keeps trying, and picks up again by itself.`
+          : null;
+  // Everyone sees who isn't being recorded, not just the person it's happening to.
+  const recording = !(caps.transcription === "browser" && notRecording);
+  useEffect(() => {
+    if (caps.transcription === "browser") send({ type: "recording", on: recording });
+  }, [recording, send, room.connected, caps.transcription]);
 
   // Tell the room when we start/stop sharing, and feed the agent snapshots.
   const sharing = Boolean(media.localScreen);
@@ -79,6 +101,12 @@ export function Meeting(props: {
   const host = state?.participants.find((p) => p.isHost);
   const canSteer = host?.id === participantId;
   const otherSharer = state?.participants.find((p) => p.isSharing && p.id !== participantId);
+  // Two people pressed Share together and Stand took the other one: stop ours, so nobody
+  // shares a screen the room can't see. Stand says who is sharing.
+  const turnedAway = sharing && Boolean(otherSharer) && me?.isSharing === false;
+  useEffect(() => {
+    if (turnedAway) void media.stopShare();
+  }, [turnedAway]);
   const focusItem = useMemo(
     () => state?.items.find((i) => i.id === state.focusItemId) ?? null,
     [state?.items, state?.focusItemId],
@@ -89,23 +117,36 @@ export function Meeting(props: {
   const { micOn, toggleMic } = media;
 
   // Problems with the connection, the mic or the screen show up as a message that goes away, not a row.
+  const lastErrorAt = useRef(0);
   useEffect(() => {
     if (!room.error) return;
+    lastErrorAt.current = Date.now();
     toast({ tone: "error", text: room.error });
     room.setError(null);
   }, [room.error]);
   useEffect(() => {
-    if (media.mediaError) toast({ tone: "error", text: media.mediaError });
+    if (!media.mediaError) return;
+    // In the Mac app, the way to the setting comes with the message.
+    const which = /› (Microphone|Screen)/.exec(media.mediaError)?.[1];
+    const fix = which && macApp?.openSettings ? { label: "Open System Settings", run: () => macApp?.openSettings?.(which === "Microphone" ? "microphone" : "screen") } : undefined;
+    toast({ tone: "error", text: media.mediaError, ...(fix ? { action: fix } : {}) });
   }, [media.mediaError]);
 
   // Changes made while the connection was down went through once it came back: say so, once.
+  // The count only drops as Stand confirms each one, and one it turned away comes as an error
+  // right after; that message says what happened instead.
   const hadWaiting = useRef(false);
   useEffect(() => {
-    if (room.waiting > 0) hadWaiting.current = true;
-    else if (room.connected && hadWaiting.current) {
-      hadWaiting.current = false;
-      toast({ text: "Back online · your changes were sent" });
+    if (room.waiting > 0) {
+      hadWaiting.current = true;
+      return;
     }
+    if (!room.connected || !hadWaiting.current) return;
+    hadWaiting.current = false;
+    const t = setTimeout(() => {
+      if (Date.now() - lastErrorAt.current > 2_000) toast({ text: "Back online · your changes were sent" });
+    }, 800);
+    return () => clearTimeout(t);
   }, [room.waiting, room.connected]);
   // Changes still waiting live only in this tab: closing or reloading it now would lose them.
   useEffect(() => {
@@ -156,12 +197,83 @@ export function Meeting(props: {
     const open = [...room.notes.filter((n) => n.kind === "action").reverse(), ...state.followUps].filter((n) => !n.doneAt);
     return open.map((n) => ({ id: n.id, text: n.text, owner: n.owner, itemKey: key(n.itemId) }));
   }, [state?.items, state?.followUps, room.notes]);
+  // The bar also carries what would otherwise only show in the hidden window: the nudge, and anything wrong.
+  const nudgeItem = canSteer && !state?.ending && state?.suggestion ? state.items.find((i) => i.id === state.suggestion!.itemId) : null;
+  const nudge = nudgeItem ? (keyOf(nudgeItem) ?? nudgeItem.title) : null;
+  // Switch on the bar takes the item the bar showed, and says there what moved, with Undo:
+  // the window with the usual Undo is out of sight.
+  const [barSwitched, setBarSwitched] = useState<string | null>(null);
   useEffect(() => {
-    if (state) macApp?.meeting?.({ space: state.roomName, itemKey: keyOf(focusItem), item: focusItem?.title ?? null, micOn, todos: barTodos });
-  }, [state?.roomName, focusItem, micOn, barTodos]);
+    if (!barSwitched) return;
+    const t = setTimeout(() => setBarSwitched(null), 8000);
+    return () => clearTimeout(t);
+  }, [barSwitched]);
+  const switchFromBar = useRef(() => {});
+  const switchToast = useRef<number | null>(null);
+  switchFromBar.current = () => {
+    const s = state?.suggestion;
+    if (!s || !nudgeItem || s.itemId !== nudgeItem.id) return;
+    const n = room.segments.filter((g) => g.itemId === state.focusItemId && g.ts >= s.since).length;
+    if (!send({ type: "suggestion.accept", itemId: nudgeItem.id })) return;
+    // The bar is narrow: where it went comes first.
+    setBarSwitched(n ? `${nudge} · ${n} moved` : `${nudge}`);
+    if (n)
+      switchToast.current = toast({
+        text: `Moved ${n} remark${n === 1 ? "" : "s"} to ${nudge}`,
+        action: { label: "Undo", run: undoing(() => send({ type: "suggestion.undo" }) && (setBarSwitched(null), true)) },
+      });
+  };
+  const barEnding = ending || Boolean(state?.ending);
+  useEffect(() => {
+    if (state)
+      macApp?.meeting?.({
+        roomId,
+        space: state.roomName,
+        itemKey: keyOf(focusItem),
+        item: focusItem?.title ?? null,
+        micOn,
+        sharing,
+        todos: barTodos,
+        nudge,
+        nudgeFromTalk: state.suggestion?.source === "talk",
+        switched: barSwitched,
+        notRecording: Boolean(notRecording),
+        offline: !room.connected,
+        ending: barEnding,
+      });
+  }, [state?.roomName, focusItem, micOn, sharing, barTodos, nudge, barSwitched, Boolean(notRecording), room.connected, barEnding]);
   useEffect(() => () => macApp?.meeting?.(null), []);
-  useMicLevel(media.micTrack, macApp?.level);
-  useEffect(() => macApp?.onCommand?.((c) => c === "mic" && void toggleMic()), [toggleMic]);
+  // In a browser, the bar pops out into a little always-on-top window (Chrome and Edge).
+  const popOut = usePopOut();
+  const popLevels = useRef<((v: number) => void) | null>(null);
+  const popLevel = useCallback((v: number) => popLevels.current?.(v), []);
+  const stageSnap = useRef<(() => Promise<boolean>) | null>(null);
+  const openPopOut = useCallback(
+    () => void popOut.open().catch(() => toast({ tone: "error", text: "Your browser didn't let Stand pop out the bar. Try the Pop out button." })),
+    [popOut.open],
+  );
+  const offerPopOut = !macApp && canPopOut();
+  // Starting a share is when you leave this tab: offer the bar then.
+  useEffect(() => {
+    if (sharing && offerPopOut && !popOut.win)
+      toast({ text: "Pop out a small bar to keep your mic and Snap in reach while you share.", action: { label: "Pop out", run: openPopOut }, ms: 10000 });
+  }, [sharing]);
+  useMicLevel(media.micTrack, macApp?.level ?? (popOut.win ? popLevel : undefined));
+  useEffect(
+    () =>
+      macApp?.onCommand?.((c) => {
+        if (c === "mic") void toggleMic();
+        if (c === "shortcuts") setShowKeys(true);
+        if (c === "switch") switchFromBar.current();
+        // One Undo: the page's goes once the bar's is used. While offline it waits to be sent.
+        if (c === "undo" && send({ type: "suggestion.undo" })) {
+          setBarSwitched(null);
+          if (switchToast.current !== null) dismissToast(switchToast.current);
+          switchToast.current = null;
+        }
+      }),
+    [toggleMic, send],
+  );
   // Mute and unmute from the keyboard, as in other meeting apps (Command or Ctrl + D).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -204,19 +316,33 @@ export function Meeting(props: {
   }, []);
 
   if (!state) {
-    return <div className="loading">{room.trouble ? <ConnectionPill room={room} /> : room.connected ? "Joining…" : "Connecting…"}</div>;
+    return (
+      <div className="loading">
+        {room.trouble ? <ConnectionPill room={room} /> : room.connected ? "Joining…" : "Connecting…"}
+        <button
+          className="link"
+          onClick={() => {
+            media.leave();
+            props.onLeave();
+          }}
+        >
+          Back to the space
+        </button>
+      </div>
+    );
   }
   // The server says so once it's on it; until then, our own click.
-  const writingUp = ending || Boolean(state.ending);
-
-  // Why nothing said is being kept, while that lasts. A toast says it once; this stays until it's fixed.
-  const notRecording = state.transcriptionDown
-    ? "Stand stopped transcribing. Leave and rejoin to start it again; what was said before is saved."
-    : caps.transcription === "browser" && media.micOn && !browserSpeechSupported()
-      ? "This browser can't transcribe, so what you say isn't recorded. Use Chrome, Edge or Safari."
-      : caps.transcription === "browser" && media.micOn && speechBlocked
-        ? "Speech recognition is blocked, so what you say isn't recorded. Allow the microphone for this site, then click Mute and Unmute."
-        : null;
+  const writingUp = barEnding;
+  // Mic blocked while transcription is also down: one pill, with the steps in order.
+  const micFirst = Boolean(state.transcriptionDown && media.micError && !media.micOn);
+  const micLabel = media.micStarting
+    ? "Asking for the mic…"
+    : media.micError
+      ? /disconnected|No microphone/.test(media.micError)
+        ? "No mic"
+        : "Mic blocked"
+      : "Muted";
+  const writingTitle = "Stand stopped listening and is writing the notes, usually in under a minute. You can leave: the recap shows up in this space.";
 
   const offParts = [
     !caps.livekit && "people can't hear each other yet (add LiveKit keys)",
@@ -234,13 +360,22 @@ export function Meeting(props: {
           <span className="timer">
             <span className={notRecording ? "rec-dot off" : "rec-dot"} aria-hidden /> {fmtDuration(now - state.meetingStartedAt)}
           </span>
-          {notRecording && (
+          {notRecording && !micFirst && (
             <button className="badge not-recording" title={notRecording} onClick={() => toast({ tone: "error", text: notRecording })}>
-              Not recording
+              {state.transcriptionRestarting ? "Not recording · restarting…" : "Not recording"}
             </button>
           )}
+          {media.audioDown && !media.audioAway && (
+            <span className="badge not-recording" title="People can't hear each other while the audio reconnects.">
+              No audio · Reconnecting…
+            </span>
+          )}
           <ConnectionPill room={room} />
-          {state.ending && !canSteer && <span className="badge">Writing notes…</span>}
+          {state.ending && (
+            <span className="badge" title={writingTitle}>
+              Writing notes · usually under a minute · you can leave
+            </span>
+          )}
           {media.audioAway ? (
             <button
               className="badge muted-pill blocked"
@@ -254,14 +389,19 @@ export function Meeting(props: {
               <MicOffIcon /> {media.audioAway === "elsewhere" ? "Mic in another window · Talk here" : "Audio disconnected · Reconnect"}
             </button>
           ) : (
-            !media.micOn && (
+            !media.micOn &&
+            !media.audioDown && (
               <button
                 className={media.micError ? "badge muted-pill blocked" : "badge muted-pill"}
                 onClick={() => void media.toggleMic()}
                 disabled={media.micStarting}
-                title={media.micError ?? "Nothing you say is recorded while you're muted. Click to unmute."}
+                title={
+                  micFirst
+                    ? `Not recording. 1. ${media.micError} 2. Then leave and rejoin, so Stand starts transcribing again.`
+                    : (media.micError ?? "Nothing you say is recorded while you're muted. Click to unmute.")
+                }
               >
-                <MicOffIcon /> {media.micStarting ? "Asking for the mic…" : media.micError ? "Mic blocked" : "Muted"}
+                <MicOffIcon /> {micFirst ? `Not recording · ${micLabel}` : micLabel}
               </button>
             )
           )}
@@ -300,10 +440,12 @@ export function Meeting(props: {
           roomId={roomId}
           state={state}
           send={send}
-          canSteer={canSteer}
+          canSteer={canSteer && !writingUp}
+          writingUp={writingUp}
           offline={!room.connected}
           notes={room.notes}
           segments={room.segments}
+          notesBusy={room.notesBusy}
         />
         <Stage
           state={state}
@@ -318,7 +460,9 @@ export function Meeting(props: {
           interims={room.interims}
           segments={room.segments}
           offline={!room.connected}
+          ending={writingUp}
           livekit={caps.livekit}
+          snapRef={stageSnap}
         />
         <SidePanel
           state={state}
@@ -334,14 +478,35 @@ export function Meeting(props: {
 
       <footer className="controls">
         <div className="controls-group">
+          {/* With no audio connection, unmuting can't help: the button says what's wrong and retries. */}
           <button
-            className={media.micOn ? "control" : "control off"}
-            onClick={() => void media.toggleMic()}
-            disabled={media.micStarting}
-            title={`${media.micOn ? "Mute" : "Unmute"} (${MOD.cmd} + D)`}
+            className={media.micOn && !media.audioDown ? "control" : "control off"}
+            onClick={() => void (media.audioAway ? media.talkHere() : media.audioDown ? undefined : media.toggleMic())}
+            disabled={media.micStarting || (media.audioDown && !media.audioAway)}
+            title={
+              media.audioAway === "elsewhere"
+                ? "Your mic moved to your other window. Click to talk from here instead."
+                : media.audioAway
+                  ? "The audio connection failed. Click to reconnect."
+                  : media.audioDown
+                    ? "The audio is reconnecting."
+                    : `${media.micOn ? "Mute" : "Unmute"} (${MOD.cmd} + D)`
+            }
           >
-            {media.micOn ? <MicIcon /> : <MicOffIcon />}
-            <span>{media.micStarting ? "Starting…" : media.micOn ? "Mute" : "Unmute"}</span>
+            {media.micOn && !media.audioDown ? <MicIcon /> : <MicOffIcon />}
+            <span>
+              {media.audioAway === "elsewhere"
+                ? "Talk here"
+                : media.audioAway
+                  ? "Reconnect"
+                  : media.audioDown
+                    ? "No audio"
+                    : media.micStarting
+                      ? "Starting…"
+                      : media.micOn
+                        ? "Mute"
+                        : "Unmute"}
+            </span>
           </button>
           {sharing ? (
             <button className="control sharing" onClick={() => void media.stopShare()}>
@@ -352,11 +517,21 @@ export function Meeting(props: {
             <button
               className="control share"
               onClick={() => void media.startShare()}
-              disabled={Boolean(otherSharer)}
-              title={otherSharer ? `${otherSharer.name} is sharing` : undefined}
+              disabled={Boolean(otherSharer) || media.sharePicking}
+              title={otherSharer ? `${otherSharer.name} is sharing` : media.sharePicking ? "Pick a screen or window in the dialog" : undefined}
             >
               <ShareIcon />
-              <span>Share screen</span>
+              <span>{media.sharePicking ? "Choosing…" : "Share screen"}</span>
+            </button>
+          )}
+          {offerPopOut && (
+            <button
+              className={popOut.win ? "control on" : "control"}
+              onClick={openPopOut}
+              title="A small bar that stays over your other apps, with your mic, Snap and the space's to-dos"
+            >
+              <PopOutIcon />
+              <span>Pop out</span>
             </button>
           )}
           {canSteer && (!caps.livekit || !caps.llm) ? (
@@ -383,7 +558,7 @@ export function Meeting(props: {
         <button
           className="control pill danger"
           disabled={writingUp || !room.connected}
-          title={room.connected ? undefined : "You can end the meeting once Stand reconnects"}
+          title={writingUp ? writingTitle : room.connected ? undefined : "You can end the meeting once Stand reconnects"}
           onClick={() => {
             if (!confirm("End the meeting for everyone and write up the notes?")) return;
             if (send({ type: "meeting.end" })) setEnding(true);
@@ -393,9 +568,29 @@ export function Meeting(props: {
         </button>
         )}
       </footer>
+      {popOut.win && state && (
+        <PopOutBar
+          win={popOut.win}
+          space={state.roomName}
+          itemKey={keyOf(focusItem)}
+          item={focusItem?.title ?? null}
+          micOn={micOn}
+          onMic={() => void toggleMic()}
+          onSnap={media.localScreen || media.remoteScreen ? () => stageSnap.current?.() ?? Promise.resolve(false) : null}
+          todos={barTodos}
+          levels={popLevels}
+        />
+      )}
     </div>
   );
 }
+
+const PopOutIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <rect x="12" y="11" width="7" height="6" rx="1" />
+  </svg>
+);
 
 /** What didn't happen, when a click needed the connection and it was down. */
 const REFUSED: Partial<Record<string, string>> = {
@@ -403,6 +598,8 @@ const REFUSED: Partial<Record<string, string>> = {
   pin: "pinning waits for the connection",
   unpin: "pinning waits for the connection",
   "suggestion.accept": "switching waits for the connection",
+  "suggestion.undo": "couldn't undo yet",
+  "notes.retry": "trying the notes again waits for the connection",
   "suggestion.dismiss": "couldn't dismiss the suggestion yet",
   "upnext.add": "couldn't add the suggestion yet",
   "upnext.addAll": "couldn't add the suggestions yet",
@@ -414,13 +611,21 @@ const REFUSED: Partial<Record<string, string>> = {
 };
 
 /** Only while something's wrong with the connection: what's happening to your changes, or what to do. */
-function ConnectionPill(props: { room: Pick<ReturnType<typeof useRoomSocket>, "connected" | "waiting" | "refused" | "trouble"> }) {
-  const { connected, waiting, refused, trouble } = props.room;
+function ConnectionPill(props: {
+  room: Pick<ReturnType<typeof useRoomSocket>, "connected" | "waiting" | "refused" | "trouble" | "retryNow">;
+}) {
+  const { connected, waiting, refused, trouble, retryNow } = props.room;
   if (trouble === "signed-out") {
     return (
-      // Reloading shows the sign-in page, which brings you back here.
-      <a className="conn-pill" href={location.pathname}>
-        Signed out · Sign in again
+      // In a new tab, so this one keeps its waiting changes and reconnects by itself once you're back in.
+      <a
+        className="conn-pill"
+        href="/"
+        target="_blank"
+        rel="noopener"
+        title="Sign in in the new tab. This meeting reconnects by itself, and your changes are kept."
+      >
+        Signed out · Sign in again ↗
       </a>
     );
   }
@@ -435,9 +640,11 @@ function ConnectionPill(props: { room: Pick<ReturnType<typeof useRoomSocket>, "c
     ? `Reconnecting · ${REFUSED[refused] ?? "that didn't go through, try again once Stand is back"}`
     : waiting > 0
       ? `Reconnecting · ${waiting} change${waiting === 1 ? "" : "s"} waiting`
-      : trouble === "unreachable"
-        ? "Can't reach Stand · retrying"
-        : "Reconnecting…";
+      : trouble === "blocked"
+        ? "Can't open a live connection · a firewall or VPN may be blocking it"
+        : trouble === "unreachable"
+          ? "Can't reach Stand · retrying"
+          : "Reconnecting…";
   return (
     <span
       className="conn-pill"
@@ -445,6 +652,9 @@ function ConnectionPill(props: { room: Pick<ReturnType<typeof useRoomSocket>, "c
       title="Edits, to-do checks and speech are kept and sent when Stand is back. Switching items and ending the meeting wait for the connection."
     >
       {text}
+      <button className="link" onClick={retryNow}>
+        Retry now
+      </button>
     </span>
   );
 }

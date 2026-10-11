@@ -5,3 +5,5 @@ data
 desktop/snap-debug.log
 desktop/native/stand-native.node
 desktop/native/build.log
+desktop/native/stand-ocr
+desktop/native/build-ocr.log

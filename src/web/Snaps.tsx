@@ -6,11 +6,24 @@ import { useEffect, useRef, useState } from "react";
 import type { Segment, Snap } from "../shared/protocol.ts";
 import { CameraIcon, CloseIcon, CropIcon, TrashIcon } from "./icons.tsx";
 import { fmtTime } from "./util.ts";
-import { errorToast } from "./Toasts.tsx";
-import { request } from "./api.ts";
+import { errorToast, toast } from "./Toasts.tsx";
+import { OfflineError, request } from "./api.ts";
+
+/** A saved snap, and the item it landed on: the one in focus when it was taken. */
+export type Snapped = { id: string; itemId: string | null };
+
+/** The upload failed; the frame is kept, so it can be sent again. */
+export class SnapNotSaved extends Error {
+  constructor(
+    message: string,
+    readonly retry: () => Promise<Snapped>,
+  ) {
+    super(message);
+  }
+}
 
 /** Grabs the frame a video is showing, at the size it's shared, and uploads it. */
-export async function takeSnap(video: HTMLVideoElement, roomId: string): Promise<string> {
+export async function takeSnap(video: HTMLVideoElement, roomId: string): Promise<Snapped> {
   const w = video.videoWidth;
   const h = video.videoHeight;
   if (!w || !h) throw new Error("The shared screen isn't showing yet.");
@@ -19,43 +32,35 @@ export async function takeSnap(video: HTMLVideoElement, roomId: string): Promise
   canvas.width = w;
   canvas.height = h;
   canvas.getContext("2d")!.drawImage(video, 0, 0, w, h);
-  return uploadSnap(canvas, roomId, at, false);
+  return uploadSnap(canvas, roomId, at);
 }
 
-/** A screenshot someone pasted or dropped in: kept on the item in focus, like a snap. */
-export async function addImageSnap(file: Blob, roomId: string): Promise<string> {
-  const at = Date.now();
-  const bmp = await createImageBitmap(file).catch(() => {
-    throw new Error("That image couldn't be read.");
-  });
-  // Huge images are scaled down to what the agent can read.
-  const scale = Math.min(1, 4000 / Math.max(bmp.width, bmp.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bmp.width * scale);
-  canvas.height = Math.round(bmp.height * scale);
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#fff"; // transparent PNGs on white, not black
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  bmp.close();
-  return uploadSnap(canvas, roomId, at, true);
-}
-
-async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number, pasted: boolean): Promise<string> {
+async function uploadSnap(canvas: HTMLCanvasElement, roomId: string, at: number): Promise<Snapped> {
   const blob = await new Promise<Blob>((ok, fail) =>
     canvas.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't read the image"))), "image/jpeg", 0.92),
   );
-  // A blip in the connection shouldn't lose the frame: try a few times before giving up.
-  const url = `/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}${pasted ? "&pasted=1" : ""}`;
-  let res: Response | null = null;
-  for (const wait of [0, 1000, 3000, 6000]) {
-    if (wait) await new Promise((r) => setTimeout(r, wait));
-    res = await fetch(url, { method: "POST", body: blob }).catch(() => null);
-    if (res && res.status < 502) break;
-  }
-  if (!res || res.status >= 502) throw new Error("Can't reach Stand, so the snap wasn't saved. Try again once you're back online.");
-  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Couldn't save the snap");
-  return ((await res.json()) as { id: string }).id;
+  // One key for every try, so a try that got through before timing out isn't saved twice.
+  const key = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+  const url = `/api/rooms/${roomId}/snaps?at=${at}&w=${canvas.width}&h=${canvas.height}&key=${key}`;
+  // Longer for a bigger picture: at least 15 s, and as long as a slow (50 KB/s) line needs,
+  // but 90 s for all the tries together.
+  const limit = Math.min(90_000, Math.max(15_000, blob.size / 50));
+  const send = async (): Promise<Snapped> => {
+    // A blip in the connection shouldn't lose the frame: try a few times, each with a time limit.
+    const deadline = Date.now() + 90_000;
+    let res: Response | null = null;
+    for (const wait of [0, 1000, 3000]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      const left = deadline - Date.now();
+      if (left < 2000) break;
+      res = await request(url, { method: "POST", body: blob }, Math.min(limit, left)).catch(() => null);
+      if (res) break;
+    }
+    if (!res) throw new SnapNotSaved("Can't reach Stand, so the snap isn't saved yet. It waits here until you close this message.", send);
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Couldn't save the snap");
+    return (await res.json()) as Snapped;
+  };
+  return send();
 }
 
 export const deleteSnap = async (id: string) => {
@@ -63,6 +68,26 @@ export const deleteSnap = async (id: string) => {
   if (r.status === 403) throw new Error("Only whoever took it, whoever's screen it is, or the host can delete it.");
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? "Try again in a moment.");
 };
+
+/** Deletes a snap, with Undo for a while after. */
+export function removeSnap(id: string) {
+  deleteSnap(id).then(
+    () =>
+      toast({
+        text: "Snap deleted",
+        action: {
+          label: "Undo",
+          run: () =>
+            void request(`/api/snaps/${id}/restore`, { method: "POST" })
+              .then(async (r) => {
+                if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? "Try again in a moment.");
+              })
+              .catch(errorToast("Couldn't bring the snap back")),
+        },
+      }),
+    (err) => errorToast("Couldn't delete the snap", err instanceof OfflineError ? () => removeSnap(id) : undefined)(err),
+  );
+}
 
 /** Who may crop or delete a snap: whoever took it, whoever's screen it is, and the host. */
 export const canChangeSnap = (s: Snap, me: string, isHost: boolean) => isHost || s.takenById === me || s.sharerId === me;
@@ -145,7 +170,7 @@ export function SnapGallery(props: {
                     <button className="icon-btn" title="Crop" onClick={() => setCropping(true)}>
                       <CropIcon size={17} />
                     </button>
-                    <button className="icon-btn" title="Delete" onClick={() => deleteSnap(snap.id).catch(errorToast("Couldn't delete the snap"))}>
+                    <button className="icon-btn" title="Delete" onClick={() => removeSnap(snap.id)}>
                       <TrashIcon size={17} />
                     </button>
                   </>

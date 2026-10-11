@@ -7,6 +7,8 @@ import { NoteList } from "./room/SidePanel.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { colorFor, fmtDate, fmtTime, initials } from "./util.ts";
 import { useDismiss } from "./useDismiss.ts";
+import { toast } from "./Toasts.tsx";
+import { useGlide } from "./useGlide.ts";
 
 /** An item's notes as the agent grouped them: the summary, then one block per
  *  discussion with who argued what and what came of it. Notes that belong to
@@ -95,7 +97,7 @@ function DiscussionBlock(props: {
       open={props.open}
       onToggle={(e) => {
         const el = e.currentTarget;
-        if (props.titleOnly && el.open) requestAnimationFrame(() => el.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+        if (props.titleOnly && el.open) requestAnimationFrame(() => el.scrollIntoView({ block: "nearest", behavior: scrollBehavior() }));
       }}
     >
       <summary>
@@ -293,9 +295,16 @@ function NoteForm(props: {
   onSave: (text: string, owner: string | null) => void;
   onCancel: () => void;
   onDelete?: () => void;
+  /** What's typed so far, so it can be kept if the form has to close (the note changed, or hosting moved). */
+  onDraft?: (text: string, owner: string) => void;
 }) {
   const [text, setText] = useState(props.text ?? "");
   const [owner, setOwner] = useState(props.owner ?? "");
+  const draftRef = useRef(props.onDraft);
+  draftRef.current = props.onDraft;
+  useEffect(() => {
+    draftRef.current?.(text, owner);
+  }, [text, owner]);
   const save = () => {
     if (text.trim()) props.onSave(text.trim(), owner.trim() || null);
   };
@@ -360,6 +369,8 @@ function EditButton(props: { onClick: () => void }) {
 }
 
 /** How long a checked-off to-do stays in the list before it folds away. */
+/** Smooth scrolling, unless Reduce Motion is on. */
+const scrollBehavior = (): ScrollBehavior => (matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
 const FOLD_DONE_AFTER_MS = 5_000;
 
 export function LiveItemNotes(props: {
@@ -376,13 +387,53 @@ export function LiveItemNotes(props: {
   const isFresh = (n: Note) => (props.fresh?.includes(n.id) ? " fresh" : "");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState<EditableKind | null>(null);
+  // The open form's text, kept when the form has to close without a save.
+  const draft = useRef<{ kind: string; text: string; owner: string; original: string } | null>(null);
+  const changed = (d: typeof draft.current) => Boolean(d && d.text.trim() && d.text.trim() !== d.original.trim());
+  // An edit whose note the agent reworded meanwhile reopens as a new note with what was typed.
+  const [addInit, setAddInit] = useState<{ text: string; owner: string } | null>(null);
+  const stopAdding = () => {
+    draft.current = null;
+    setAddInit(null);
+    setAdding(null);
+  };
+  useEffect(() => {
+    if (!editingId || notes.some((n) => n.id === editingId)) return;
+    const d = draft.current;
+    draft.current = null;
+    setEditingId(null);
+    // A note added offline gets its real id once it's through; that's not a rewording.
+    if (editingId.startsWith("pending-") || !d || !changed(d) || !editing) return;
+    setAddInit({ text: d.text, owner: d.owner });
+    setAdding(d.kind as EditableKind);
+  }, [notes, editingId]);
+  // Hosting moved while a form was open: the form goes, but what was typed is offered to copy.
+  const couldEdit = useRef(Boolean(editing));
+  useEffect(() => {
+    const could = couldEdit.current;
+    couldEdit.current = Boolean(editing);
+    if (!could || editing) return;
+    const d = draft.current;
+    draft.current = null;
+    setEditingId(null);
+    setAdding(null);
+    setAddInit(null);
+    if (!d || !changed(d)) return;
+    const text = d.text.trim();
+    toast({
+      tone: "error",
+      text: `Hosting moved before you saved, so this wasn't added: "${text.length > 80 ? `${text.slice(0, 80)}…` : text}"`,
+      ms: 15_000,
+      ...(navigator.clipboard ? { action: { label: "Copy it", run: () => void navigator.clipboard.writeText(text).catch(() => {}) } } : {}),
+    });
+  }, [Boolean(editing)]);
   const [showDone, setShowDone] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
   const addMenuRef = useDismiss<HTMLSpanElement>(addMenu, () => setAddMenu(false));
   const [flash, setFlash] = useState<string[]>([]);
   useEffect(() => {
     if (!flash.length) return;
-    document.querySelector(`[data-note-id="${flash[0]}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    document.querySelector(`[data-note-id="${flash[0]}"]`)?.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
     const t = setTimeout(() => setFlash([]), 2200);
     return () => clearTimeout(t);
   }, [flash]);
@@ -395,10 +446,14 @@ export function LiveItemNotes(props: {
     wasDone.current = new Map(notes.map((n) => [n.id, Boolean(n.doneAt)]));
     if (newly.length) setLingering((l) => [...l, ...newly.filter((id) => !l.includes(id))]);
   }, [notes]);
+  const [folding, setFolding] = useState(false);
   useEffect(() => {
+    setFolding(false);
     if (!lingering.length) return;
-    const t = setTimeout(() => setLingering([]), FOLD_DONE_AFTER_MS);
-    return () => clearTimeout(t);
+    // Fades out first, then folds.
+    const fade = setTimeout(() => setFolding(true), FOLD_DONE_AFTER_MS - 200);
+    const fold = setTimeout(() => (setLingering([]), setFolding(false)), FOLD_DONE_AFTER_MS);
+    return () => (clearTimeout(fade), clearTimeout(fold));
   }, [lingering]);
   const todo = notes.filter((n) => n.kind === "action" && (!n.doneAt || lingering.includes(n.id)));
   const done = notes.filter((n) => n.kind === "action" && n.doneAt && !lingering.includes(n.id));
@@ -418,13 +473,19 @@ export function LiveItemNotes(props: {
           owner={n.owner}
           onSave={(text, owner) => {
             editing.change(n, text, owner);
+            draft.current = null;
             setEditingId(null);
           }}
           onDelete={() => {
             editing.remove(n);
+            draft.current = null;
             setEditingId(null);
           }}
-          onCancel={() => setEditingId(null)}
+          onCancel={() => {
+            draft.current = null;
+            setEditingId(null);
+          }}
+          onDraft={(text, owner) => (draft.current = { kind: n.kind, text, owner, original: n.text })}
         />
       </li>
     ) : null;
@@ -444,7 +505,7 @@ export function LiveItemNotes(props: {
 
   const action = (n: Note) =>
     editRow(n) ?? (
-      <li key={n.id} data-note-id={n.id} className={`tk action${n.doneAt ? " done" : ""}${flash.includes(n.id) ? " flash" : ""}${isFresh(n)}`}>
+      <li key={n.id} data-note-id={n.id} className={`tk action${n.doneAt ? " done" : ""}${folding && n.doneAt && lingering.includes(n.id) ? " folding" : ""}${flash.includes(n.id) ? " flash" : ""}${isFresh(n)}`}>
         <input
           type="checkbox"
           checked={!!n.doneAt}
@@ -461,8 +522,11 @@ export function LiveItemNotes(props: {
       </li>
     );
 
+  // A to-do folding away or a note arriving: what's below glides rather than jumps.
+  const notesRef = useRef<HTMLDivElement>(null);
+  useGlide(notesRef, "section.tk-group", "li.tk, .tk-more");
   return (
-    <div className="live-notes">
+    <div className="live-notes" ref={notesRef}>
       {empty && !adding && notes.length > 0 && <p className="tk-empty">Nothing decided or assigned yet.</p>}
       {(todo.length > 0 || done.length > 0 || (editing && !adding)) && (
         <section className="tk-group tk-card">
@@ -485,6 +549,7 @@ export function LiveItemNotes(props: {
                         key={k}
                         role="menuitem"
                         onClick={() => {
+                          setAddInit(null);
                           setAdding(k);
                           setAddMenu(false);
                         }}
@@ -553,14 +618,18 @@ export function LiveItemNotes(props: {
         (adding ? (
           <section className="tk-group tk-card note-add">
             <h4>{adding === "action" ? "New to-do" : adding === "decision" ? "New decision" : "New open question"}</h4>
+            {addInit && <p className="note-form-hint">The agent reworded that note while you were editing. Save adds yours as a new one.</p>}
             <NoteForm
-              key={adding}
+              key={`${adding}${addInit ? ":kept" : ""}`}
               kind={adding}
+              text={addInit?.text}
+              owner={addInit?.owner}
               onSave={(text, owner) => {
                 editing.add(adding, text, owner);
-                setAdding(null);
+                stopAdding();
               }}
-              onCancel={() => setAdding(null)}
+              onCancel={stopAdding}
+              onDraft={(text, owner) => (draft.current = { kind: adding, text, owner, original: "" })}
             />
           </section>
         ) : null)}

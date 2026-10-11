@@ -53,6 +53,7 @@ const base = (over: Partial<UpNextInput> = {}): UpNextInput => ({
   updates: [],
   dismissed: new Map(),
   otherSpaces: [],
+  captures: [],
   ...over,
 });
 
@@ -221,4 +222,40 @@ test("the polisher saves Claude's pass, shows it, and skips a rerun when nothing
     [["Retry docs", "Huy's, still open"]],
   );
   assert.ok(upNext.polishedAt);
+});
+
+test("snaps saved to the space since the last meeting are suggested, unless their item is on the agenda", () => {
+  const snap = (id: string, ts: number, extra: Partial<UpNextInput["captures"][number]> = {}) => ({
+    id,
+    ts,
+    itemId: null,
+    by: "Huy Ngo",
+    line: null,
+    caption: null,
+    screenText: null,
+    ...extra,
+  });
+  const { upNext } = computeUpNext(
+    base({
+      captures: [
+        snap("late", 290, { screenText: "\n  TypeError: cannot read 'plan' of undefined\n    at checkout.ts:42" }),
+        snap("chart", 260, { line: "Signup chart dropped Tuesday", caption: "A line chart of signups" }),
+        snap("pinned", 255, { itemId: "task", line: "Billing bug again" }),
+        snap("webhooks", 240, { itemId: "gone", caption: "Webhook retries failing in the logs" }),
+        snap("old", 180, { line: "From before the last meeting" }),
+      ],
+      notes: [note("q", "m2", "question", "Who owns pricing?"), note("a", "m2", "action", "Ship it")],
+    }),
+  );
+  assert.deepEqual(
+    upNext.suggestions.map((s) => [s.kind, s.title]),
+    [
+      ["question", "Who owns pricing?"],
+      ["capture", "TypeError: cannot read 'plan' of undefined"],
+      ["capture", "Signup chart dropped Tuesday"],
+      ["capture", "Webhook retries failing in the logs"],
+      ["todo", "Ship it"],
+    ],
+  );
+  assert.equal(upNext.suggestions.find((s) => s.key === "snap:webhooks")?.reason, "Snap saved by Huy Ngo · Webhooks retry");
 });

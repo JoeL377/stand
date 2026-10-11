@@ -1,5 +1,22 @@
 import type { DraftSlide } from "../shared/outline.ts";
-import type { AgentToken, Capabilities, Deck, DeckDraft, DeckHistory, FollowUp, Item, ItemHistory, MeetingRecap, Note, SpaceSummary, UpNext, User } from "../shared/protocol.ts";
+import type {
+  AgentToken,
+  Capabilities,
+  Deck,
+  DeckDraft,
+  DeckHistory,
+  FollowUp,
+  Item,
+  ItemHistory,
+  Jot,
+  MeetingRecap,
+  Note,
+  Snap,
+  SpaceFeed,
+  SpaceSummary,
+  UpNext,
+  User,
+} from "../shared/protocol.ts";
 
 /** Thrown when the server can't be reached at all, as opposed to saying no. */
 export class OfflineError extends Error {
@@ -86,6 +103,13 @@ export const api = {
   updateSpace: (id: string, patch: { name?: string; purpose?: string; synthesisInstructions?: string }) =>
     call<{ id: string; name: string; purpose: string; synthesisInstructions: string }>("PATCH", `/api/rooms/${id}`, patch),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
+  feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
+  updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
+  saveJot: (roomId: string, jot: { text: string; itemId?: string | null; at?: number }) => call<Jot>("POST", `/api/rooms/${roomId}/jots`, jot),
+  updateJot: (id: string, patch: { itemId?: string | null; text?: string }) => call<Jot>("PATCH", `/api/jots/${id}`, patch),
+  deleteJot: (id: string) => call<{ ok: true }>("DELETE", `/api/jots/${id}`),
+  /** Brings back a note deleted in the last minute, with its snaps. */
+  restoreJot: (id: string) => call<Jot>("POST", `/api/jots/${id}/restore`),
   addAgenda: (roomId: string, titles: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items`, { titles }),
   importLinear: (roomId: string, input: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/linear`, { input }, SLOW_REQUEST_MS),
   renameItem: (roomId: string, itemId: string, title: string) =>

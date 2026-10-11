@@ -24,6 +24,8 @@ export function AgendaPanel(props: {
   state: RoomState;
   send: (m: ClientMessage) => boolean;
   canSteer: boolean;
+  /** The meeting is ending: the notes are being written. */
+  writingUp?: boolean;
   /** The connection is down: switching items waits until it's back. */
   offline?: boolean;
   /** Folded down to a thin strip, so the stage gets the room. */
@@ -33,10 +35,14 @@ export function AgendaPanel(props: {
   foldKeys: string;
   segments: Segment[];
   notes: Note[];
+  /** Items whose notes the agent is rewriting right now. */
+  notesBusy?: string[];
 }) {
   const { roomId, state, send, canSteer, offline, segments, notes } = props;
   const host = state.participants.find((p) => p.isHost);
-  const steerTitle = !canSteer
+  const steerTitle = state.ending || props.writingUp
+    ? "The meeting has ended: Stand is writing the notes"
+    : !canSteer
     ? `${host?.name ?? "The host"} chooses the item`
     : offline
       ? "Reconnecting… you can switch items once Stand is back"
@@ -172,14 +178,23 @@ export function AgendaPanel(props: {
               </span>
             )}
           </span>
+          {/* Notes for an item the meeting has left can still be being written: a quiet sign of it. */}
+          {!active && props.notesBusy?.includes(it.id) && <span className="notes-busy-dot" title="Updating this item's notes" aria-label="Updating notes" />}
         </button>
         <span className="item-tools">
           {canSteer && (
             <button
               className={state.pinnedBy && active ? "icon on" : "icon"}
               disabled={offline}
-              title={offline ? "You can pin once Stand reconnects" : "Pin: stay on this item even if the screen changes"}
-              onClick={() => send({ type: "pin", itemId: it.id })}
+              aria-pressed={Boolean(state.pinnedBy && active)}
+              title={
+                offline
+                  ? "You can pin once Stand reconnects"
+                  : state.pinnedBy && active
+                    ? "Unpin: let the agent follow the screen again"
+                    : "Pin: stay on this item even if the screen changes"
+              }
+              onClick={() => send(state.pinnedBy && active ? { type: "unpin" } : { type: "pin", itemId: it.id })}
             >
               <PinIcon />
             </button>

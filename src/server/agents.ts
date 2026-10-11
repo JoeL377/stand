@@ -1,9 +1,11 @@
 // What agents see of Stand, shared by the MCP server (mcp.ts) and the
 // "Copy for agent" button: references to single to-dos, decisions, questions
 // and topics, the context to act on them, and the two ways to report back.
+// Also the notes people save to a space from the Mac's bar, with the snaps
+// pinned to them (stand:note/<id>).
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
-import type { AgentToken, Discussion, Item, ItemUpdate, Note, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
+import type { AgentToken, Discussion, Item, ItemUpdate, Jot, Note, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
 import { linkSnaps, type SnapRow } from "./snaps.ts";
@@ -18,6 +20,13 @@ export const refUrl = (baseUrl: string, kind: RefKind, id: string) => `${baseUrl
 export function parseRef(input: string): { kind: RefKind; id: string } | null {
   const m = /(?:^|stand:|\/ref\/)(action|decision|question|topic)\/([a-z0-9]{4,24})\b/i.exec(input.trim());
   return m ? { kind: m[1].toLowerCase() as RefKind, id: m[2] } : null;
+}
+
+/** A note saved from the bar: "stand:note/j8f2k", "note/j8f2k". */
+export const noteRef = (id: string) => `stand:note/${id}`;
+export function parseNoteRef(input: string): string | null {
+  const m = /(?:^|stand:)note\/([a-z0-9]{4,24})\b/i.exec(input.trim());
+  return m ? m[1] : null;
 }
 
 /** An error the agent should see as-is (not found, not allowed, bad input). */
@@ -112,8 +121,11 @@ export function agentApi(deps: AgentDeps) {
 
   /** A snap of the screen as agents see it: the image (fetched with the same token) and what's on it. */
   const snapInfo = (p: SnapRow, notes: Note[], baseUrl: string) => ({
+    pinned_to: p.jotId ? noteRef(p.jotId) : undefined,
     image_url: `${baseUrl}/api/snaps/${p.id}.${p.ext}?v=${p.version}`,
     caption: p.caption ?? undefined,
+    note: p.line ?? undefined,
+    text_on_screen: p.screenText ?? undefined,
     by: p.source === "agent" ? "the Stand agent (kept because it backs a note)" : p.takenBy,
     backs: p.noteId ? notes.find((n) => n.id === p.noteId)?.text : undefined,
     at: new Date(p.ts).toISOString(),
@@ -128,6 +140,32 @@ export function agentApi(deps: AgentDeps) {
     const mine = rows.filter((p) => belongs({ noteId: p.noteId, discussionId: linked.get(p.id)?.discussionId ?? null }));
     return mine.length ? mine.slice(0, 8).map((p) => snapInfo(p, notes, baseUrl)) : undefined;
   }
+
+  /** One of the caller's spaces by id or (part of its) name. */
+  function findSpace(caller: Caller, query: string) {
+    const q = query.trim().toLowerCase();
+    const spaces = db.spaceRows(caller.user.id).filter((r) => r.id === query || r.name.toLowerCase().includes(q));
+    if (!q || spaces.length === 0) throw new AgentError(`You're not in a space matching "${query}". list_spaces shows yours.`);
+    if (spaces.length > 1 && !spaces.some((r) => r.name.toLowerCase() === q))
+      throw new AgentError(`"${query}" matches ${spaces.map((r) => `${r.name} (${r.id})`).join(", ")}. Give one id.`);
+    return space((spaces.find((r) => r.id === query || r.name.toLowerCase() === q) ?? spaces[0]).id, caller);
+  }
+
+  /** A note saved from the bar, with the snaps pinned to it. */
+  const noteInfo = (j: Jot, baseUrl: string) => {
+    const item = j.itemId ? db.getItem(j.itemId) : null;
+    const snaps = db.jotSnaps(j.id);
+    return {
+      ref: noteRef(j.id),
+      text: j.text,
+      by: j.by,
+      at: new Date(j.ts).toISOString(),
+      item: item
+        ? { id: item.id, title: item.title, filed_by: j.itemSuggested ? "the Stand agent (not confirmed yet)" : "a person" }
+        : undefined,
+      snaps: snaps.length ? snaps.map((p) => ({ ...snapInfo(p, [], baseUrl), pinned_to: undefined })) : undefined,
+    };
+  };
 
   /** Finds what a reference points to, checking the caller is in its space. */
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
@@ -172,6 +210,19 @@ export function agentApi(deps: AgentDeps) {
   return {
     /** One to-do, decision, open question or topic with just enough context to act on it. */
     get(caller: Caller, refText: string, baseUrl: string) {
+      const jotId = parseNoteRef(refText);
+      if (jotId) {
+        const j = db.getJot(jotId);
+        if (!j) throw new AgentError("That note doesn't exist any more.");
+        const room = space(j.roomId, caller);
+        return {
+          kind: "note",
+          ...noteInfo(j, baseUrl),
+          space: { id: room.id, name: room.name, purpose: room.purpose || undefined },
+          on_this_item: j.itemId ? onItem(j.itemId) : undefined,
+          url: `${baseUrl}/s/${room.id}`,
+        };
+      }
       const r = resolve(caller, refText);
       const item = r.itemId ? db.getItem(r.itemId) : null;
       const where = {
@@ -284,12 +335,7 @@ export function agentApi(deps: AgentDeps) {
 
     listActions(caller: Caller, opts: { space: string; status?: "open" | "done" | "all"; owner?: string }, baseUrl: string) {
       const status = opts.status ?? "open";
-      const q = opts.space.trim().toLowerCase();
-      const spaces = db.spaceRows(caller.user.id).filter((r) => r.id === opts.space || r.name.toLowerCase().includes(q));
-      if (!q || spaces.length === 0) throw new AgentError(`You're not in a space matching "${opts.space}". list_spaces shows yours.`);
-      if (spaces.length > 1 && !spaces.some((r) => r.name.toLowerCase() === q))
-        throw new AgentError(`"${opts.space}" matches ${spaces.map((r) => `${r.name} (${r.id})`).join(", ")}. Give one id.`);
-      const room = spaces.find((r) => r.id === opts.space || r.name.toLowerCase() === q) ?? spaces[0];
+      const room = findSpace(caller, opts.space);
       const who = opts.owner?.trim().toLowerCase();
       const rows = db
         .memberActions(caller.user.id)
@@ -314,15 +360,11 @@ export function agentApi(deps: AgentDeps) {
 
     /** The next agenda the agent drafted for a space, ranked, each with why. */
     suggestedAgenda(caller: Caller, spaceQuery: string, baseUrl: string) {
-      const q = spaceQuery.trim().toLowerCase();
-      const spaces = db.spaceRows(caller.user.id).filter((r) => r.id === spaceQuery || r.name.toLowerCase().includes(q));
-      if (!q || spaces.length === 0) throw new AgentError(`You're not in a space matching "${spaceQuery}". list_spaces shows yours.`);
-      if (spaces.length > 1 && !spaces.some((r) => r.name.toLowerCase() === q))
-        throw new AgentError(`"${spaceQuery}" matches ${spaces.map((r) => `${r.name} (${r.id})`).join(", ")}. Give one id.`);
-      const room = space((spaces.find((r) => r.id === spaceQuery || r.name.toLowerCase() === q) ?? spaces[0]).id, caller);
+      const room = findSpace(caller, spaceQuery);
       const { upNext } = deps.suggested(room.id);
       const refFor = (key: string) => {
         const [kind, id] = key.split(":");
+        if (kind === "jot") return noteRef(id);
         const note = kind === "note" ? db.getNote(id) : null;
         return note && (note.kind === "action" || note.kind === "question") ? refOf(note.kind, note.id) : undefined;
       };
@@ -347,6 +389,33 @@ export function agentApi(deps: AgentDeps) {
         progress: upNext.since ? { closed: upNext.closed, of: upNext.total, since: new Date(upNext.since).toISOString() } : undefined,
         drafted_by: upNext.polishedAt ? "the Stand agent, tidied by Claude" : "the Stand agent (plain ranking)",
         note: "Nothing here is on the agenda until the meeting host adds it. To push something up, post_update with status blocked or needs_decision.",
+      };
+    },
+
+    /** Notes saved to a space from the bar, newest first, with their snaps; and snaps saved on their own. */
+    listNotes(caller: Caller, opts: { space: string; itemId?: string; since?: string; limit?: number }, baseUrl: string) {
+      const room = findSpace(caller, opts.space);
+      let since = 0;
+      if (opts.since) {
+        since = Date.parse(opts.since);
+        if (Number.isNaN(since)) throw new AgentError(`"${clip(opts.since, 40)}" isn't a date. Use one like 2026-10-11 or 2026-10-11T08:00:00Z.`);
+      }
+      if (opts.itemId && db.getItem(opts.itemId)?.roomId !== room.id) throw new AgentError("That item isn't in this space. list_spaces shows each space's items.");
+      const limit = Math.max(1, Math.min(100, Math.round(opts.limit ?? 30)));
+      const onItemOnly = <T extends { itemId: string | null }>(rows: T[]) => (opts.itemId ? rows.filter((r) => r.itemId === opts.itemId) : rows);
+      const notes = onItemOnly(db.spaceJots(room.id, since, 500)).slice(0, limit);
+      const alone = onItemOnly(db.spaceSnaps(room.id, since, 500)).slice(0, limit);
+      return {
+        space: { id: room.id, name: room.name },
+        since: opts.since ? new Date(since).toISOString() : undefined,
+        notes: notes.map((j) => noteInfo(j, baseUrl)),
+        snaps_on_their_own: alone.length
+          ? alone.map((p) => {
+              const item = p.itemId ? db.getItem(p.itemId) : null;
+              return { ...snapInfo(p, [], baseUrl), item: item ? { id: item.id, title: item.title } : undefined };
+            })
+          : undefined,
+        note: notes.length || alone.length ? undefined : "Nothing saved here yet. People save notes and snaps from the Stand bar in the Mac app.",
       };
     },
 
@@ -407,7 +476,16 @@ export function agentApi(deps: AgentDeps) {
           positions: d.positions.map((p) => `${p.speaker}: ${p.position}`),
         })),
         updates: db.itemUpdates(item.id, 10).map(updateInfo),
-        snaps: db.itemSnaps(item.id, 8).map((p) => snapInfo(p, notes, baseUrl)),
+        saved_notes: (() => {
+          const saved = db.itemJots(item.id, 8);
+          return saved.length ? saved.map((j) => noteInfo(j, baseUrl)) : undefined;
+        })(),
+        // Snaps pinned to a note show with it, above.
+        snaps: db
+          .itemSnaps(item.id, 20)
+          .filter((p) => !p.jotId)
+          .slice(0, 8)
+          .map((p) => snapInfo(p, notes, baseUrl)),
         meetings: [...new Set(notes.map((n) => n.meetingId))].length,
       };
     },

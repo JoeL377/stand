@@ -19,9 +19,9 @@ async function claudeAgent() {
   const prompts: string[] = [];
   const requests: Array<{ model: string; system: string; messages: Array<{ content: string }> }> = [];
   Object.assign(agent, {
-    parse: async (_schema: unknown, content: string) => {
-      prompts.push(content);
-      return null;
+    parse: async (_schema: unknown, content: string | Array<{ text: string }>) => {
+      prompts.push(typeof content === "string" ? content : content.map((b) => b.text).join("\n"));
+      return { summary: "", discussions: [] };
     },
     client: {
       beta: {

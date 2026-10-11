@@ -5,8 +5,8 @@ import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps } from "./brief.ts";
 import { looksLikePdf, parseDeck } from "./decks.ts";
-import { type CapturedNote, HeuristicAgent, type ItemNotesDraft } from "./llm.ts";
-import type { ClientMessage, Note, ServerMessage, User } from "../shared/protocol.ts";
+import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, type NotesOptions, NotesTrouble, type SettledTopic } from "./llm.ts";
+import type { ClientMessage, Item, Note, Segment, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
 import { outlineToSlides } from "../shared/outline.ts";
@@ -432,6 +432,166 @@ test("a notes refresh never drops a to-do or decision captured earlier, and keep
   assert.equal(second.filter((n) => n.kind === "decision").length, 1);
 });
 
+test("in a long meeting a quiet topic settles: runs read what's still going, and its notes stay as they were", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "One", url: null, description: null }]);
+  const calls: Array<{ lines: string[]; settled: SettledTopic[]; tidy: boolean }> = [];
+  const drafts: ItemNotesDraft[] = [
+    {
+      notes: [
+        { kind: "action", text: "Make the keep button stand out", owner: "Joe", discussion: 0 },
+        { kind: "decision", text: "Open the review queue in the widget first", owner: null, discussion: 1 },
+      ],
+      discussions: [
+        { topic: "Conflict page", positions: [], outcome: "action", segmentIndexes: [0, 1], continuesId: null },
+        { topic: "Review queue", positions: [], outcome: "decided", segmentIndexes: [2, 3], continuesId: null },
+      ],
+    },
+    // Forty minutes on, the conflict page settled. The model writes its to-do again anyway.
+    {
+      notes: [
+        { kind: "action", text: "Make the keep button stand out more", owner: "Joe", discussion: 0 },
+        { kind: "decision", text: "Open the review queue in the widget first", owner: null, discussion: 0, sameAs: "D1" },
+      ],
+      discussions: [{ topic: "Review queue", positions: [], outcome: "decided", segmentIndexes: [0, 1, 2], continuesId: null }],
+    },
+    // Then the talk goes back to the conflict page.
+    {
+      notes: [
+        { kind: "action", text: "Make the conflict diff easier to read", owner: "Andy", discussion: 0 },
+        { kind: "decision", text: "Open the review queue in the widget first", owner: null, discussion: 1, sameAs: "D1" },
+      ],
+      discussions: [
+        { topic: "Conflict page diff", positions: [{ speaker: "Andy", position: "The diff is hard to read" }], outcome: "action", segmentIndexes: [3], continuesId: null, picksUp: "T1" },
+        { topic: "Review queue", positions: [], outcome: "decided", segmentIndexes: [0, 1, 2], continuesId: null },
+      ],
+    },
+  ];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async notesFor(item: Item | null, segments: Segment[], _e: unknown, _c: unknown, _s: unknown, options?: NotesOptions) {
+      calls.push({ lines: segments.map((x) => x.text), settled: options?.settled ?? [], tidy: !!options?.tidy });
+      return drafts.shift() ?? new HeuristicAgent().notesFor(item, segments);
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const refresh = (session as unknown as { refreshNotes(id: string | null): Promise<Note[]> }).refreshNotes.bind(session);
+  const MIN = 60_000;
+  const t = Date.now();
+  session.addSpeech("p1", "Andy", "The conflict page needs a clearer keep button", t - 40 * MIN);
+  session.addSpeech("p2", "Joe", "I'll make the keep button stand out", t - 39 * MIN);
+  session.addSpeech("p3", "Huy", "Should the review queue open in the widget?", t - 3 * MIN);
+  session.addSpeech("p1", "Andy", "Yes, widget first", t - 2 * MIN);
+  const itemId = db.meetingSegments(session.meetingId)[0].itemId;
+  const first = await refresh(itemId);
+  assert.equal(calls[0].lines.length, 4);
+  const conflict = db.meetingDiscussions(session.meetingId).find((d) => d.topic === "Conflict page")!;
+  const keep = first.find((n) => n.text === "Make the keep button stand out")!;
+  db.setActionDone(room.id, keep.id, "Joe");
+
+  session.addSpeech("p3", "Huy", "And the widget shows the queue count", t - 1 * MIN);
+  const second = await refresh(itemId);
+  assert.deepEqual(calls[1].lines, ["Should the review queue open in the widget?", "Yes, widget first", "And the widget shows the queue count"]);
+  assert.deepEqual(calls[1].settled, [
+    {
+      key: "T1",
+      topic: "Conflict page",
+      outcome: "action",
+      notes: [{ kind: "action", text: "Make the keep button stand out", owner: "Joe" }],
+    },
+  ]);
+  const settled = db.meetingDiscussions(session.meetingId).find((d) => d.id === conflict.id);
+  assert.deepEqual(settled?.segmentIds, conflict.segmentIds);
+  const actions = second.filter((n) => n.kind === "action");
+  assert.deepEqual(actions.map((n) => [n.id, n.doneBy, n.discussionId]), [[keep.id, "Joe", conflict.id]], "kept as it was, not written twice");
+
+  session.addSpeech("p1", "Andy", "Back on the conflict page, the diff is hard to read", Date.now());
+  const third = await refresh(itemId);
+  assert.equal(calls[2].lines.at(-1), "Back on the conflict page, the diff is hard to read");
+  const back = db.meetingDiscussions(session.meetingId).find((d) => d.id === conflict.id)!;
+  assert.equal(back.topic, "Conflict page diff");
+  assert.equal(back.segmentIds.length, 3, "its earlier lines and the new one");
+  assert.equal(third.find((n) => n.text === "Make the conflict diff easier to read")?.discussionId, conflict.id);
+
+  // As the meeting ends, one last run reads all of it.
+  await session.end();
+  assert.equal(calls.at(-1)?.tidy, true);
+  assert.equal(calls.at(-1)?.lines.length, 6);
+  assert.deepEqual(calls.at(-1)?.settled, []);
+  assert.ok(db.meetingNotes(session.meetingId).some((n) => n.id === keep.id && n.doneBy === "Joe"));
+});
+
+test("one topic for an hour: its older talk folds into where it stood, and the run carries it on", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "One", url: null, description: null }]);
+  const calls: Array<{ lines: string[]; settled: SettledTopic[] }> = [];
+  const MIN = 60_000;
+  const t = Date.now();
+  const drafts: ItemNotesDraft[] = [
+    {
+      notes: [
+        { kind: "question", text: "Per seat or per space?", owner: null, discussion: 0 },
+        { kind: "action", text: "Price out SSO", owner: "Andy", discussion: 0 },
+      ],
+      discussions: [{ topic: "Pricing", positions: [{ speaker: "Huy", position: "Per seat" }], outcome: "open", segmentIndexes: [...Array(50).keys()], continuesId: null }],
+    },
+    {
+      notes: [
+        { kind: "decision", text: "Charge per seat", owner: null, discussion: 0 },
+        { kind: "action", text: "Price out SSO", owner: "Andy", discussion: 0, sameAs: "A1" },
+      ],
+      discussions: [
+        // Every line it was sent; how many depends on where the 5-minute step falls.
+        { topic: "Pricing", positions: [{ speaker: "Joe", position: "Per seat, then" }], outcome: "decided", segmentIndexes: [], continuesId: null, picksUp: "T1" },
+      ],
+    },
+  ];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async notesFor(item: Item | null, segments: Segment[], _e: unknown, _c: unknown, _s: unknown, options?: NotesOptions) {
+      calls.push({ lines: segments.map((x) => x.text), settled: options?.settled ?? [] });
+      const draft = drafts.shift();
+      if (draft && calls.length === 2) draft.discussions[0].segmentIndexes = [...segments.keys()];
+      return draft ?? new HeuristicAgent().notesFor(item, segments);
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const refresh = (session as unknown as { refreshNotes(id: string | null): Promise<Note[]> }).refreshNotes.bind(session);
+  // Fifty remarks on pricing over the last hour, the latest six minutes ago.
+  for (let i = 0; i < 50; i++) session.addSpeech("p1", i % 2 ? "Huy" : "Joe", `Pricing, take ${i}`, t - (60 - i * 1.1) * MIN);
+  const itemId = db.meetingSegments(session.meetingId)[0].itemId;
+  await refresh(itemId);
+  const pricing = db.meetingDiscussions(session.meetingId)[0];
+  assert.equal(pricing.segmentIds.length, 50);
+
+  session.addSpeech("p2", "Joe", "OK, per seat", t - 2 * MIN);
+  session.addSpeech("p1", "Huy", "Agreed", t - 1 * MIN);
+  const notes = await refresh(itemId);
+  // The talk from over 15 minutes ago isn't sent again; where the topic stood is.
+  // The topic's last 15 to 20 minutes (the edge moves in 5-minute steps) and the new talk.
+  const sent = calls[1].lines.length;
+  assert.ok(sent >= 11 && sent <= 15, `sent ${sent} lines`);
+  assert.deepEqual(calls[1].lines.slice(-2), ["OK, per seat", "Agreed"]);
+  assert.deepEqual(calls[1].settled[0], {
+    key: "T1",
+    topic: "Pricing",
+    outcome: "open",
+    going: true,
+    positions: [{ speaker: "Huy", position: "Per seat" }],
+    notes: [
+      { kind: "question", text: "Per seat or per space?", owner: null },
+      { kind: "action", text: "Price out SSO", owner: "Andy" },
+    ],
+  });
+  const after = db.meetingDiscussions(session.meetingId);
+  assert.equal(after.length, 1);
+  assert.equal(after[0].id, pricing.id);
+  assert.equal(after[0].segmentIds.length, 52, "its older lines and the new ones");
+  assert.deepEqual(after[0].positions.map((p) => p.speaker), ["Huy", "Joe"]);
+  assert.deepEqual(notes.map((n) => n.kind).sort(), ["action", "decision"]);
+  assert.ok(notes.every((n) => n.discussionId === pricing.id));
+});
+
 test("spaces: every space is listed with its open to-dos, the ones for you, and what to decide", async () => {
   const { toSpaceSummary, ownedBy } = await import("./spaces.ts");
   const db = openDb(":memory:");
@@ -572,4 +732,162 @@ test("End meeting shows everyone it's ending, and the meeting ends even when the
   assert.ok(ws.got.some((m) => m.type === "meeting.ended" && m.meetingId === s.meetingId));
   assert.ok(db.getMeeting(s.meetingId)?.endedAt);
   assert.ok(db.getMeeting(meetingId)?.endedAt);
+});
+
+test("a note change from someone who isn't the host says why, and puts their screen back", async () => {
+  const { db, session, meetingId } = setup();
+  await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  // Sent while offline, back when Ann was hosting; it arrives after the seat moved.
+  await say(ann, { type: "note.add", itemId: null, kind: "action", text: "Write the doc", owner: null, cid: "late" });
+  assert.equal(db.meetingNotes(meetingId).length, 0);
+  assert.ok(ann.got.some((m) => m.type === "ack" && m.cid === "late"));
+  const err = ann.got.find((m) => m.type === "error");
+  assert.match(err?.type === "error" ? err.message : "", /Couldn't save your to-do: only the host can change notes, and Joe is hosting now/);
+  // The list she's shown is the real one, without the to-do that didn't go in.
+  assert.ok(ann.got.some((m) => m.type === "notes" && m.itemId === null && m.notes.length === 0));
+  await session.end();
+});
+
+test("the agenda changing doesn't move a host off General, and a removed item takes its pin and nudge with it", async () => {
+  const { db, session, items } = setup();
+  const host = await join(session, { id: "u1", name: "Joe" });
+  await say(host, { type: "focus", itemId: null });
+  db.addItems(session.roomId, [{ source: "agenda", externalId: null, title: "Four", url: null, description: null }]);
+  session.itemsChanged();
+  assert.equal(session.state().focusItemId, null, "a host on General stays there");
+
+  await say(host, { type: "pin", itemId: items[1].id });
+  assert.equal(session.state().pinnedBy, "Joe");
+  db.archiveItem(items[1].id);
+  session.itemsChanged();
+  assert.equal(session.state().focusItemId, items[0].id);
+  assert.equal(session.state().pinnedBy, null, "the pin went with its item");
+
+  session.demoSuggest(items[2].id, "Three is on screen");
+  db.archiveItem(items[2].id);
+  session.itemsChanged();
+  assert.equal(session.state().suggestion, null, "no nudge for an item that's gone");
+  await session.end();
+});
+
+test("Undo of Switch and move puts the focus and every remark back, late ones too", async () => {
+  const { db, session, items, meetingId } = setup();
+  const host = await join(session, { id: "u1", name: "Joe" });
+  session.addSpeech("u2", "Sam", "Before the screen changed", Date.now() - 5_000);
+  session.demoSuggest(items[2].id, "Three is on screen");
+  await new Promise((r) => setTimeout(r, 5));
+  session.addSpeech("u2", "Sam", "Still on one, really", Date.now());
+  await say(host, { type: "suggestion.accept", cid: "a" });
+  assert.equal(session.state().focusItemId, items[2].id);
+  // Words spoken before the click, arriving after it.
+  session.addSpeech("u3", "Ann", "Agreed on one", Date.now() - 1);
+  await say(host, { type: "suggestion.undo", cid: "u" });
+  assert.equal(session.state().focusItemId, items[0].id);
+  assert.deepEqual(
+    db.meetingSegments(meetingId).map((s) => s.itemId),
+    [items[0].id, items[0].id, items[0].id],
+  );
+  await session.end();
+});
+
+test("only one person shares at a time; the second is told who is", async () => {
+  const { session } = setup();
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  await say(joe, { type: "sharing", on: true });
+  await say(ann, { type: "sharing", on: true });
+  const err = ann.got.find((m) => m.type === "error");
+  assert.match(err?.type === "error" ? err.message : "", /Joe is already sharing/);
+  assert.deepEqual(
+    session.state().participants.filter((p) => p.isSharing).map((p) => p.id),
+    ["u1"],
+  );
+  await session.end();
+});
+
+test("notes that fail stay marked on their item until a try works, and anyone can retry", async () => {
+  const { session, items } = setup();
+  const agent = (session as unknown as { agent: HeuristicAgent }).agent;
+  const real = agent.notesFor.bind(agent);
+  agent.notesFor = () => Promise.reject(new Error("rate limited"));
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  session.addSpeech("u2", "Ann", "We should ship the checklist on Friday", Date.now());
+  await say(ann, { type: "notes.retry", itemId: items[0].id });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(session.state().notesFailing, [items[0].id]);
+  agent.notesFor = real;
+  await say(ann, { type: "notes.retry", itemId: items[0].id });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(session.state().notesFailing, []);
+  await session.end();
+});
+
+test("a rate-limited notes run waits it out instead of trying again at every pause", async () => {
+  const { session, items } = setup();
+  const agent = (session as unknown as { agent: HeuristicAgent }).agent;
+  let tries = 0;
+  agent.notesFor = () => (tries++, Promise.reject(new NotesTrouble("busy", 30_000)));
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  await say(ann, { type: "notes.retry", itemId: items[0].id });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(tries, 1);
+  assert.equal(session.state().notesTrouble, "busy");
+  const told = ann.got.filter((m) => m.type === "error").map((m) => (m.type === "error" ? m.message : ""));
+  assert.match(told.join(" "), /rate limit/);
+  // More talk while it's held: no new run until the wait is over.
+  session.addSpeech("u2", "Ann", "Let's ship the checklist on Friday", Date.now());
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(tries, 1);
+  agent.notesFor = HeuristicAgent.prototype.notesFor.bind(agent);
+  await session.end();
+});
+
+test("someone whose browser can't transcribe shows as not recorded to everyone", async () => {
+  const { session } = setup();
+  await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  await say(ann, { type: "recording", on: false });
+  assert.equal(session.state().participants.find((p) => p.id === "u2")?.notRecording, true);
+  await say(ann, { type: "recording", on: true });
+  assert.equal(session.state().participants.find((p) => p.id === "u2")?.notRecording, false);
+  await session.end();
+});
+
+test("after a restart the held seat names its host and says how long it's held", async () => {
+  const { db, session } = setup();
+  const room = db.getRoom(session.roomId)!;
+  const joe = db.upsertUser({ googleSub: null, email: "joe@example.com", name: "Joe Liang", picture: null });
+  await join(session, { id: joe.id, name: joe.name });
+  const [open] = db.openMeetings(room.id);
+  const again = new RoomSession(db, new HeuristicAgent(), room, () => {}, undefined, undefined, open);
+  await join(again, { id: "u2", name: "Ann" });
+  assert.equal(again.state().hostAway, "Joe Liang");
+  assert.ok((again.state().hostAwayMs ?? 0) > 0);
+  await again.end();
+});
+
+test("transcription that stops starts again by itself once, then asks people to rejoin", async (t) => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  let started = 0;
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {}, () => (started++, { stop: async () => {} }));
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  assert.equal(started, 1);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  session.transcriptionFailed("speech-to-text stopped");
+  assert.equal(session.state().transcriptionDown, true);
+  assert.equal(session.state().transcriptionRestarting, true);
+  assert.match(String(joe.got.findLast((m) => m.type === "error")?.message), /starting it again/);
+  t.mock.timers.tick(10_000);
+  assert.equal(started, 2);
+  assert.equal(session.state().transcriptionDown, false);
+  // A second stop soon after: no loop of restarts, people are told what to do.
+  session.transcriptionFailed("speech-to-text stopped");
+  t.mock.timers.tick(10_000);
+  assert.equal(started, 2);
+  assert.equal(session.state().transcriptionRestarting, false);
+  assert.match(String(joe.got.findLast((m) => m.type === "error")?.message), /Leave and rejoin/);
+  t.mock.timers.reset();
+  await session.end();
 });

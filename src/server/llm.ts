@@ -6,7 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { type DraftSlide, outlineToSlides } from "../shared/outline.ts";
-import type { DiscussionOutcome, Item, Note, Segment } from "../shared/protocol.ts";
+import type { DiscussionOutcome, Item, Note, NoteKind, Segment } from "../shared/protocol.ts";
 import { config } from "./config.ts";
 
 export type DraftNote = Pick<Note, "kind" | "text" | "owner">;
@@ -23,7 +23,27 @@ export interface ItemNotesDraft {
     segmentIndexes: number[];
     /** An earlier discussion of this item that this one picks up again. */
     continuesId: string | null;
+    /** The key of a settled topic from earlier in this meeting that the talk went back to. */
+    picksUp?: string | null;
   }>;
+}
+
+/** A topic from earlier in this meeting that has gone quiet (see settle.ts): the model sees it
+ *  as a line with its notes instead of reading its lines again. A topic still going whose older
+ *  talk folded (going) is shown the same way, with its positions so far, and carried on. */
+export type SettledTopic = {
+  key: string;
+  topic: string;
+  outcome: DiscussionOutcome;
+  notes: Array<{ kind: Exclude<NoteKind, "summary">; text: string; owner: string | null }>;
+  going?: boolean;
+  positions?: Array<{ speaker: string; position: string }>;
+};
+
+export interface NotesOptions {
+  settled?: SettledTopic[];
+  /** The run as the meeting ends: the whole transcript, read more carefully, for the recap. */
+  tidy?: boolean;
 }
 
 /** Discussions of the same item in earlier meetings, so a new one can link back. */
@@ -85,6 +105,7 @@ export interface Agent {
     earlier?: EarlierDiscussion[],
     captured?: CapturedNote[],
     context?: NotesContext,
+    options?: NotesOptions,
   ): Promise<ItemNotesDraft>;
   matchScreen(jpegDataUrl: string, items: Item[], currentItemId: string | null): Promise<ScreenMatch>;
   summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string>;
@@ -97,6 +118,16 @@ export interface Agent {
   draftDeck(brief: string): Promise<DraftSlide[]>;
   /** One line on what a snap of the shared screen shows. Null without a model. */
   describeSnap(image: { data: string; mediaType: SnapMedia }, item: Item | null, remarks: string[]): Promise<string | null>;
+  /** A snap saved to a space between meetings: one line on what it shows, and which of the
+   *  space's items it's most likely about (only when it plainly is). Null when it can't tell. */
+  describeCapture(
+    image: { data: string; mediaType: SnapMedia },
+    space: { name: string; purpose: string },
+    items: Array<{ id: string; title: string }>,
+    line: string | null,
+  ): Promise<{ caption: string | null; itemId: string | null } | null>;
+  /** The item a note someone saved to the space is plainly about, or null. */
+  pickItem(space: { name: string; purpose: string }, items: Array<{ id: string; title: string }>, text: string): Promise<string | null>;
   /** Whether the screen the agent was reading backs one of the decisions or
    *  to-dos it just wrote: which one (by key), and a caption. Null when it doesn't. */
   frameBacks(
@@ -114,7 +145,7 @@ export type SnapMedia = "image/jpeg" | "image/png" | "image/webp";
 /** A suggestion as the agent sees it when tidying the agenda, with what it came from. */
 export interface AgendaDraftRow {
   key: string;
-  kind: "needs_people" | "question" | "todo";
+  kind: "needs_people" | "question" | "capture" | "todo";
   title: string;
   reason: string;
   owner: string | null;
@@ -169,6 +200,10 @@ const NotesSchema = z.object({
         .describe("One per participant who contributed, in the order they first spoke"),
       outcome: z.enum(["decided", "action", "open", "info"]).describe("decided: a decision was made. action: it ended with someone taking work. open: unresolved. info: an update with nothing to resolve."),
       continues: z.string().nullable().describe("The id of the earlier discussion this picks up again, from the list given, or null"),
+      picks_up: z
+        .string()
+        .nullable()
+        .describe("The key (T1, T2...) of the topic listed from earlier in this meeting that this goes back to or carries on, or null"),
       decisions: z.array(
         z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (D1, D2...) of the already-captured decision this is, or null if new") }),
       ),
@@ -207,6 +242,15 @@ const SnapSchema = z.object({
   caption: z.string().describe("What's on screen, in one short line under 110 characters, naming the specific thing shown"),
 });
 
+const CaptureSchema = z.object({
+  caption: z.string().describe("What's on screen, in one short line under 110 characters, naming the specific thing shown"),
+  item: z.string().nullable().describe("The key (I1, I2...) of the item this is plainly about, or null when none clearly fits"),
+});
+
+const PickSchema = z.object({
+  item: z.string().nullable().describe("The key (I1, I2...) of the item this note is plainly about, or null when none clearly fits"),
+});
+
 const BacksSchema = z.object({
   backs: z.string().nullable().describe("The key of the decision or to-do this screen is evidence for, or null if none"),
   caption: z.string().describe("What's on screen, in one short line under 110 characters"),
@@ -243,7 +287,54 @@ const AgendaSchema = z.object({
     .describe("Every suggestion given, once each, in the order the meeting should take them"),
 });
 
-class ClaudeAgent implements Agent {
+/** A notes run that hangs keeps "Updating" up; past this it fails and the next pause tries
+ *  again. Long enough for the whole transcript of an item talked about for two hours. */
+const NOTES_TIMEOUT_MS = 120_000;
+/** The last run as the meeting ends reads the whole meeting, and everyone is already waiting on the recap. */
+const NOTES_TIDY_TIMEOUT_MS = 240_000;
+/** The notes list every transcript line under its topic, so they grow with a long item, and
+ *  the model thinks first within the same limit. Only what it writes is billed. */
+const NOTES_MAX_TOKENS = 16_000;
+/** Transcript lines per block of the notes prompt; see notesPrompt. */
+const NOTES_CHUNK_LINES = 50;
+
+/** A notes run that failed for a reason worth saying: the account's rate limit (wait it out)
+ *  or its credit running out (someone has to top it up). */
+export class NotesTrouble extends Error {
+  constructor(
+    readonly reason: "busy" | "credit",
+    /** busy: how long the API asked us to wait, when it said. */
+    readonly retryAfterMs = 0,
+    options?: { cause?: unknown },
+  ) {
+    super(reason === "busy" ? "the model's rate limit was hit" : "the Anthropic account is out of credit", options);
+  }
+}
+
+export function notesTrouble(err: unknown): NotesTrouble | null {
+  if (err instanceof Anthropic.RateLimitError || (err instanceof Anthropic.APIError && err.status === 529)) {
+    const s = Number(err.headers?.get("retry-after"));
+    return new NotesTrouble("busy", Number.isFinite(s) && s > 0 ? s * 1000 : 0, { cause: err });
+  }
+  if (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message)) return new NotesTrouble("credit", 0, { cause: err });
+  return null;
+}
+
+/** The notes prompt as blocks. Every run sends the item's whole transcript, which only grows,
+ *  so it goes in fixed chunks of lines with the last whole chunk marked for the prompt cache:
+ *  the next run reads all of that back at a tenth of the price, and it doesn't count against
+ *  the account's per-minute input limit. What changes run to run comes after it. */
+export function notesPrompt(head: string, lines: string[], tail: string): Anthropic.Beta.BetaTextBlockParam[] {
+  const whole = lines.length - (lines.length % NOTES_CHUNK_LINES);
+  const blocks: Anthropic.Beta.BetaTextBlockParam[] = [{ type: "text", text: head }];
+  for (let i = 0; i < whole; i += NOTES_CHUNK_LINES) blocks.push({ type: "text", text: lines.slice(i, i + NOTES_CHUNK_LINES).join("\n") });
+  if (whole) blocks[blocks.length - 1].cache_control = { type: "ephemeral" };
+  if (whole < lines.length) blocks.push({ type: "text", text: lines.slice(whole).join("\n") });
+  if (tail.trim()) blocks.push({ type: "text", text: tail.trim() });
+  return blocks;
+}
+
+export class ClaudeAgent implements Agent {
   private client: Anthropic;
   constructor(apiKey: string) {
     this.client = new Anthropic({ apiKey });
@@ -255,6 +346,8 @@ class ClaudeAgent implements Agent {
     system: string,
     effort: "low" | "medium",
     model = config.anthropicModel,
+    /** timeout: for calls a person is waiting on mid-meeting, give up and let the next run try. */
+    { timeout, maxTokens = 4000 }: { timeout?: number; maxTokens?: number } = {},
   ): Promise<T | null> {
     // If a safety classifier declines, let the API retry on its recommended
     // fallback model. Haiku has no server-side fallback.
@@ -263,12 +356,16 @@ class ClaudeAgent implements Agent {
       : { betas: ["server-side-fallback-2026-07-01"] as Anthropic.AnthropicBeta[], fallbacks: "default" as const };
     const res = await this.client.beta.messages.parse({
       model,
-      max_tokens: 4000,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content }],
       output_config: { effort, format: betaZodOutputFormat(schema) },
       ...fallback,
-    });
+    }, timeout ? { timeout, maxRetries: 1 } : undefined);
+    const u = res.usage;
+    console.log(
+      `[agent] ${model} in=${u.input_tokens} cached=${u.cache_read_input_tokens ?? 0} wrote=${u.cache_creation_input_tokens ?? 0} out=${u.output_tokens} stop=${res.stop_reason}`,
+    );
     if (res.stop_reason === "refusal") return null;
     return (res.parsed_output as T | null) ?? null;
   }
@@ -279,17 +376,37 @@ class ClaudeAgent implements Agent {
     earlier: EarlierDiscussion[] = [],
     captured: CapturedNote[] = [],
     context: NotesContext = {},
+    { settled = [], tidy = false }: NotesOptions = {},
   ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
-    const numbered = segments
-      .map((s, i) => `[${i + 1}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
-      .join("\n");
+    const numbered = segments.map((s, i) => `[${i + 1}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`);
     const before = earlier.length
       ? `\n\nDiscussions of this item in earlier meetings (newest first):\n${earlier
           .slice(0, 15)
           .map((d) => `- id=${d.id} (${new Date(d.meetingStartedAt).toISOString().slice(0, 10)}): ${d.topic}`)
           .join("\n")}`
       : "";
+    const label = { action: "To do", decision: "Decided", question: "Open" };
+    const topicLines = (list: SettledTopic[]) =>
+      list
+        .map(
+          (t) =>
+            `- ${t.key} (${t.outcome}) ${t.topic}${(t.positions ?? []).map((p) => `\n  ${p.speaker}: ${p.position}`).join("")}${t.notes
+              .map((n) => `\n  ${label[n.kind]}: ${n.text}${n.owner ? ` (${n.owner})` : ""}`)
+              .join("")}`,
+        )
+        .join("\n");
+    const quietOnes = settled.filter((t) => !t.going);
+    const goingOnes = settled.filter((t) => t.going);
+    const quiet = `${
+      quietOnes.length
+        ? `\n\nTopics from earlier in this meeting that have gone quiet. Their lines aren't repeated below, and their notes are kept as they are:\n${topicLines(quietOnes)}`
+        : ""
+    }${
+      goingOnes.length
+        ? `\n\nTopics still going that started a while ago. Their earlier talk isn't repeated below; this is where they stood:\n${topicLines(goingOnes)}`
+        : ""
+    }`;
     const already = captured.length
       ? `\n\nAlready captured from earlier in this meeting (keep every one; reword only if the talk since made it clearer):\n${captured
           .map((c) => `- ${c.key} ${c.kind === "action" ? "action item" : "decision"}: ${c.text}${c.owner ? ` (owner: ${c.owner})` : ""}`)
@@ -304,10 +421,13 @@ class ClaudeAgent implements Agent {
       : "";
     const out = await this.parse(
       NotesSchema,
-      `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${already}${shown}
+      notesPrompt(
+        `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${quiet}
 
-What was said while this item was in focus (speech transcript and in-room chat, in order):
-${numbered}${asked(context.instructions)}`,
+${quiet ? "What was said since, while this item was in focus" : "What was said while this item was in focus"} (speech transcript and in-room chat, in order):`,
+        numbered,
+        `${already}${shown}${asked(context.instructions)}`,
+      ),
       `You take notes in a team meeting. You are given what was said while one agenda item (a ticket, task or slide) was in focus.
 
 Group the talk into discussions: a discussion is a stretch of back-and-forth about one question or subject. Most items have one to three. A status update with no back-and-forth is one discussion with outcome "info". Every line belongs to at most one discussion; skip small talk.
@@ -316,12 +436,21 @@ For each discussion, give each participant's position in one short line, how it 
 
 Notes are rewritten as the meeting goes on. Every already-captured action item and decision must appear again, under the discussion it belongs to, with its key in same_as. Never drop or merge two of them into one; only give same_as for a note that is the same task or decision.
 
+In a long meeting, topics that went quiet are listed as settled, with their keys (T1, T2...) and notes. If the talk goes back to one, give its key in picks_up and list only the new lines in turns. Don't write a settled topic's notes again.
+
+A long topic that is still going is listed with its key too, with where it stood before the lines below. Carry it on: give its key in picks_up, its new lines in turns, its positions in full, and its decisions, action items and open questions in full, earlier ones included.
+
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
-      "low",
-      config.notesModel,
-    );
-    if (!out) return { notes: [], discussions: [] };
+      tidy ? "medium" : "low",
+      tidy ? config.notesTidyModel : config.notesModel,
+      { timeout: tidy ? NOTES_TIDY_TIMEOUT_MS : NOTES_TIMEOUT_MS, maxTokens: NOTES_MAX_TOKENS },
+    ).catch((err) => {
+      throw notesTrouble(err) ?? err;
+    });
+    // Declined: keep the notes and topics as they are rather than writing none.
+    if (!out) throw new Error("the model declined to write notes");
     const known = new Set(earlier.map((d) => d.id));
+    const keys = new Set(settled.map((t) => t.key));
     const notes: ItemNotesDraft["notes"] = out.summary.trim() ? [{ kind: "summary", text: out.summary.trim(), owner: null, discussion: null }] : [];
     out.discussions.forEach((d, i) => {
       notes.push(
@@ -338,6 +467,7 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
         outcome: d.outcome,
         segmentIndexes: [...new Set(d.turns.map((n) => n - 1).filter((n) => n >= 0 && n < segments.length))].sort((a, b) => a - b),
         continuesId: d.continues && known.has(d.continues) ? d.continues : null,
+        picksUp: d.picks_up && keys.has(d.picks_up) ? d.picks_up : null,
       })),
     };
   }
@@ -395,6 +525,46 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
     return out?.caption.trim().slice(0, 160) || null;
   }
 
+  async describeCapture(
+    image: { data: string; mediaType: SnapMedia },
+    space: { name: string; purpose: string },
+    items: Array<{ id: string; title: string }>,
+    line: string | null,
+  ): Promise<{ caption: string | null; itemId: string | null } | null> {
+    const listed = items.slice(0, 40);
+    const out = await this.parse(
+      CaptureSchema,
+      [
+        { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+        {
+          type: "text",
+          text: `Someone saved this screenshot to their team's space "${space.name}"${space.purpose ? ` (${space.purpose})` : ""} between meetings.${
+            line ? `\nThey wrote with it: ${line}` : ""
+          }\n\nThe space's items:\n${listed.length ? listed.map((it, i) => `I${i + 1}: ${it.title}`).join("\n") : "(none)"}\n\nSay what's on screen, and which item it's about.`,
+        },
+      ],
+      "You caption screenshots people save for their team so people and agents can find them later. Be concrete: name the ticket, file, chart, page or error shown, and the detail that matters. No preamble. Only pick an item when the screenshot or what they wrote is plainly about it.",
+      "low",
+    );
+    if (!out) return null;
+    const pick = out.item ? listed[Number(out.item.replace(/\D/g, "")) - 1] : undefined;
+    return { caption: out.caption.trim().slice(0, 160) || null, itemId: pick?.id ?? null };
+  }
+
+  async pickItem(space: { name: string; purpose: string }, items: Array<{ id: string; title: string }>, text: string): Promise<string | null> {
+    const listed = items.slice(0, 40);
+    if (!listed.length) return null;
+    const out = await this.parse(
+      PickSchema,
+      `Someone saved this note to their team's space "${space.name}"${space.purpose ? ` (${space.purpose})` : ""} between meetings:\n${text}\n\nThe space's items:\n${listed
+        .map((it, i) => `I${i + 1}: ${it.title}`)
+        .join("\n")}\n\nWhich item is it about?`,
+      "You file notes people save for their team under the agenda item they're about. Only pick an item when the note is plainly about it.",
+      "low",
+    );
+    return out?.item ? (listed[Number(out.item.replace(/\D/g, "")) - 1]?.id ?? null) : null;
+  }
+
   async frameBacks(
     image: { data: string; mediaType: SnapMedia },
     item: Item | null,
@@ -441,7 +611,7 @@ For each suggestion, write a short agenda line (what to talk about, not a copy o
 
 Order: things blocked or waiting on a decision first, then open questions, then to-dos that moved since, then the rest. Return every key exactly once. Do not invent anything.`,
       "low",
-      config.notesModel,
+      config.notesTidyModel,
     );
     if (!out) return null;
     const known = new Set(suggestions.map((s) => s.key));
@@ -678,6 +848,27 @@ export class HeuristicAgent implements Agent {
 
   async describeSnap(): Promise<string | null> {
     return null;
+  }
+
+  /** Without a model: the item whose title shares the most words with what they typed. */
+  async describeCapture(
+    _image: unknown,
+    _space: unknown,
+    items: Array<{ id: string; title: string }>,
+    line: string | null,
+  ): Promise<{ caption: string | null; itemId: string | null } | null> {
+    const words = (t: string) => new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3));
+    const said = words(line ?? "");
+    let best: { id: string; n: number } | null = null;
+    for (const it of items) {
+      const n = [...words(it.title)].filter((w) => said.has(w)).length;
+      if (n && (!best || n > best.n)) best = { id: it.id, n };
+    }
+    return best ? { caption: null, itemId: best.id } : null;
+  }
+
+  async pickItem(_space: unknown, items: Array<{ id: string; title: string }>, text: string): Promise<string | null> {
+    return (await this.describeCapture(null, null, items, text))?.itemId ?? null;
   }
 
   async frameBacks(): Promise<{ key: string; caption: string } | null> {

@@ -7,8 +7,9 @@ export interface Interim {
   text: string;
 }
 
-/** Why the room can't be reached, once a few reconnects have failed. */
-export type Trouble = "signed-out" | "gone" | "unreachable";
+/** Why the room can't be reached, once a few reconnects have failed. "blocked": Stand
+ *  answers, but the live connection never opens (a firewall or VPN, usually). */
+export type Trouble = "signed-out" | "gone" | "unreachable" | "blocked";
 
 /** Changes that have to reach the room. Each goes with an id and stays in the
  *  outbox until the server acks it; after a dropped connection it's sent again. */
@@ -17,6 +18,7 @@ const LASTING = new Set<ClientMessage["type"]>([
   "pin",
   "unpin",
   "suggestion.accept",
+  "suggestion.undo",
   "suggestion.dismiss",
   "upnext.add",
   "upnext.addAll",
@@ -38,7 +40,7 @@ const LASTING = new Set<ClientMessage["type"]>([
  *  meeting as it happens, so they need the connection now. */
 const CAN_WAIT = new Set<ClientMessage["type"]>(["chat", "speech", "segment.move", "followup.done", "note.edit", "note.remove", "note.restore", "note.add"]);
 /** Sent on their own as things happen; nobody clicked anything. */
-const BACKGROUND = new Set<ClientMessage["type"]>(["hello", "ping", "speech.interim", "frame", "sharing"]);
+const BACKGROUND = new Set<ClientMessage["type"]>(["hello", "ping", "speech.interim", "frame", "sharing", "recording"]);
 /** No ack or pong this long after sending: the connection is dead, even if the browser hasn't noticed yet. */
 const ANSWER_WITHIN_MS = 6_000;
 const PING_EVERY_MS = 10_000;
@@ -119,6 +121,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const meetingRef = useRef<string | null>(null);
   /** Gives up on the current socket and reconnects. */
   const dropRef = useRef<() => void>(() => {});
+  /** Stops waiting out the backoff and tries now. */
+  const retryRef = useRef<() => void>(() => {});
   const refusedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const outboxRoom = useRef(roomId);
@@ -148,12 +152,12 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
         setConnected(true);
         setTrouble(null);
         ws.send(JSON.stringify({ type: "hello", meetingId: meetingRef.current ?? undefined } satisfies ClientMessage));
-        // Whatever hadn't got through goes now, in the order it was made.
+        // Whatever hadn't got through goes now, in the order it was made. They count as
+        // waiting until the server says it has them, so "sent" is only said once it's true.
         for (const o of outbox.current) {
           ws.send(JSON.stringify({ ...o.msg, cid: o.cid }));
           o.sentAt = Date.now();
         }
-        setWaiting(0);
       };
       ws.onmessage = (ev) => {
         heardAt = Date.now();
@@ -161,6 +165,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
         switch (msg.type) {
           case "ack":
             outbox.current = outbox.current.filter((o) => o.cid !== msg.cid);
+            setWaiting((w) => (w ? Math.min(w, outbox.current.length) : 0));
             break;
           case "pong":
             answersPings = true;
@@ -199,10 +204,17 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
             setNotesBusy((all) => (msg.busy ? [...all.filter((k) => k !== key), key] : all.filter((k) => k !== key)));
             break;
           }
-          case "meeting.ended":
+          case "meeting.ended": {
             closedByUs = true;
+            // Changes made offline that never reached this meeting: say so rather than drop them quietly.
+            const lost = outbox.current.filter((o) => o.msg.type !== "speech" && o.msg.type !== "meeting.end").length;
+            outbox.current = [];
+            setWaiting(0);
+            if (lost)
+              setError(`${lost === 1 ? "1 change made while you were offline wasn't" : `${lost} changes made while you were offline weren't`} saved: the meeting ended first.`);
             setEndedMeetingId(msg.meetingId);
             break;
+          }
           case "error":
             setError(msg.message);
             break;
@@ -222,12 +234,26 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
       retry = setTimeout(connect, Math.min(8000, 500 * 2 ** attempts));
     };
     const diagnose = async () => {
+      let found: Trouble | null;
       try {
         const res = await fetch(`/api/rooms/${roomId}`);
-        setTrouble(res.status === 401 ? "signed-out" : res.status === 404 ? "gone" : res.ok ? null : "unreachable");
+        // Stand answers but the live connection still won't open: something between is blocking it.
+        found = res.status === 401 ? "signed-out" : res.status === 404 ? "gone" : res.ok ? (attempts >= 5 ? "blocked" : null) : "unreachable";
       } catch {
-        setTrouble("unreachable");
+        found = "unreachable";
       }
+      // Back while we were asking: nothing to report.
+      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+      setTrouble(found);
+      // A space that's gone won't come back. Signed out keeps trying, so signing in in another tab is enough.
+      if (found === "gone") clearTimeout(retry);
+    };
+    // Try now, keeping what's known: the pill keeps saying what's wrong until it's fixed,
+    // rather than going back to "Reconnecting…" while it works it out again.
+    retryRef.current = () => {
+      if (wsRef.current || closedByUs) return;
+      clearTimeout(retry);
+      connect();
     };
     dropRef.current = () => {
       const ws = wsRef.current;
@@ -328,6 +354,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     waiting,
     refused,
     trouble,
+    retryNow: useCallback(() => retryRef.current(), []),
     send,
   };
 }

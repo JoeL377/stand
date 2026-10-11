@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DisconnectReason, Room, RoomEvent, Track, type RemoteTrack, type Participant } from "livekit-client";
 import { api } from "../api.ts";
+import { macApp } from "../macApp.ts";
 import { toast } from "../Toasts.tsx";
 
 export interface RemoteScreen {
@@ -18,6 +19,9 @@ function mediaMessage(kind: "mic" | "screen", err: unknown): string {
   const e = err as Error;
   const mic = kind === "mic";
   if (e.name === "NotAllowedError") {
+    // In the Mac app there's no browser: it's Stand itself that macOS has to allow.
+    if (macApp && (!mic || /system/i.test(e.message)))
+      return `Your Mac is blocking ${mic ? "the microphone" : "screen sharing"} for Stand. Allow Stand in System Settings › Privacy & Security › ${mic ? "Microphone" : "Screen & System Audio Recording"}, then quit and reopen Stand.`;
     if (!mic || /system/i.test(e.message))
       return `Your computer is blocking ${mic ? "the microphone" : "screen sharing"}. Allow your browser in System Settings › Privacy & Security › ${mic ? "Microphone" : "Screen Recording"}, then try again.`;
     return "Your browser blocked the microphone. Allow it from the icon at the left of the address bar, then click Unmute.";
@@ -48,10 +52,14 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   // the newer one takes over), "lost" for anything else. talkHere() joins again from here.
   const [audioAway, setAudioAway] = useState<"elsewhere" | "lost" | null>(null);
   const [joins, setJoins] = useState(0);
+  /** Audio worked in this meeting; losing it now is a drop, not a slow start. */
+  const [audioWas, setAudioWas] = useState(false);
 
   // ---- LiveKit connection -------------------------------------------------
   useEffect(() => {
     if (!livekit || !enabled) return;
+    // Trying again: it shows as reconnecting until it works or fails.
+    setAudioAway(null);
     const room = new Room({ adaptiveStream: true, dynacast: true });
     roomRef.current = room;
     const audioEls = new Map<string, HTMLMediaElement>();
@@ -114,6 +122,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           ms: 12000,
         });
       })
+      .on(RoomEvent.Reconnecting, () => setConnected(false))
       .on(RoomEvent.Reconnected, () => setConnected(true));
 
     (async () => {
@@ -123,6 +132,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
         await room.connect(url, token);
         if (cancelled) return room.disconnect();
         setConnected(true);
+        setAudioWas(true);
         setAudioAway(null);
         setNeedsAudioUnlock(!room.canPlaybackAudio);
         // Connected is one thing; the mic is another, with its own prompt and its own ways to fail.
@@ -141,6 +151,8 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           setMicStarting(false);
         }
       } catch (err) {
+        if (cancelled) return;
+        setAudioAway("lost");
         setMediaError(`Couldn't connect audio: ${(err as Error).message}`);
       }
     })();
@@ -203,6 +215,13 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
             return;
           }
           mockMicStream.current = stream;
+          // Unplugged, or taken by the system: say so instead of showing it on.
+          stream.getAudioTracks()[0]?.addEventListener("ended", () => {
+            if (mockMicStream.current !== stream) return;
+            mockMicStream.current = null;
+            setMicOn(false);
+            setMicError("Your mic was disconnected. Plug it back in, then click Unmute.");
+          });
           setMicOn(true);
           setMicTrack(stream.getAudioTracks()[0] ?? null);
         }
@@ -228,9 +247,12 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   // ---- screen share ---------------------------------------------------------
   // One screen picker at a time.
   const shareBusy = useRef(false);
+  /** The screen picker is open: the button says so, and a second click does nothing. */
+  const [sharePicking, setSharePicking] = useState(false);
   const startShare = useCallback(async () => {
     if (shareBusy.current) return;
     shareBusy.current = true;
+    setSharePicking(true);
     setMediaError(null);
     try {
       if (livekit) {
@@ -250,13 +272,19 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
       if (e.name !== "NotAllowedError" || /system/i.test(e.message)) setMediaError(mediaMessage("screen", err));
     } finally {
       shareBusy.current = false;
+      setSharePicking(false);
     }
   }, [livekit]);
 
   const stopShare = useCallback(async () => {
-    if (livekit) await roomRef.current?.localParticipant.setScreenShareEnabled(false);
-    else localScreen?.getTracks().forEach((t) => t.stop());
-    setLocalScreen(null);
+    try {
+      if (livekit) await roomRef.current?.localParticipant.setScreenShareEnabled(false);
+      else localScreen?.getTracks().forEach((t) => t.stop());
+      setLocalScreen(null);
+    } catch (err) {
+      // Still sharing: the button stays, so it can be pressed again.
+      setMediaError(`Couldn't stop sharing: ${(err as Error).message}. Try again, or close the share from your browser's bar.`);
+    }
   }, [livekit, localScreen]);
 
   const unlockAudio = useCallback(async () => {
@@ -279,6 +307,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
     localScreen,
     remoteScreen,
     startShare,
+    sharePicking,
     stopShare,
     speaking,
     needsAudioUnlock,
@@ -287,6 +316,8 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
     connected,
     audioAway,
     talkHere,
+    /** Audio dropped mid-meeting, or never connected: people can't hear each other. */
+    audioDown: livekit && (audioAway !== null || (audioWas && !connected)),
     leave,
   };
 }
