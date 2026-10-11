@@ -32,6 +32,7 @@ import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { toSpaceSummary } from "./spaces.ts";
+import { ConxtLiveDelivery } from "./conxtLive.ts";
 import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
@@ -198,6 +199,8 @@ app.use("/api", requireUser(db));
 app.use("/api/rooms/:id/conxt", conxtRoutes(db, conxtDestinations));
 const conxtDelivery = new ConxtDelivery(db, conxtDestinations);
 conxtDelivery.start();
+const conxtLiveDelivery = new ConxtLiveDelivery(db, conxtDestinations);
+conxtLiveDelivery.start();
 
 // ---- snaps: stills of the shared screen ------------------------------------
 

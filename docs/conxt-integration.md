@@ -153,3 +153,20 @@ the task authority. Later edits and task completion do not currently sync automa
 Old queued deliveries remain unchanged. Deploy the Conxt contract first, then Stand.
 A synthetic producer fixture was generated with actual finalization/outbox code and
 validated through Conxt's disposable PostgreSQL API/worker/review pipeline.
+
+
+## Live transcript delivery
+
+Connected meetings now send recorded turns while the meeting runs, including updates
+when consecutive speech extends an existing turn. SQLite triggers persist changes in
+a separate durable outbox. Pending batches are immutable until acknowledged; ordered
+sequences make lost receipts and restart retries safe. New events remain queued while
+a batch is in flight. Acknowledged events are compacted. Disconnecting pauses live
+sharing; changed destinations never reroute pending work. Owner-only live retry and
+status are available in the connection panel.
+
+Deploy Conxt's live transcript API/migration first. Conxt Sources shows provisional
+turns and refreshes every two seconds; MCP can read them separately from accepted
+knowledge. The final synthesis delivery remains the existing governed path. Only
+meetings bound to a connected room are shared; connecting mid-meeting applies to its
+next meeting. Speech generation depends on the existing Stand speech provider.
