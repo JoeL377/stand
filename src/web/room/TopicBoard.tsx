@@ -189,6 +189,7 @@ export function TopicBoard(props: {
           notesOf={notesOf}
           at={clock((bar.find((s) => `${s.chapter}-${s.from}` === peek.key)?.from ?? shown.head?.d.ts ?? start) - start)}
           anchor={peek.key}
+          headOnScreen={shown.head === current}
           elsewhere={shown.itemId !== props.focusItemId ? (props.items.find((i) => i.id === shown.itemId)?.title ?? "General") : null}
           idOf={idOf}
           boardRef={boardRef}
@@ -273,6 +274,8 @@ function Peek(props: {
   at: string;
   /** The stretch of the bar it was opened from. */
   anchor: string;
+  /** Its main topic is the one on screen: only the topics inside it are new. */
+  headOnScreen: boolean;
   /** The agenda item it was under, when that isn't the one in focus. */
   elsewhere: string | null;
   pinned: boolean;
@@ -282,6 +285,7 @@ function Peek(props: {
 }) {
   const { c } = props;
   const head = c.head?.d;
+  const showHead = !!c.head && !props.headOnScreen;
   const [pos, setPos] = useState<CSSProperties>({ visibility: "hidden" });
   const ref = useRef<HTMLDivElement>(null);
   const { onClose, pinned } = props;
@@ -323,9 +327,9 @@ function Peek(props: {
         {props.elsewhere && <span className="topic-mins topic-peek-item">· {props.elsewhere}</span>}
       </div>
       <strong className="topic-peek-title">{c.title}</strong>
-      {head && head.positions.length > 0 && (
+      {showHead && head!.positions.length > 0 && (
         <div className="topic-peek-positions">
-          {head.positions.slice(0, MAX_POSITIONS).map((p) => (
+          {head!.positions.slice(0, MAX_POSITIONS).map((p) => (
             <div key={p.speaker}>
               <Dot id={props.idOf(p.speaker)} name={p.speaker} size={18} />
               <span>{p.position}</span>
@@ -333,9 +337,9 @@ function Peek(props: {
           ))}
         </div>
       )}
-      {c.head && props.notesOf(c.head).length > 0 && <NoteList notes={props.notesOf(c.head)} max={PEEK_NOTES} />}
+      {showHead && props.notesOf(c.head!).length > 0 && <NoteList notes={props.notesOf(c.head!)} max={PEEK_NOTES} />}
       {inside.length > 0 && (
-        <div className={head ? "topic-peek-inside" : "topic-peek-inside group"}>
+        <div className={showHead ? "topic-peek-inside" : "topic-peek-inside group"}>
           {inside.slice(0, PEEK_TOPICS).map((t) => (
             <div key={t.d.id} className="topic-peek-sub">
               <span className="topic-peek-sub-title">{t.d.topic}</span>
