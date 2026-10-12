@@ -6,7 +6,6 @@ import type {
   AgentToken,
   AlignmentState,
   AlignmentView,
-  AlignmentVote,
   MeetingKind,
   Deck,
   DeckDraft,
@@ -420,9 +419,6 @@ export interface MeetingSetup {
   carry: string | null;
 }
 
-/** Answers from before there were four of them. */
-const LEGACY_VOTES: Record<string, AlignmentVote> = { aligned: "agree", commit: "live_with", not_aligned: "concern" };
-
 export function openDb(file?: string) {
   if (file && file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file ?? ":memory:");
@@ -619,27 +615,32 @@ export function openDb(file?: string) {
       const r = db.prepare("SELECT alignment, alignment_at FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
       if (!r?.alignment) return null;
       try {
-        const state = JSON.parse(r.alignment as string) as AlignmentState;
-        // Boards saved before proposals existed have none.
-        return { state: { ...state, proposal: state.proposal ?? null }, at: (r.alignment_at as number) ?? null };
+        const { proposal: _old, ...state } = JSON.parse(r.alignment as string) as AlignmentState & { proposal?: unknown };
+        // Boards saved before options existed have none.
+        const landing = state.landing ? { ...state.landing, option: state.landing.option ?? null } : null;
+        return { state: { ...state, options: state.options ?? [], gaining: state.gaining ?? null, landing }, at: (r.alignment_at as number) ?? null };
       } catch {
         return null;
       }
     },
-    setAlignmentVote(meetingId: string, userId: string, name: string, vote: AlignmentVote) {
+    /** `vote`: the id of the option they lean toward. */
+    setAlignmentVote(meetingId: string, userId: string, name: string, vote: string) {
       db.prepare(
         "INSERT INTO alignment_votes (meeting_id, user_id, name, vote, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (meeting_id, user_id) DO UPDATE SET name = excluded.name, vote = excluded.vote, at = excluded.at",
       ).run(meetingId, userId, name, vote, Date.now());
     },
-    /** Where it landed was written again: earlier answers were to something else. */
-    clearAlignmentVotes(meetingId: string) {
-      db.prepare("DELETE FROM alignment_votes WHERE meeting_id = ?").run(meetingId);
+    /** Options were dropped from the board: leans toward them go with them. */
+    keepAlignmentVotes(meetingId: string, optionIds: string[]) {
+      const rows = db.prepare("SELECT user_id, vote FROM alignment_votes WHERE meeting_id = ?").all(meetingId) as Row[];
+      for (const r of rows) {
+        if (!optionIds.includes(r.vote as string)) db.prepare("DELETE FROM alignment_votes WHERE meeting_id = ? AND user_id = ?").run(meetingId, r.user_id as string);
+      }
     },
     alignmentVotes(meetingId: string): AlignmentView["votes"] {
       return (db.prepare("SELECT user_id, name, vote, at FROM alignment_votes WHERE meeting_id = ? ORDER BY at").all(meetingId) as Row[]).map((r) => ({
         userId: r.user_id as string,
         name: r.name as string,
-        vote: LEGACY_VOTES[r.vote as string] ?? (r.vote as AlignmentVote),
+        vote: r.vote as string,
         at: r.at as number,
       }));
     },

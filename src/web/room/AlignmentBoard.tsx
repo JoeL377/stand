@@ -1,21 +1,15 @@
-// The alignment board: what an alignment meeting shows in the middle of the screen. One card:
-// what's on the table (the agreement Stand hears forming, written as something the group could
-// say yes to) and everyone's answer to it, Agree / Can live with it / Concern / Block. Stand's
-// guess from what someone said shows dashed until they tap their own. Under it, the one concern
-// holding it up. Wrap-up freezes the same card with the outcome and who does what next, and
-// the recap opens with it. Everything else the agent keeps (stances, where they differ, what's
-// agreed, waiting and parked) is one click away under More.
+// The alignment board: what an alignment meeting shows in the middle of the screen. The options
+// on the table side by side, each with what it gains, what it costs, and who leans toward it.
+// Stand's read of where someone leans shows dashed until they tap an option themselves. The
+// option picking up support is marked Gaining. Wrap-up folds it into one card, the option it
+// landed on with the outcome and who does what next, and the recap opens with that card.
+// Everything else the agent keeps (stances, where they differ, what's agreed, waiting and
+// parked) is one click away under More.
 import { type CSSProperties, createContext, type ReactNode, type RefObject, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { AlignmentState, AlignmentVote, AlignmentView } from "../../shared/protocol.ts";
+import type { AlignmentOption, AlignmentState, AlignmentView } from "../../shared/protocol.ts";
 import { toast, undoing } from "../Toasts.tsx";
 import { colorFor, fmtTime, initials } from "../util.ts";
 
-const ANSWERS: Array<{ vote: AlignmentVote; label: string }> = [
-  { vote: "agree", label: "Agree" },
-  { vote: "live_with", label: "Can live with it" },
-  { vote: "concern", label: "Concern" },
-  { vote: "block", label: "Block" },
-];
 const OUTCOME: Record<NonNullable<AlignmentState["landing"]>["outcome"], string> = {
   decided: "Decided",
   held: "Held, not decided",
@@ -32,6 +26,7 @@ export function fmtSpan(ms: number) {
 type Person = { id: string; name: string };
 const first = (name: string) => name.split(/\s+/)[0];
 const samePerson = (a: string, b: string) => a === b || first(a).toLowerCase() === first(b).toLowerCase();
+const cls = (...names: Array<string | false | null | undefined>) => names.filter(Boolean).join(" ");
 
 /** Live boards mark what just changed. Things already on the board when it opens don't count. */
 const Live = createContext<{ live: boolean; opened: RefObject<boolean>; more: boolean }>({ live: false, opened: { current: false }, more: false });
@@ -59,15 +54,15 @@ type BoardProps = {
   votes: AlignmentView["votes"];
   /** Who's in the meeting (live) or took part (recap): id for the color, name to match positions. */
   people: Person[];
-  /** Your user id: which answer is yours. */
+  /** Your user id: which lean is yours. */
   me: string;
   /** Live: the question can be set and the suggestion kept. Absent in the recap. Return false
    *  when it couldn't be sent. */
   onQuestion?: (text: string) => boolean;
   onKeep?: () => void;
-  /** Answer what's on the table; a promise that rejects (or false) puts your answer back. */
-  onVote?: (vote: AlignmentVote) => boolean | Promise<unknown>;
-  /** The host is having it written again: answers wait. */
+  /** Lean toward an option, by its id; a promise that rejects (or false) puts your lean back. */
+  onVote?: (option: string) => boolean | Promise<unknown>;
+  /** The host is having it written again: leans wait. */
   wrapping?: boolean;
   /** Live only: "now", for how long things have been going. */
   now?: number;
@@ -91,8 +86,7 @@ export function AlignmentBoard(props: BoardProps) {
   };
   // The color for a person: by their id when they're here, else by name.
   const idOf = (name: string) => props.people.find((p) => samePerson(p.name, name))?.id ?? name;
-  const table = s.landing ? { text: s.landing.text } : s.proposal;
-  const concern = s.proposal?.concern ?? null;
+  const table = Boolean(s.landing || s.options.length);
   const counts = [
     s.positions.length > 0 && `${s.positions.length} stance${s.positions.length === 1 ? "" : "s"}`,
     s.agreed.length > 0 && `✓ ${s.agreed.length} agreed`,
@@ -106,19 +100,20 @@ export function AlignmentBoard(props: BoardProps) {
       <div className="align-board">
         {/* The recap has no tab row to carry the question: it sits small above the card. */}
         {table && !live && s.question && <p className="align-asked">{s.question.text}</p>}
-        {table ? (
-          <Table {...props} text={table.text} idOf={idOf} now={now} />
+        {s.landing ? (
+          <Landed {...props} idOf={idOf} />
+        ) : s.options.length ? (
+          <Options {...props} idOf={idOf} />
         ) : (
           <section className="align-card align-table">
             <Question state={s} now={now} live={live} onQuestion={props.onQuestion} onKeep={props.onKeep} />
             {live && (
               <p className="align-forming">
-                <span className="agent-mark small">✦</span> Stand will put a proposal here once one forms
+                <span className="agent-mark small">✦</span> Stand will lay out the options here once they come up
               </p>
             )}
           </section>
         )}
-        {table && concern && <Concern c={concern} id={idOf(concern.person)} />}
         {s.landing && s.landing.nextSteps.length > 0 && (
           <div className="align-next" aria-label="Next steps">
             <span className="align-label">Next</span>
@@ -130,7 +125,7 @@ export function AlignmentBoard(props: BoardProps) {
             ))}
           </div>
         )}
-        {more && <Rest state={s} idOf={idOf} now={now} live={live} terms={Boolean(terms)} showWhy={Boolean(table)} />}
+        {more && <Rest state={s} idOf={idOf} now={now} live={live} terms={Boolean(terms)} showWhy={table} />}
         {hidden && (
           <button className="align-more" onClick={toggle} aria-expanded={more}>
             {!more && counts.length > 0 && <span>{counts.join(" · ")}</span>}
@@ -142,114 +137,161 @@ export function AlignmentBoard(props: BoardProps) {
   );
 }
 
-/** What's on the table, and everyone's answer to it. Live, Stand's guesses show dashed for
- *  whoever hasn't answered; once it's landed only people's own answers count. */
-function Table(props: BoardProps & { text: string; idOf: (name: string) => string; now: number }) {
+type Place = { option: string; guess: boolean };
+
+/** Who leans where: each person's own tap, else Stand's read of them (a guess). Your own tap
+ *  shows as soon as you make it; the server's copy replaces it. */
+function useLeans(props: BoardProps & { idOf: (name: string) => string }) {
   const s = props.state;
-  const l = s.landing;
-  const ref = useRef<HTMLElement>(null);
-  const { live } = useContext(Live);
-  const fresh = useFlash(props.text);
-  // Landing is the moment of the meeting: bring it into view, wherever people had scrolled.
-  const landed = useRef(l?.text);
-  useEffect(() => {
-    if (landed.current === l?.text) return;
-    landed.current = l?.text;
-    if (!live || !l) return;
-    const box = ref.current?.closest(".align-tab");
-    box?.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-  }, [l?.text, live]);
-  // Your answer shows as soon as you tap; the server's copy replaces it.
-  const [picked, setPicked] = useState<AlignmentVote | null>(null);
-  const saved = props.votes.find((v) => v.userId === props.me)?.vote;
+  const votes = props.votes.filter((v) => s.options.some((o) => o.id === v.vote));
+  const [picked, setPicked] = useState<string | null>(null);
+  const saved = votes.find((v) => v.userId === props.me)?.vote ?? null;
   useEffect(() => setPicked(null), [saved]);
   const mine = picked ?? saved;
-  const answer = (v: AlignmentVote) => {
-    if (!props.onVote || props.wrapping) return;
-    setPicked(v);
-    const sent = props.onVote(v);
+  const pick = (option: string) => {
+    if (!props.onVote || props.wrapping || option === mine) return;
+    setPicked(option);
+    const sent = props.onVote(option);
     if (sent === false) setPicked(null);
     else if (sent instanceof Promise) sent.catch(() => setPicked(null));
   };
-  // Everyone here, everyone Stand has a read on, and anyone who answered from elsewhere.
+  // Everyone here, everyone Stand has a read on, and anyone who leaned from elsewhere.
   const who: Person[] = [];
   const add = (p: Person) => {
     if (!who.some((x) => x.id === p.id || samePerson(x.name, p.name))) who.push(p);
   };
   for (const p of props.people) add(p);
   for (const p of s.positions) add({ id: props.idOf(p.person), name: p.person });
-  for (const g of s.proposal?.guesses ?? []) add({ id: props.idOf(g.person), name: g.person });
-  for (const v of props.votes) add({ id: v.userId, name: v.name });
-  const tapOf = (p: Person): AlignmentVote | undefined =>
-    p.id === props.me && mine ? mine : (props.votes.find((v) => v.userId === p.id) ?? props.votes.find((v) => samePerson(v.name, p.name)))?.vote;
-  const guessOf = (p: Person) => (l ? undefined : s.proposal?.guesses.find((g) => samePerson(g.person, p.name))?.answer);
-  const tapped = who.filter((p) => tapOf(p));
-  const behind = tapped.filter((p) => tapOf(p) === "agree" || tapOf(p) === "live_with").length;
-  const rewritten = !l && s.proposal?.rewrittenAt ? (fmtSpan(props.now - s.proposal.rewrittenAt) ?? "just now") : null;
+  for (const o of s.options) for (const name of o.leaning) add({ id: props.idOf(name), name });
+  for (const v of votes) add({ id: v.userId, name: v.name });
+  const placeOf = (p: Person): Place | null => {
+    const tap = p.id === props.me && mine ? mine : (votes.find((v) => v.userId === p.id) ?? votes.find((v) => samePerson(v.name, p.name)))?.vote;
+    if (tap) return { option: tap, guess: false };
+    const read = s.options.find((o) => o.leaning.some((n) => samePerson(n, p.name)));
+    return read ? { option: read.id, guess: true } : null;
+  };
+  const at = (option: string) => who.flatMap((p) => (placeOf(p)?.option === option ? [{ ...p, guess: placeOf(p)!.guess }] : []));
+  return { who, at, mine, pick, disabled: !props.onVote || Boolean(props.wrapping) };
+}
+
+/** The options on the table, side by side. Tap one to lean toward it. */
+function Options(props: BoardProps & { idOf: (name: string) => string }) {
+  const s = props.state;
+  const leans = useLeans(props);
   return (
-    <section ref={ref} className={["align-card align-table", l && "landed", fresh && (l ? "align-in" : "align-new")].filter(Boolean).join(" ")} aria-label={l ? "Where we landed" : "On the table"}>
-      <div className="align-head">
-        {l ? (
-          <>
-            <span className={`align-outcome ${l.outcome}`}>{OUTCOME[l.outcome]}</span>
-            <span className={tapped.length && tapped.length === who.length ? "align-meta ok" : "align-meta"}>
-              {props.wrapping ? "Writing it again…" : `${behind} of ${who.length} agree or can live with it`}
-            </span>
-          </>
-        ) : (
-          <span className="align-label">
-            <span className="agent-mark small">✦</span> On the table
-          </span>
-        )}
-        {rewritten && (
-          <span className="align-rewritten" title={s.proposal?.rewrittenAt ? `Rewritten at ${fmtTime(s.proposal.rewrittenAt)}` : undefined}>
-            Rewritten {rewritten === "just now" ? rewritten : `${rewritten} ago`}
-          </span>
-        )}
-      </div>
-      <p className="align-proposal">{props.text}</p>
-      <div className={live ? "align-answers" : "align-answers compact"} role="group" aria-label="Your answer">
-        {ANSWERS.map((a) => {
-          const taps = who.filter((p) => tapOf(p) === a.vote);
-          const guesses = who.filter((p) => !tapOf(p) && guessOf(p) === a.vote);
-          const names = [...taps.map((p) => first(p.name)), ...guesses.map((p) => `${first(p.name)} (Stand's guess)`)];
-          return (
-            <button
-              key={a.vote}
-              className={mine === a.vote ? `align-answer mine ${a.vote}` : `align-answer ${a.vote}`}
-              aria-pressed={mine === a.vote}
-              disabled={!props.onVote || props.wrapping}
-              title={names.length ? `${a.label}: ${names.join(", ")}` : undefined}
-              onClick={() => answer(a.vote)}
-            >
-              <span>{a.label}</span>
-              {(live || taps.length > 0 || guesses.length > 0) && (
-                <span className="align-stack" aria-hidden>
-                  {taps.map((p) => (
-                    <Dot key={p.id} id={p.id} name={p.name} size={live ? 22 : 18} />
-                  ))}
-                  {guesses.map((p) => (
-                    <Dot key={p.id} id={p.id} name={p.name} size={live ? 22 : 18} guess />
-                  ))}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </section>
+    <div className="align-options" role="group" aria-label="Options on the table">
+      {s.options.map((o) => (
+        <OptionCard key={o.id} o={o} gaining={s.gaining === o.id} mine={leans.mine === o.id} people={leans.at(o.id)} disabled={leans.disabled} onPick={() => leans.pick(o.id)} />
+      ))}
+    </div>
   );
 }
 
-function Concern({ c, id }: { c: { person: string; text: string }; id: string }) {
-  const flash = useFlash(c.person + c.text);
+function OptionCard(props: { o: AlignmentOption; gaining: boolean; mine: boolean; people: Array<Person & { guess: boolean }>; disabled: boolean; onPick: () => void }) {
+  const { o } = props;
+  const flash = useFlash([o.title, o.detail, o.gain, o.cost].join("|"));
   return (
-    <p className={flash ? "align-concern align-new" : "align-concern"} aria-label="Holding it up">
-      <Dot id={id} name={c.person} size={18} />
-      <span>
-        <b>{first(c.person)}:</b> {c.text}
+    <button
+      className={cls("align-option", props.gaining && "gaining", props.mine && "mine", flash && "align-new")}
+      aria-pressed={props.mine}
+      disabled={props.disabled}
+      title={leanTitle(props.people)}
+      onClick={props.onPick}
+    >
+      <span className="align-option-head">
+        <strong>{o.title}</strong>
+        {props.gaining && <span className="align-gaining">Gaining</span>}
       </span>
-    </p>
+      {o.detail && <span className="align-option-detail">{o.detail}</span>}
+      {o.gain && <span className="align-gain">＋ {o.gain}</span>}
+      {o.cost && <span className="align-cost">－ {o.cost}</span>}
+      <Leaners people={props.people} />
+    </button>
+  );
+}
+
+/** Solid for people who tapped, dashed for Stand's read. */
+function Leaners({ people, size = 22 }: { people: Array<Person & { guess: boolean }>; size?: number }) {
+  if (!people.length) return null;
+  const sorted = [...people.filter((p) => !p.guess), ...people.filter((p) => p.guess)];
+  return (
+    <span className="align-stack" aria-hidden>
+      {sorted.map((p) => (
+        <Dot key={p.id} id={p.id} name={p.name} size={size} guess={p.guess} />
+      ))}
+    </span>
+  );
+}
+
+function leanTitle(people: Array<Person & { guess: boolean }>) {
+  return people.length ? `Leaning here: ${people.map((p) => `${first(p.name)}${p.guess ? " (Stand's read)" : ""}`).join(", ")}` : undefined;
+}
+
+/** Once it's wrapped up: the option it landed on as one card, with the outcome and who leans
+ *  there, and the options set aside on one line. Leaning still works on both. */
+function Landed(props: BoardProps & { idOf: (name: string) => string }) {
+  const s = props.state;
+  const l = s.landing!;
+  const { live } = useContext(Live);
+  const ref = useRef<HTMLElement>(null);
+  const fresh = useFlash(l.text);
+  // Landing is the moment of the meeting: bring it into view, wherever people had scrolled.
+  const landed = useRef(l.text);
+  useEffect(() => {
+    if (landed.current === l.text) return;
+    landed.current = l.text;
+    if (!live) return;
+    const box = ref.current?.closest(".align-tab");
+    box?.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }, [l.text, live]);
+  const leans = useLeans(props);
+  const opt = s.options.find((o) => o.id === l.option) ?? null;
+  const here = opt ? leans.at(opt.id) : [];
+  const others = s.options.filter((o) => o !== opt);
+  const card = (
+    <>
+      <strong className="align-landed-text">{l.text}</strong>
+      {opt?.cost && <span className="align-cost">－ {opt.cost}</span>}
+      <Leaners people={here} />
+    </>
+  );
+  return (
+    <section ref={ref} className={cls("align-landed", fresh && "align-in")} aria-label="Where we landed">
+      <div className="align-head">
+        <span className={`align-outcome ${l.outcome}`}>{OUTCOME[l.outcome]}</span>
+        <span className="align-meta">{props.wrapping ? "Writing it again…" : opt ? `${here.length} of ${leans.who.length} lean here` : null}</span>
+      </div>
+      {opt ? (
+        <button
+          className={cls("align-option landed", leans.mine === opt.id && "mine")}
+          aria-pressed={leans.mine === opt.id}
+          disabled={leans.disabled}
+          title={leanTitle(here)}
+          onClick={() => leans.pick(opt.id)}
+        >
+          {card}
+        </button>
+      ) : (
+        <div className="align-option landed">{card}</div>
+      )}
+      {others.length > 0 && (
+        <p className="align-aside">
+          <span className="align-label">{opt ? "Set aside" : "Options"}</span>
+          {others.map((o, i) => {
+            const there = leans.at(o.id);
+            return (
+              <span key={o.id} className="align-aside-item">
+                {i > 0 && <span aria-hidden>·</span>}
+                <button className={cls("align-aside-opt", leans.mine === o.id && "mine")} aria-pressed={leans.mine === o.id} disabled={leans.disabled} title={leanTitle(there)} onClick={() => leans.pick(o.id)}>
+                  {o.title}
+                  {there.length > 0 && ` (${there.map((p) => first(p.name)).join(", ")})`}
+                </button>
+              </span>
+            );
+          })}
+        </p>
+      )}
+    </section>
   );
 }
 

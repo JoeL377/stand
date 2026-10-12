@@ -230,7 +230,7 @@ export function Stage(props: {
 
   const align = state.alignment;
   // While you're on another tab, the board tab gets a dot when the board changes, and a new
-  // landing says so, with a way back to answer it.
+  // landing says so, with a way back to it.
   const [boardUnseen, setBoardUnseen] = useState(false);
   const landingText = align?.state.landing?.text ?? null;
   const onBoardRef = useRef(onBoard);
@@ -246,7 +246,7 @@ export function Stage(props: {
     if (shownLanding.current === landingText) return;
     shownLanding.current = landingText;
     if (!landingText || onBoardRef.current) return;
-    toast({ text: "Where you landed is up", action: { label: "Answer", run: () => setTab(ALIGN_TAB) } });
+    toast({ text: "Where you landed is up", action: { label: "Show", run: () => setTab(ALIGN_TAB) } });
   }, [landingText]);
   return (
     <main className="stage">
@@ -275,7 +275,7 @@ export function Stage(props: {
           <span className="spacer" />
           <BoardFreshness view={align} onRetry={canSteer && !props.ending ? () => send({ type: "align.wrap" }) : undefined} />
           {/* Once something is on the table, the question steps back to this row. */}
-          {(align.state.proposal || align.state.landing) && (
+          {(align.state.options.length > 0 || align.state.landing) && (
             <QuestionLine state={align.state} now={Date.now()} onQuestion={props.ending ? undefined : (text) => send({ type: "align.question", text })} />
           )}
         </div>

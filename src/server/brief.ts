@@ -2,7 +2,7 @@
 // follow-up. One JSON shape (versioned, stable ids, links back to the source
 // ticket or slide) and a Markdown rendering of the same thing.
 
-import type { AlignmentState, AlignmentVote, Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment, Snap } from "../shared/protocol.ts";
+import type { AlignmentState, Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment, Snap } from "../shared/protocol.ts";
 
 type Meeting = { id: string; roomId: string; startedAt: number; endedAt: number | null; summary: string | null; synthesis?: string | null };
 
@@ -108,10 +108,11 @@ export interface MeetingBrief {
 export interface BriefAlignment {
   question: string | null;
   whyNow: string | null;
-  /** What was on the table: the agreement Stand heard forming, and what held it up. */
-  proposal: { text: string; concern: { person: string; text: string } | null } | null;
+  /** The options on the table, with who leaned toward each (their own tap, else Stand's read). */
+  options: Array<{ title: string; detail: string | null; gain: string | null; cost: string | null; leaning: string[]; landedHere: boolean }>;
   landing: AlignmentState["landing"];
-  votes: Array<{ name: string; vote: AlignmentVote; at: string }>;
+  /** Who tapped which option, by its title. */
+  votes: Array<{ name: string; option: string; at: string }>;
   positions: Array<{ person: string; stance: string; reasons: string[]; movedAt: string | null; movedBecause: string | null }>;
   differ: AlignmentState["differ"];
   settleTest: { text: string; proposedBy: string | null; answered: boolean } | null;
@@ -120,18 +121,29 @@ export interface BriefAlignment {
   parked: string[];
 }
 
-const VOTE_LABEL: Record<AlignmentVote, string> = { agree: "Agree", live_with: "Can live with it", concern: "Concern", block: "Block" };
 const LANDING_LABEL = { decided: "Decided", held: "Held, not decided", not_aligned: "Not aligned" } as const;
 
-function toBriefAlignment(a: { state: AlignmentState; votes: Array<{ name: string; vote: AlignmentVote; at: number }> }): BriefAlignment {
+function toBriefAlignment(a: { state: AlignmentState; votes: Array<{ name: string; vote: string; at: number }> }): BriefAlignment {
   const s = a.state;
   const when = (t: number | null) => (t ? iso(t) : null);
+  const titleOf = new Map(s.options.map((o) => [o.id, o.title]));
+  const votes = a.votes.filter((v) => titleOf.has(v.vote));
+  const first = (name: string) => name.trim().split(/\s+/)[0]?.toLowerCase();
+  // A person's own tap wins over Stand's read of them.
+  const tapped = (name: string) => votes.some((v) => v.name === name || first(v.name) === first(name));
   return {
     question: s.question?.text ?? null,
     whyNow: s.question?.whyNow ?? null,
-    proposal: s.proposal ? { text: s.proposal.text, concern: s.proposal.concern } : null,
+    options: s.options.map((o) => ({
+      title: o.title,
+      detail: o.detail,
+      gain: o.gain,
+      cost: o.cost,
+      leaning: [...votes.filter((v) => v.vote === o.id).map((v) => v.name), ...o.leaning.filter((p) => !tapped(p))],
+      landedHere: s.landing?.option === o.id,
+    })),
     landing: s.landing,
-    votes: a.votes.map((v) => ({ name: v.name, vote: v.vote, at: iso(v.at) })),
+    votes: votes.map((v) => ({ name: v.name, option: titleOf.get(v.vote)!, at: iso(v.at) })),
     positions: s.positions.map((p) => ({ ...p, movedAt: when(p.movedAt) })),
     differ: s.differ,
     settleTest: s.settleTest ? { text: s.settleTest.text, proposedBy: s.settleTest.proposedBy, answered: s.settleTest.answered } : null,
@@ -152,9 +164,16 @@ function alignmentLines(a: BriefAlignment): string[] {
     if (l.stillOpen) out.push(`- Still open: ${l.stillOpen}`);
     for (const s of l.nextSteps) out.push(`- [ ] ${s.owner ? `${s.owner}: ` : ""}${s.text}`);
     out.push("");
-  } else if (a.proposal) out.push(`**On the table:** ${a.proposal.text}`, "");
-  if (a.proposal?.concern) out.push(`**Holding it up:** ${a.proposal.concern.person}: ${a.proposal.concern.text}`, "");
-  if (a.votes.length) out.push("**Answers**", ...a.votes.map((v) => `- ${v.name}: ${VOTE_LABEL[v.vote]}`), "");
+  }
+  if (a.options.length) {
+    out.push(a.landing ? "**Options**" : "**Options on the table**");
+    for (const o of a.options) {
+      out.push(`- ${o.title}${o.detail ? `: ${o.detail}` : ""}${o.landedHere ? " (landed here)" : ""}${o.leaning.length ? ` · leaning: ${o.leaning.join(", ")}` : ""}`);
+      if (o.gain) out.push(`  - Gains: ${o.gain}`);
+      if (o.cost) out.push(`  - Costs: ${o.cost}`);
+    }
+    out.push("");
+  }
   if (a.positions.length) {
     out.push("**Positions**");
     for (const p of a.positions) {
@@ -231,7 +250,7 @@ export function buildBrief(input: {
   /** The space's synthesis instructions, if it has any. */
   synthesisInstructions?: string;
   /** Alignment meetings: the board as it ended and the answers to "Are you aligned with this?". */
-  alignment?: { state: AlignmentState; votes: Array<{ name: string; vote: AlignmentVote; at: number }> } | null;
+  alignment?: { state: AlignmentState; votes: Array<{ name: string; vote: string; at: number }> } | null;
   groups: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions?: Discussion[]; snaps?: Snap[] }>;
   decks: Deck[];
   baseUrl: string;

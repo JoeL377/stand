@@ -334,29 +334,30 @@ const AlignSchema = z.object({
   unanswered_add: z.array(z.object({ asker: z.string(), question: z.string(), line: z.number().int().nullable() })),
   answered: z.array(z.string()).describe("Keys (U1, U2...) of waiting questions the talk has now answered"),
   parked_add: z.array(z.string()).describe("Side ideas raised off the question, a few words each"),
-  proposal: z
-    .object({
-      text: z.string().describe("The agreement forming, as something the group could say yes to. One or two short sentences, concrete, in their words."),
-      same_as_before: z.boolean().describe("True when it's the proposal already on the table, reworded or sharpened. False when it's a different proposal."),
-      guesses: z
-        .array(z.object({ person: z.string().describe("An attendee's name, exactly as listed"), answer: z.enum(["agree", "live_with", "concern", "block"]) }))
-        .describe("Each person's likely answer, only from what they themselves said about it. Leave out anyone who hasn't spoken to it."),
-      concern: z
-        .object({ person: z.string(), text: z.string().describe("A short line, in their terms") })
-        .nullable()
-        .describe("The one concern that most holds it up; null when nothing does"),
-      line: z.number().int().nullable().describe("The line where it took this shape"),
-    })
+  options: z
+    .array(
+      z.object({
+        key: z.string().nullable().describe("Its key on the board (O1, O2...) when it's an option already there, even reworded; null for a new one"),
+        title: z.string().describe("The option in two to five words, in their terms"),
+        detail: z.string().nullable().describe("What it means, in a few words"),
+        gain: z.string().nullable().describe("The best case for it, as people argued it, in under eight words"),
+        cost: z.string().nullable().describe("What it costs or risks, as people argued it, in under eight words"),
+        leaning: z.array(z.string()).describe("Attendees who lean toward it, only from what they themselves said. Each person in at most one option."),
+        gaining: z.boolean().describe("True for at most one option: the one that picked up support lately"),
+        line: z.number().int().nullable().describe("The line where it first came up"),
+      }),
+    )
     .nullable()
-    .describe("The whole proposal when its text, a guess or the concern changed. Null when nothing changed, or nothing is forming yet."),
+    .describe("The whole list of options (at most 3) when anything about them changed: one added, dropped, reworded, or someone leaning differently. Null when nothing changed, or no real options have come up."),
   landing: z
     .object({
       outcome: z.enum(["decided", "held", "not_aligned"]),
-      text: z.string().describe("What was on the table as it stands at the end, reworded only if the talk changed it. Decided: the answer. Held: the position they're keeping for now. Not aligned: where it stands. One or two short sentences."),
+      text: z.string().describe("Where it landed: usually the option they settled on, as it stands at the end, in a short line. Decided: the answer. Held: the position they're keeping for now. Not aligned: where it stands."),
       reopens: z.string().nullable().describe("Held: when or where it comes back"),
       changes_if: z.string().nullable().describe("Held: what would change it"),
       still_open: z.string().nullable().describe("The main question still open"),
       next_steps: z.array(z.object({ owner: z.string().nullable(), text: z.string() })).describe("What people said they'd do before it reopens"),
+      option: z.string().nullable().describe("The key (O1, O2...) of the option it landed on, numbered as in your options list if you returned one, else as on the board. Null if it landed on none of them."),
     })
     .nullable()
     .describe("Only when asked to wrap up; otherwise null"),
@@ -564,16 +565,16 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
 Attendees: ${input.attendees.join(", ")}
 
 The board as it stands:
-${boardText(input.state)}${before}
+${boardText(input.state, input.taps)}${before}
 
 ${input.lines.length ? `Said since the board was last updated:\n${lines}` : "Nothing new was said."}${
         input.closing
-          ? "\n\nThe meeting is wrapping up. Bring the board up to date, then write where it landed: what's on the table as it stands, and whether it's decided (they agreed on it), held (they chose to keep a position for now; say when it reopens and what would change it), or not_aligned. Next steps are what people said they'd do, each a few words with its owner."
+          ? "\n\nThe meeting is wrapping up. Bring the board up to date, then write where it landed: the option they settled on (or where it stands, if none), and whether it's decided (they agreed on it), held (they chose to keep a position for now; say when it reopens and what would change it), or not_aligned. Next steps are what people said they'd do, each a few words with its owner."
           : ""
       }`,
-      `You keep the board for an alignment meeting: people trying to agree on one question. The board's main card is what's on the table: the one agreement you hear forming, which everyone answers. Behind it are the question, where each person stands, where they differ, what would settle it, what they agree on so far, questions waiting on an answer, and parked side ideas. You get the board and what was said since it was last updated; return only what changed.
+      `You keep the board for an alignment meeting: people trying to agree on one question. The board shows the options on the table side by side: the few choices the talk is really between, each with what it gains, what it costs, and who leans toward it. Behind them are the question, where each person stands, where they differ, what would settle it, what they agree on so far, questions waiting on an answer, and parked side ideas. You get the board and what was said since it was last updated; return only what changed.
 
-On the table: once an agreement starts to form (someone suggests a way forward and others react), write it as something the group could say yes to, concrete and short, in their words. Keep it until the talk changes it: sharpen the wording as people refine it (same_as_before true), and replace it only when the group moves to a different proposal (same_as_before false; everyone is asked again). Guess each person's answer only from what they said about it: agree, live_with (doubts, but would go along), concern (a specific concern to address first) or block (would not go along). No guess for anyone who hasn't spoken to it. The concern is the one that most holds it up, from whoever raised it. Return the whole proposal whenever its text, a guess or the concern changes; null otherwise.
+Options: once the talk is a choice between ways forward, list them, at most three, each as people framed it: a title of two to five words, what it means, its best case and its cost, each as argued in the meeting. Keep each option's key while it's reworded, so people's leans stand; drop an option only when the group drops it. Put a person under an option only when what they said shows they lean toward it, and under one option at most. Mark gaining on the one option that picked up support lately, if any. On the board, "(tapped)" means that person picked the option themselves: that is where they lean, so don't list them anywhere else, and weigh it when writing where it landed. A question with no real options (just one proposal) can have one option. Return the whole list whenever anything about the options changes; null otherwise.
 
 Positions: one per attendee who has taken a side, the stance in one sentence and up to three reasons in their own terms. Mark moved only when the stance itself shifts, not when they add a reason, and say what moved them. Say it the way they would; don't soften or merge two people's views.
 Where they differ: the one or two real disagreements still open, each phrased as a question, with each side in a few words.
@@ -611,11 +612,10 @@ Don't invent anything that wasn't said; read through transcription errors. Keep 
             changesIf: out.landing.changes_if,
             stillOpen: out.landing.still_open,
             nextSteps: out.landing.next_steps,
+            option: out.landing.option,
           }
         : null,
-      proposal: out.proposal
-        ? { text: out.proposal.text, same: out.proposal.same_as_before, guesses: out.proposal.guesses, concern: out.proposal.concern, line: out.proposal.line }
-        : null,
+      options: out.options,
     };
   }
 

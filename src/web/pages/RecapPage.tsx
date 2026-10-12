@@ -106,7 +106,7 @@ export function RecapPage() {
   // An alignment meeting's recap opens with where it landed and who's aligned with it, in place
   // of the summary and the counts (which count notes, not where people stand); the notes follow.
   const align = data.alignment;
-  const alignFirst = Boolean(align && (align.state.question || align.state.positions.length > 0 || align.state.proposal || align.state.landing));
+  const alignFirst = Boolean(align && (align.state.question || align.state.positions.length > 0 || align.state.options.length > 0 || align.state.landing));
   const overview = (
     <>
       {data.summary && <p className="lede">{data.summary}</p>}

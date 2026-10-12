@@ -297,18 +297,11 @@ export interface AlignmentState {
   unanswered: Array<{ asker: string; question: string; at: number | null }>;
   /** Side ideas, recorded so they aren't lost. */
   parked: string[];
-  /** On the table: the one agreement the agent hears forming, written as something the group
-   *  could say yes to, with its guess at each person's answer from what they said, and the one
-   *  concern holding it up. Null until something forms. */
-  proposal: {
-    text: string;
-    /** When this proposal (in substance) was first put on the table. */
-    at: number | null;
-    /** When its wording last changed, once it has. */
-    rewrittenAt: number | null;
-    guesses: Array<{ person: string; answer: AlignmentVote }>;
-    concern: { person: string; text: string } | null;
-  } | null;
+  /** The options on the table: the few choices the talk is really between, each with what it
+   *  gains and what it costs, and who the agent hears leaning toward it. Empty until they come up. */
+  options: AlignmentOption[];
+  /** The option that picked up support lately, if one did. */
+  gaining: string | null;
   /** Where it landed, once the meeting wraps up. */
   landing: {
     outcome: "decided" | "held" | "not_aligned";
@@ -318,11 +311,23 @@ export interface AlignmentState {
     changesIf: string | null;
     stillOpen: string | null;
     nextSteps: Array<{ owner: string | null; text: string }>;
+    /** The option it landed on, when it landed on one. */
+    option: string | null;
   } | null;
 }
 
-/** Each person's answer to what's on the table. */
-export type AlignmentVote = "agree" | "live_with" | "concern" | "block";
+export interface AlignmentOption {
+  /** Stays the same while the option is reworded, so people's leans stand. */
+  id: string;
+  title: string;
+  detail: string | null;
+  gain: string | null;
+  cost: string | null;
+  /** When it first came up. */
+  at: number | null;
+  /** The agent's read of who leans toward it, from what they said. */
+  leaning: string[];
+}
 
 export interface AlignmentView {
   state: AlignmentState;
@@ -336,8 +341,8 @@ export interface AlignmentView {
   failing: boolean;
   /** The last wrap-up failed: where it landed wasn't written. */
   wrapFailed: boolean;
-  /** Each person's own answer to what's on the table (a tap, not a guess). */
-  votes: Array<{ userId: string; name: string; vote: AlignmentVote; at: number }>;
+  /** The option each person leans toward, by their own tap (not the agent's read). */
+  votes: Array<{ userId: string; name: string; vote: string; at: number }>;
 }
 
 export interface RoomState {
@@ -424,7 +429,8 @@ export type ClientMessage = (
   /** Host: write where it landed now, before ending. */
   | { type: "align.wrap" }
   /** Anyone, once it has landed: "Are you aligned with this?" */
-  | { type: "align.vote"; vote: AlignmentVote }
+  /** Lean toward an option on the board, by its id. */
+  | { type: "align.vote"; vote: string }
   /** Browser transcription: a finished utterance from this participant's mic. */
   | { type: "speech"; text: string; startedAt: number }
   | { type: "speech.interim"; text: string }

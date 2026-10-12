@@ -18,7 +18,7 @@ const none: AlignmentDraft = {
   unansweredAdd: [],
   answered: [],
   parkedAdd: [],
-  proposal: null,
+  options: null,
   landing: null,
 };
 const seg = (i: number, speakerName: string, text: string, ts = 1_000 * i): Segment => ({
@@ -126,6 +126,7 @@ test("where it landed keeps its owners to attendees", () => {
           { owner: "Andy", text: "Build ingestion in Connect" },
           { owner: "Janesh", text: "Weigh in" },
         ],
+        option: null,
       },
     },
     [],
@@ -143,7 +144,7 @@ test("the next meeting on the same question starts from where it stood, not wher
     ...emptyAlignment(),
     question: { text: "Q", askedBy: "Andy Li", at: 1, whyNow: "now", suggested: false },
     positions: [{ person: "Huy Ngo", stance: "Engine", reasons: [], movedAt: 9, movedBecause: "x" }],
-    landing: { outcome: "held", text: "Separate", reopens: null, changesIf: null, stillOpen: null, nextSteps: [] },
+    landing: { outcome: "held", text: "Separate", reopens: null, changesIf: null, stillOpen: null, nextSteps: [], option: null },
   };
   const next = carryOver(s);
   assert.equal(next.landing, null);
@@ -183,24 +184,27 @@ test("Start sets the kind and question for the next meeting, used once", () => {
   assert.equal(db.takeNextQuestion(room.id, -1), null);
 });
 
-test("answers are one per person, read old three-answer votes as the new four, and clear", () => {
+test("leans are one per person, and go when their option leaves the board", () => {
   const db = openDb(":memory:");
   const room = db.createRoom("CoNxt");
   const m = db.startMeeting(room.id);
-  db.setAlignmentVote(m.id, "u1", "Joe", "agree");
-  db.setAlignmentVote(m.id, "u1", "Joe", "live_with");
-  db.setAlignmentVote(m.id, "u2", "Huy", "not_aligned" as never);
-  db.setAlignmentVote(m.id, "u3", "Andy", "block");
+  db.setAlignmentVote(m.id, "u1", "Joe", "oa");
+  db.setAlignmentVote(m.id, "u1", "Joe", "ob");
+  db.setAlignmentVote(m.id, "u2", "Huy", "oa");
+  db.setAlignmentVote(m.id, "u3", "Andy", "ob");
   assert.deepEqual(
     db.alignmentVotes(m.id).map((v) => [v.name, v.vote]),
     [
-      ["Joe", "live_with"],
-      ["Huy", "concern"],
-      ["Andy", "block"],
+      ["Joe", "ob"],
+      ["Huy", "oa"],
+      ["Andy", "ob"],
     ],
   );
-  db.clearAlignmentVotes(m.id);
-  assert.equal(db.alignmentVotes(m.id).length, 0);
+  db.keepAlignmentVotes(m.id, ["ob"]);
+  assert.deepEqual(
+    db.alignmentVotes(m.id).map((v) => v.name),
+    ["Joe", "Andy"],
+  );
 });
 
 test("the space offers the last alignment meeting's question again until it's decided", () => {
@@ -213,7 +217,7 @@ test("the space offers the last alignment meeting's question again until it's de
   assert.equal(db.openAlignment(room.id), null); // still going
   db.endMeeting(m.id, null, null);
   assert.equal(db.openAlignment(room.id)?.state.question?.text, "One product?");
-  db.saveAlignment(m.id, { ...state, landing: { outcome: "decided", text: "Yes", reopens: null, changesIf: null, stillOpen: null, nextSteps: [] } });
+  db.saveAlignment(m.id, { ...state, landing: { outcome: "decided", text: "Yes", reopens: null, changesIf: null, stillOpen: null, nextSteps: [], option: null } });
   assert.equal(db.openAlignment(room.id), null);
 });
 
@@ -243,7 +247,8 @@ async function say(ws: FakeSocket, msg: ClientMessage) {
   await new Promise((r) => setImmediate(r));
 }
 
-/** Writes positions from what each person said, and where it landed when asked. Counts live notes runs. */
+/** Writes positions from what each person said, one option, and where it landed when asked.
+ *  Counts live notes runs. */
 class ScriptedAgent extends HeuristicAgent {
   runs: AlignmentInput[] = [];
   notesRuns = 0;
@@ -252,7 +257,16 @@ class ScriptedAgent extends HeuristicAgent {
     return {
       ...none,
       positions: input.lines.map((l, i) => ({ person: l.speakerName, stance: l.text, reasons: [], moved: false, movedBecause: null, line: i + 1 })),
-      landing: { outcome: "held", text: "Separate for now", reopens: "Tomorrow", changesIf: null, stillOpen: null, nextSteps: [{ owner: "Andy", text: "Build ingestion" }] },
+      options: [{ key: input.state.options.length ? "O1" : null, title: "Separate for now", detail: null, gain: null, cost: "Two front ends", leaning: ["Joe"], gaining: true, line: 1 }],
+      landing: {
+        outcome: "held",
+        text: "Separate for now",
+        reopens: "Tomorrow",
+        changesIf: null,
+        stillOpen: null,
+        nextSteps: [{ owner: "Andy", text: "Build ingestion" }],
+        option: "O1",
+      },
     };
   }
   override async notesFor(...args: Parameters<HeuristicAgent["notesFor"]>) {
@@ -261,7 +275,7 @@ class ScriptedAgent extends HeuristicAgent {
   }
 }
 
-test("an alignment meeting keeps the board, wraps up on the host's word, and takes each person's answer", async () => {
+test("an alignment meeting keeps the board, wraps up on the host's word, and takes each person's lean", async () => {
   const db = openDb(":memory:");
   const room = db.createRoom("CoNxt");
   db.setMeetingSetup(room.id, "alignment", { text: "Should Connect and Stand be one product?", by: "Joe Liang", carry: null });
@@ -276,8 +290,8 @@ test("an alignment meeting keeps the board, wraps up on the host's word, and tak
   session.addSpeech("u1", "Joe Liang", "One surface for alignment", Date.now());
   session.addSpeech("u2", "Andy Li", "Name a team that uses Connect without Stand", Date.now());
 
-  // Answers wait for something on the table; only the host wraps up.
-  await say(andy, { type: "align.vote", vote: "agree" });
+  // Leans wait for options on the board; only the host wraps up.
+  await say(andy, { type: "align.vote", vote: "o1" });
   assert.equal(db.alignmentVotes(session.meetingId).length, 0);
   await say(andy, { type: "align.wrap" });
   assert.equal(session.state().alignment?.state.landing, null);
@@ -296,17 +310,20 @@ test("an alignment meeting keeps the board, wraps up on the host's word, and tak
   assert.deepEqual(agent.runs.at(-1)?.attendees.sort(), ["Andy Li", "Joe Liang"]);
   assert.equal(agent.notesRuns, 0);
 
-  await say(andy, { type: "align.vote", vote: "live_with" });
+  const separate = view.state.options[0].id;
+  assert.equal(view.state.landing?.option, separate);
+  await say(andy, { type: "align.vote", vote: "nope" });
+  await say(andy, { type: "align.vote", vote: separate });
   assert.deepEqual(
     session.state().alignment?.votes.map((v) => [v.name, v.vote]),
-    [["Andy Li", "live_with"]],
+    [["Andy Li", separate]],
   );
   // Anyone can change the question; the agent never does.
   await say(andy, { type: "align.question", text: "  One product, or two?  " });
   assert.equal(session.state().alignment?.state.question?.text, "One product, or two?");
   assert.equal(session.state().alignment?.state.question?.askedBy, "Andy Li");
 
-  // Ending writes the usual notes too, and the brief carries the board and the answers.
+  // Ending writes the usual notes too, and the brief carries the board and who leans where.
   const runsBefore = agent.runs.length;
   await session.end();
   assert.equal(agent.runs.length, runsBefore, "already landed: no second closing pass");
@@ -321,7 +338,8 @@ test("an alignment meeting keeps the board, wraps up on the host's word, and tak
     baseUrl: "http://x",
   });
   assert.equal(brief.alignment?.landing?.outcome, "held");
-  assert.match(briefToMarkdown(brief), /Where we landed \(Held, not decided\):\*\* Separate for now[\s\S]*Andy Li: Can live with it/);
+  assert.deepEqual(brief.alignment?.votes, [{ name: "Andy Li", option: "Separate for now", at: brief.alignment?.votes[0].at }]);
+  assert.match(briefToMarkdown(brief), /Where we landed \(Held, not decided\):\*\* Separate for now[\s\S]*- Separate for now \(landed here\) · leaning: Andy Li, Joe Liang\n  - Costs: Two front ends/);
 });
 
 test("an alignment meeting ended without wrapping up still says where it landed", async () => {
@@ -363,7 +381,7 @@ test("a kept question picks up the earlier meeting's board", () => {
     question: { text: "One product?", askedBy: "Andy Li", at: 1, whyNow: "Ingestion", suggested: false },
     positions: [{ person: "Huy Ngo", stance: "Engine", reasons: ["Horizontal"], movedAt: 5, movedBecause: "x" }],
     agreed: [{ text: "Stand feeds Connect", at: 2, by: [] }],
-    landing: { outcome: "held", text: "Separate", reopens: null, changesIf: null, stillOpen: null, nextSteps: [] },
+    landing: { outcome: "held", text: "Separate", reopens: null, changesIf: null, stillOpen: null, nextSteps: [], option: null },
   });
   db.endMeeting(first.id, null, null);
   db.setMeetingSetup(room.id, "alignment", { text: "One product?", by: "Joe Liang", carry: first.id });
@@ -438,99 +456,130 @@ test("a wrap-up that fails says so, and the next one clears it", async () => {
 
 const said = (name: string, text: string, ts: number) => seg(ts, name, text, ts);
 
-test("what's on the table keeps when it was put forward while it's reworded, and starts over when it's a different proposal", () => {
-  const attendees = ["Joe Liang", "Huy Ngo", "Andy Li"];
-  const lines = [said("Joe Liang", "Let's keep them separate for now", 1000)];
-  const put = (text: string, same: boolean, extra: Partial<NonNullable<AlignmentDraft["proposal"]>> = {}) => ({
-    ...none,
-    proposal: { text, same, guesses: [], concern: null, line: 1, ...extra },
-  });
+test("an option keeps its id while it's reworded, a new one gets its own, and each person leans one way", () => {
+  const lines = [said("Joe Liang", "a", 1000), said("Huy Ngo", "b", 5000)];
+  const opt = (o: Partial<NonNullable<AlignmentDraft["options"]>[number]>) => ({ key: null, title: "x", detail: null, gain: null, cost: null, leaning: [], gaining: false, line: 1, ...o });
   let s = applyAlignment(
     emptyAlignment(),
-    put("Keep Connect and Stand separate for now.", false, {
-      guesses: [
-        { person: "Joe", answer: "agree" },
-        { person: "Huy", answer: "live_with" },
-        { person: "Janesh", answer: "block" },
+    {
+      ...none,
+      options: [
+        opt({ title: "Keep them separate for now", leaning: ["Huy", "Janesh", "Andy"], gaining: true }),
+        opt({ title: "Merge them", gain: "One surface", cost: "Connect loses its pitch", leaning: ["Joe", "Andy"] }),
       ],
-      concern: { person: "Andy", text: "Wants one team using Connect without Stand" },
-    }),
+    },
     lines,
-    attendees,
+    people,
   );
-  assert.equal(s.proposal?.at, 1000);
-  assert.equal(s.proposal?.rewrittenAt, null);
-  // Only attendees get a guess.
-  assert.deepEqual(s.proposal?.guesses, [
-    { person: "Joe Liang", answer: "agree" },
-    { person: "Huy Ngo", answer: "live_with" },
-  ]);
-  assert.deepEqual(s.proposal?.concern, { person: "Andy Li", text: "Wants one team using Connect without Stand" });
+  const [separate, merge] = s.options.map((o) => o.id);
+  // Only attendees lean, and Andy leans only toward the first option that named him.
+  assert.deepEqual(s.options[0].leaning, ["Huy Ngo", "Andy Li"]);
+  assert.deepEqual(s.options[1].leaning, ["Joe Liang"]);
+  assert.equal(s.options[1].cost, "Connect loses its pitch");
+  assert.equal(s.gaining, separate);
 
-  // Reworded: when it was put forward stays, and it's marked rewritten.
-  s = applyAlignment(s, put("Keep Connect and Stand separate for now, and revisit with Janesh.", true), [said("Huy Ngo", "Add Janesh", 5000)], attendees);
-  assert.equal(s.proposal?.at, 1000);
-  assert.equal(s.proposal?.rewrittenAt, 5000);
+  // Reworded by key, or by its gist, it keeps its id and when it came up; a new one is new.
+  s = applyAlignment(
+    s,
+    { ...none, options: [opt({ key: "O2", title: "Merge them into one product", line: 2 }), opt({ title: "Keep them separate for now.", line: 2 }), opt({ title: "Wait for Janesh", line: 2 })] },
+    lines,
+    people,
+  );
+  assert.deepEqual(s.options.slice(0, 2).map((o) => o.id), [merge, separate]);
+  assert.equal(s.options[0].at, 1000);
+  assert.equal(s.options[2].at, 5000);
+  assert.ok(![separate, merge].includes(s.options[2].id));
+  assert.equal(s.gaining, null);
 
-  // A different proposal starts over.
-  s = applyAlignment(s, put("Merge them: Stand is the front end of Connect.", false), [said("Andy Li", "Merge them", 9000)], attendees);
-  assert.equal(s.proposal?.at, 9000);
-  assert.equal(s.proposal?.rewrittenAt, null);
+  // An empty list changes nothing; more than three keeps the first three.
+  assert.deepEqual(applyAlignment(s, { ...none, options: [] }, lines, people).options, s.options);
+  assert.equal(applyAlignment(s, { ...none, options: ["a", "b", "c", "d"].map((title) => opt({ title })) }, lines, people).options.length, 3);
 
-  // The next meeting picks up the proposal and its concern, not anyone's answers.
-  const next = carryOver({ ...s, proposal: { ...s.proposal!, guesses: [{ person: "Joe Liang", answer: "agree" }], concern: { person: "Andy Li", text: "x" } } });
-  assert.deepEqual(next.proposal, { text: "Merge them: Stand is the front end of Connect.", at: null, rewrittenAt: null, guesses: [], concern: { person: "Andy Li", text: "x" } });
+  // Where it landed points at an option by its key.
+  s = applyAlignment(s, { ...none, landing: { outcome: "held", text: "Separate for now", reopens: null, changesIf: null, stillOpen: null, nextSteps: [], option: "O2" } }, lines, people);
+  assert.equal(s.landing?.option, separate);
+  assert.match(boardText(s), /O2 Keep them separate for now\.\n  Gains: - \| Costs: - \| Leaning: nobody yet/);
+  // People's own taps show the model where they lean, over its read of them.
+  const withRead = { ...s, options: s.options.map((o) => ({ ...o, leaning: o.id === merge ? ["Joe Liang", "Huy Ngo"] : [] })) };
+  assert.match(boardText(withRead, [{ person: "Joe Liang", option: separate }]), /O1 Merge them into one product\n.*Leaning: Huy Ngo\n- O2 Keep them separate for now\.\n.*Leaning: Joe Liang \(tapped\)/);
+
+  // The next meeting picks up the options, not who leaned where.
+  const next = carryOver({ ...s, options: s.options.map((o) => ({ ...o, leaning: ["Joe Liang"] })), gaining: merge });
+  assert.deepEqual(
+    next.options.map((o) => [o.title, o.at, o.leaning.length]),
+    s.options.map((o) => [o.title, null, 0]),
+  );
+  assert.equal(next.gaining, null);
 });
 
-test("without a model, the latest suggestion goes on the table with answers guessed from what people said", () => {
-  const draft = heuristicAlignment({
+test("without a model, each suggestion becomes an option, with its speaker and whoever agrees leaning toward it, and it lands where most lean", () => {
+  const input: AlignmentInput = {
     state: emptyAlignment(),
     context: [],
-    lines: [said("Joe Liang", "I think we should keep them separate for now", 1), said("Huy Ngo", "Yes, that makes sense", 2), said("Andy Li", "Maybe, but only if someone uses Connect alone", 3)],
+    lines: [
+      said("Joe Liang", "I think we should keep them separate for now", 1),
+      said("Huy Ngo", "Yes, that makes sense", 2),
+      said("Andy Li", "Do we combine them?", 3),
+      said("Andy Li", "Let's merge them into one product", 4),
+    ],
     attendees: ["Joe Liang", "Huy Ngo", "Andy Li"],
-    closing: false,
+    closing: true,
     space: { name: "CoNxt", purpose: "" },
-  });
-  assert.equal(draft.proposal?.text, "I think we should keep them separate for now");
+  };
+  const draft = heuristicAlignment(input);
   assert.deepEqual(
-    Object.fromEntries(draft.proposal!.guesses.map((g) => [g.person, g.answer])),
-    { "Joe Liang": "agree", "Huy Ngo": "agree", "Andy Li": "concern" },
+    draft.options?.map((o) => [o.title, o.leaning, o.gaining]),
+    [
+      ["I think we should keep them separate for now", ["Joe Liang", "Huy Ngo"], false],
+      ["Let's merge them into one product", ["Andy Li"], true],
+    ],
   );
-  assert.equal(draft.proposal?.concern?.person, "Andy Li");
+  // Wrapping up lands where most people lean: two for keeping them separate, one for merging.
+  assert.equal(draft.landing?.option, "O1");
+  const s = applyAlignment(emptyAlignment(), draft, input.lines, input.attendees);
+  assert.equal(s.landing?.option, s.options[0].id);
 });
 
-test("people answer what's on the table live; a reworded proposal keeps their answers and a different one asks again", async () => {
+test("people lean toward options live; a reworded option keeps their lean and a dropped one takes it", async () => {
   const db = openDb(":memory:");
   const room = db.createRoom("CoNxt");
   db.setMeetingSetup(room.id, "alignment", { text: "One product or two?", by: "Joe Liang", carry: null });
-  const queue: Array<NonNullable<AlignmentDraft["proposal"]>> = [];
+  const queue: Array<NonNullable<AlignmentDraft["options"]>> = [];
   class TableAgent extends HeuristicAgent {
     override async alignmentFor(): Promise<AlignmentDraft> {
-      return { ...none, proposal: queue.shift() ?? null };
+      return { ...none, options: queue.shift() ?? null };
     }
   }
   const session = new RoomSession(db, new TableAgent(), db.getRoom(room.id)!, () => {});
   const joe = await join(session, { id: "u1", name: "Joe Liang" });
   const andy = await join(session, { id: "u2", name: "Andy Li" });
-  const run = async (text: string, same: boolean) => {
-    queue.push({ text, same, guesses: [{ person: "Andy", answer: "concern" }], concern: null, line: null });
-    session.addSpeech("u1", "Joe Liang", `${text} (said)`, Date.now());
+  const opt = (key: string | null, title: string) => ({ key, title, detail: null, gain: null, cost: null, leaning: ["Andy"], gaining: false, line: null });
+  const run = async (options: NonNullable<AlignmentDraft["options"]>) => {
+    queue.push(options);
+    session.addSpeech("u1", "Joe Liang", `${options.map((o) => o.title).join(" or ")} (said)`, Date.now());
     await say(joe, { type: "align.wrap" }); // a closing run reads the new line right away
     await new Promise((r) => setTimeout(r, 20));
   };
-  // Nothing on the table yet: answers wait.
-  await say(andy, { type: "align.vote", vote: "agree" });
-  assert.equal(db.alignmentVotes(session.meetingId).length, 0);
+  const options = () => session.state().alignment!.state.options;
 
-  await run("Keep them separate for now.", false);
-  await say(andy, { type: "align.vote", vote: "live_with" });
-  await say(joe, { type: "align.vote", vote: "agree" });
+  await run([opt(null, "Keep them separate"), opt(null, "Merge them")]);
+  const [separate, merge] = options().map((o) => o.id);
+  await say(andy, { type: "align.vote", vote: merge });
+  await say(joe, { type: "align.vote", vote: separate });
   assert.equal(db.alignmentVotes(session.meetingId).length, 2);
 
-  await run("Keep them separate for now, and revisit with Janesh.", true);
-  assert.equal(db.alignmentVotes(session.meetingId).length, 2, "reworded: answers stand");
+  await run([opt("O1", "Keep them separate, revisit with Janesh"), opt("O2", "Merge them into one product")]);
+  assert.deepEqual(
+    options().map((o) => o.id),
+    [separate, merge],
+  );
+  assert.equal(db.alignmentVotes(session.meetingId).length, 2, "reworded: leans stand");
 
-  await run("Merge them into one product.", false);
-  assert.equal(db.alignmentVotes(session.meetingId).length, 0, "a different proposal asks again");
-  assert.equal(session.state().alignment?.state.proposal?.guesses[0]?.person, "Andy Li");
+  await run([opt("O1", "Keep them separate, revisit with Janesh")]);
+  assert.deepEqual(
+    db.alignmentVotes(session.meetingId).map((v) => [v.name, v.vote]),
+    [["Joe Liang", separate]],
+    "the dropped option takes Andy's lean with it",
+  );
+  assert.deepEqual(options()[0].leaning, ["Andy Li"]);
 });

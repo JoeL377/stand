@@ -1,7 +1,6 @@
 import type { DraftSlide } from "../shared/outline.ts";
 import type {
   AlignmentView,
-  AlignmentVote,
   MeetingKind,
   AgentToken,
   Capabilities,
@@ -79,7 +78,7 @@ export interface RoomInfo {
   liveMeetingId: string | null;
   /** What Start offers: the kind the space's meetings start as, and the last alignment meeting's open question. */
   defaultKind: MeetingKind;
-  openAlignment: { meetingId: string; startedAt: number; question: string; positions: number; agreed: number; test: boolean } | null;
+  openAlignment: { meetingId: string; startedAt: number; question: string; options: number; positions: number; agreed: number; test: boolean } | null;
 }
 
 export interface ConxtStatus {
@@ -113,7 +112,7 @@ export const api = {
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   meetingSetup: (roomId: string, setup: { kind: MeetingKind; question?: string; carry?: string | null }) =>
     call<{ ok: true; applied: boolean }>("POST", `/api/rooms/${roomId}/meeting-setup`, setup),
-  alignmentVote: (meetingId: string, vote: AlignmentVote) => call<{ votes: AlignmentView["votes"] }>("POST", `/api/meetings/${meetingId}/alignment/vote`, { vote }),
+  alignmentVote: (meetingId: string, vote: string) => call<{ votes: AlignmentView["votes"] }>("POST", `/api/meetings/${meetingId}/alignment/vote`, { vote }),
   feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
   saveJot: (roomId: string, jot: { text: string; itemId?: string | null; at?: number }) => call<Jot>("POST", `/api/rooms/${roomId}/jots`, jot),

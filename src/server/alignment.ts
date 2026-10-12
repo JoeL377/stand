@@ -1,9 +1,9 @@
-// Alignment meetings: the board the agent keeps as people talk (the question, the proposal on
-// the table and each person's likely answer to it, where each person stands, what they differ
-// on and already agree on), and how a run's changes are applied to it.
+// Alignment meetings: the board the agent keeps as people talk (the question, the options on
+// the table with who leans toward each, where each person stands, what they differ on and
+// already agree on), and how a run's changes are applied to it.
 // Each run gets the board as it stands plus what was said since, and returns only what changed,
 // so a run stays small however long the meeting goes.
-import type { AlignmentState, AlignmentVote, Segment } from "../shared/protocol.ts";
+import type { AlignmentOption, AlignmentState, Segment } from "../shared/protocol.ts";
 
 /** At most this many of each, so the board stays one screen and the runs stay small. */
 const MAX_REASONS = 3;
@@ -11,6 +11,8 @@ const MAX_DIFFER = 2;
 const MAX_AGREED = 10;
 const MAX_UNANSWERED = 6;
 const MAX_PARKED = 8;
+/** More than three options stops reading as a choice. */
+export const MAX_OPTIONS = 3;
 
 export const emptyAlignment = (): AlignmentState => ({
   question: null,
@@ -20,23 +22,30 @@ export const emptyAlignment = (): AlignmentState => ({
   agreed: [],
   unanswered: [],
   parked: [],
-  proposal: null,
+  options: [],
+  gaining: null,
   landing: null,
 });
 
-export const ANSWERS: AlignmentVote[] = ["agree", "live_with", "concern", "block"];
-
 /** The next meeting on the same question starts from where this one stood: positions, what
- *  they differ on and agree on, the open test and questions, and what was on the table with
- *  its concern. Not where it landed, who moved, or anyone's answers: those are asked again. */
+ *  they differ on and agree on, the open test and questions, and the options on the table.
+ *  Not where it landed, who moved, or who leans where: those are asked again. */
 export function carryOver(prev: AlignmentState): AlignmentState {
-  const p = prev.proposal ?? null;
   return {
     ...structuredClone(prev),
     positions: prev.positions.map((x) => ({ ...x, movedAt: null, movedBecause: null })),
-    proposal: p ? { text: p.text, at: null, rewrittenAt: null, guesses: [], concern: p.concern ? { ...p.concern } : null } : null,
+    options: (prev.options ?? []).map((o) => ({ ...o, at: null, leaning: [] })),
+    gaining: null,
     landing: null,
   };
+}
+
+/** An id for a new option, unlike any in `taken`. */
+function optionId(taken: Array<{ id: string }>) {
+  for (;;) {
+    const id = `o${Math.random().toString(36).slice(2, 8)}`;
+    if (!taken.some((o) => o.id === id)) return id;
+  }
 }
 
 /** Whether an edited line is still the same one: a typo or a few words changed, not a new
@@ -73,16 +82,22 @@ export interface AlignmentDraft {
   /** Keys (U1, U2...) of questions that got their answer. */
   answered: string[];
   parkedAdd: string[];
-  /** The whole proposal when its text, a guess or the concern changed; null when nothing did.
-   *  `same`: the same proposal reworded, so people's answers stand. */
-  proposal: {
-    text: string;
-    same: boolean;
-    guesses: Array<{ person: string; answer: AlignmentVote }>;
-    concern: { person: string; text: string } | null;
+  /** The whole list of options when any changed; null (or empty) when none did. `key` is the
+   *  option's key on the board (O1, O2...) when it's the same option, maybe reworded, so
+   *  people's leans stand; null for a new one. */
+  options: Array<{
+    key: string | null;
+    title: string;
+    detail: string | null;
+    gain: string | null;
+    cost: string | null;
+    leaning: string[];
+    gaining: boolean;
     line: number | null;
-  } | null;
-  landing: AlignmentState["landing"];
+  }> | null;
+  /** `option`: the key of the option it landed on, numbered as in `options` when the run
+   *  returned them, else as on the board. */
+  landing: (Omit<NonNullable<AlignmentState["landing"]>, "option"> & { option: string | null }) | null;
 }
 
 export interface AlignmentInput {
@@ -95,6 +110,8 @@ export interface AlignmentInput {
   attendees: string[];
   /** The meeting is wrapping up: write where it landed. */
   closing: boolean;
+  /** Who tapped which option (by its id): where they lean, in their own words. */
+  taps?: Array<{ person: string; option: string }>;
   space: { name: string; purpose: string };
 }
 
@@ -108,8 +125,14 @@ export function matchAttendee(name: string, attendees: string[]): string | null 
   return attendees.find((a) => norm(a) === n) ?? attendees.find((a) => first(a) === first(n)) ?? null;
 }
 
+/** Who leans toward an option: their own taps, then the agent's read of everyone else. */
+function leaners(o: AlignmentOption, taps: Array<{ person: string; option: string }>) {
+  const tapped = (p: string) => taps.some((t) => t.person === p || first(t.person) === first(p));
+  return [...taps.filter((t) => t.option === o.id).map((t) => `${t.person} (tapped)`), ...o.leaning.filter((p) => !tapped(p))];
+}
+
 /** The board as the prompt shows it, with keys the model can point back at. */
-export function boardText(s: AlignmentState): string {
+export function boardText(s: AlignmentState, taps: Array<{ person: string; option: string }> = []): string {
   const q = s.question
     ? `Question${s.question.suggested ? " (your suggestion, not confirmed)" : ""}: ${s.question.text}${s.question.askedBy ? ` (asked by ${s.question.askedBy})` : ""}${
         s.question.whyNow ? `\nWhy it matters now: ${s.question.whyNow}` : ""
@@ -127,13 +150,20 @@ export function boardText(s: AlignmentState): string {
   const agreed = s.agreed.length ? s.agreed.map((a, i) => `- A${i + 1} ${a.text}`).join("\n") : "- none yet";
   const waiting = s.unanswered.length ? s.unanswered.map((u, i) => `- U${i + 1} ${u.asker}: ${u.question}`).join("\n") : "- none";
   const parked = s.parked.length ? s.parked.join("; ") : "none";
-  const p = s.proposal;
-  const table = p
-    ? `${p.text}\nGuessed answers: ${p.guesses.length ? p.guesses.map((g) => `${g.person}: ${g.answer}`).join("; ") : "none yet"}\nHolding it up: ${p.concern ? `${p.concern.person}: ${p.concern.text}` : "nothing"}`
-    : "nothing yet";
+  const options = s.options.length
+    ? s.options
+        .map(
+          (o, i) =>
+            `- O${i + 1} ${o.title}${o.detail ? ` (${o.detail})` : ""}${s.gaining === o.id ? " [gaining]" : ""}\n  Gains: ${o.gain ?? "-"} | Costs: ${o.cost ?? "-"} | Leaning: ${
+              leaners(o, taps).join(", ") || "nobody yet"
+            }`,
+        )
+        .join("\n")
+    : "- none yet";
   return `${q}
 
-On the table: ${table}
+Options on the table:
+${options}
 
 Positions:
 ${positions}
@@ -239,25 +269,37 @@ export function applyAlignment(state: AlignmentState, draft: AlignmentDraft, lin
   }
   next.parked = next.parked.slice(-MAX_PARKED);
 
-  const p = draft.proposal;
-  const text = p ? clip(p.text, 400) : "";
-  if (p && text) {
-    const had = next.proposal;
-    // A different proposal starts over; the same one reworded keeps when it was put forward.
-    const fresh = !had || (!p.same && !sameGist(had.text, text));
-    const guesses = new Map<string, AlignmentVote>();
-    for (const g of p.guesses) {
-      const person = who(g.person);
-      if (person && ANSWERS.includes(g.answer)) guesses.set(person, g.answer);
+  if (draft.options?.length) {
+    const before = next.options;
+    const opts: AlignmentOption[] = [];
+    const placed = new Set<string>();
+    let gaining: string | null = null;
+    for (const o of draft.options) {
+      const title = clip(o.title, 80);
+      if (!title || opts.length >= MAX_OPTIONS) continue;
+      // The same option reworded keeps its id, and so people's leans: by its key, else by its gist.
+      const k = /^O(\d+)$/i.exec(o.key?.trim() ?? "");
+      const had = (k ? before[+k[1] - 1] : undefined) ?? before.find((x) => sameGist(x.title, title));
+      const same = had && !opts.some((x) => x.id === had.id) ? had : null;
+      // Each person leans one way: the first option that names them keeps them.
+      const leaning = o.leaning.map(who).filter((x): x is string => Boolean(x && !placed.has(x)));
+      for (const x of leaning) placed.add(x);
+      const option: AlignmentOption = {
+        id: same?.id ?? optionId([...before, ...opts]),
+        title,
+        detail: o.detail ? clip(o.detail, 120) || null : null,
+        gain: o.gain ? clip(o.gain, 100) || null : null,
+        cost: o.cost ? clip(o.cost, 100) || null : null,
+        at: same ? same.at : at(o.line),
+        leaning: [...new Set(leaning)],
+      };
+      opts.push(option);
+      if (o.gaining && !gaining) gaining = option.id;
     }
-    const concernBy = p.concern ? who(p.concern.person) : null;
-    next.proposal = {
-      text,
-      at: fresh ? at(p.line) : had!.at,
-      rewrittenAt: fresh ? null : norm(had!.text) === norm(text) ? had!.rewrittenAt : at(p.line),
-      guesses: [...guesses].map(([person, answer]) => ({ person, answer })),
-      concern: p.concern && concernBy && clip(p.concern.text, 200) ? { person: concernBy, text: clip(p.concern.text, 200) } : null,
-    };
+    if (opts.length) {
+      next.options = opts;
+      next.gaining = gaining;
+    }
   }
 
   if (draft.landing && clip(draft.landing.text, 400)) {
@@ -269,6 +311,7 @@ export function applyAlignment(state: AlignmentState, draft: AlignmentDraft, lin
       changesIf: l.changesIf ? clip(l.changesIf, 240) : null,
       stillOpen: l.stillOpen ? clip(l.stillOpen, 240) : null,
       nextSteps: l.nextSteps.flatMap((s) => (clip(s.text, 200) ? [{ owner: who(s.owner), text: clip(s.text, 200) }] : [])).slice(0, 6),
+      option: next.options[Number(/^O(\d+)$/i.exec(l.option?.trim() ?? "")?.[1] ?? 0) - 1]?.id ?? null,
     };
   }
   return next;
@@ -287,7 +330,7 @@ export function heuristicAlignment(input: AlignmentInput): AlignmentDraft {
     unansweredAdd: [],
     answered: [],
     parkedAdd: [],
-    proposal: null,
+    options: null,
     landing: null,
   };
   const latest = new Map<string, { text: string; line: number }>();
@@ -303,48 +346,67 @@ export function heuristicAlignment(input: AlignmentInput): AlignmentDraft {
     const asked = input.lines.findIndex((s) => /\?\s*$/.test(s.text));
     if (asked >= 0) draft.question = { text: input.lines[asked].text, askedBy: input.lines[asked].speakerName, whyNow: null, line: asked + 1 };
   }
-  // On the table: the latest suggestion someone made ("we should…", "let's…"), with each
-  // speaker's answer guessed from their own words.
-  const proposed = [...input.lines.entries()].reverse().find(([, s]) => /\b(we should|let's|let us|i propose|how about|keep|go with)\b/i.test(s.text) && !/\?\s*$/.test(s.text));
-  const table = proposed ? proposed[1].text.slice(0, 200) : input.state.proposal?.text;
-  if (table) {
-    const guesses = new Map<string, AlignmentVote>((input.state.proposal?.guesses ?? []).map((g) => [g.person, g.answer]));
-    if (proposed) guesses.set(proposed[1].speakerName, "agree");
-    let concern = input.state.proposal?.concern ?? null;
-    for (const s of input.lines) {
-      if (proposed && s === proposed[1]) continue;
-      const answer = guessAnswer(s.text);
-      if (!answer) continue;
-      guesses.set(s.speakerName, answer);
-      if (answer === "concern" || answer === "block") concern = { person: s.speakerName, text: s.text.slice(0, 160) };
+  // Options: each suggestion someone made ("we should…", "let's…"), with its speaker leaning
+  // toward it, and anyone who then agrees leaning toward the latest one.
+  const opts: NonNullable<AlignmentDraft["options"]> = input.state.options.map((o, i) => ({
+    key: `O${i + 1}`,
+    title: o.title,
+    detail: o.detail,
+    gain: o.gain,
+    cost: o.cost,
+    leaning: [...o.leaning],
+    gaining: o.id === input.state.gaining,
+    line: null,
+  }));
+  const lean = (person: string, o: (typeof opts)[number]) => {
+    for (const x of opts) x.leaning = x.leaning.filter((p) => p !== person);
+    o.leaning.push(person);
+  };
+  let leading = opts.find((o) => o.gaining) ?? null;
+  let changed = false;
+  input.lines.forEach((s, i) => {
+    if (SUGGEST.test(s.text) && !/\?\s*$/.test(s.text)) {
+      const title = s.text.length > 60 ? `${s.text.slice(0, 60).replace(/\s+\S*$/, "")}…` : s.text;
+      let o = opts.find((x) => sameGist(x.title, title));
+      if (!o) {
+        o = { key: null, title, detail: null, gain: null, cost: null, leaning: [], gaining: false, line: i + 1 };
+        opts.push(o);
+      }
+      lean(s.speakerName, o);
+      leading = o;
+      changed = true;
+    } else if (leading && AGREE.test(s.text)) {
+      lean(s.speakerName, leading);
+      changed = true;
     }
-    draft.proposal = {
-      text: table,
-      same: Boolean(input.state.proposal && sameGist(input.state.proposal.text, table)),
-      guesses: [...guesses].map(([person, answer]) => ({ person, answer })),
-      concern,
-      line: proposed ? proposed[0] + 1 : null,
-    };
+  });
+  if (changed) {
+    for (const o of opts) o.gaining = o === leading;
+    draft.options = opts.slice(-MAX_OPTIONS);
   }
   if (input.closing) {
-    const p = draft.proposal ?? input.state.proposal;
+    // Where most people lean, by their own taps first; ties go to the one gaining ground.
+    const list = draft.options ?? opts;
+    const taps = input.taps ?? [];
+    const count = (o: (typeof list)[number]) => {
+      const had = o.key ? input.state.options[Number(o.key.slice(1)) - 1] : undefined;
+      const tapped = taps.filter((t) => t.option === had?.id);
+      return tapped.length + o.leaning.filter((p) => !taps.some((t) => t.person === p)).length;
+    };
+    const landed = [...list].sort((a, b) => count(b) - count(a) || Number(b.gaining) - Number(a.gaining))[0] ?? null;
     draft.landing = {
       outcome: "held",
-      text: p ? p.text : input.state.question ? `Not decided yet: ${input.state.question.text}` : "Not decided yet",
+      text: landed ? landed.title : input.state.question ? `Not decided yet: ${input.state.question.text}` : "Not decided yet",
       reopens: "The next meeting",
       changesIf: null,
       stillOpen: input.state.unanswered[0]?.question ?? null,
       nextSteps: [],
+      option: landed ? `O${list.indexOf(landed) + 1}` : null,
     };
   }
   return draft;
 }
 
-/** Without a model: an answer only when the words say it plainly. */
-function guessAnswer(text: string): AlignmentVote | null {
-  if (/\b(no way|i'd block|i would block|can't accept|cannot accept|won't go along)\b/i.test(text)) return "block";
-  if (/\b(can live with|could live with|fine with it|i'll go along|okay with it)\b/i.test(text)) return "live_with";
-  if (/\b(but|concern|worried|not sure|unless|counter)\b/i.test(text)) return "concern";
-  if (/\b(agree|yes|sounds good|makes sense|works for me|can't argue)\b/i.test(text)) return "agree";
-  return null;
-}
+const SUGGEST = /\b(we should|let's|let us|i propose|how about|keep|go with)\b/i;
+/** Without a model: agreement only when the words say it plainly. */
+const AGREE = /\b(agree|yes|sounds good|makes sense|works for me|can't argue|can live with)\b/i;

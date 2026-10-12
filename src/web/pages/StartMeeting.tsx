@@ -95,8 +95,9 @@ export function StartMeeting(props: { room: RoomInfo; onJoin: () => void }) {
                 <span className="start-carry" title="Still open from last time">
                   <span>
                     <span className="agent-mark small">✦</span> Picks up where it stood
-                    {carry!.positions + carry!.agreed > 0 || carry!.test ? ": " : ""}
+                    {carry!.options + carry!.positions + carry!.agreed > 0 || carry!.test ? ": " : ""}
                     {[
+                      carry!.options > 0 && `${carry!.options} option${carry!.options === 1 ? "" : "s"}`,
                       carry!.positions > 0 && `${carry!.positions} position${carry!.positions === 1 ? "" : "s"}`,
                       carry!.agreed > 0 && `${carry!.agreed} agreed`,
                       carry!.test && "1 test",
