@@ -891,3 +891,43 @@ test("transcription that stops starts again by itself once, then asks people to 
   t.mock.timers.reset();
   await session.end();
 });
+
+test("a line a notes run leaves out stays in its topic, and a topic left out whole comes back", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const MIN = 60_000;
+  const t = Date.now();
+  const topic = (name: string, segmentIndexes: number[]) => ({ topic: name, positions: [], outcome: "open" as const, segmentIndexes, continuesId: null });
+  const drafts: ItemNotesDraft[] = [
+    { notes: [], discussions: [topic("Pricing", [0, 1, 2, 3, 4, 5]), topic("Hiring", [6, 7, 8, 9]), topic("Lunch", [10, 11])] },
+    // Renamed Pricing and kept only its first lines, forgot Hiring, carried Lunch on.
+    { notes: [], discussions: [topic("Pricing for teams", [0, 1, 2]), topic("Lunch", [10, 11, 12])] },
+    // As the meeting ends: Hiring left out on purpose.
+    { notes: [], discussions: [topic("Pricing for teams", [0, 1, 2, 3, 4, 5]), topic("Lunch", [10, 11, 12])] },
+  ];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async notesFor(item: Item | null, segments: Segment[]) {
+      return drafts.shift() ?? new HeuristicAgent().notesFor(item, segments);
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const refresh = (session as unknown as { refreshNotes(id: string | null): Promise<Note[]> }).refreshNotes.bind(session);
+  for (let i = 0; i < 12; i++) session.addSpeech(`p${i % 3}`, `P${i % 3}`, `Remark ${i}`, t - (13 - i) * MIN);
+  const itemId = db.meetingSegments(session.meetingId)[0].itemId;
+  await refresh(itemId);
+  const first = new Map(db.meetingDiscussions(session.meetingId).map((d) => [d.topic, d]));
+  session.addSpeech("p0", "P0", "Remark 12", t);
+  await refresh(itemId);
+  const lines = new Map(db.meetingSegments(session.meetingId).map((s) => [s.id, s.text]));
+  const topics = db.meetingDiscussions(session.meetingId).map((d) => [d.id, d.topic, d.segmentIds.map((id) => lines.get(id)).join(",")]);
+  assert.deepEqual(topics, [
+    [first.get("Pricing")!.id, "Pricing for teams", "Remark 0,Remark 1,Remark 2,Remark 3,Remark 4,Remark 5"],
+    [first.get("Hiring")!.id, "Hiring", "Remark 6,Remark 7,Remark 8,Remark 9"],
+    [first.get("Lunch")!.id, "Lunch", "Remark 10,Remark 11,Remark 12"],
+  ]);
+  await session.end();
+  assert.deepEqual(
+    db.meetingDiscussions(session.meetingId).map((d) => d.topic),
+    ["Pricing for teams", "Lunch"],
+  );
+});

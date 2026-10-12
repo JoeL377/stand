@@ -1157,6 +1157,7 @@ export class RoomSession implements SpeechSink {
     folded: Discussion[],
     keys: Array<{ id: string; key: string }>,
   ): Note[] {
+    const lastRun = this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId);
     const byKey = new Map([...settled, ...folded].map((d, i) => [`T${i + 1}`, d]));
     const back = new Set<string>();
     const fresh: DraftDiscussion[] = draft.discussions.map(({ segmentIndexes, picksUp, ...d }) => {
@@ -1178,10 +1179,12 @@ export class RoomSession implements SpeechSink {
     const kept: DraftDiscussion[] = [...settled, ...folded]
       .filter((d) => !back.has(d.id))
       .map((d) => ({ id: d.id, topic: d.topic, positions: d.positions, outcome: d.outcome, segmentIds: d.segmentIds, continuesId: d.continues?.id ?? null }));
+    // The run as the meeting ends reads everything: a topic it leaves out whole, it meant to.
+    const revived = keepLeftOut(lastRun, [...kept, ...fresh], window, { revive: !this.ended });
     // Topics in the order they came up.
     const at = new Map(segments.map((s) => [s.id, s.ts]));
     const start = (d: DraftDiscussion) => Math.min(...d.segmentIds.map((id) => at.get(id) ?? Infinity));
-    const order = [...kept, ...fresh].map((d, i) => ({ d, i, t: start(d) })).sort((a, b) => a.t - b.t || a.i - b.i);
+    const order = [...kept, ...fresh, ...revived].map((d, i) => ({ d, i, t: start(d) })).sort((a, b) => a.t - b.t || a.i - b.i);
     const discussions = this.db.replaceDiscussions(
       this.meetingId,
       itemId,
@@ -1431,4 +1434,33 @@ export function mentionScore(text: string, item: Pick<Item, "title" | "externalI
   const said = new Set(driftWords(text));
   for (const w of new Set(driftWords(item.title))) if (said.has(w)) score++;
   return score;
+}
+
+/** A line a run put under a topic stays there unless a later run puts it under another one.
+ *  Each run regroups the talk it reads and leaves a few lines out; once such a line is too old to
+ *  be read again (settle.ts) nothing would put it back, and the chapter bar would show a gap where
+ *  people were talking. A line left out goes back to the topic that took over most of its old
+ *  topic's lines (or has its name); a topic left out whole comes back as it was, unless `revive`
+ *  is off. Adds to the drafts in place and returns the topics that come back. */
+export function keepLeftOut(before: Discussion[], drafts: DraftDiscussion[], window: Segment[], { revive = true } = {}): DraftDiscussion[] {
+  const read = new Set(window.map((s) => s.id));
+  const placed = new Set(drafts.flatMap((d) => d.segmentIds));
+  const revived: DraftDiscussion[] = [];
+  for (const was of before) {
+    const lost = was.segmentIds.filter((id) => read.has(id) && !placed.has(id));
+    if (!lost.length) continue;
+    const mine = new Set(was.segmentIds);
+    const name = was.topic.trim().toLowerCase();
+    let heir: DraftDiscussion | undefined;
+    let most = 0;
+    for (const d of drafts) {
+      const shared = d.segmentIds.filter((id) => mine.has(id)).length;
+      if (shared > most) [heir, most] = [d, shared];
+    }
+    heir ??= drafts.find((d) => d.topic.trim().toLowerCase() === name);
+    if (heir) heir.segmentIds = [...heir.segmentIds, ...lost];
+    else if (revive) revived.push({ id: was.id, topic: was.topic, positions: was.positions, outcome: was.outcome, segmentIds: lost, continuesId: was.continues?.id ?? null });
+    for (const id of lost) placed.add(id);
+  }
+  return revived;
 }

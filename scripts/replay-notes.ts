@@ -25,6 +25,7 @@
 //                    2 minutes of the meeting, as the room does. Each call is in merges.json.
 // --final-merge      once the talk ends, place them once more on the tidy model, as a meeting's end does.
 // REPLAY_DUMP_RUNS=50,300   also save those runs' requests (request-50.json...), to see what a run sends.
+// REPLAY_STANDIN_DROP=0.1   the stand-in leaves out that share of the lines it lists, as Haiku does now and then.
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -253,6 +254,10 @@ const labelOf: Array<string | null> = lines.map((l, i) => {
   return gold.find((g) => g.spans.some(([a, b]) => i >= a && i <= b))?.id ?? null;
 });
 const titleOf = new Map<string, string>(gold ? gold.map((g) => [g.id, g.title]) : meeting.finalTopics.map((t) => [t.id, t.topic]));
+const DROP = Number(process.env.REPLAY_STANDIN_DROP ?? 0);
+let seed = 1;
+/** Seeded, so a replay with drops gives the same answer twice. */
+const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 function standIn() {
   const groups = new Map<string, number[]>();
   runWindow.forEach((s, k) => {
@@ -262,7 +267,7 @@ function standIn() {
   });
   const discussions = [...groups].map(([label, at]) => {
     const title = titleOf.get(label) ?? label;
-    const turns = at.map((k) => runNumbers[k]);
+    const turns = at.filter((_, j) => j === 0 || !(DROP && rand() < DROP)).map((k) => runNumbers[k]);
     const speakers = [...new Set(at.map((k) => runWindow[k].speakerName))];
     const captured = runCaptured.filter((c) => c.text.startsWith(`${title}:`));
     return {
