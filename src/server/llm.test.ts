@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.ts";
-import { ClaudeAgent, NotesTrouble, notesPrompt } from "./llm.ts";
+import { ClaudeAgent, NotesTrouble, notesPrompt, turnNumbers } from "./llm.ts";
 import type { Segment } from "../shared/protocol.ts";
 
 const said = (n: number): Segment[] =>
@@ -79,6 +79,20 @@ test("a notes run has room to think and to list a long meeting's lines, and a ti
   assert.match(blocks.at(-1)!.text, /Already captured.*A1 action item: Close the app/s);
   assert.deepEqual(draft.discussions[0].segmentIndexes, [0, 1, 69]);
   assert.equal(draft.notes[0].text, "Make the Keep button stand out");
+});
+
+test("a topic's lines can come back as ranges, and nonsense in them is skipped", () => {
+  assert.deepEqual(turnNumbers([4, 2]), [4, 2]);
+  assert.deepEqual(turnNumbers("3-5, 9,[11]-[12]; 20"), [3, 4, 5, 9, 11, 12, 20]);
+  assert.deepEqual(turnNumbers("7-5, lines, 2"), [2]);
+});
+
+test("live notes think first unless that's turned off; the run as the meeting ends always does", async () => {
+  const { agent, calls } = withApi(() => noteReply);
+  await agent.notesFor(null, said(3));
+  assert.deepEqual((calls[0].body as { thinking?: unknown }).thinking, config.notesThinking ? undefined : { type: "disabled" });
+  await agent.notesFor(null, said(3), [], [], {}, { tidy: true });
+  assert.equal((calls[1].body as { thinking?: unknown }).thinking, undefined);
 });
 
 test("live notes run on the small model, the run as the meeting ends on the bigger one", async () => {

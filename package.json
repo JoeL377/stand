@@ -15,7 +15,9 @@
     "build": "vite build",
     "start": "NODE_ENV=production tsx --env-file-if-exists=.env src/server/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test --test-force-exit src/server/*.test.ts"
+    "test": "node --import tsx --test --test-force-exit src/server/*.test.ts",
+    "replay": "node --import tsx scripts/replay-notes.ts",
+    "replay:score": "node --import tsx scripts/score-replay.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

@@ -24,6 +24,11 @@ export const config = {
   /** For the calls that run once per meeting and merge things: the notes' tidy run as
    *  the meeting ends (it feeds the recap) and the suggested agenda. */
   notesTidyModel: env("NOTES_TIDY_MODEL") ?? "claude-sonnet-5-5",
+  /** Live notes experiments, for trying on a recorded meeting with scripts/replay-notes.ts; both
+   *  off unless set. NOTES_TURNS=ranges: the model lists a topic's lines as ranges ("3-17, 20")
+   *  instead of every number. NOTES_THINKING=off: live notes runs answer without thinking first. */
+  notesTurnsAsRanges: env("NOTES_TURNS") === "ranges",
+  notesThinking: env("NOTES_THINKING") !== "off",
   linearKey: env("LINEAR_API_KEY"),
   google: {
     clientId: env("GOOGLE_CLIENT_ID"),

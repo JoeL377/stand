@@ -189,12 +189,29 @@ const itemLabel = (item: Item | null) =>
 
 // ---------------------------------------------------------------------------
 
+/** A discussion's lines as the model lists them: every number, or (NOTES_TURNS=ranges) ranges. */
+const Turns: z.ZodType<number[] | string> = config.notesTurnsAsRanges
+  ? z.string().describe('The [numbers] of the transcript lines that belong to this discussion, as ranges, e.g. "3-17, 20, 24-30"')
+  : z.array(z.number().int()).describe("The [numbers] of the transcript lines that belong to this discussion");
+
+/** The line numbers a discussion lists, either way. */
+export function turnNumbers(turns: number[] | string): number[] {
+  if (Array.isArray(turns)) return turns;
+  return turns.split(/[,;\s]+/).flatMap((part) => {
+    const m = /^\[?(\d+)\]?(?:[-–]\[?(\d+)\]?)?$/.exec(part);
+    if (!m) return [];
+    const from = Number(m[1]);
+    const to = m[2] ? Number(m[2]) : from;
+    return to >= from && to - from < 5_000 ? Array.from({ length: to - from + 1 }, (_, k) => from + k) : [];
+  });
+}
+
 const NotesSchema = z.object({
   summary: z.string().describe("One or two sentences on where this item stands after the discussion. Empty if nothing substantive was said."),
   discussions: z.array(
     z.object({
       topic: z.string().describe("The question or subject discussed, as a short title under 70 characters"),
-      turns: z.array(z.number().int()).describe("The [numbers] of the transcript lines that belong to this discussion"),
+      turns: Turns,
       positions: z
         .array(z.object({ speaker: z.string(), position: z.string().describe("Their stance or contribution, in one short line") }))
         .describe("One per participant who contributed, in the order they first spoke"),
@@ -347,7 +364,7 @@ export class ClaudeAgent implements Agent {
     effort: "low" | "medium",
     model = config.anthropicModel,
     /** timeout: for calls a person is waiting on mid-meeting, give up and let the next run try. */
-    { timeout, maxTokens = 4000 }: { timeout?: number; maxTokens?: number } = {},
+    { timeout, maxTokens = 4000, thinking = true }: { timeout?: number; maxTokens?: number; thinking?: boolean } = {},
   ): Promise<T | null> {
     // If a safety classifier declines, let the API retry on its recommended
     // fallback model. Haiku has no server-side fallback.
@@ -360,6 +377,7 @@ export class ClaudeAgent implements Agent {
       system,
       messages: [{ role: "user", content }],
       output_config: { effort, format: betaZodOutputFormat(schema) },
+      ...(thinking ? {} : { thinking: { type: "disabled" as const } }),
       ...fallback,
     }, timeout ? { timeout, maxRetries: 1 } : undefined);
     const u = res.usage;
@@ -443,7 +461,7 @@ A long topic that is still going is listed with its key too, with where it stood
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
       tidy ? "medium" : "low",
       tidy ? config.notesTidyModel : config.notesModel,
-      { timeout: tidy ? NOTES_TIDY_TIMEOUT_MS : NOTES_TIMEOUT_MS, maxTokens: NOTES_MAX_TOKENS },
+      { timeout: tidy ? NOTES_TIDY_TIMEOUT_MS : NOTES_TIMEOUT_MS, maxTokens: NOTES_MAX_TOKENS, thinking: tidy || config.notesThinking },
     ).catch((err) => {
       throw notesTrouble(err) ?? err;
     });
@@ -465,7 +483,7 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
         topic: d.topic.trim().slice(0, 120),
         positions: d.positions.filter((p) => p.position.trim()),
         outcome: d.outcome,
-        segmentIndexes: [...new Set(d.turns.map((n) => n - 1).filter((n) => n >= 0 && n < segments.length))].sort((a, b) => a - b),
+        segmentIndexes: [...new Set(turnNumbers(d.turns).map((n) => n - 1).filter((n) => n >= 0 && n < segments.length))].sort((a, b) => a - b),
         continuesId: d.continues && known.has(d.continues) ? d.continues : null,
         picksUp: d.picks_up && keys.has(d.picks_up) ? d.picks_up : null,
       })),
