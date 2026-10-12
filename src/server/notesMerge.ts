@@ -1,16 +1,18 @@
 // Notes for an item are redrafted from its whole transcript on every refresh.
-// A redraft can reword, merge or simply leave out a to-do or decision it wrote
-// before, so this carries the earlier ones forward: a redrafted note that
-// restates an earlier one keeps that note's id and checked-off state, and an
-// earlier one the redraft left out is kept as it was. Nothing captured is lost.
+// A redraft can reword, merge or simply leave out a to-do, decision or open
+// question it wrote before, so this carries the earlier ones forward: a
+// redrafted note that restates an earlier one keeps that note's id and
+// checked-off state, and an earlier one the redraft left out is kept as it was.
+// Nothing captured is lost; an open question goes only once the talk answers it.
 // The host's hand edits win: an edited or added note keeps its wording, and a
 // note the host deleted isn't written again.
 
 import type { Note } from "../shared/protocol.ts";
 import type { CapturedNote, DraftNote } from "./llm.ts";
 
-type Kept = "action" | "decision";
-const KEPT: ReadonlySet<string> = new Set<Kept>(["action", "decision"]);
+type Kept = "action" | "decision" | "question";
+const KEPT: ReadonlySet<string> = new Set<Kept>(["action", "decision", "question"]);
+const PREFIX: Record<Kept, string> = { action: "A", decision: "D", question: "Q" };
 
 /** A note to write, with the earlier note's identity when it continues one. */
 export type MergedNote = DraftNote & {
@@ -22,13 +24,15 @@ export type MergedNote = DraftNote & {
   editedBy?: string | null;
 };
 
-/** Keys the model sees for the earlier notes: A1.. for to-dos, D1.. for decisions. */
+/** Keys the model sees for the earlier notes: A1.. for to-dos, D1.. for decisions, Q1.. for open questions. */
 export function capturedFor(existing: Note[]): Array<CapturedNote & { id: string }> {
-  let a = 0;
-  let d = 0;
+  const count: Record<Kept, number> = { action: 0, decision: 0, question: 0 };
   return existing
     .filter((n) => KEPT.has(n.kind))
-    .map((n) => ({ id: n.id, key: n.kind === "action" ? `A${++a}` : `D${++d}`, kind: n.kind as Kept, text: n.text, owner: n.owner }));
+    .map((n) => {
+      const kind = n.kind as Kept;
+      return { id: n.id, key: `${PREFIX[kind]}${++count[kind]}`, kind, text: n.text, owner: n.owner };
+    });
 }
 
 const words = (t: string) =>
@@ -55,8 +59,11 @@ export function mergeNotes(
   existing: Note[],
   keys: Array<{ id: string; key: string }>,
   dismissed: Array<{ kind: string; text: string }> = [],
+  /** Keys (Q1..) of open questions the talk has answered: they go, unless the host wrote or edited them. */
+  answered: string[] = [],
 ): MergedNote[] {
   const byKey = new Map(keys.map((k) => [k.key, existing.find((n) => n.id === k.id)]));
+  const done = new Set(answered.flatMap((k) => (byKey.get(k)?.kind === "question" && !byKey.get(k)!.editedBy ? [byKey.get(k)!.id] : [])));
   const claimed = new Set<string>();
   const kept = (e: Note) => KEPT.has(e.kind) || !!e.editedBy;
   const out: MergedNote[] = [];
@@ -65,6 +72,8 @@ export function mergeNotes(
     let prev = sameAs ? byKey.get(sameAs) : undefined;
     if (prev && (prev.kind !== n.kind || claimed.has(prev.id))) prev = undefined;
     prev ??= existing.find((e) => e.kind === n.kind && kept(e) && !claimed.has(e.id) && similar(e.text, n.text));
+    // Answered, though the redraft wrote it again.
+    if (prev && done.has(prev.id)) continue;
     if (!prev) {
       out.push(n);
       continue;
@@ -75,7 +84,7 @@ export function mergeNotes(
   }
   // Whatever the redraft left out stays, as it was.
   for (const e of existing) {
-    if (!kept(e) || claimed.has(e.id)) continue;
+    if (!kept(e) || claimed.has(e.id) || done.has(e.id)) continue;
     out.push({
       kind: e.kind,
       text: e.text,
