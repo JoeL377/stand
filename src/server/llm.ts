@@ -434,7 +434,8 @@ export class ClaudeAgent implements Agent {
     { settled = [], tidy = false, lineNumbers, lastTopics = [] }: NotesOptions = {},
   ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
-    const numbers = lineNumbers?.length === segments.length ? lineNumbers : segments.map((_, i) => i + 1);
+    const classic = config.notesClassicLayout;
+    const numbers = !classic && lineNumbers?.length === segments.length ? lineNumbers : segments.map((_, i) => i + 1);
     const indexOf = new Map(numbers.map((n, i) => [n, i]));
     const numbered = segments.map((s, i) => ({ n: numbers[i], text: `[${numbers[i]}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}` }));
     const before = earlier.length
@@ -457,11 +458,11 @@ export class ClaudeAgent implements Agent {
     const goingOnes = settled.filter((t) => t.going);
     const quiet = `${
       quietOnes.length
-        ? `\n\nTopics from earlier in this meeting that have gone quiet. Their lines aren't in the transcript above, and their notes are kept as they are:\n${topicLines(quietOnes)}`
+        ? `\n\nTopics from earlier in this meeting that have gone quiet. Their lines aren't ${classic ? "repeated below" : "in the transcript above"}, and their notes are kept as they are:\n${topicLines(quietOnes)}`
         : ""
     }${
       goingOnes.length
-        ? `\n\nTopics still going that started a while ago. Their earlier talk isn't in the transcript above; this is where they stood:\n${topicLines(goingOnes)}`
+        ? `\n\nTopics still going that started a while ago. Their earlier talk isn't ${classic ? "repeated below" : "in the transcript above"}; this is where they stood:\n${topicLines(goingOnes)}`
         : ""
     }`;
     const soFar = config.notesLastTopics ? lastTopics.filter((t) => t.lines.some((n) => indexOf.has(n))) : [];
@@ -485,11 +486,15 @@ export class ClaudeAgent implements Agent {
     const out = await this.parse(
       NotesSchema,
       notesPrompt(
-        `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}
+        classic
+          ? `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${quiet}
+
+${quiet ? "What was said since, while this item was in focus" : "What was said while this item was in focus"} (speech transcript and in-room chat, in order):`
+          : `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}
 
 What was said while this item was in focus (speech transcript and in-room chat, in order, numbered through the item; in a long meeting, lines of topics that went quiet are left out):`,
         numbered,
-        `${lastRun}${quiet}${already}${shown}${asked(context.instructions)}`,
+        `${lastRun}${classic ? "" : quiet}${already}${shown}${asked(context.instructions)}`,
       ),
       `You take notes in a team meeting. You are given what was said while one agenda item (a ticket, task or slide) was in focus.
 

@@ -33,6 +33,10 @@ export const config = {
   notesTurnsAsRanges: env("NOTES_TURNS") === "ranges",
   notesThinking: env("NOTES_THINKING") !== "off",
   notesLastTopics: env("NOTES_LAST_TOPICS") === "on",
+  /** NOTES_LAYOUT=classic: the notes prompt as it was before 2026-10-12. Lines numbered from 1 in
+   *  each run, and topics that went quiet listed before the talk. The stable layout reuses far more
+   *  of the prompt cache, but on Haiku new topics showed about 20 s later (Conxt replay). */
+  notesClassicLayout: env("NOTES_LAYOUT") === "classic",
   linearKey: env("LINEAR_API_KEY"),
   google: {
     clientId: env("GOOGLE_CLIENT_ID"),

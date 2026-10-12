@@ -84,6 +84,20 @@ test("lines of a topic that went quiet drop out without renumbering the rest, so
   assert.match(gone[1].text, /^\[101\]/);
 });
 
+test("NOTES_LAYOUT=classic: lines numbered from 1 in each run, and quiet topics before the talk", async (t) => {
+  config.notesClassicLayout = true;
+  t.after(() => (config.notesClassicLayout = false));
+  const { agent, calls } = withApi(() => noteReply);
+  const segments = said(120).slice(30);
+  const settled = [{ key: "T1", topic: "Conflict page", outcome: "action" as const, notes: [] }];
+  const draft = await agent.notesFor(null, segments, [], [], undefined, { settled, lineNumbers: segments.map((_, i) => i + 31) });
+  const blocks = calls[0].body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
+  assert.match(blocks[0].text, /gone quiet. Their lines aren't repeated below.*\n- T1 \(action\) Conflict page\n\nWhat was said since/s);
+  assert.match(blocks[1].text, /^\[1\] /);
+  assert.doesNotMatch(blocks.at(-1)!.text, /gone quiet/);
+  assert.deepEqual(draft.discussions[0].segmentIndexes, [0, 1, 69]);
+});
+
 test("by default a notes run isn't shown the last run's topics", async () => {
   const { agent, calls } = withApi(() => noteReply);
   await agent.notesFor(null, said(5), [], [], undefined, { lastTopics: [{ topic: "Keep button", lines: [1, 2] }] });
