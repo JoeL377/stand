@@ -5,6 +5,7 @@ import { HeuristicAgent, type ItemNotesDraft } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { applyMerges, mainCount, mergePrompt, planMerge, rankTopics } from "./topicMerge.ts";
 import type { Discussion, Note, Segment } from "../shared/protocol.ts";
+import { chapterOf, stretches } from "../shared/chapters.ts";
 
 const MIN = 60_000;
 const T0 = Date.UTC(2026, 9, 12, 10);
@@ -40,7 +41,7 @@ const note = (discussionId: string, kind: Note["kind"], text: string = kind): No
   discussionId,
 });
 
-test("topics rank by talk, people and what came of them; a meeting keeps 3 to 8 main ones", () => {
+test("topics rank by talk, people and what came of them; a meeting keeps 3 to 6 main ones", () => {
   const { segments, discussions, end } = meeting([
     { id: "long", lines: 40, speakers: 3 },
     { id: "aside", lines: 3 },
@@ -52,7 +53,7 @@ test("topics rank by talk, people and what came of them; a meeting keeps 3 to 8 
     ["long", "decided", "aside"],
   );
   assert.equal(Math.round(ranked[0].minutes), 13, "each remark counts until the next one");
-  assert.deepEqual([mainCount(10), mainCount(30), mainCount(100)], [3, 5, 8]);
+  assert.deepEqual([mainCount(10), mainCount(30), mainCount(100)], [3, 5, 6]);
 });
 
 test("the plan only changes when a topic starts, settles or moves in or out of the main ones", () => {
@@ -173,7 +174,7 @@ test("the room places smaller topics after a notes run, and again on the tidy mo
   const session = new RoomSession(db, agent, room, () => {});
   const internals = session as unknown as { refreshNotes(id: string | null): Promise<Note[]>; mergeRun: Promise<void> };
   const t = Date.now() - 20 * MIN;
-  for (let i = 0; i < 40; i++) session.addSpeech(`p${i % 3}`, `P${i % 3}`, `Remark ${i}`, t + i * 25_000);
+  for (let i = 0; i < 40; i++) session.addSpeech(`p${i % 3}`, `P${i % 3}`, `Remark ${i}`, t + i * 20_000);
   await internals.refreshNotes(null);
   await new Promise((r) => setTimeout(r, 20));
   await internals.mergeRun;
@@ -190,4 +191,33 @@ test("the room places smaller topics after a notes run, and again on the tidy mo
 
   await session.end();
   assert.equal(calls.at(-1)?.final, true);
+});
+
+test("the chapter bar: placed topics join their chapter, and an aside under a minute doesn't cut a stretch in two", () => {
+  const every = (from: number, to: number, step = 15_000) => Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, i) => T0 + from + i * step);
+  const topics = [
+    { id: "pricing", itemId: null, times: [...every(0, 5 * MIN), ...every(5.5 * MIN, 9 * MIN)] },
+    { id: "aside", itemId: null, times: [T0 + 5 * MIN + 15_000] },
+    { id: "tiers", itemId: null, mergedInto: "pricing", times: every(9.25 * MIN, 11 * MIN) },
+    { id: "login", itemId: null, group: "Sign-in", times: every(11.25 * MIN, 13 * MIN) },
+    { id: "sso", itemId: null, group: "sign-in", times: every(13.25 * MIN, 15 * MIN) },
+    { id: "lunch", itemId: null, times: [T0 + 15.25 * MIN] },
+  ];
+  const byId = new Map(topics.map((t) => [t.id, t]));
+  assert.equal(chapterOf(topics[2], byId), "pricing");
+  assert.equal(chapterOf(topics[3], byId), chapterOf(topics[4], byId));
+  const now = T0 + 15.5 * MIN;
+  assert.deepEqual(
+    stretches(topics, "lunch", now).map((s) => [s.chapter, (s.from - T0) / MIN]),
+    [
+      ["pricing", 0],
+      ["group::sign-in", 11.25],
+      ["lunch", 15.25],
+    ],
+    "the live chapter stays, however short",
+  );
+  assert.deepEqual(
+    stretches(topics, null, now).map((s) => s.chapter),
+    ["pricing", "group::sign-in"],
+  );
 });

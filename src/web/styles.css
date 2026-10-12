@@ -1834,7 +1834,7 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-stretch { position: absolute; top: 0; height: 100%; min-width: 5px; padding: 0; border: 0; border-radius: 0; background: none; cursor: pointer; }
 .topic-stretch::before { content: ""; position: absolute; left: 1px; right: 1px; top: 7px; height: 6px; border-radius: 3px; background: rgb(255 255 255 / 0.2); transition: top 120ms var(--ease-out, ease-out), height 120ms var(--ease-out, ease-out), background-color 120ms; }
 .topic-stretch:hover::before, .topic-stretch.on::before, .topic-stretch:focus-visible::before { top: 5px; height: 10px; background: rgb(255 255 255 / 0.45); }
-.topic-stretch.current { cursor: default; }
+.topic-stretch.current:not(.peekable) { cursor: default; }
 .topic-stretch.current::before, .topic-stretch.current:hover::before { top: 5px; height: 10px; background: var(--accent); }
 .topic-stretch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
 .topic-bar-times { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -1847,6 +1847,13 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-peek .topic-notes { font-size: 13px; }
 .topic-peek-at { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .topic-peek-item { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topic-part-of { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topic-peek-inside { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / 0.1); }
+.topic-peek-inside.group { padding-top: 0; border-top: 0; }
+.topic-peek-sub { display: flex; flex-direction: column; gap: 4px; }
+.topic-peek-sub-title { font-size: 13px; font-weight: 500; }
+.topic-peek-sub .topic-notes { font-size: 12.5px; color: var(--muted); }
+.topic-peek-inside .topic-more { padding-left: 0; }
 .topic-dot { display: inline-grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-weight: 600; line-height: 1; }
 @media (max-width: 900px) {
   .topic-positions { grid-template-columns: repeat(2, minmax(0, 1fr)); }

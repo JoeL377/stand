@@ -1,6 +1,6 @@
 // The board shows a meeting's main topics, not every fragment live notes split the talk into.
 // Topics are ranked with no model call: talk, time, people and what came of them. A long meeting
-// keeps 5 to 8 as main topics. Every so often, once a topic goes quiet or a new one starts, one
+// keeps up to 6 as main topics. Every so often, once a topic goes quiet or a new one starts, one
 // small call reads the topics' titles and notes (never the transcript) and places each smaller
 // topic inside the main topic of its item it belongs to, or in a small group with others like it.
 // The placing is stored apart from the topics, so the notes runs never see it and can't undo it.
@@ -27,9 +27,9 @@ export interface RankedTopic {
   notes: Note[];
 }
 
-/** How many main topics a meeting this long shows: 3 for a short one, 5 at half an hour, at most 8. */
+/** How many main topics a meeting this long keeps: 3 for a short one, 5 at half an hour, at most 6. */
 export function mainCount(meetingMinutes: number): number {
-  return Math.max(3, Math.min(8, 2 + Math.floor(meetingMinutes / 10)));
+  return Math.min(6, 3 + Math.floor(meetingMinutes / 15));
 }
 
 /** The meeting's topics, most important first. Talk counts most; a short topic that still

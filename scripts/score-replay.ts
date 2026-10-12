@@ -5,6 +5,7 @@
 //   node --import tsx scripts/score-replay.ts meeting.json gold-topics.json replay/current [more replays...]
 import fs from "node:fs";
 import path from "node:path";
+import { type ChapterTopic, chapterOf, stretches as barStretches } from "../src/shared/chapters.ts";
 
 interface Line {
   ts: number;
@@ -22,7 +23,7 @@ interface Gold {
 interface Snapshot {
   at: number;
   itemId: string | null;
-  topics: Array<{ id: string; topic: string; outcome: string; lines: number[] }>;
+  topics: Array<{ id: string; topic: string; outcome: string; lines: number[]; mergedInto?: string | null; group?: string | null }>;
 }
 
 const [meetingFile, goldFile, ...replays] = process.argv.slice(2);
@@ -48,7 +49,16 @@ function score(dir: string) {
 
   // What the board showed at each moment, by the board's own rule: the topic holding the latest
   // remark, else the one talked about most recently, from the last notes run that had finished.
-  const samples: Array<{ t: number; truth: string | null; shown: string | null; shownTitle: string | null; shownId: string | null }> = [];
+  const samples: Array<{ t: number; truth: string | null; shown: string | null; shownTitle: string | null; shownId: string | null; bar: number; barBefore: number }> = [];
+  // The chapter bar at a moment: every item's topics as their last run left them.
+  const shape = (d: Snapshot["topics"][number], itemId: string | null, placed: boolean): ChapterTopic => ({
+    id: d.id,
+    itemId,
+    mergedInto: placed ? d.mergedInto : null,
+    group: placed ? d.group : null,
+    times: d.lines.map((i) => lines[i].ts),
+  });
+  const latestByItem = new Map<string | null, Snapshot>();
   const start = lines[0].ts;
   const end = lines.at(-1)!.ts;
   let li = -1;
@@ -59,7 +69,7 @@ function score(dir: string) {
       li++;
       if (goldOf[li]) lastLabeled = { id: goldOf[li]!, ts: lines[li].ts };
     }
-    while (si + 1 < snaps.length && snaps[si + 1].at <= t) si++;
+    while (si + 1 < snaps.length && snaps[si + 1].at <= t) latestByItem.set(snaps[++si].itemId, snaps[si]);
     const focus = lines[li].itemId;
     const truth = goldOf[li] ?? (lastLabeled && t - lastLabeled.ts < CARRY ? lastLabeled.id : null);
     const snap = [...snaps.slice(0, si + 1)].reverse().find((s) => s.itemId === focus);
@@ -69,7 +79,24 @@ function score(dir: string) {
         snap.topics.find((d) => d.lines.includes(li)) ??
         [...snap.topics].sort((a, b) => Math.max(-1, ...b.lines.filter((x) => x <= li)) - Math.max(-1, ...a.lines.filter((x) => x <= li)))[0];
     }
-    samples.push({ t, truth, shown: shown ? (majority(shown.lines)?.id ?? null) : null, shownTitle: shown?.topic ?? null, shownId: shown?.id ?? null });
+    const all = [...latestByItem].flatMap(([itemId, s]) => s.topics.map((d) => ({ d, itemId })));
+    const lastSaid = shown ? Math.max(-Infinity, ...shown.lines.map((i) => lines[i].ts)) : -Infinity;
+    const live = shown && t - lastSaid < 120_000 ? shown.id : null;
+    const bar = (placed: boolean, fold: boolean) => {
+      const shapes = all.map(({ d, itemId }) => shape(d, itemId, placed));
+      const byId = new Map(shapes.map((x) => [x.id, x]));
+      const liveShape = live ? byId.get(live) : undefined;
+      return barStretches(shapes, liveShape ? chapterOf(liveShape, byId) : null, t, { fold }).length;
+    };
+    samples.push({
+      t,
+      truth,
+      shown: shown ? (majority(shown.lines)?.id ?? null) : null,
+      shownTitle: shown?.topic ?? null,
+      shownId: shown?.id ?? null,
+      bar: bar(true, true),
+      barBefore: bar(false, false),
+    });
   }
   const judged = samples.filter((s) => s.truth);
   const right = judged.filter((s) => s.shown === s.truth).length;
@@ -112,6 +139,22 @@ function score(dir: string) {
     path.join(dir, "timeline.md"),
     `# What the board showed: ${path.basename(dir)}\n\n| at | topic being talked about | shown after | what the board's current topic said |\n|---|---|---|---|\n${rows.join("\n")}\n`,
   );
+  // Placings: which reference topic each placed topic and its chapter hold, to read for wrong ones.
+  const finalById = new Map(finalTopics.map((d) => [d.id, d]));
+  const placings = finalTopics
+    .filter((d) => d.mergedInto || d.group)
+    .map((d) => {
+      const into = d.mergedInto ? finalById.get(d.mergedInto) : null;
+      const mine = majority(d.lines)?.id ?? "-";
+      const theirs = into ? (majority(into.lines)?.id ?? "-") : null;
+      return { text: `"${d.topic}" (${mine}) -> ${into ? `"${into.topic}" (${theirs})` : `group "${d.group}"`}`, across: into ? mine !== theirs : false };
+    });
+  const finalShapes = [...finals].flatMap(([itemId, s]) => s.topics.map((d) => shape(d, itemId, true)));
+  const shapeById = new Map(finalShapes.map((x) => [x.id, x]));
+  const chaptersAtEnd = new Set(finalShapes.map((x) => chapterOf(x, shapeById)));
+  // A major reference topic has a chapter of its own when the head of some chapter is mostly it.
+  const heads = new Set(finalTopics.filter((d) => !d.mergedInto && !d.group).flatMap((d) => majority(d.lines)?.id ?? []));
+  const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0;
   const switches = samples.filter((s, k) => k && s.shownId !== samples[k - 1].shownId).length;
   const truthSwitches = samples.filter((s, k) => k && s.truth && samples[k - 1].truth && s.truth !== samples[k - 1].truth).length;
   const majors = gold.filter((g) => g.importance === "major");
@@ -133,6 +176,17 @@ function score(dir: string) {
     realSwitchesPerHour: Math.round((truthSwitches / samples.length) * 360),
     finalTopics: finalTopics.length,
     referenceTopics: gold.length,
+    chapters: {
+      atEnd: chaptersAtEnd.size,
+      barStretchesAtEnd: samples.at(-1)?.bar ?? 0,
+      barStretchesAtEndBefore: samples.at(-1)?.barBefore ?? 0,
+      medianBarStretches: median(samples.map((s) => s.bar)),
+      medianBarStretchesBefore: median(samples.map((s) => s.barBefore)),
+      majorTopicsWithOwnChapter: `${majors.filter((g) => heads.has(g.id)).length} of ${majors.length}`,
+      placed: placings.length,
+      placedAcrossReferenceTopics: placings.filter((p) => p.across).length,
+      placings: placings.map((p) => p.text),
+    },
   };
 }
 

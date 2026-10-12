@@ -1307,6 +1307,7 @@ export class RoomSession implements SpeechSink {
 
     let summary = "";
     let synthesizing: Promise<string | null> = Promise.resolve(null);
+    let placing: Promise<void> = Promise.resolve();
     try {
       const segments = this.db.meetingSegments(this.meetingId);
       const itemIds = [...new Set(segments.map((s) => s.itemId))];
@@ -1314,8 +1315,8 @@ export class RoomSession implements SpeechSink {
       for (const id of itemIds) {
         perItem.push({ item: id ? this.db.getItem(id) : null, notes: await this.refreshNotes(id) });
       }
-      // The tidy runs rewrote the topics: place the smaller ones again, for the recap.
-      await this.mergeTopics(true);
+      // The tidy runs rewrote the topics: place the smaller ones again for the recap page, beside the recap.
+      placing = this.mergeTopics(true);
       // The recap (with the snaps in view), and the Synthesis when the space has instructions for one, side by side.
       const room = this.db.getRoom(this.roomId);
       const instructions = room?.synthesisInstructions.trim() ?? "";
@@ -1349,6 +1350,7 @@ export class RoomSession implements SpeechSink {
       console.error("[agent] summary failed:", err);
     } finally {
       // Whatever the agent managed, the meeting ends and the room is free again.
+      await placing;
       this.db.endMeeting(this.meetingId, summary || null, await synthesizing, endedAt);
       this.polisher?.schedule(this.roomId, 0);
       this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });

@@ -1,24 +1,26 @@
 // The topic board: what the middle screen shows while nobody shares or presents. The topic
 // being talked about now fills the screen, with where each person stands on it, what it came
 // to, and the latest remark. Underneath, a chapter bar runs from the start of the meeting to
-// now, like chapters on a video: each stretch is a topic, at the time it was talked about.
-// Hovering or clicking a stretch opens that topic on your own screen. The topics are the
-// discussions live notes already group the talk into; the current one holds the latest remark.
+// now, like chapters on a video: each stretch is a chapter, at the time it was talked about.
+// A chapter is a main topic with the smaller topics placed inside it, or a small group of
+// topics (see server/topicMerge.ts), so a long call reads as a few chapters, not dozens of
+// slivers. Hovering or clicking a stretch opens that chapter on your own screen. The topics are
+// the discussions live notes already group the talk into; the current one holds the latest remark.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
 import type { Discussion, DiscussionOutcome, Item, Note, Participant, Segment } from "../../shared/protocol.ts";
+import { type ChapterTopic, chapterOf, remarkTimes, stretches as chapterStretches, type Stretch } from "../../shared/chapters.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 
 const OUTCOME: Record<DiscussionOutcome, string> = { open: "Open", action: "To do", decided: "Decided", info: "FYI" };
 /** Talk older than this isn't "now" any more. */
 const NOW_MS = 120_000;
-/** A pause longer than this between two topics shows as a gap in the chapter bar. */
-const GAP_MS = 180_000;
-/** How long a stretch lasts past its last remark when a gap follows it. */
-const TAIL_MS = 30_000;
 const MAX_POSITIONS = 3;
 const MAX_NOTES = 4;
 const PEEK_NOTES = 3;
+/** Topics placed inside a chapter that its peek lists, with a note or two each. */
+const PEEK_TOPICS = 3;
+const PEEK_TOPIC_NOTES = 2;
 const NOTE_ORDER: Record<Note["kind"], number> = { decision: 0, action: 1, question: 2, summary: 3 };
 const MARK: Record<Note["kind"], string> = { decision: "✓", action: "○", question: "?", summary: "" };
 const MARK_LABEL: Record<Note["kind"], string> = { decision: "Decided", action: "To do", question: "Open question", summary: "" };
@@ -39,12 +41,21 @@ interface Topic {
   turns: Segment[];
   /** When it was last talked about. */
   last: number;
+  /** The chapter it draws in on the bar. */
+  chapter: string;
+  /** Time spent on it. */
+  spent: number;
 }
-/** One stretch of the chapter bar: a topic, from when talk turned to it until it moved on. */
-interface Stretch {
-  topic: Topic;
-  from: number;
-  to: number;
+/** A main topic with the topics placed inside it, or a small group of topics. */
+interface Chapter {
+  key: string;
+  /** The main topic; null for a group. */
+  head: Topic | null;
+  title: string;
+  /** The topics placed inside it, or the group's topics. */
+  inside: Topic[];
+  itemId: string | null;
+  spent: number;
 }
 
 export function TopicBoard(props: {
@@ -62,13 +73,34 @@ export function TopicBoard(props: {
 }) {
   const now = useNow(15_000);
   const turnsById = new Map(props.segments.map((s) => [s.id, s]));
+  const held = remarkTimes(props.segments);
   const latest = props.segments.reduce<Segment | null>((a, s) => (!a || s.ts > a.ts ? s : a), null);
-  const topics: Topic[] = props.discussions.map((d) => {
+  const shapes: ChapterTopic[] = props.discussions.map((d) => ({
+    id: d.id,
+    itemId: d.itemId,
+    mergedInto: d.mergedInto,
+    group: d.group,
+    times: d.segmentIds.flatMap((id) => turnsById.get(id)?.ts ?? []),
+  }));
+  const shapeById = new Map(shapes.map((t) => [t.id, t]));
+  const topics: Topic[] = props.discussions.map((d, i) => {
     const turns = d.segmentIds.flatMap((id) => turnsById.get(id) ?? []).sort((a, b) => a.ts - b.ts);
-    return { d, turns, last: turns.at(-1)?.ts ?? d.ts };
+    // A topic with no remarks of its own (notes carried in from earlier) is never the latest one.
+    return { d, turns, last: turns.at(-1)?.ts ?? -Infinity, chapter: chapterOf(shapes[i], shapeById), spent: turns.reduce((ms, t) => ms + (held.get(t.id) ?? 0), 0) };
   });
+  const chapters = new Map<string, Chapter>();
+  for (const t of topics) {
+    const c = chapters.get(t.chapter) ?? { key: t.chapter, head: null, title: t.d.group ?? t.d.topic, inside: [], itemId: t.d.itemId, spent: 0 };
+    if (t.d.id === t.chapter) {
+      c.head = t;
+      c.title = t.d.topic;
+    } else c.inside.push(t);
+    c.spent += t.spent;
+    chapters.set(t.chapter, c);
+  }
   const here = topics.filter((t) => t.d.itemId === props.focusItemId);
   const current = (latest && here.find((t) => t.d.segmentIds.includes(latest.id))) ?? [...here].sort((a, b) => b.last - a.last)[0] ?? null;
+  const currentChapter = current ? chapters.get(current.chapter)! : null;
   // The color for a person: by their id when they're here, else by name.
   const idOf = (name: string) => props.participants.find((p) => same(p.name, name))?.id ?? name;
   const notesOf = (t: Topic) =>
@@ -76,22 +108,24 @@ export function TopicBoard(props: {
   const [peek, setPeek] = useState<{ id: string; key: string; pinned: boolean } | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const live = !!current && now - current.last < NOW_MS;
-  const stretches = chapters(topics, live ? current : null, now);
-  const start = Math.min(props.meetingStartedAt, stretches[0]?.from ?? Infinity);
-  // Time on a topic: its stretches added up, so coming back to it later counts too.
-  const spentOn = (t: Topic) => stretches.reduce((sum, s) => (s.topic === t ? sum + s.to - s.from : sum), 0);
-  const peeked = peek && topics.find((t) => t.d.id === peek.id && t !== current);
+  const bar: Stretch[] = chapterStretches(shapes, live && current ? current.chapter : null, now);
+  const start = Math.min(props.meetingStartedAt, bar[0]?.from ?? Infinity);
+  // A chapter that's only the topic on screen has nothing more to show.
+  const peekable = (c: Chapter) => !(c.head === current && !c.inside.length);
+  const peeked = peek ? chapters.get(peek.id) : undefined;
+  const shown = peeked && peekable(peeked) ? peeked : null;
   const speaking = live ? Object.values(props.interims).find((i) => i.text.trim()) : undefined;
   const lastTurn = current?.turns.at(-1);
   const item = props.focusItem;
 
   return (
-    <div ref={boardRef} className={peeked ? "topic-board peeking" : "topic-board"}>
+    <div ref={boardRef} className={shown ? "topic-board peeking" : "topic-board"}>
       {current ? (
         <Current
           t={current}
           notes={notesOf(current)}
-          spent={spentOn(current)}
+          spent={current.spent}
+          partOf={currentChapter && currentChapter.head !== current ? currentChapter.title : null}
           live={live}
           remark={speaking ? { name: speaking.speakerName, id: speaking.speakerId, text: speaking.text, now: true } : lastTurn && { name: lastTurn.speakerName, id: idOf(lastTurn.speakerName), text: lastTurn.text, now: false }}
           idOf={idOf}
@@ -115,28 +149,30 @@ export function TopicBoard(props: {
           </p>
         </div>
       )}
-      {stretches.length > 0 && (
+      {bar.length > 0 && (
         <div className="topic-chapters">
-          <div className="topic-bar" role="group" aria-label="Topics so far">
-            {stretches.map((s) => {
-              const isCurrent = s.topic === current;
+          <div className="topic-bar" role="group" aria-label="Chapters so far">
+            {bar.map((s) => {
+              const c = chapters.get(s.chapter)!;
+              const isCurrent = c === currentChapter;
+              const canPeek = peekable(c);
               const at = clock(s.from - start);
-              const key = `${s.topic.d.id}-${s.from}`;
-              const open = (pinned: boolean) => setPeek((p) => (p?.pinned && !pinned ? p : { id: s.topic.d.id, key, pinned }));
+              const key = `${s.chapter}-${s.from}`;
+              const open = (pinned: boolean) => setPeek((p) => (p?.pinned && !pinned ? p : { id: s.chapter, key, pinned }));
               return (
                 <button
                   key={key}
                   data-key={key}
                   type="button"
-                  className={["topic-stretch", isCurrent && "current", peek?.id === s.topic.d.id && "on"].filter(Boolean).join(" ")}
+                  className={["topic-stretch", isCurrent && "current", canPeek && "peekable", peek?.id === s.chapter && "on"].filter(Boolean).join(" ")}
                   style={{ left: `${pct(s.from - start, now - start)}%`, width: `${pct(s.to - s.from, now - start)}%` }}
-                  aria-label={`${at}, ${s.topic.d.topic}, ${OUTCOME[s.topic.d.outcome]}${isCurrent ? ", now" : ""}`}
-                  aria-expanded={isCurrent ? undefined : peek?.id === s.topic.d.id}
-                  onMouseEnter={() => !isCurrent && open(false)}
+                  aria-label={`${at}, ${c.title}${c.head ? `, ${OUTCOME[c.head.d.outcome]}` : ""}${isCurrent ? ", now" : ""}`}
+                  aria-expanded={canPeek ? peek?.id === s.chapter : undefined}
+                  onMouseEnter={() => canPeek && open(false)}
                   onMouseLeave={() => setPeek((p) => (p?.pinned ? p : null))}
-                  onFocus={() => !isCurrent && open(false)}
+                  onFocus={() => canPeek && open(false)}
                   onBlur={() => setPeek((p) => (p?.pinned ? p : null))}
-                  onClick={() => !isCurrent && (peek?.key === key && peek.pinned ? setPeek(null) : open(true))}
+                  onClick={() => canPeek && (peek?.key === key && peek.pinned ? setPeek(null) : open(true))}
                 />
               );
             })}
@@ -147,14 +183,13 @@ export function TopicBoard(props: {
           </div>
         </div>
       )}
-      {peeked && (
+      {shown && peek && (
         <Peek
-          t={peeked}
-          notes={notesOf(peeked)}
-          at={clock((stretches.find((s) => `${s.topic.d.id}-${s.from}` === peek.key)?.from ?? peeked.d.ts) - start)}
-          spent={spentOn(peeked)}
+          c={shown}
+          notesOf={notesOf}
+          at={clock((bar.find((s) => `${s.chapter}-${s.from}` === peek.key)?.from ?? shown.head?.d.ts ?? start) - start)}
           anchor={peek.key}
-          elsewhere={peeked.d.itemId !== props.focusItemId ? (props.items.find((i) => i.id === peeked.d.itemId)?.title ?? "General") : null}
+          elsewhere={shown.itemId !== props.focusItemId ? (props.items.find((i) => i.id === shown.itemId)?.title ?? "General") : null}
           idOf={idOf}
           boardRef={boardRef}
           onClose={() => setPeek(null)}
@@ -166,23 +201,6 @@ export function TopicBoard(props: {
 }
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.max(0, Math.min(100, (part / whole) * 100)) : 0);
-
-/** The meeting's talk as stretches, one per run of remarks on the same topic, each lasting until the
- * next one starts unless the talk paused. The current topic runs on to now while it's live. */
-function chapters(topics: Topic[], liveTopic: Topic | null, now: number): Stretch[] {
-  const turns = topics.flatMap((topic) => topic.turns.map((s) => ({ topic, ts: s.ts }))).sort((a, b) => a.ts - b.ts);
-  const runs: { topic: Topic; from: number; last: number }[] = [];
-  for (const t of turns) {
-    const run = runs.at(-1);
-    if (run && run.topic === t.topic) run.last = t.ts;
-    else runs.push({ topic: t.topic, from: t.ts, last: t.ts });
-  }
-  return runs.map((r, i) => {
-    const next = runs[i + 1];
-    const to = next ? (next.from - r.last < GAP_MS ? next.from : r.last + TAIL_MS) : r.topic === liveTopic ? now : r.last + TAIL_MS;
-    return { topic: r.topic, from: r.from, to: Math.min(Math.max(to, r.from + 1000), now) };
-  });
-}
 
 /** The time, again every so often, so the chapter bar keeps up with the meeting. */
 function useNow(every: number) {
@@ -200,6 +218,8 @@ function Current(props: {
   notes: Note[];
   /** Time on it so far. */
   spent: number;
+  /** The chapter it was placed in, when that's another topic or a group. */
+  partOf: string | null;
   live: boolean;
   remark: { name: string; id: string; text: string; now: boolean } | undefined;
   idOf: (name: string) => string;
@@ -213,6 +233,7 @@ function Current(props: {
         <span className={props.live ? "topic-now-label live" : "topic-now-label"}>{props.live ? "Now" : "Last"}</span>
         <span className={`topic-outcome ${d.outcome}`}>{OUTCOME[d.outcome]}</span>
         {props.spent >= 60_000 && <span className="topic-mins">{fmtDuration(props.spent)}</span>}
+        {props.partOf && <span className="topic-mins topic-part-of">· part of {props.partOf}</span>}
       </div>
       <h2 className="topic-now-title" aria-live="polite">
         {d.topic}
@@ -243,13 +264,13 @@ function Current(props: {
   );
 }
 
-/** Another topic, opened from its chip on your own screen: where people stood and what it came to. */
+/** A chapter, opened from the bar on your own screen: its main topic, where people stood and what
+ *  it came to, then the topics placed inside it. A group lists its topics. */
 function Peek(props: {
-  t: Topic;
-  notes: Note[];
+  c: Chapter;
+  notesOf: (t: Topic) => Note[];
   /** When talk turned to it, into the meeting, at the stretch it was opened from. */
   at: string;
-  spent: number;
   /** The stretch of the bar it was opened from. */
   anchor: string;
   /** The agenda item it was under, when that isn't the one in focus. */
@@ -259,19 +280,20 @@ function Peek(props: {
   boardRef: RefObject<HTMLDivElement | null>;
   onClose: () => void;
 }) {
-  const { d } = props.t;
+  const { c } = props;
+  const head = c.head?.d;
   const [pos, setPos] = useState<CSSProperties>({ visibility: "hidden" });
   const ref = useRef<HTMLDivElement>(null);
   const { onClose, pinned } = props;
   // Sit just above its stretch of the bar, centered on it, kept inside the board.
   useEffect(() => {
     const board = props.boardRef.current;
-    const stretch = board?.querySelector<HTMLElement>(`.topic-stretch[data-key="${props.anchor}"]`);
+    const stretch = board?.querySelector<HTMLElement>(`.topic-stretch[data-key="${CSS.escape(props.anchor)}"]`);
     if (!board || !stretch || !ref.current) return;
     const b = board.getBoundingClientRect();
-    const c = stretch.getBoundingClientRect();
+    const r = stretch.getBoundingClientRect();
     const w = ref.current.offsetWidth;
-    setPos({ left: Math.max(16, Math.min(c.left - b.left + c.width / 2 - w / 2, b.width - w - 16)), bottom: b.bottom - c.top + 6 });
+    setPos({ left: Math.max(16, Math.min(r.left - b.left + r.width / 2 - w / 2, b.width - w - 16)), bottom: b.bottom - r.top + 6 });
   }, [props.anchor, props.boardRef]);
   useEffect(() => {
     if (!pinned) return;
@@ -287,18 +309,23 @@ function Peek(props: {
       window.removeEventListener("mousedown", click);
     };
   }, [pinned, onClose]);
+  const inside = [...c.inside].sort((a, b) => b.spent - a.spent);
   return (
-    <div ref={ref} className="topic-peek" role="dialog" aria-label={d.topic} style={pos}>
+    <div ref={ref} className="topic-peek" role="dialog" aria-label={c.title} style={pos}>
       <div className="topic-now-head">
         <span className="topic-peek-at">{props.at}</span>
-        <span className={`topic-outcome ${d.outcome}`}>{OUTCOME[d.outcome]}</span>
-        {props.spent >= 60_000 && <span className="topic-mins">{fmtDuration(props.spent)}</span>}
+        {head ? (
+          <span className={`topic-outcome ${head.outcome}`}>{OUTCOME[head.outcome]}</span>
+        ) : (
+          <span className="topic-outcome">{c.inside.length} topics</span>
+        )}
+        {c.spent >= 60_000 && <span className="topic-mins">{fmtDuration(c.spent)}</span>}
         {props.elsewhere && <span className="topic-mins topic-peek-item">· {props.elsewhere}</span>}
       </div>
-      <strong className="topic-peek-title">{d.topic}</strong>
-      {d.positions.length > 0 && (
+      <strong className="topic-peek-title">{c.title}</strong>
+      {head && head.positions.length > 0 && (
         <div className="topic-peek-positions">
-          {d.positions.slice(0, MAX_POSITIONS).map((p) => (
+          {head.positions.slice(0, MAX_POSITIONS).map((p) => (
             <div key={p.speaker}>
               <Dot id={props.idOf(p.speaker)} name={p.speaker} size={18} />
               <span>{p.position}</span>
@@ -306,7 +333,18 @@ function Peek(props: {
           ))}
         </div>
       )}
-      {props.notes.length > 0 && <NoteList notes={props.notes} max={PEEK_NOTES} />}
+      {c.head && props.notesOf(c.head).length > 0 && <NoteList notes={props.notesOf(c.head)} max={PEEK_NOTES} />}
+      {inside.length > 0 && (
+        <div className={head ? "topic-peek-inside" : "topic-peek-inside group"}>
+          {inside.slice(0, PEEK_TOPICS).map((t) => (
+            <div key={t.d.id} className="topic-peek-sub">
+              <span className="topic-peek-sub-title">{t.d.topic}</span>
+              {props.notesOf(t).length > 0 && <NoteList notes={props.notesOf(t)} max={PEEK_TOPIC_NOTES} />}
+            </div>
+          ))}
+          {inside.length > PEEK_TOPICS && <span className="topic-more">+{inside.length - PEEK_TOPICS} more topics</span>}
+        </div>
+      )}
     </div>
   );
 }

@@ -21,6 +21,9 @@
 //                    without it, the stand-in uses the topics the meeting ended with.
 // --debounce MS, --max-wait MS   the run cadence (the room uses 3000 and 12000).
 // --until MIN        stop after this many minutes of talk.
+// --merge off        don't place the smaller topics (server/topicMerge.ts); on by default, at most every
+//                    2 minutes of the meeting, as the room does. Each call is in merges.json.
+// --final-merge      once the talk ends, place them once more on the tidy model, as a meeting's end does.
 // REPLAY_DUMP_RUNS=50,300   also save those runs' requests (request-50.json...), to see what a run sends.
 import fs from "node:fs";
 import path from "node:path";
@@ -56,6 +59,8 @@ const { values: args, positionals } = parseArgs({
     debounce: { type: "string", default: "3000" },
     "max-wait": { type: "string", default: "12000" },
     until: { type: "string" },
+    merge: { type: "string", default: "on" },
+    "final-merge": { type: "boolean", default: false },
   },
 });
 const file = positionals[0];
@@ -103,6 +108,17 @@ const roomInternals = session as unknown as {
   scheduleNotes: (itemId: string | null, delay: number) => void;
   refreshNotes: (itemId: string | null) => Promise<unknown>;
   addSegment: (speakerId: string, speakerName: string, kind: "speech" | "chat", text: string, ts: number) => Segment;
+  scheduleMerge: () => void;
+  mergeTopics: (final: boolean) => Promise<void>;
+  mergedAt: number;
+};
+
+// ---- placing the smaller topics, on the meeting's clock (the room's rule: at most every 2 minutes) ----
+const MERGE_EVERY_MS = 120_000;
+let mergeDue: number | null = null;
+roomInternals.scheduleMerge = () => {
+  if (args.merge === "off" || mergeDue !== null) return;
+  mergeDue = Math.max(sim, roomInternals.mergedAt + MERGE_EVERY_MS);
 };
 
 // ---- run cadence, on the meeting's clock (the same rule as the room's scheduleNotes) ----
@@ -171,7 +187,8 @@ messages.parse = async (params: any, opts?: any) => {
       lastCall = { usage: res.usage, model: params.model, ms: performance.now() - started, promptChars, estimated: false, stop: res.stop_reason };
       return res;
     }
-    const parsed = standIn();
+    // The stand-in places nothing: it only counts what the call would cost.
+    const parsed = isMergeCall(params) ? { merges: [] } : standIn();
     const outText = JSON.stringify(parsed);
     const usage = { ...cacheSim(blocks), output_tokens: tokens(outText) };
     // Modeled latency: a second to start, then about 200 tokens a second.
@@ -181,6 +198,8 @@ messages.parse = async (params: any, opts?: any) => {
     Date.now = simNow;
   }
 };
+
+const isMergeCall = (params: any) => typeof params.system === "string" && params.system.startsWith("You tidy the topic list");
 
 /** The request as the text blocks the model reads, in order: system and the output format first. */
 function promptBlocks(params: any): Array<{ text: string; cache: boolean }> {
@@ -290,19 +309,76 @@ interface Snapshot {
   /** When the board showed it: when the run finished. */
   at: number;
   itemId: string | null;
-  topics: Array<{ id: string; topic: string; outcome: string; lines: number[] }>;
+  topics: Array<{ id: string; topic: string; outcome: string; lines: number[]; mergedInto: string | null; group: string | null }>;
 }
 const snapshots: Snapshot[] = [];
+const snapTopics = (discussions: ReturnType<typeof db.meetingDiscussions>) =>
+  discussions.map((d) => ({
+    id: d.id,
+    topic: d.topic,
+    outcome: d.outcome,
+    lines: d.segmentIds.flatMap((id) => lineOf.get(id) ?? []),
+    mergedInto: d.mergedInto ?? null,
+    group: d.group ?? null,
+  }));
+const originalItem = (itemId: string | null) => [...itemIdOf].find(([, mine]) => mine === itemId)?.[0] ?? null;
+interface MergeRecord {
+  at: number;
+  ms: number;
+  model: string;
+  usage: Usage;
+  final: boolean;
+  main: number;
+  placed: number;
+  topics: number;
+}
+const merges: MergeRecord[] = [];
+/** Places the smaller topics now, as the room would, and records what the board shows once it answers. */
+async function placeTopics(final: boolean) {
+  lastCall = null;
+  const before = JSON.stringify(db.meetingDiscussions(meetingId).map((d) => [d.id, d.mergedInto, d.group]));
+  await roomInternals.mergeTopics(final);
+  const call = callJustMade();
+  const discussions = db.meetingDiscussions(meetingId);
+  if (call)
+    merges.push({
+      at: sim,
+      ms: Math.round(call.ms),
+      model: call.model,
+      usage: {
+        input_tokens: call.usage.input_tokens,
+        output_tokens: call.usage.output_tokens,
+        cache_read_input_tokens: call.usage.cache_read_input_tokens ?? 0,
+        cache_creation_input_tokens: call.usage.cache_creation_input_tokens ?? 0,
+      },
+      final,
+      main: discussions.filter((d) => !d.mergedInto && !d.group).length,
+      placed: discussions.filter((d) => d.mergedInto || d.group).length,
+      topics: discussions.length,
+    });
+  // It runs beside the notes runs: the board changes when it answers, and the talk doesn't wait.
+  if (JSON.stringify(discussions.map((d) => [d.id, d.mergedInto, d.group])) === before) return;
+  const at = sim + (call?.ms ?? 0);
+  for (const itemId of new Set(discussions.map((d) => d.itemId)))
+    snapshots.push({ at, itemId: originalItem(itemId), topics: snapTopics(discussions.filter((d) => d.itemId === itemId)) });
+}
 const started = performance.now();
 if (session.state().focusItemId !== (itemIdOf.get(lines[0]?.itemId ?? null) ?? null)) session.setFocus(itemIdOf.get(lines[0].itemId) ?? null, "Replay", "manual");
 
 let i = 0;
 let n = 0;
-while (i < lines.length || pending.size) {
+while (i < lines.length || pending.size || mergeDue !== null) {
   const next = [...pending].sort((a, b) => a[1].due - b[1].due)[0];
-  if (i < lines.length && (!next || lines[i].ts <= next[1].due)) {
+  const nextAt = Math.min(next?.[1].due ?? Infinity, mergeDue ?? Infinity);
+  if (i < lines.length && lines[i].ts <= nextAt) {
     sim = Math.max(sim, lines[i].ts);
     say(i++);
+    continue;
+  }
+  if (mergeDue !== null && mergeDue <= (next?.[1].due ?? Infinity)) {
+    sim = Math.max(sim, mergeDue);
+    mergeDue = null;
+    await placeTopics(false);
     continue;
   }
   const [itemId, { due }] = next;
@@ -345,24 +421,23 @@ while (i < lines.length || pending.size) {
     say(i++);
   }
   sim = Math.max(sim, end);
-  snapshots.push({
-    at: sim,
-    itemId: [...itemIdOf].find(([, mine]) => mine === itemId)?.[0] ?? null,
-    topics: discussions.map((d) => ({ id: d.id, topic: d.topic, outcome: d.outcome, lines: d.segmentIds.flatMap((id) => lineOf.get(id) ?? []) })),
-  });
+  snapshots.push({ at: sim, itemId: originalItem(itemId), topics: snapTopics(discussions) });
   if (n % 25 === 0 && call) {
     const mins = ((at - meeting.meeting.startedAt) / 60_000).toFixed(1);
     console.log(`[replay] run ${n} at ${mins} min: ${runWindow.length}/${itemLines} lines, ${discussions.length} topics, ${Math.round(ms)} ms`);
   }
 }
+if (args["final-merge"]) await placeTopics(true);
 Date.now = realNow;
+// The placing runs beside the notes runs, so its snapshots can land between theirs.
+snapshots.sort((a, b) => a.at - b.at);
 
 // ---- what it cost ----
 const PRICES: Record<string, { in: number; out: number; read: number; write: number }> = {
   "claude-haiku-5-5": { in: 0.1, out: 0.5, read: 0.01, write: 0.125 },
   "claude-sonnet-5-5": { in: 2, out: 10, read: 0.2, write: 2.5 },
 };
-const price = (r: RunRecord) => {
+const price = (r: { model: string; usage: Usage }) => {
   const p = PRICES[r.model];
   if (!p) return NaN;
   const u = r.usage;
@@ -390,11 +465,18 @@ const summary = {
   },
   costUsd: +sum(price).toFixed(4),
   costPerHourUsd: +((sum(price) / minutes) * 60).toFixed(4),
+  merge: {
+    calls: merges.length,
+    medianMs: merges.map((r) => r.ms).sort((a, b) => a - b)[Math.floor(merges.length / 2)] ?? 0,
+    costUsd: +merges.reduce((c, r) => c + price(r), 0).toFixed(4),
+    finalCostUsd: +merges.filter((r) => r.final).reduce((c, r) => c + price(r), 0).toFixed(4),
+  },
   estimated: !useModel,
   wallSeconds: Math.round((performance.now() - started) / 1000),
 };
 fs.writeFileSync(path.join(out, "runs.json"), JSON.stringify(runs, null, 1));
 fs.writeFileSync(path.join(out, "snapshots.json"), JSON.stringify(snapshots));
+fs.writeFileSync(path.join(out, "merges.json"), JSON.stringify(merges, null, 1));
 fs.writeFileSync(path.join(out, "summary.json"), JSON.stringify(summary, null, 2));
 console.log(JSON.stringify(summary, null, 2));
 process.exit(0);
