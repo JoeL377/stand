@@ -372,11 +372,15 @@ export function Stage(props: {
           </div>
         ) : (
           <TopicBoard
-            discussions={props.discussions.filter((d) => d.itemId === state.focusItemId)}
-            notes={props.notes.filter((n) => n.itemId === state.focusItemId)}
+            discussions={props.discussions}
+            notes={props.notes}
             segments={props.segments}
+            interims={interims}
             participants={state.participants}
+            items={state.items}
             focusItem={focusItem}
+            focusItemId={state.focusItemId}
+            meetingStartedAt={state.meetingStartedAt}
           />
         )}
       </div>
