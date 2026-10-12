@@ -132,11 +132,13 @@ roomInternals.scheduleNotes = (itemId, delay) => {
 // ---- what each run sent and got back ----
 const lineOf = new Map<string, number>(); // segment id -> index into lines
 let runWindow: Segment[] = [];
+let runNumbers: number[] = [];
 let runSettled: SettledTopic[] = [];
 let runCaptured: CapturedNote[] = [];
 const realNotesFor = agent.notesFor.bind(agent);
 agent.notesFor = (item, segments, earlier, captured, context, options) => {
   runWindow = segments;
+  runNumbers = options?.lineNumbers?.length === segments.length ? options.lineNumbers : segments.map((_, k) => k + 1);
   runSettled = options?.settled ?? [];
   runCaptured = captured ?? [];
   return realNotesFor(item, segments, earlier, captured, context, options);
@@ -256,11 +258,12 @@ function standIn() {
   runWindow.forEach((s, k) => {
     const label = labelOf[lineOf.get(s.id) ?? -1];
     if (!label) return;
-    groups.set(label, [...(groups.get(label) ?? []), k + 1]);
+    groups.set(label, [...(groups.get(label) ?? []), k]);
   });
-  const discussions = [...groups].map(([label, turns]) => {
+  const discussions = [...groups].map(([label, at]) => {
     const title = titleOf.get(label) ?? label;
-    const speakers = [...new Set(turns.map((t) => runWindow[t - 1].speakerName))];
+    const turns = at.map((k) => runNumbers[k]);
+    const speakers = [...new Set(at.map((k) => runWindow[k].speakerName))];
     const captured = runCaptured.filter((c) => c.text.startsWith(`${title}:`));
     return {
       topic: title,

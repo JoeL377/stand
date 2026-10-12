@@ -55,18 +55,51 @@ const noteReply = {
   },
 };
 
-test("the notes prompt keeps a long transcript in fixed chunks, cached up to the last whole one", () => {
-  const lines = (n: number) => Array.from({ length: n }, (_, i) => `[${i + 1}] Joe: line ${i + 1}`);
-  const early = notesPrompt("Item: General", lines(120), "Already captured: A1");
+test("the notes prompt keeps a long transcript in blocks by line number, cached up to the last one talk moved past", () => {
+  const line = (n: number) => ({ n, text: `[${n}] Joe: line ${n}` });
+  const lines = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => line(from + i));
+  const early = notesPrompt("Item: General", lines(1, 120), "Already captured: A1");
   assert.equal(early.length, 5); // head, 1-50, 51-100, 101-120, what changes run to run
   assert.equal(early[2].cache_control?.type, "ephemeral");
   assert.ok(early[2].text.endsWith("line 100"));
   assert.equal(early.filter((b) => b.cache_control).length, 1);
-  // Later in the meeting: everything up to the cached chunk is the same, so the next run reads it back.
-  const later = notesPrompt("Item: General", lines(149), "Already captured: A1, A2");
+  // Later in the meeting: everything up to the cached block is the same, so the next run reads it back.
+  const later = notesPrompt("Item: General", lines(1, 149), "Already captured: A1, A2");
   assert.deepEqual(later.slice(0, 3), early.slice(0, 3));
   // A short transcript is too small to cache.
-  assert.equal(notesPrompt("Item", lines(10), "").filter((b) => b.cache_control).length, 0);
+  assert.equal(notesPrompt("Item", lines(1, 10), "").filter((b) => b.cache_control).length, 0);
+});
+
+test("lines of a topic that went quiet drop out without renumbering the rest, so earlier blocks stay cached", () => {
+  const line = (n: number) => ({ n, text: `[${n}] Joe: line ${n}` });
+  const all = Array.from({ length: 160 }, (_, i) => line(i + 1));
+  const before = notesPrompt("Item: General", all, "");
+  // Lines 60-80 settle: blocks 1-50 and the head are untouched, and later lines keep their numbers.
+  const after = notesPrompt("Item: General", all.filter((l) => l.n < 60 || l.n > 80), "Topics that have gone quiet: ...");
+  assert.deepEqual(after.slice(0, 2).map((b) => b.text), before.slice(0, 2).map((b) => b.text));
+  assert.match(after[3].text, /^\[101\] Joe: line 101/);
+  assert.ok(after[3].cache_control, "the last block talk moved past");
+  // A block left empty is skipped.
+  const gone = notesPrompt("Item: General", all.filter((l) => l.n > 100), "");
+  assert.match(gone[1].text, /^\[101\]/);
+});
+
+test("a notes run lists the last run's topics after the transcript, and reads lines back by their numbers", async () => {
+  const { agent, calls } = withApi(() => noteReply);
+  const segments = said(120).slice(30);
+  const draft = await agent.notesFor(null, segments, [], [], undefined, {
+    lineNumbers: segments.map((_, i) => i + 31),
+    lastTopics: [
+      { topic: "Keep button", lines: [31, 32, 33, 40] },
+      { topic: "Settled already", lines: [5, 6] },
+    ],
+  });
+  const blocks = calls[0].body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
+  assert.match(blocks[1].text, /^\[31\] /);
+  assert.match(blocks.at(-1)!.text, /Topics so far.*"Keep button": lines 31-33, 40/s);
+  assert.doesNotMatch(blocks.at(-1)!.text, /Settled already/);
+  // The reply's lines 1 and 2 weren't sent; its line 70 is the 40th line sent.
+  assert.deepEqual(draft.discussions[0].segmentIndexes, [39]);
 });
 
 test("a notes run has room to think and to list a long meeting's lines, and a time limit", async () => {
@@ -128,7 +161,7 @@ test("a rate limit or an empty account says so, so notes can wait or ask for a t
   await assert.rejects(other.agent.notesFor(null, said(3)), (err) => !(err instanceof NotesTrouble));
 });
 
-test("settled topics go before the transcript as lines with their notes, and the model can go back to one", async () => {
+test("settled topics go after the transcript as lines with their notes, and the model can go back to one", async () => {
   const { agent, calls } = withApi(() => ({
     ...noteReply,
     parsed_output: {
@@ -140,7 +173,8 @@ test("settled topics go before the transcript as lines with their notes, and the
   const draft = await agent.notesFor(null, said(3), [], [], {}, { settled });
   const { body, opts } = calls[0];
   const blocks = body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
-  assert.match(blocks[0].text, /gone quiet.*\n- T1 \(action\) Conflict page\n  To do: Make Keep stand out \(Joe\)\n\nWhat was said since/s);
+  assert.match(blocks.at(-1)!.text, /gone quiet.*\n- T1 \(action\) Conflict page\n  To do: Make Keep stand out \(Joe\)/s);
+  assert.doesNotMatch(blocks[0].text, /gone quiet/, "the head stays the same run to run, for the cache");
   assert.deepEqual(draft.discussions.map((d) => d.picksUp), ["T1", null], "an unknown key is ignored");
   assert.equal(body.output_config?.effort, "low");
   assert.equal(opts?.timeout, 120_000);
@@ -163,8 +197,8 @@ test("a long topic still going shows where it stood, positions and all, and is c
   ];
   const draft = await agent.notesFor(null, said(3), [], [], {}, { settled });
   const blocks = calls[0].body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
-  assert.match(blocks[0].text, /still going.*\n- T1 \(open\) Pricing\n  Huy: Per seat is simplest\n  Open: Per seat or per space\?\n\nWhat was said since/s);
-  assert.doesNotMatch(blocks[0].text, /gone quiet/);
+  assert.match(blocks.at(-1)!.text, /still going.*\n- T1 \(open\) Pricing\n  Huy: Per seat is simplest\n  Open: Per seat or per space\?/s);
+  assert.doesNotMatch(blocks.at(-1)!.text, /gone quiet/);
   assert.equal(draft.discussions[0].picksUp, "T1");
 });
 

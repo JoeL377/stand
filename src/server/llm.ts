@@ -44,6 +44,11 @@ export interface NotesOptions {
   settled?: SettledTopic[];
   /** The run as the meeting ends: the whole transcript, read more carefully, for the recap. */
   tidy?: boolean;
+  /** Each line's number, by its place in the item's whole transcript (1, 2, 3... when not given),
+   *  so a line keeps its number when lines before it drop out (see notesPrompt). */
+  lineNumbers?: number[];
+  /** The topics the last run put the lines in, by those numbers, so this run keeps them. */
+  lastTopics?: Array<{ topic: string; lines: number[] }>;
 }
 
 /** Discussions of the same item in earlier meetings, so a new one can link back. */
@@ -346,18 +351,41 @@ export function notesTrouble(err: unknown): NotesTrouble | null {
   return null;
 }
 
-/** The notes prompt as blocks. Every run sends the item's whole transcript, which only grows,
- *  so it goes in fixed chunks of lines with the last whole chunk marked for the prompt cache:
- *  the next run reads all of that back at a tenth of the price, and it doesn't count against
- *  the account's per-minute input limit. What changes run to run comes after it. */
-export function notesPrompt(head: string, lines: string[], tail: string): Anthropic.Beta.BetaTextBlockParam[] {
-  const whole = lines.length - (lines.length % NOTES_CHUNK_LINES);
+/** The notes prompt as blocks. The transcript goes in blocks by line number (1-50, 51-100...),
+ *  and a line is numbered by its place in the item's whole transcript, so a block reads the same
+ *  run after run: the next run reads it back from the prompt cache at a tenth of the price, and
+ *  it doesn't count against the account's per-minute input limit. A line dropping out (its topic
+ *  settled) changes only its own block and those after it. The last block talk has moved past is
+ *  marked for the cache. Everything that changes run to run (the topics so far, settled topics,
+ *  notes captured) comes after the transcript, so it never breaks the cached part. */
+export function notesPrompt(head: string, lines: Array<{ n: number; text: string }>, tail: string): Anthropic.Beta.BetaTextBlockParam[] {
+  const blockOf = (n: number) => Math.floor((n - 1) / NOTES_CHUNK_LINES);
+  const filling = blockOf(lines.at(-1)?.n ?? 1);
+  const byBlock = new Map<number, string[]>();
+  for (const l of lines) byBlock.set(blockOf(l.n), [...(byBlock.get(blockOf(l.n)) ?? []), l.text]);
   const blocks: Anthropic.Beta.BetaTextBlockParam[] = [{ type: "text", text: head }];
-  for (let i = 0; i < whole; i += NOTES_CHUNK_LINES) blocks.push({ type: "text", text: lines.slice(i, i + NOTES_CHUNK_LINES).join("\n") });
-  if (whole) blocks[blocks.length - 1].cache_control = { type: "ephemeral" };
-  if (whole < lines.length) blocks.push({ type: "text", text: lines.slice(whole).join("\n") });
+  let sealed: Anthropic.Beta.BetaTextBlockParam | null = null;
+  for (const [b, text] of [...byBlock].sort((x, y) => x[0] - y[0])) {
+    const block: Anthropic.Beta.BetaTextBlockParam = { type: "text", text: text.join("\n") };
+    if (b < filling) sealed = block;
+    blocks.push(block);
+  }
+  if (sealed) sealed.cache_control = { type: "ephemeral" };
   if (tail.trim()) blocks.push({ type: "text", text: tail.trim() });
   return blocks;
+}
+
+/** 3, 4, 5, 9 -> "3-5, 9". */
+export function rangesOf(nums: number[]): string {
+  const sorted = [...new Set(nums)].sort((a, b) => a - b);
+  const out: string[] = [];
+  for (let k = 0; k < sorted.length; k++) {
+    let j = k;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    out.push(j > k ? `${sorted[k]}-${sorted[j]}` : `${sorted[k]}`);
+    k = j;
+  }
+  return out.join(", ");
 }
 
 export class ClaudeAgent implements Agent {
@@ -403,10 +431,12 @@ export class ClaudeAgent implements Agent {
     earlier: EarlierDiscussion[] = [],
     captured: CapturedNote[] = [],
     context: NotesContext = {},
-    { settled = [], tidy = false }: NotesOptions = {},
+    { settled = [], tidy = false, lineNumbers, lastTopics = [] }: NotesOptions = {},
   ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
-    const numbered = segments.map((s, i) => `[${i + 1}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`);
+    const numbers = lineNumbers?.length === segments.length ? lineNumbers : segments.map((_, i) => i + 1);
+    const indexOf = new Map(numbers.map((n, i) => [n, i]));
+    const numbered = segments.map((s, i) => ({ n: numbers[i], text: `[${numbers[i]}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}` }));
     const before = earlier.length
       ? `\n\nDiscussions of this item in earlier meetings (newest first):\n${earlier
           .slice(0, 15)
@@ -427,13 +457,19 @@ export class ClaudeAgent implements Agent {
     const goingOnes = settled.filter((t) => t.going);
     const quiet = `${
       quietOnes.length
-        ? `\n\nTopics from earlier in this meeting that have gone quiet. Their lines aren't repeated below, and their notes are kept as they are:\n${topicLines(quietOnes)}`
+        ? `\n\nTopics from earlier in this meeting that have gone quiet. Their lines aren't in the transcript above, and their notes are kept as they are:\n${topicLines(quietOnes)}`
         : ""
     }${
       goingOnes.length
-        ? `\n\nTopics still going that started a while ago. Their earlier talk isn't repeated below; this is where they stood:\n${topicLines(goingOnes)}`
+        ? `\n\nTopics still going that started a while ago. Their earlier talk isn't in the transcript above; this is where they stood:\n${topicLines(goingOnes)}`
         : ""
     }`;
+    const soFar = lastTopics.filter((t) => t.lines.some((n) => indexOf.has(n)));
+    const lastRun = soFar.length
+      ? `\n\nTopics so far, as the last run grouped the lines above. Keep each one's title word for word, and its lines under it, while the talk is still about the same thing; put the new lines where they belong:\n${soFar
+          .map((t) => `- "${t.topic}": lines ${rangesOf(t.lines.filter((n) => indexOf.has(n)))}`)
+          .join("\n")}`
+      : "";
     const already = captured.length
       ? `\n\nAlready captured from earlier in this meeting (keep every one; reword only if the talk since made it clearer):\n${captured
           .map((c) => `- ${c.key} ${c.kind === "action" ? "action item" : "decision"}: ${c.text}${c.owner ? ` (owner: ${c.owner})` : ""}`)
@@ -449,15 +485,15 @@ export class ClaudeAgent implements Agent {
     const out = await this.parse(
       NotesSchema,
       notesPrompt(
-        `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${quiet}
+        `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}
 
-${quiet ? "What was said since, while this item was in focus" : "What was said while this item was in focus"} (speech transcript and in-room chat, in order):`,
+What was said while this item was in focus (speech transcript and in-room chat, in order, numbered through the item; in a long meeting, lines of topics that went quiet are left out):`,
         numbered,
-        `${already}${shown}${asked(context.instructions)}`,
+        `${lastRun}${quiet}${already}${shown}${asked(context.instructions)}`,
       ),
       `You take notes in a team meeting. You are given what was said while one agenda item (a ticket, task or slide) was in focus.
 
-Group the talk into discussions: a discussion is a stretch of back-and-forth about one question or subject. Most items have one to three. A status update with no back-and-forth is one discussion with outcome "info". Every line belongs to at most one discussion; skip small talk.
+Group the talk into discussions: a discussion is a stretch of back-and-forth about one question or subject. Most items have one to three. A status update with no back-and-forth is one discussion with outcome "info". Every line belongs to at most one discussion; skip small talk. A short aside of a line or two stays in the discussion around it rather than starting one of its own.
 
 For each discussion, give each participant's position in one short line, how it ended, and the decisions actually made, the action items with their owner (the speaker's name; null if nobody took it), and the questions left open. Phrase action items as tasks, not quotes. If it picks up a discussion from an earlier meeting in the list, give that id.
 
@@ -492,7 +528,7 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
         topic: d.topic.trim().slice(0, 120),
         positions: d.positions.filter((p) => p.position.trim()),
         outcome: d.outcome,
-        segmentIndexes: [...new Set(turnNumbers(d.turns).map((n) => n - 1).filter((n) => n >= 0 && n < segments.length))].sort((a, b) => a - b),
+        segmentIndexes: [...new Set(turnNumbers(d.turns).flatMap((n) => indexOf.get(n) ?? []))].sort((a, b) => a - b),
         continuesId: d.continues && known.has(d.continues) ? d.continues : null,
         picksUp: d.picks_up && keys.has(d.picks_up) ? d.picks_up : null,
       })),

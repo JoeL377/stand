@@ -1064,14 +1064,17 @@ export class RoomSession implements SpeechSink {
       const item = itemId ? this.db.getItem(itemId) : null;
       // As the meeting ends, the last run reads the whole meeting again to tidy it up for the recap.
       const tidy = this.ended;
+      const itemTopics = this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId);
       const { settled, folded, window } = tidy
         ? { settled: [], folded: [], window: segments }
-        : settle(
-            segments,
-            this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId),
-            startedAt,
-            this.notesReadUpTo.get(itemId),
-          );
+        : settle(segments, itemTopics, startedAt, this.notesReadUpTo.get(itemId));
+      // Lines are numbered through the item, so a line keeps its number as others drop out.
+      const lineOf = new Map(segments.map((s, i) => [s.id, i + 1]));
+      const lineNumbers = window.map((s) => lineOf.get(s.id)!);
+      const out = new Set([...settled, ...folded].map((d) => d.id));
+      const lastTopics = tidy
+        ? []
+        : itemTopics.filter((d) => !out.has(d.id)).map((d) => ({ topic: d.topic, lines: d.segmentIds.flatMap((id) => lineOf.get(id) ?? []) }));
       try {
         const settledIds = new Set(settled.map((d) => d.id));
         const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
@@ -1102,7 +1105,7 @@ export class RoomSession implements SpeechSink {
             ? current
             : this.saveNotes(
                 itemId,
-                await this.agent.notesFor(item, window, earlier, keys, { instructions, screens }, { settled: topics, tidy }),
+                await this.agent.notesFor(item, window, earlier, keys, { instructions, screens }, { settled: topics, tidy, lineNumbers, lastTopics }),
                 segments,
                 window,
                 settled,
