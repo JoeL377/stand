@@ -33,10 +33,12 @@ export const config = {
   notesTurnsAsRanges: env("NOTES_TURNS") === "ranges",
   notesThinking: env("NOTES_THINKING") !== "off",
   notesLastTopics: env("NOTES_LAST_TOPICS") === "on",
-  /** NOTES_LAYOUT=classic: the notes prompt as it was before 2026-10-12. Lines numbered from 1 in
-   *  each run, and topics that went quiet listed before the talk. The stable layout reuses far more
-   *  of the prompt cache, but on Haiku new topics showed about 20 s later (Conxt replay). */
-  notesClassicLayout: env("NOTES_LAYOUT") === "classic",
+  /** NOTES_LAYOUT=stable: lines numbered through the item and topics that went quiet listed after
+   *  the talk, so far more of the prompt comes back from the cache. In the Conxt replays on Haiku
+   *  it cost about $0.08 a meeting hour less, but picked the right current topic 5 to 7 points less
+   *  often, so the layout where each run numbers its lines from 1 and lists quiet topics first
+   *  stays the default. */
+  notesStableLayout: env("NOTES_LAYOUT") === "stable",
   linearKey: env("LINEAR_API_KEY"),
   google: {
     clientId: env("GOOGLE_CLIENT_ID"),

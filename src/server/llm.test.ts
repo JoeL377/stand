@@ -84,9 +84,7 @@ test("lines of a topic that went quiet drop out without renumbering the rest, so
   assert.match(gone[1].text, /^\[101\]/);
 });
 
-test("NOTES_LAYOUT=classic: lines numbered from 1 in each run, and quiet topics before the talk", async (t) => {
-  config.notesClassicLayout = true;
-  t.after(() => (config.notesClassicLayout = false));
+test("by default each run numbers its lines from 1 and lists quiet topics before the talk", async () => {
   const { agent, calls } = withApi(() => noteReply);
   const segments = said(120).slice(30);
   const settled = [{ key: "T1", topic: "Conflict page", outcome: "action" as const, notes: [] }];
@@ -106,12 +104,17 @@ test("by default a notes run isn't shown the last run's topics", async () => {
   assert.doesNotMatch(JSON.stringify(calls[0].body.system), /short aside/);
 });
 
-test("a notes run lists the last run's topics after the transcript (NOTES_LAST_TOPICS=on), and reads lines back by their numbers", async (t) => {
+test("NOTES_LAYOUT=stable, NOTES_LAST_TOPICS=on: lines numbered through the item, quiet topics and the last run's topics after the talk", async (t) => {
   config.notesLastTopics = true;
-  t.after(() => (config.notesLastTopics = false));
+  config.notesStableLayout = true;
+  t.after(() => {
+    config.notesLastTopics = false;
+    config.notesStableLayout = false;
+  });
   const { agent, calls } = withApi(() => noteReply);
   const segments = said(120).slice(30);
   const draft = await agent.notesFor(null, segments, [], [], undefined, {
+    settled: [{ key: "T1", topic: "Conflict page", outcome: "action" as const, notes: [] }],
     lineNumbers: segments.map((_, i) => i + 31),
     lastTopics: [
       { topic: "Keep button", lines: [31, 32, 33, 40] },
@@ -122,6 +125,8 @@ test("a notes run lists the last run's topics after the transcript (NOTES_LAST_T
   assert.match(blocks[1].text, /^\[31\] /);
   assert.match(blocks.at(-1)!.text, /Topics so far.*"Keep button": lines 31-33, 40/s);
   assert.doesNotMatch(blocks.at(-1)!.text, /Settled already/);
+  assert.match(blocks.at(-1)!.text, /gone quiet. Their lines aren't in the transcript above/);
+  assert.doesNotMatch(blocks[0].text, /gone quiet/, "the head stays the same run to run, for the cache");
   // The reply's lines 1 and 2 weren't sent; its line 70 is the 40th line sent.
   assert.deepEqual(draft.discussions[0].segmentIndexes, [39]);
 });
@@ -185,7 +190,7 @@ test("a rate limit or an empty account says so, so notes can wait or ask for a t
   await assert.rejects(other.agent.notesFor(null, said(3)), (err) => !(err instanceof NotesTrouble));
 });
 
-test("settled topics go after the transcript as lines with their notes, and the model can go back to one", async () => {
+test("settled topics go before the transcript as lines with their notes, and the model can go back to one", async () => {
   const { agent, calls } = withApi(() => ({
     ...noteReply,
     parsed_output: {
@@ -197,8 +202,7 @@ test("settled topics go after the transcript as lines with their notes, and the 
   const draft = await agent.notesFor(null, said(3), [], [], {}, { settled });
   const { body, opts } = calls[0];
   const blocks = body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
-  assert.match(blocks.at(-1)!.text, /gone quiet.*\n- T1 \(action\) Conflict page\n  To do: Make Keep stand out \(Joe\)/s);
-  assert.doesNotMatch(blocks[0].text, /gone quiet/, "the head stays the same run to run, for the cache");
+  assert.match(blocks[0].text, /gone quiet.*\n- T1 \(action\) Conflict page\n  To do: Make Keep stand out \(Joe\)\n\nWhat was said since/s);
   assert.deepEqual(draft.discussions.map((d) => d.picksUp), ["T1", null], "an unknown key is ignored");
   assert.equal(body.output_config?.effort, "low");
   assert.equal(opts?.timeout, 120_000);
@@ -221,8 +225,8 @@ test("a long topic still going shows where it stood, positions and all, and is c
   ];
   const draft = await agent.notesFor(null, said(3), [], [], {}, { settled });
   const blocks = calls[0].body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
-  assert.match(blocks.at(-1)!.text, /still going.*\n- T1 \(open\) Pricing\n  Huy: Per seat is simplest\n  Open: Per seat or per space\?/s);
-  assert.doesNotMatch(blocks.at(-1)!.text, /gone quiet/);
+  assert.match(blocks[0].text, /still going.*\n- T1 \(open\) Pricing\n  Huy: Per seat is simplest\n  Open: Per seat or per space\?\n\nWhat was said since/s);
+  assert.doesNotMatch(blocks[0].text, /gone quiet/);
   assert.equal(draft.discussions[0].picksUp, "T1");
 });
 

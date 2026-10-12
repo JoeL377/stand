@@ -25,7 +25,7 @@
 //                    2 minutes of the meeting, as the room does. Each call is in merges.json.
 // --final-merge      once the talk ends, place them once more on the tidy model, as a meeting's end does.
 // REPLAY_DUMP_RUNS=50,300   also save those runs' requests (request-50.json...), to see what a run sends.
-// NOTES_LAYOUT=classic, NOTES_LAST_TOPICS=on   the notes prompt experiments in server/config.ts.
+// NOTES_LAYOUT=stable, NOTES_LAST_TOPICS=on   the notes prompt experiments in server/config.ts.
 // REPLAY_STANDIN_DROP=0.1   the stand-in leaves out that share of the lines it lists, as Haiku does now and then.
 import fs from "node:fs";
 import path from "node:path";
@@ -140,7 +140,7 @@ let runCaptured: CapturedNote[] = [];
 const realNotesFor = agent.notesFor.bind(agent);
 agent.notesFor = (item, segments, earlier, captured, context, options) => {
   runWindow = segments;
-  runNumbers = !config.notesClassicLayout && options?.lineNumbers?.length === segments.length ? options.lineNumbers : segments.map((_, k) => k + 1);
+  runNumbers = config.notesStableLayout && options?.lineNumbers?.length === segments.length ? options.lineNumbers : segments.map((_, k) => k + 1);
   runSettled = options?.settled ?? [];
   runCaptured = captured ?? [];
   return realNotesFor(item, segments, earlier, captured, context, options);

@@ -434,7 +434,7 @@ export class ClaudeAgent implements Agent {
     { settled = [], tidy = false, lineNumbers, lastTopics = [] }: NotesOptions = {},
   ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
-    const classic = config.notesClassicLayout;
+    const classic = !config.notesStableLayout;
     const numbers = !classic && lineNumbers?.length === segments.length ? lineNumbers : segments.map((_, i) => i + 1);
     const indexOf = new Map(numbers.map((n, i) => [n, i]));
     const numbered = segments.map((s, i) => ({ n: numbers[i], text: `[${numbers[i]}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}` }));
