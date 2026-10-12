@@ -1907,7 +1907,11 @@ a.sh-pill:hover { text-decoration: none; }
 .rc-ch-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: 0.7; }
 .rc-ch-dot.decided { background: var(--ok); opacity: 1; } .rc-ch-dot.action { background: var(--accent); opacity: 1; } .rc-ch-dot.open { background: var(--warn); opacity: 1; }
 .rc-ch-mins { flex: none; margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.rc-ch-body { margin: 2px 0 14px 62px; padding: 16px 20px 12px; border-radius: 10px; background: var(--panel-2); display: flex; flex-direction: column; gap: 18px; }
+.rc-ch[open] { margin: 10px -4px; padding: 0; border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); }
+.rc-ch[open] + .rc-ch, .rc-ch[open] + .rc-asides { border-top-color: transparent; }
+.rc-ch[open] > summary { margin: 0; padding: 12px 16px; border-radius: 12px 12px 0 0; }
+.rc-ch[open] > summary .rc-ch-title { font-weight: 600; }
+.rc-ch-body { margin: 0 16px; padding: 16px 0 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 18px; }
 .rc-ch-crux { margin: 0; font-size: 15px; line-height: 1.55; text-wrap: pretty; }
 .rc-ch-crux .agent-mark { font-size: 13px; }
 .rc-ch-sub h4 { margin: 0 0 8px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
@@ -1930,7 +1934,8 @@ a.sh-pill:hover { text-decoration: none; }
 .rc-next-fold[open] > summary { margin-bottom: 8px; }
 @media (max-width: 560px) {
   .rc-chip { display: none; }
-  .rc-ch-body { margin-left: 0; padding: 14px 14px 10px; }
+  .rc-ch-body { margin: 0 12px; }
+  .rc-ch[open] > summary { padding: 10px 12px; }
 }
 .rc-stretch-tip.start { left: 0; transform: none; }
 .rc-stretch-tip.end { left: auto; right: 0; transform: none; }
