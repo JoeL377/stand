@@ -5,6 +5,7 @@ import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
   User,
+  ChapterRecap,
   ClientMessage,
   Discussion,
   Item,
@@ -17,7 +18,8 @@ import type {
 } from "../shared/protocol.ts";
 import { capabilities } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
-import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
+import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
+import { meetingChapters } from "../shared/chapters.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
@@ -38,6 +40,10 @@ const FRAME_MIN_INTERVAL_MS = 4_000;
 const FRAME_BACKS_MS = 180_000;
 /** The recap sees at most this many snaps, and this many bytes of them, so the request stays within the API's limits. */
 const RECAP_MAX_SNAPS = 20;
+/** A chapter this long gets moments in the recap, read from its remarks. */
+const MOMENTS_MIN_MINUTES = 10;
+/** Remarks the recap reads across all long chapters: about two hours of talk. */
+const RECAP_MAX_LINES = 2500;
 const RECAP_MAX_BYTES = 18 * 1024 * 1024;
 /** Notes for the item in focus refresh this long after the last new remark. */
 const NOTES_DEBOUNCE_MS = 3_000;
@@ -1315,6 +1321,7 @@ export class RoomSession implements SpeechSink {
     let summary = "";
     let synthesizing: Promise<string | null> = Promise.resolve(null);
     let placing: Promise<void> = Promise.resolve();
+    let chapterNotes: ChapterRecap[] = [];
     try {
       const segments = this.db.meetingSegments(this.meetingId);
       const itemIds = [...new Set(segments.map((s) => s.itemId))];
@@ -1322,7 +1329,7 @@ export class RoomSession implements SpeechSink {
       for (const id of itemIds) {
         perItem.push({ item: id ? this.db.getItem(id) : null, notes: await this.refreshNotes(id) });
       }
-      // The tidy runs rewrote the topics: place the smaller ones again for the recap page, beside the recap.
+      // The tidy runs rewrote the topics: place the smaller ones again, then write the recap on those chapters.
       placing = this.mergeTopics(true);
       // The recap (with the snaps in view), and the Synthesis when the space has instructions for one, side by side.
       const room = this.db.getRoom(this.roomId);
@@ -1340,8 +1347,10 @@ export class RoomSession implements SpeechSink {
           });
       }
       try {
+        await placing;
         const recap = await this.agent.recapMeeting(this.recapInput(perItem));
         summary = recap.summary;
+        chapterNotes = recap.chapters ?? [];
         const kept = new Map(this.db.meetingSnaps(this.meetingId).map((p) => [p.id, p]));
         for (const place of recap.snaps) {
           const row = kept.get(place.id);
@@ -1358,7 +1367,7 @@ export class RoomSession implements SpeechSink {
     } finally {
       // Whatever the agent managed, the meeting ends and the room is free again.
       await placing;
-      this.db.endMeeting(this.meetingId, summary || null, await synthesizing, endedAt);
+      this.db.endMeeting(this.meetingId, summary || null, await synthesizing, endedAt, chapterNotes);
       this.polisher?.schedule(this.roomId, 0);
       this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
       for (const ws of this.conns.keys()) ws.close();
@@ -1401,7 +1410,32 @@ export class RoomSession implements SpeechSink {
       });
     }
     snaps.sort((a, b) => a.at - b.at);
-    return { items, snaps };
+    // The chapters as the recap page will show them. Long ones carry their remarks so the recap can pick out moments.
+    let budget = RECAP_MAX_LINES;
+    const byId = new Map(segments.map((s) => [s.id, s]));
+    const chapters: RecapChapter[] = meetingChapters(discussions, segments).map((c) => {
+      const head = discussions.find((d) => d.id === (c.headId ?? c.topicIds[0]));
+      const long = c.minutes >= MOMENTS_MIN_MINUTES && budget > 0;
+      const lines = long
+        ? c.segmentIds.slice(0, budget).flatMap((id) => {
+            const s = byId.get(id);
+            return s ? [{ segmentId: s.id, ts: s.ts, speaker: s.speakerName, text: s.text }] : [];
+          })
+        : [];
+      budget -= lines.length;
+      return {
+        key: c.key,
+        title: c.title,
+        item: perItem.find((p) => (p.item?.id ?? null) === c.itemId)?.item ?? (c.itemId ? this.db.getItem(c.itemId) : null),
+        start: c.start,
+        minutes: c.minutes,
+        outcome: c.outcome,
+        topicIds: c.topicIds,
+        positions: head?.positions ?? [],
+        lines,
+      };
+    });
+    return { items, snaps, chapters, startedAt: this.db.getMeeting(this.meetingId)?.startedAt };
   }
 
   /** For the demo script: segments currently in this meeting. */

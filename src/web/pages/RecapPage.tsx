@@ -4,6 +4,8 @@ import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
+import { meetingChapters } from "../../shared/chapters.ts";
+import { ChapterBar, ChapterChip, ChapterList, Face, isLong } from "../RecapChapters.tsx";
 import { api, request, type RoomInfo } from "../api.ts";
 import { errorToast, toast } from "../Toasts.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
@@ -19,6 +21,8 @@ export function RecapPage() {
   const [copied, setCopied] = useState(false);
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [upNext, setUpNext] = useState<UpNext | null>(null);
+  // Chapters someone opened or closed; the rest follow the default (long ones open).
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -55,6 +59,7 @@ export function RecapPage() {
       </div>
     );
   if (!data) return <div className="loading">Loading…</div>;
+
   const people = [...new Set(data.items.flatMap((g) => g.segments.map((s) => s.speakerName)))];
   const actions = data.items.flatMap((g) => g.notes.filter((n) => n.kind === "action"));
   const items = [...(room?.items ?? []), ...data.items.flatMap((g) => (g.item ? [g.item] : []))];
@@ -85,10 +90,6 @@ export function RecapPage() {
   const all = groups.flatMap((g) => g.notes);
   const decided = all.filter((n) => n.kind === "decision");
   const questions = all.filter((n) => n.kind === "question");
-  const topicCount = groups.reduce((k, g) => k + (g.discussions?.length ?? 0), 0);
-  // Only label where something came from when there was more than one place it could be.
-  const many = groups.length > 1;
-  const src = many ? source : undefined;
   const open = actions.filter((n) => !n.doneAt).length;
   // Each screenshot has one home: under the to-do, decision or question it
   // backs; otherwise under the topic it was discussed in; otherwise its item.
@@ -97,8 +98,39 @@ export function RecapPage() {
   const onNote = (id: string) => snaps.filter((p) => p.noteId === id);
   const unplaced = (p: Snap) => !(p.noteId && noteIds.has(p.noteId));
   const onTopic = (id: string) => snaps.filter((p) => unplaced(p) && p.discussionId === id);
-  const topicIds = new Set(groups.flatMap((g) => (g.discussions ?? []).map((d) => d.id)));
   const shots = (n: Note) => <SnapFigures snaps={onNote(n.id)} />;
+
+  // The meeting's chapters, as the chapter bar showed them, and what the recap wrote about each.
+  const discussions = groups.flatMap((g) => g.discussions ?? []);
+  const segments = groups.flatMap((g) => g.segments).sort((a, b) => a.ts - b.ts);
+  const lastTs = segments.at(-1)?.ts ?? data.startedAt;
+  const endAt = data.endedAt ?? lastTs;
+  const chapters = meetingChapters(discussions, segments, endAt);
+  const written = new Map((data.chapters ?? []).map((c) => [c.key, c]));
+  const chapterIndex = new Map(chapters.flatMap((c, i) => c.topicIds.map((id) => [id, i] as const)));
+  const chipFor = (n: Note) => {
+    const i = n.discussionId ? chapterIndex.get(n.discussionId) : undefined;
+    return i === undefined ? null : <ChapterChip c={chapters[i]} i={i} startedAt={data.startedAt} />;
+  };
+  // Topics no chapter shows (notes carried in, nothing said this meeting) keep the old row.
+  const inChapters = new Set(chapters.flatMap((c) => c.topicIds));
+  const leftover = groups.flatMap((g) => (g.discussions ?? []).filter((d) => !inChapters.has(d.id)).map((d) => ({ d, g })));
+  const looseSnaps = snaps.filter((p) => unplaced(p) && !(p.discussionId && discussions.some((d) => d.id === p.discussionId)));
+  const isOpen = (key: string) => toggled[key] ?? isLong(chapters.find((c) => c.key === key)!);
+  const openSet = new Set(chapters.filter((c) => isOpen(c.key)).map((c) => c.key));
+  const jumpTo = (i: number) => setToggled((t) => ({ ...t, [chapters[i].key]: true }));
+  // People in the colors the transcript gives them.
+  const speakerId = new Map(segments.map((s) => [s.speakerName, s.speakerId]));
+  const colorOf = (name: string) => colorFor(speakerId.get(name) ?? name);
+  const owner = (n: Note) =>
+    n.owner ? (
+      <Face name={n.owner} color={colorOf(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · done by ${n.doneBy}` : ""}`} />
+    ) : (
+      <span className="rc-face none" title="Unassigned">
+        ?
+      </span>
+    );
+  const nextCount = upNext && upNext.since === data.startedAt ? upNext.suggestions.length + upNext.parked.length : 0;
 
   return (
     <div className="doc recap">
@@ -109,13 +141,23 @@ export function RecapPage() {
         <h1>
           {data.roomName} · {fmtDate(data.startedAt)}
         </h1>
-        <p className="muted">
+        <p className="muted rc-meta">
           {fmtTime(data.startedAt)}
           {data.endedAt ? ` · ${fmtDuration(data.endedAt - data.startedAt)}` : " · in progress"}
-          {people.length > 0 && ` · ${people.join(", ")}`}
+          {people.length > 0 && (
+            <>
+              {" · "}
+              <span className="rc-ch-faces">
+                {people.map((p) => (
+                  <Face key={p} name={p} color={colorOf(p)} size={18} />
+                ))}
+              </span>{" "}
+              {people.map((p) => p.split(/\s+/)[0]).join(", ")}
+            </>
+          )}
         </p>
         {data.summary && <p className="lede">{data.summary}</p>}
-        {(actions.length > 0 || decided.length > 0 || questions.length > 0 || topicCount > 0) && (
+        {(actions.length > 0 || decided.length > 0 || questions.length > 0 || chapters.length > 0) && (
           <div className="glance">
             {actions.length > 0 && (
               <a href="#todo" className="glance-chip todo">
@@ -132,16 +174,15 @@ export function RecapPage() {
                 <QuestionIcon /> <b>{questions.length}</b> open
               </a>
             )}
-            {topicCount > 0 && (
-              <a href="#topics" className="glance-chip topic">
-                <TopicIcon /> <b>{topicCount}</b> topic{topicCount === 1 ? "" : "s"}
+            {chapters.length > 0 && (
+              <a href="#chapters" className="glance-chip topic">
+                <TopicIcon /> <b>{chapters.length}</b> chapter{chapters.length === 1 ? "" : "s"}
               </a>
             )}
           </div>
         )}
+        {chapters.length > 1 && <ChapterBar chapters={chapters} from={data.startedAt} to={Math.max(endAt, lastTs)} onPick={jumpTo} />}
       </header>
-
-      <ConxtPanel roomId={data.roomId} meetingId={data.meetingId} />
 
       {groups.length === 0 && <p className="muted">Nothing was recorded in this meeting.</p>}
 
@@ -162,7 +203,18 @@ export function RecapPage() {
           <h2 className="rc-h todo">
             <TodoIcon /> To do
           </h2>
-          <FollowUpList notes={actions} onToggle={saveFollowUp(data.roomId)} source={src} below={shots} />
+          <FollowUpList
+            notes={actions}
+            onToggle={saveFollowUp(data.roomId)}
+            below={shots}
+            oneLine
+            tail={(n) => (
+              <>
+                {owner(n)}
+                {chipFor(n)}
+              </>
+            )}
+          />
         </section>
       )}
       {decided.length > 0 && (
@@ -170,7 +222,7 @@ export function RecapPage() {
           <h2 className="rc-h decided">
             <DecidedIcon /> Decided
           </h2>
-          <PointList notes={decided} kind="decided" source={src} below={shots} />
+          <PointList notes={decided} kind="decided" chip={chipFor} below={shots} />
         </section>
       )}
       {questions.length > 0 && (
@@ -178,7 +230,7 @@ export function RecapPage() {
           <h2 className="rc-h question">
             <QuestionIcon /> Open questions
           </h2>
-          <PointList notes={questions} kind="question" source={src} below={shots} />
+          <PointList notes={questions} kind="question" chip={chipFor} below={shots} />
         </section>
       )}
       {carried.length > 0 && (
@@ -191,45 +243,45 @@ export function RecapPage() {
       )}
 
       {groups.length > 0 && (
-        <section id="topics" className="doc-section rc-section">
-          <h2 className="rc-h topic">
-            <TopicIcon /> What was discussed
-          </h2>
-          {groups.map((g) => {
-            const key = g.item?.id ?? "general";
-            const gist = g.notes.find((n) => n.kind === "summary");
-            return (
-              <div key={key} className="rc-group">
-                <div className="rc-group-head">
-                  <h3>
-                    {keyOf(g.item) && <span className="key">{keyOf(g.item)}</span>}
-                    {g.item ? <Link to={`/items/${g.item.id}`}>{g.item.title}</Link> : "General / off-agenda"}
-                  </h3>
-                  <button className="link small" onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
-                    {open_[key] ? "Hide transcript" : `Transcript (${g.segments.length})`}
-                  </button>
-                </div>
-                {gist && <p className="rc-gist">{gist.text}</p>}
-                <SnapStrip snaps={(g.snaps ?? []).filter((p) => unplaced(p) && !(p.discussionId && topicIds.has(p.discussionId)))} />
-                {(g.discussions ?? []).map((d) => (
-                  <TopicRow key={d.id} d={d} segments={g.segments} snaps={onTopic(d.id)} />
-                ))}
-                {open_[key] && <Turns segments={g.segments} />}
-              </div>
-            );
-          })}
+        <section id="chapters" className="doc-section rc-section">
+          <div className="rc-group-head">
+            <h2 className="rc-h topic">
+              <TopicIcon /> Chapters
+            </h2>
+            <button className="link small" onClick={() => setOpen((o) => ({ ...o, all: !o.all }))}>
+              {open_.all ? "Hide transcript" : `Whole transcript (${segments.length})`}
+            </button>
+          </div>
+          <SnapStrip snaps={looseSnaps} />
+          <ChapterList
+            chapters={chapters}
+            written={written}
+            discussions={discussions}
+            notes={all}
+            segments={segments}
+            items={groups.map((g) => g.item)}
+            snapsOnTopic={onTopic}
+            startedAt={data.startedAt}
+            open={openSet}
+            setOpen={(key, o) => setToggled((t) => (isOpen(key) === o ? t : { ...t, [key]: o }))}
+            colorOf={colorOf}
+          />
+          {leftover.map(({ d, g }) => (
+            <TopicRow key={d.id} d={d} segments={g.segments} snaps={onTopic(d.id)} />
+          ))}
+          {open_.all && <Turns segments={segments} />}
         </section>
       )}
 
       {/* Only the latest meeting knows what carries: the draft moves on once the next one starts. */}
-      {upNext && upNext.since === data.startedAt && upNext.suggestions.length + upNext.parked.length > 0 && (
-        <section id="next" className="doc-section rc-section">
-          <h2 className="rc-h carry">
+      {upNext && nextCount > 0 && (
+        <details id="next" className="doc-section rc-section rc-next-fold">
+          <summary className="rc-h carry">
             <span className="upnext-mark" aria-hidden>
               ↻
             </span>{" "}
-            Carries to next time <span className="count">{upNext.suggestions.length + upNext.parked.length}</span>
-          </h2>
+            {nextCount} carr{nextCount === 1 ? "ies" : "y"} to the next agenda
+          </summary>
           <ul className="rc-next">
             {[...upNext.suggestions, ...upNext.parked].map((s) => (
               <li key={s.key}>
@@ -242,8 +294,10 @@ export function RecapPage() {
             ))}
           </ul>
           <p className="muted small">The agent suggests these for the next agenda. The host adds the ones worth talking about.</p>
-        </section>
+        </details>
       )}
+
+      <ConxtPanel roomId={data.roomId} meetingId={data.meetingId} />
 
       <footer className="brief-bar rc-brief">
         <span className="muted small">Follow-up brief for people and agents</span>
@@ -262,22 +316,22 @@ export function RecapPage() {
 function PointList(props: {
   notes: Note[];
   kind: "decided" | "question";
-  source?: (n: Note) => { label: string; href: string | null } | null;
+  /** Where it came from: its chapter. */
+  chip?: (n: Note) => React.ReactNode;
   below?: (n: Note) => React.ReactNode;
 }) {
   const Icon = props.kind === "decided" ? DecidedIcon : QuestionIcon;
   return (
     <ul className={`rc-points ${props.kind}`}>
       {props.notes.map((n) => {
-        const src = props.source?.(n);
         return (
           <li key={n.id}>
             <Icon />
             <span className="rc-point-body">
               <span>{n.text}</span>
-              {src && <span className="rc-src">{src.href ? <Link to={src.href}>{src.label}</Link> : src.label}</span>}
               {props.below?.(n)}
             </span>
+            {props.chip?.(n)}
             <CopyForAgent kind={props.kind === "decided" ? "decision" : "question"} id={n.id} />
           </li>
         );

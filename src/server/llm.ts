@@ -6,7 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { type DraftSlide, outlineToSlides } from "../shared/outline.ts";
-import type { DiscussionOutcome, Item, Note, NoteKind, Segment } from "../shared/protocol.ts";
+import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind, Segment } from "../shared/protocol.ts";
 import { config } from "./config.ts";
 
 export type DraftNote = Pick<Note, "kind" | "text" | "owner">;
@@ -67,6 +67,10 @@ export type ScreenNote = { at: number; by: string; caption: string };
  *  the snaps people kept, with the images themselves. */
 export interface RecapInput {
   items: Array<{ item: Item | null; notes: Note[]; topics: Array<{ id: string; topic: string }> }>;
+  /** When the meeting started: chapter and moment times count from here. */
+  startedAt?: number;
+  /** The meeting's chapters (shared/chapters.ts), in order. Long ones carry their remarks, for the moments. */
+  chapters?: RecapChapter[];
   snaps: Array<{
     id: string;
     itemId: string | null;
@@ -85,7 +89,23 @@ export interface RecapInput {
  *  was discussed in. The caption says what it shows and why it mattered. */
 export interface RecapDraft {
   summary: string;
+  /** A crux line for each chapter, and moments for the long ones. */
+  chapters?: ChapterRecap[];
   snaps: Array<{ id: string; noteId: string | null; discussionId: string | null; caption: string }>;
+}
+
+/** A chapter as the recap reads it. */
+export interface RecapChapter {
+  key: string;
+  title: string;
+  item: Item | null;
+  start: number;
+  minutes: number;
+  outcome: DiscussionOutcome;
+  topicIds: string[];
+  positions: Discussion["positions"];
+  /** Only for chapters long enough to get moments; empty otherwise. */
+  lines: Array<{ segmentId: string; ts: number; speaker: string; text: string }>;
 }
 
 /** What else a notes run sees: the space's synthesis instructions, and the snaps taken on the item (as text). */
@@ -290,7 +310,25 @@ const BacksSchema = z.object({
 });
 
 const RecapSchema = z.object({
-  summary: z.string().describe("A 2-4 sentence recap of the meeting. Plain prose, no headings, lead with what matters most."),
+  summary: z
+    .string()
+    .describe("Two sentences, under 60 words: where the meeting landed. Plain prose. Don't list the to-dos, decisions or questions one by one."),
+  chapters: z
+    .array(
+      z.object({
+        key: z.string().describe("The chapter's key, exactly as given (C1, C2...)"),
+        crux: z.string().describe("One sentence under 160 characters: where this chapter landed, and who drove it if that matters"),
+        moments: z
+          .array(
+            z.object({
+              line: z.string().describe("The key of the line the moment starts at (L1, L2...)"),
+              text: z.string().describe("Under 90 characters: who said or agreed what, e.g. 'Andy: would anyone use the engine without Stand? Unanswered'"),
+            }),
+          )
+          .describe("Only for chapters given with their lines: 3 to 9 turning points, in order. Empty for the others."),
+      }),
+    )
+    .describe("One entry per chapter given"),
   screenshots: z
     .array(
       z.object({
@@ -726,17 +764,18 @@ Order: things blocked or waiting on a decision first, then open questions, then 
 
   async recapMeeting(input: RecapInput): Promise<RecapDraft> {
     const perItem = input.items.map((g) => ({ item: g.item, notes: g.notes }));
-    if (!input.snaps.length) return { summary: await this.summarizeMeeting(perItem), snaps: [] };
-    // Short keys for notes, topics and snaps, so the answer can point at them.
+    const chapters = input.chapters ?? [];
+    if (!input.snaps.length && !chapters.length) return { summary: await this.summarizeMeeting(perItem), snaps: [] };
+    // Short keys for notes, topics, chapters, lines and snaps, so the answer can point at them.
     const noteKey = new Map<string, Note>();
     const topicKey = new Map<string, { id: string; itemId: string | null }>();
+    const tKey = new Map<string, string>();
     const lines: string[] = [];
     for (const g of input.items) {
       if (!g.notes.length && !g.topics.length) continue;
       lines.push(`## ${itemLabel(g.item)}`);
       const gist = g.notes.find((n) => n.kind === "summary");
       if (gist) lines.push(gist.text);
-      const tKey = new Map<string, string>();
       for (const t of g.topics) {
         const k = `T${topicKey.size + 1}`;
         topicKey.set(k, { id: t.id, itemId: g.item?.id ?? null });
@@ -753,10 +792,39 @@ Order: things blocked or waiting on a decision first, then open questions, then 
       }
       lines.push("");
     }
+    const t0 = input.startedAt ?? Math.min(Infinity, ...chapters.map((c) => c.start));
+    const clock = (ts: number) => {
+      const s = Math.max(0, Math.round((ts - t0) / 1000));
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = String(s % 60).padStart(2, "0");
+      return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+    };
+    // The chapters, in order. Long ones come with their remarks so the moments can point at lines.
+    const chapterKey = new Map<string, RecapChapter>();
+    const lineKey = new Map<string, RecapChapter["lines"][number]>();
+    const chapterText = chapters.map((c) => {
+      const k = `C${chapterKey.size + 1}`;
+      chapterKey.set(k, c);
+      const head = `### ${k} ${c.title} · from ${clock(c.start)} · ${Math.max(1, Math.round(c.minutes))} min · ${c.outcome} · ${itemLabel(c.item)}`;
+      const topics = c.topicIds.map((id) => tKey.get(id)).filter(Boolean);
+      const out = [head, ...(topics.length ? [`Topics: ${topics.join(", ")}`] : []), ...c.positions.map((p) => `- ${p.speaker}: ${p.position}`)];
+      if (c.lines.length) {
+        out.push("Lines:");
+        for (const l of c.lines) {
+          const lk = `L${lineKey.size + 1}`;
+          lineKey.set(lk, l);
+          out.push(`${lk} [${clock(l.ts)}] ${l.speaker}: ${l.text.slice(0, 400)}`);
+        }
+      }
+      return out.join("\n");
+    });
     const label = (itemId: string | null) => itemLabel(input.items.find((g) => (g.item?.id ?? null) === itemId)?.item ?? null);
     const content: Anthropic.Beta.BetaContentBlockParam[] = [
-      { type: "text", text: `The meeting's notes, by agenda item:\n\n${lines.join("\n").trim() || "(no notes)"}\n\nScreenshots people saved during it, in order:` },
+      { type: "text", text: `The meeting's notes, by agenda item:\n\n${lines.join("\n").trim() || "(no notes)"}` },
     ];
+    if (chapterText.length) content.push({ type: "text", text: `The meeting's chapters, in the order they were talked about:\n\n${chapterText.join("\n\n")}` });
+    if (input.snaps.length) content.push({ type: "text", text: "Screenshots people saved during it, in order:" });
     input.snaps.forEach((s, i) => {
       content.push(
         {
@@ -768,18 +836,25 @@ Order: things blocked or waiting on a decision first, then open questions, then 
         { type: "image", source: { type: "base64", media_type: s.image.mediaType, data: s.image.data } },
       );
     });
-    content.push({ type: "text", text: "Write the recap, and place and caption every screenshot." });
+    content.push({
+      type: "text",
+      text: `Write the recap${chapterText.length ? ", a crux for every chapter, moments for the chapters given with lines" : ""}${input.snaps.length ? ", and place and caption every screenshot" : ""}.`,
+    });
     const out = await this.parse(
       RecapSchema,
       content,
-      `You write the recap of a team meeting from its notes, and place the screenshots people saved during it.
+      `You write the recap of a team meeting from its notes and chapters, and place the screenshots people saved during it.
 
-Summary: 2-4 sentences, plain prose, no headings, lead with what matters most.
+Summary: two sentences, under 60 words, plain prose. Say where the meeting landed and what took most of it. The to-dos, decisions and open questions are listed right under it, so don't list them one by one.
+
+Chapters: a chapter is a stretch of the meeting on one subject, as people saw it on the meeting's chapter bar. For each one write a crux: one sentence on where it landed (decided, left open, who takes it), not what it was about; the title already says that. A chapter given with its lines also gets moments: 3 to 9 turning points a reader would jump to (a proposal, a pushback, a reframing question, the point it was settled or dropped), each pointing at the line it starts at, in order. Name people by first name. Leave out jokes, tests of the tool and small talk. Don't invent anything that isn't in the lines or the notes.
 
 Screenshots: each gets one home. If it backs a to-do, decision or open question (it shows the thing decided on, the work to do, or what the question is about, so someone acting on that note would want to see it), give that note's key. Otherwise give the topic it was discussed in. Prefer notes and topics from the item it was saved on. Give neither only when it relates to nothing in the notes.
 
 Caption: one line saying what the image shows and why it mattered to the conversation. Name the specific thing on screen (the chart, error, design, number or page) and what the team said or decided about it. It may be a problem, but it may just as well be a design under review, a number someone pointed at, or context for the talk. Don't invent anything that isn't in the image or the notes.`,
       "medium",
+      config.anthropicModel,
+      { maxTokens: 12_000 },
     );
     if (!out) return { summary: await this.summarizeMeeting(perItem), snaps: [] };
     const snaps: RecapDraft["snaps"] = [];
@@ -795,7 +870,21 @@ Caption: one line saying what the image shows and why it mattered to the convers
         caption: r.caption.trim().slice(0, 200),
       });
     }
-    return { summary: out.summary.trim(), snaps };
+    const written: ChapterRecap[] = [];
+    for (const r of out.chapters ?? []) {
+      const c = chapterKey.get(r.key.trim());
+      if (!c || written.some((w) => w.key === c.key)) continue;
+      const moments = (c.lines.length ? r.moments : [])
+        .flatMap((m) => {
+          const l = lineKey.get(m.line.trim());
+          return l && c.lines.includes(l) && m.text.trim() ? [{ segmentId: l.segmentId, ts: l.ts, text: m.text.trim().slice(0, 140) }] : [];
+        })
+        .filter((m, i, all) => all.findIndex((x) => x.segmentId === m.segmentId) === i)
+        .sort((x, y) => x.ts - y.ts)
+        .slice(0, 9);
+      written.push({ key: c.key, crux: r.crux.trim().slice(0, 240), moments });
+    }
+    return { summary: out.summary.trim(), snaps, chapters: written };
   }
 
   async summarizeMeeting(perItem: Array<{ item: Item | null; notes: DraftNote[] }>): Promise<string> {
@@ -807,7 +896,8 @@ Caption: one line saying what the image shows and why it mattered to the convers
     const res = await this.client.beta.messages.create({
       model: config.anthropicModel,
       max_tokens: 2000,
-      system: "Write a 2-4 sentence recap of a team meeting from its per-item notes. Plain prose, no headings, lead with what matters most.",
+      system:
+        "Write a two-sentence recap of a team meeting from its per-item notes: where it landed. Plain prose, no headings. The notes are listed under it, so don't list them one by one.",
       messages: [{ role: "user", content: body }],
       output_config: { effort: "low" },
       betas: ["server-side-fallback-2026-07-01"],

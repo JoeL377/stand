@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import type {
+  ChapterRecap,
   AgentToken,
   Deck,
   DeckDraft,
@@ -428,6 +429,7 @@ export function openDb(file?: string) {
   if (!roomCols.includes("synthesis_instructions")) db.exec("ALTER TABLE rooms ADD COLUMN synthesis_instructions TEXT NOT NULL DEFAULT ''");
   const meetingCols = (db.prepare("PRAGMA table_info(meetings)").all() as Row[]).map((c) => c.name);
   if (!meetingCols.includes("synthesis")) db.exec("ALTER TABLE meetings ADD COLUMN synthesis TEXT");
+  if (!meetingCols.includes("chapters_json")) db.exec("ALTER TABLE meetings ADD COLUMN chapters_json TEXT");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
@@ -795,10 +797,16 @@ export function openDb(file?: string) {
       db.prepare("INSERT INTO meetings (id, room_id, started_at) VALUES (?, ?, ?)").run(id, roomId, startedAt);
       return { id, startedAt };
     },
-    endMeeting(id: string, summary: string | null, synthesis: string | null = null, at = Date.now()) {
+    endMeeting(id: string, summary: string | null, synthesis: string | null = null, at = Date.now(), chapters: ChapterRecap[] = []) {
       db.exec("BEGIN IMMEDIATE");
       try {
-        db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ? WHERE id = ?").run(at, summary, synthesis, id);
+        db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ?, chapters_json = ? WHERE id = ?").run(
+          at,
+          summary,
+          synthesis,
+          chapters.length ? JSON.stringify(chapters) : null,
+          id,
+        );
         enqueueConxtMeeting(db, id);
         db.exec("COMMIT");
       } catch (err) { db.exec("ROLLBACK"); throw err; }
@@ -853,6 +861,8 @@ export function openDb(file?: string) {
         summary: (r.summary as string) ?? null,
         /** What the space's synthesis instructions asked for, as Markdown; null without instructions. */
         synthesis: (r.synthesis as string) ?? null,
+        /** What the recap wrote about each chapter. */
+        chapters: (r.chapters_json ? JSON.parse(r.chapters_json as string) : []) as ChapterRecap[],
       };
     },
     listMeetings(roomId: string) {

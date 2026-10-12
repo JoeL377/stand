@@ -405,6 +405,17 @@ export interface MeetingRecap {
   /** The space's synthesis instructions applied to this meeting, as Markdown; null when it had none. */
   synthesis: string | null;
   items: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions: Discussion[]; snaps: Snap[] }>;
+  /** What the recap wrote about each chapter (shared/chapters.ts), by chapter key; empty for meetings recapped before chapters. */
+  chapters: ChapterRecap[];
+}
+
+/** The recap's words on one chapter: where it landed, and for a long one, the moments that moved it. */
+export interface ChapterRecap {
+  key: string;
+  /** One sentence: where the chapter landed. */
+  crux: string;
+  /** Turning points, in order: the remark each one starts at, and a line on it. */
+  moments: Array<{ segmentId: string; ts: number; text: string }>;
 }
 
 /** Synthesis instructions are a paragraph or a short list, not a document. */

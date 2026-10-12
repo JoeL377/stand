@@ -2,9 +2,18 @@
 // follow-up. One JSON shape (versioned, stable ids, links back to the source
 // ticket or slide) and a Markdown rendering of the same thing.
 
-import type { Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment, Snap } from "../shared/protocol.ts";
+import { meetingChapters } from "../shared/chapters.ts";
+import type { ChapterRecap, Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment, Snap } from "../shared/protocol.ts";
 
-type Meeting = { id: string; roomId: string; startedAt: number; endedAt: number | null; summary: string | null; synthesis?: string | null };
+type Meeting = {
+  id: string;
+  roomId: string;
+  startedAt: number;
+  endedAt: number | null;
+  summary: string | null;
+  synthesis?: string | null;
+  chapters?: ChapterRecap[];
+};
 
 export const BRIEF_SCHEMA = "stand.meeting-brief/v1";
 export const FOLLOW_UPS_SCHEMA = "stand.follow-ups/v1";
@@ -39,6 +48,31 @@ export interface BriefAction {
   discussion: { id: string; topic: string; positions: Discussion["positions"] } | null;
   /** Screenshots that show what this is about (this meeting's brief only). */
   images?: BriefImage[];
+  /** The chapter of the meeting it came out of (this meeting's brief only). */
+  chapter?: { key: string; title: string; at: string } | null;
+}
+
+/** A stretch of the meeting on one subject, as people saw it on the chapter bar: a main topic
+ *  with the smaller topics placed inside it, or a small group of topics. In the order talked about. */
+export interface BriefChapter {
+  key: string;
+  title: string;
+  item: BriefItemRef;
+  /** Time into the meeting it started, like 15:21, and the clock time. */
+  at: string;
+  startedAt: string;
+  minutes: number;
+  outcome: DiscussionOutcome;
+  /** Where it landed, in a sentence; null when the recap didn't write one. */
+  crux: string | null;
+  speakers: string[];
+  /** Its topics (items[].discussions ids), the main one first. */
+  topicIds: string[];
+  actionIds: string[];
+  decisions: string[];
+  openQuestions: string[];
+  /** For long chapters: the turning points, in order. */
+  moments: Array<{ at: string; startedAt: string; text: string }>;
 }
 
 /** A screenshot placed under a note or topic, with what it shows and why it mattered. */
@@ -86,6 +120,8 @@ export interface MeetingBrief {
   carriedOver: BriefAction[];
   decisions: Array<{ id: string; text: string; item: BriefItemRef; images: BriefImage[] }>;
   openQuestions: Array<{ id: string; text: string; item: BriefItemRef; images: BriefImage[] }>;
+  /** The meeting as chapters, in the order they were talked about. */
+  chapters: BriefChapter[];
   /** The same notes grouped by agenda item, in agenda order. */
   items: Array<{
     item: BriefItemRef;
@@ -191,6 +227,7 @@ export function buildBrief(input: {
       .map((f) => toAction(f, ref(f.itemId ? (input.itemById?.(f.itemId) ?? null) : null), input.discussionById)),
     decisions: [],
     openQuestions: [],
+    chapters: [],
     items: [],
   };
 
@@ -250,7 +287,47 @@ export function buildBrief(input: {
       ...(input.withTranscript && { transcript: g.segments.map(turn) }),
     });
   }
+  // Chapters: the same ones the recap page and the meeting's chapter bar show.
+  const allDiscussions = input.groups.flatMap((g) => g.discussions ?? []);
+  const allSegments = input.groups.flatMap((g) => g.segments);
+  const allNotes = input.groups.flatMap((g) => g.notes);
+  const written = new Map((m.chapters ?? []).map((c) => [c.key, c]));
+  const chapters = meetingChapters(allDiscussions, allSegments, m.endedAt ?? Infinity);
+  const chapterOfTopic = new Map(chapters.flatMap((c) => c.topicIds.map((id) => [id, c] as const)));
+  for (const c of chapters) {
+    const mine = (kind: Note["kind"]) => allNotes.filter((n) => n.kind === kind && n.discussionId && c.topicIds.includes(n.discussionId));
+    const w = written.get(c.key);
+    brief.chapters.push({
+      key: c.key,
+      title: c.title,
+      item: ref(input.groups.find((g) => (g.item?.id ?? null) === c.itemId)?.item ?? null),
+      at: offset(c.start, m.startedAt),
+      startedAt: iso(c.start),
+      minutes: Math.max(1, Math.round(c.minutes)),
+      outcome: c.outcome,
+      crux: w?.crux || null,
+      speakers: c.speakers,
+      topicIds: c.topicIds,
+      actionIds: mine("action").map((n) => n.id),
+      decisions: mine("decision").map((n) => n.text),
+      openQuestions: mine("question").map((n) => n.text),
+      moments: (w?.moments ?? []).map((x) => ({ at: offset(x.ts, m.startedAt), startedAt: iso(x.ts), text: x.text })),
+    });
+  }
+  for (const a of brief.actions) {
+    const c = a.discussion ? chapterOfTopic.get(a.discussion.id) : undefined;
+    a.chapter = c ? { key: c.key, title: c.title, at: offset(c.start, m.startedAt) } : null;
+  }
   return brief;
+}
+
+/** Time into the meeting, like 15:21 or 1:02:04. */
+export function offset(ts: number, startedAt: number): string {
+  const s = Math.max(0, Math.round((ts - startedAt) / 1000));
+  const h = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(mm).padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
 }
 
 const OUTCOME_LABEL: Record<DiscussionOutcome, string> = { decided: "decided", action: "action taken", open: "still open", info: "FYI, nothing to decide" };
@@ -304,6 +381,16 @@ export function briefToMarkdown(b: MeetingBrief): string {
     out.push("## Open questions", "");
     for (const q of b.openQuestions) out.push(`- ${q.text} · ${link(q.item)}`, ...imageLines(q.images));
     out.push("");
+  }
+
+  if (b.chapters.length) {
+    out.push("## Chapters", "");
+    for (const c of b.chapters) {
+      out.push(`### ${c.at} · ${c.title} · ${c.minutes} min · ${OUTCOME_LABEL[c.outcome]}`, "");
+      if (c.crux) out.push(c.crux, "");
+      for (const x of c.moments) out.push(`- ${x.at} ${x.text}`);
+      if (c.moments.length) out.push("");
+    }
   }
 
   out.push("## By agenda item", "");

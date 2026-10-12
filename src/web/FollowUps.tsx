@@ -33,11 +33,14 @@ export function FollowUpList(props: {
   compact?: boolean;
   /** Anything to show under an action's line, like the screenshots it backs. */
   below?: (n: FollowUpNote) => ReactNode;
+  /** One line per action: no line of owner and source under it; `tail` shows at its end instead. */
+  oneLine?: boolean;
+  tail?: (n: FollowUpNote) => ReactNode;
 }) {
   const [saved, setSaved] = useState<Record<string, Note>>({});
   const [busy, setBusy] = useState<string | null>(null);
   return (
-    <ul className={props.compact ? "followups compact" : "followups"}>
+    <ul className={["followups", props.compact && "compact", props.oneLine && "one-line"].filter(Boolean).join(" ")}>
       {props.notes.map((orig) => {
         const n = { ...orig, ...saved[orig.id] };
         const done = Boolean(n.doneAt);
@@ -69,14 +72,17 @@ export function FollowUpList(props: {
             </button>
             <span className="fu-body">
               <span className="fu-text">{n.text}</span>
-              <span className="fu-meta">
-                <span className={n.owner ? "fu-owner" : "fu-owner none"}>{n.owner ?? "Unassigned"}</span>
-                {src && (src.href ? <Link to={src.href}>{src.label}</Link> : <span>{src.label}</span>)}
-                {props.showDate && n.meetingStartedAt && <span>{fmtDate(n.meetingStartedAt)}</span>}
-                {done && n.doneBy && <span>Done by {n.doneBy}</span>}
-              </span>
+              {!props.oneLine && (
+                <span className="fu-meta">
+                  <span className={n.owner ? "fu-owner" : "fu-owner none"}>{n.owner ?? "Unassigned"}</span>
+                  {src && (src.href ? <Link to={src.href}>{src.label}</Link> : <span>{src.label}</span>)}
+                  {props.showDate && n.meetingStartedAt && <span>{fmtDate(n.meetingStartedAt)}</span>}
+                  {done && n.doneBy && <span>Done by {n.doneBy}</span>}
+                </span>
+              )}
               {props.below?.(n)}
             </span>
+            {props.tail?.(n)}
             <CopyForAgent kind="action" id={n.id} />
           </li>
         );

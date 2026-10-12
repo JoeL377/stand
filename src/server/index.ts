@@ -935,6 +935,7 @@ app.get(
       summary: m.summary,
       synthesis: m.synthesis,
       items: meetingGroups(m),
+      chapters: m.chapters,
     };
     res.json(body);
   }),
