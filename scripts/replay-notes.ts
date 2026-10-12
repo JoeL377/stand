@@ -20,6 +20,7 @@
 //                    without it, the stand-in uses the topics the meeting ended with.
 // --debounce MS, --max-wait MS   the run cadence (the room uses 3000 and 12000).
 // --until MIN        stop after this many minutes of the meeting.
+// REPLAY_DUMP_RUNS=50,300   also save those runs' requests (request-50.json...), to see what a run sends.
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -158,6 +159,9 @@ messages.parse = async (params: any, opts?: any) => {
   const started = performance.now();
   try {
     const blocks = promptBlocks(params);
+    if ((process.env.REPLAY_DUMP_RUNS ?? "").split(",").includes(String(runs.length + 1))) {
+      fs.writeFileSync(path.join(out, `request-${runs.length + 1}.json`), JSON.stringify({ ...params, output_config: { ...params.output_config, format: "(schema)" } }, null, 1));
+    }
     const promptChars = blocks.reduce((n, b) => n + b.text.length, 0);
     if (useModel) {
       const res = await realParse(params, opts);
