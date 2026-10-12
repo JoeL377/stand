@@ -11,9 +11,6 @@ import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { colorFor, fmtDate, fmtTime, initials, itemLabel } from "./util.ts";
 import type { Item } from "../shared/protocol.ts";
 
-/** A chapter this long opens by default, and gets moments in the recap. */
-const LONG_MINUTES = 10;
-
 /** Time into the meeting, like 15:21 or 1:02:04. */
 export function clock(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -174,7 +171,6 @@ export function ChapterList(props: {
   );
 }
 
-export const isLong = (c: MeetingChapter) => c.minutes >= LONG_MINUTES;
 
 function ChapterRow(props: {
   c: MeetingChapter;
@@ -206,11 +202,15 @@ function ChapterRow(props: {
     <details id={chapterAnchor(props.i)} className="rc-ch" open={props.open} onToggle={(e) => props.onToggle((e.currentTarget as HTMLDetailsElement).open)}>
       <summary>
         <span className="rc-ch-at">{clock(c.start - startedAt)}</span>
+        <span className={`rc-ch-dot ${c.outcome}`} title={o.label} aria-label={o.label} />
         <span className="rc-ch-title">{c.title}</span>
-        <span className={`rc-outcome ${c.outcome}`}>
-          <o.Icon size={13} /> {o.label}
-        </span>
-        <span className="rc-ch-meta">
+        <span className="rc-ch-mins">{Math.max(1, Math.round(c.minutes))} min</span>
+      </summary>
+      <div className="rc-ch-body">
+        <div className="rc-ch-meta">
+          <span className={`rc-outcome ${c.outcome}`}>
+            <o.Icon size={13} /> {o.label}
+          </span>
           {(["action", "decision", "question"] as const).map((k) => {
             const n = count(k);
             const Icon = NOTE_ICON[k]!;
@@ -221,15 +221,12 @@ function ChapterRow(props: {
               </span>
             ) : null;
           })}
-          <span className="rc-ch-mins">{Math.max(1, Math.round(c.minutes))} min</span>
           <span className="rc-ch-faces" aria-label={c.speakers.join(", ")}>
             {c.speakers.slice(0, 4).map((name) => (
               <Face key={name} name={name} color={props.colorOf(name)} size={18} />
             ))}
           </span>
-        </span>
-      </summary>
-      <div className="rc-ch-body">
+        </div>
         {props.crux?.crux && (
           <p className="rc-ch-crux">
             <span className="agent-mark" aria-hidden>

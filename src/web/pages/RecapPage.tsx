@@ -5,7 +5,7 @@ import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
 import { meetingChapters } from "../../shared/chapters.ts";
-import { ChapterBar, ChapterChip, ChapterList, Face, isLong } from "../RecapChapters.tsx";
+import { ChapterBar, ChapterChip, ChapterList, Face } from "../RecapChapters.tsx";
 import { api, request, type RoomInfo } from "../api.ts";
 import { errorToast, toast } from "../Toasts.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
@@ -116,7 +116,8 @@ export function RecapPage() {
   const inChapters = new Set(chapters.flatMap((c) => c.topicIds));
   const leftover = groups.flatMap((g) => (g.discussions ?? []).filter((d) => !inChapters.has(d.id)).map((d) => ({ d, g })));
   const looseSnaps = snaps.filter((p) => unplaced(p) && !(p.discussionId && discussions.some((d) => d.id === p.discussionId)));
-  const isOpen = (key: string) => toggled[key] ?? isLong(chapters.find((c) => c.key === key)!);
+  // Chapters start folded: a row is its time, how it ended, its title and its length.
+  const isOpen = (key: string) => toggled[key] ?? false;
   const openSet = new Set(chapters.filter((c) => isOpen(c.key)).map((c) => c.key));
   const jumpTo = (i: number) => setToggled((t) => ({ ...t, [chapters[i].key]: true }));
   // People in the colors the transcript gives them.
