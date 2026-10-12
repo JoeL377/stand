@@ -99,6 +99,19 @@ function score(dir: string) {
     const big = [...others].filter((g) => d.lines.filter((i) => goldOf[i] === g).length >= Math.max(5, d.lines.length * 0.2));
     if (big.length) merged.push(`"${d.topic}" holds ${[m.id, ...big].join(" + ")}`);
   }
+  // For reading: each stretch of talk, and what the board showed during it.
+  const rows = stretches.map((st, k) => {
+    const during = samples.filter((x) => x.t >= st.from && x.t <= st.to);
+    const shown = new Map<string, number>();
+    for (const x of during) shown.set(x.shownTitle ?? "(nothing)", (shown.get(x.shownTitle ?? "(nothing)") ?? 0) + 1);
+    const titles = [...shown].sort((a, b) => b[1] - a[1]).map(([t, c]) => `${t} (${Math.round((c / during.length) * 100)}%)`);
+    const lag = lags[k].lag === null ? "never" : `${Math.round(lags[k].lag! / 1000)}s`;
+    return `| ${clock(st.from - start)} | ${st.id} ${goldById.get(st.id)!.title} | ${lag} | ${titles.join("; ") || "(under 10 s)"} |`;
+  });
+  fs.writeFileSync(
+    path.join(dir, "timeline.md"),
+    `# What the board showed: ${path.basename(dir)}\n\n| at | topic being talked about | shown after | what the board's current topic said |\n|---|---|---|---|\n${rows.join("\n")}\n`,
+  );
   const switches = samples.filter((s, k) => k && s.shownId !== samples[k - 1].shownId).length;
   const truthSwitches = samples.filter((s, k) => k && s.truth && samples[k - 1].truth && s.truth !== samples[k - 1].truth).length;
   const majors = gold.filter((g) => g.importance === "major");
@@ -128,4 +141,3 @@ const clock = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 for (const dir of replays) console.log(JSON.stringify(score(dir), null, 1));
-void goldById;
