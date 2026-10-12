@@ -20,8 +20,9 @@ export function SidePanel(props: {
 }) {
   const [earlierOpen, setEarlierOpen] = useState(true);
   const { state, segments, notes, interims, send } = props;
-  // Two tabs: the agent's notes and topics first, the raw transcript second.
-  const [tab, setTab] = useState<"notes" | "transcript">("notes");
+  // Two tabs: the agent's notes and topics, and the raw transcript. The topics also sit on the
+  // middle screen, so the transcript opens first.
+  const [tab, setTab] = useState<"notes" | "transcript">("transcript");
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId);
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);

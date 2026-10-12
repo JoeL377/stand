@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import type { ClientMessage, Item, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { ClientMessage, Discussion, Item, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -8,6 +8,7 @@ import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
+import { TopicBoard } from "./TopicBoard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
@@ -28,6 +29,9 @@ export function Stage(props: {
   speaking: Set<string>;
   interims: Record<string, Interim>;
   segments: Segment[];
+  /** Live notes: the topics the talk is grouped into, and what came of them. */
+  discussions: Discussion[];
+  notes: Note[];
   livekit: boolean;
   /** Set to a function that snaps the shared screen while one is up, for the pop-out bar. */
   snapRef?: MutableRefObject<(() => Promise<boolean>) | null>;
@@ -331,58 +335,49 @@ export function Stage(props: {
               {sharer.isHost ? "; the agent still reads it." : ". The agent follows only the host's screen."}
             </p>
           </div>
-        ) : (
+        ) : focusItem?.deckId && (focusItem.slideNo || focusItem.slide) ? (
           <div className="screen-empty">
-            {focusItem?.deckId && (focusItem.slideNo || focusItem.slide) ? (
-              <div key={focusItem.deckId} className={`slide-stage${arrive}`}>
-                <Slide item={focusItem} deck={deck} className="slide-main" />
-                <div className="slide-bar">
-                  {canSteer && (
-                    <button
-                      className="ghost"
-                      onClick={() => flip(-1)}
-                      disabled={props.offline || slideIdx <= 0}
-                      title={props.offline ? "You can flip slides once Stand reconnects" : undefined}
-                      aria-label="Previous slide"
-                    >
-                      ←
-                    </button>
-                  )}
-                  <span className="muted small">
-                    {deck?.title ?? "Slides"} · {focusItem.slideNo} of {deck?.pageCount ?? deckSlides.length}
-                  </span>
-                  {canSteer && (
-                    <button
-                      className="ghost"
-                      onClick={() => flip(1)}
-                      disabled={props.offline || slideIdx < 0 || slideIdx >= deckSlides.length - 1}
-                      title={props.offline ? "You can flip slides once Stand reconnects" : undefined}
-                      aria-label="Next slide"
-                    >
-                      →
-                    </button>
-                  )}
-                  {canSteer && <span className="muted small slide-hint">Arrow keys flip slides</span>}
-                </div>
-                {canSteer && focusItem.slide?.notes && <p className="slide-notes">{focusItem.slide.notes}</p>}
-              </div>
-            ) : focusItem ? (
-              <div key={focusItem.id} className={`focus-card${arrive}`}>
-                {keyOf(focusItem) && <div className="key big">{keyOf(focusItem)}</div>}
-                <h2>{focusItem.title}</h2>
-                {focusItem.description && <p className="muted pre focus-desc">{focusItem.description}</p>}
-                {focusItem.url && (
-                  <a href={focusItem.url} target="_blank" rel="noreferrer">
-                    Open in {focusItem.source === "linear" ? "Linear" : "new tab"} ↗
-                  </a>
+            <div key={focusItem.deckId} className={`slide-stage${arrive}`}>
+              <Slide item={focusItem} deck={deck} className="slide-main" />
+              <div className="slide-bar">
+                {canSteer && (
+                  <button
+                    className="ghost"
+                    onClick={() => flip(-1)}
+                    disabled={props.offline || slideIdx <= 0}
+                    title={props.offline ? "You can flip slides once Stand reconnects" : undefined}
+                    aria-label="Previous slide"
+                  >
+                    ←
+                  </button>
                 )}
+                <span className="muted small">
+                  {deck?.title ?? "Slides"} · {focusItem.slideNo} of {deck?.pageCount ?? deckSlides.length}
+                </span>
+                {canSteer && (
+                  <button
+                    className="ghost"
+                    onClick={() => flip(1)}
+                    disabled={props.offline || slideIdx < 0 || slideIdx >= deckSlides.length - 1}
+                    title={props.offline ? "You can flip slides once Stand reconnects" : undefined}
+                    aria-label="Next slide"
+                  >
+                    →
+                  </button>
+                )}
+                {canSteer && <span className="muted small slide-hint">Arrow keys flip slides</span>}
               </div>
-            ) : (
-              <p className="muted">
-                {canSteer ? "Open an item on the left, or share your screen." : `Waiting for ${host?.name ?? "the host"} to open an item.`}
-              </p>
-            )}
+              {canSteer && focusItem.slide?.notes && <p className="slide-notes">{focusItem.slide.notes}</p>}
+            </div>
           </div>
+        ) : (
+          <TopicBoard
+            discussions={props.discussions.filter((d) => d.itemId === state.focusItemId)}
+            notes={props.notes.filter((n) => n.itemId === state.focusItemId)}
+            segments={props.segments}
+            participants={state.participants}
+            focusItem={focusItem}
+          />
         )}
       </div>
 

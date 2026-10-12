@@ -459,6 +459,8 @@ export function Meeting(props: {
           speaking={media.speaking}
           interims={room.interims}
           segments={room.segments}
+          discussions={room.discussions}
+          notes={room.notes}
           offline={!room.connected}
           ending={writingUp}
           livekit={caps.livekit}
