@@ -138,6 +138,10 @@ export interface Agent {
   /** Tidies the space's suggested agenda: folds duplicates, writes short agenda
    *  lines and reasons, and orders it. Null when there's no model to ask. */
   polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null>;
+  /** Places a meeting's smaller topics (see topicMerge.ts): for each smaller topic's key, the key of
+   *  the main topic it belongs to or a group title. `final`: the pass as the meeting ends, on the tidy
+   *  model. Null without a model. */
+  mergeTopics(prompt: string, final: boolean): Promise<Array<{ key: string; into: string }> | null>;
 }
 
 export type SnapMedia = "image/jpeg" | "image/png" | "image/webp";
@@ -309,6 +313,11 @@ const AgendaSchema = z.object({
 const NOTES_TIMEOUT_MS = 120_000;
 /** The last run as the meeting ends reads the whole meeting, and everyone is already waiting on the recap. */
 const NOTES_TIDY_TIMEOUT_MS = 240_000;
+/** Placing the smaller topics reads titles and notes only: quick, and nobody waits on it. */
+const MERGE_TIMEOUT_MS = 60_000;
+const MergeSchema = z.object({
+  merges: z.array(z.object({ key: z.string(), into: z.string().describe("a main topic's key, or the title of a group") })),
+});
 /** The notes list every transcript line under its topic, so they grow with a long item, and
  *  the model thinks first within the same limit. Only what it writes is billed. */
 const NOTES_MAX_TOKENS = 16_000;
@@ -607,6 +616,24 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
     return { key: out.backs, caption: out.caption.trim().slice(0, 160) };
   }
 
+  async mergeTopics(prompt: string, final: boolean): Promise<Array<{ key: string; into: string }> | null> {
+    if (!prompt.trim()) return [];
+    const out = await this.parse(
+      MergeSchema,
+      prompt,
+      `You tidy the topic list of a meeting so people see a few main topics, not many fragments. Topics are listed under the agenda item they were talked about in.
+For each smaller topic, decide where it belongs:
+- The key of a main topic under the same agenda item, only if the smaller topic is about the same subject (a sub-question or detail of it). Sharing a product area or a person is not enough: "login errors" is not part of "whether agents can capture context".
+- Otherwise, a short title for a group of smaller topics under that item on one shared subject (for example "Bugs found while testing"). Give topics the exact same title to group them.
+Answer for every smaller topic exactly once.`,
+      "low",
+      final ? config.notesTidyModel : config.notesModel,
+      // Without thinking, the small model folds unrelated topics together.
+      { timeout: MERGE_TIMEOUT_MS, maxTokens: 6000 },
+    );
+    return out?.merges ?? null;
+  }
+
   async polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null> {
     if (!suggestions.length) return [];
     const list = suggestions
@@ -861,6 +888,9 @@ export class HeuristicAgent implements Agent {
   }
 
   async polishAgenda(): Promise<AgendaPolishRow[] | null> {
+    return null;
+  }
+  async mergeTopics(): Promise<Array<{ key: string; into: string }> | null> {
     return null;
   }
 

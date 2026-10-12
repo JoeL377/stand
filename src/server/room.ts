@@ -22,6 +22,7 @@ import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { settle } from "./settle.ts";
+import { applyMerges, mergePrompt, planMerge } from "./topicMerge.ts";
 import { newId } from "./ids.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
@@ -48,6 +49,8 @@ const NOTES_TROUBLE = {
 };
 /** While talk keeps going, refresh notes at least this often instead of waiting for a pause. */
 const NOTES_MAX_WAIT_MS = 12_000;
+/** The smaller topics are placed again at most this often (see topicMerge.ts). */
+const MERGE_EVERY_MS = 120_000;
 /** A speaker's next words join their last entry when they pause for less than this. */
 const SPEECH_JOIN_GAP_MS = 2_000;
 /** ...as long as the entry stays a readable size. */
@@ -150,6 +153,12 @@ export class RoomSession implements SpeechSink {
   private notesFailing = new Set<string | null>();
   /** Per item, the newest remark the last notes run that worked had read (see settle.ts). */
   private notesReadUpTo = new Map<string | null, number>();
+  /** Placing the smaller topics: one at a time, and when it last asked and on what. */
+  private mergeRun: Promise<void> = Promise.resolve();
+  private mergeTimer: NodeJS.Timeout | null = null;
+  private mergedAt = -Infinity;
+  private mergedSig = "";
+  private merged = "[]";
   /** Why, when it's the Anthropic account rather than one run: its rate limit or its credit. */
   private notesWhy: NotesTrouble["reason"] | null = null;
   /** Rate limited: no notes run starts before this, so retries don't keep it hit. */
@@ -1101,6 +1110,7 @@ export class RoomSession implements SpeechSink {
                 keys,
               );
         if (segments.length) this.notesReadUpTo.set(itemId, segments[segments.length - 1].ts);
+        if (!tidy) this.scheduleMerge();
         console.log(
           `[agent] notes for ${itemId ?? "off-agenda"}: ${window.length} of ${segments.length} lines${settled.length ? `, ${settled.length} topics settled` : ""}${folded.length ? `, ${folded.length} long topics folded` : ""}${tidy ? ", whole meeting" : ""} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
         );
@@ -1203,6 +1213,48 @@ export class RoomSession implements SpeechSink {
     return notes;
   }
 
+  /** Places the smaller topics on the board soon: at most every MERGE_EVERY_MS. */
+  private scheduleMerge() {
+    if (this.ended || this.mergeTimer) return;
+    this.mergeTimer = setTimeout(
+      () => {
+        this.mergeTimer = null;
+        void this.mergeTopics(false);
+      },
+      Math.max(0, this.mergedAt + MERGE_EVERY_MS - Date.now()),
+    );
+  }
+
+  /** Ranks the meeting's topics and has the model place the smaller ones inside a main topic or in
+   *  a small group (see topicMerge.ts). Live, only once a topic has started or settled since it last
+   *  asked; `final`, as the meeting ends, always, on the tidy model. A call that fails leaves the last placing. */
+  private async mergeTopics(final: boolean) {
+    const run = this.mergeRun.then(async () => {
+      const discussions = this.db.meetingDiscussions(this.meetingId);
+      const plan = planMerge(discussions, this.db.meetingSegments(this.meetingId), this.db.meetingNotes(this.meetingId), Date.now());
+      if (!final && plan.sig === this.mergedSig) return;
+      this.mergedSig = plan.sig;
+      this.mergedAt = Date.now();
+      const { text, keys } = mergePrompt(plan, (id) => (id ? (this.db.getItem(id)?.title ?? "Untitled") : "General (off the agenda)"));
+      const answer = text
+        ? await this.agent.mergeTopics(text, final).catch((err) => {
+            console.error("[agent] placing topics failed:", err);
+            return null;
+          })
+        : [];
+      if (!answer) return;
+      const merges = applyMerges(plan, keys, answer);
+      console.log(`[agent] topics: ${plan.main.length} main, ${merges.length} of ${plan.small.length} smaller placed${final ? ", whole meeting" : ""}`);
+      const placed = JSON.stringify(merges);
+      if (placed === this.merged) return;
+      this.merged = placed;
+      this.db.replaceTopicMerges(this.meetingId, merges);
+      for (const itemId of new Set(discussions.map((d) => d.itemId))) this.sendItemNotes(itemId);
+    });
+    this.mergeRun = run.catch((err) => console.error("[agent] placing topics failed:", err));
+    await this.mergeRun;
+  }
+
   // ---- demo ---------------------------------------------------------------
 
   private async playDemo() {
@@ -1246,6 +1298,8 @@ export class RoomSession implements SpeechSink {
     if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
     for (const t of this.noteTimers.values()) clearTimeout(t);
     this.noteTimers.clear();
+    if (this.mergeTimer) clearTimeout(this.mergeTimer);
+    this.mergeTimer = null;
     // Everyone sees "Writing notes…"; a restart before it's done finishes the recap instead of resuming.
     this.db.meetingEnding(this.meetingId);
     this.broadcastState();
@@ -1260,6 +1314,8 @@ export class RoomSession implements SpeechSink {
       for (const id of itemIds) {
         perItem.push({ item: id ? this.db.getItem(id) : null, notes: await this.refreshNotes(id) });
       }
+      // The tidy runs rewrote the topics: place the smaller ones again, for the recap.
+      await this.mergeTopics(true);
       // The recap (with the snaps in view), and the Synthesis when the space has instructions for one, side by side.
       const room = this.db.getRoom(this.roomId);
       const instructions = room?.synthesisInstructions.trim() ?? "";

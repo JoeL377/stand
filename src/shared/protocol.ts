@@ -104,6 +104,10 @@ export interface Discussion {
   segmentIds: string[];
   /** The discussion of the same question in an earlier meeting, if it continues one. */
   continues: { id: string; meetingId: string; startedAt: number; topic: string } | null;
+  /** A smaller topic folded into a main topic of the same item: that topic's id. */
+  mergedInto?: string | null;
+  /** A smaller topic gathered with others into a small group: the group's title. */
+  group?: string | null;
   ts: number;
 }
 

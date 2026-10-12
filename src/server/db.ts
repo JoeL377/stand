@@ -206,6 +206,15 @@ CREATE TABLE IF NOT EXISTS discussions (
 );
 CREATE INDEX IF NOT EXISTS discussions_item ON discussions(item_id);
 CREATE INDEX IF NOT EXISTS discussions_meeting ON discussions(meeting_id);
+-- Where a smaller topic sits on the board: inside a main topic of its item, or in a small group
+-- (see topicMerge.ts). Kept apart from discussions, which every notes run rewrites.
+CREATE TABLE IF NOT EXISTS topic_merges (
+  meeting_id TEXT NOT NULL,
+  discussion_id TEXT NOT NULL,
+  parent_id TEXT,
+  group_title TEXT,
+  PRIMARY KEY (meeting_id, discussion_id)
+);
 -- Personal access tokens for agents (the Stand MCP). Only a hash is kept.
 CREATE TABLE IF NOT EXISTS api_tokens (
   id TEXT PRIMARY KEY,
@@ -257,8 +266,10 @@ CREATE INDEX IF NOT EXISTS updates_note ON updates(note_id);
 `;
 
 /** Reads a discussion with the earlier one it continues, if any. */
-const DISCUSSION_SELECT = `SELECT d.*, c.meeting_id AS c_meeting_id, c.topic AS c_topic, cm.started_at AS c_started_at
-  FROM discussions d LEFT JOIN discussions c ON c.id = d.continues_id LEFT JOIN meetings cm ON cm.id = c.meeting_id`;
+const DISCUSSION_SELECT = `SELECT d.*, c.meeting_id AS c_meeting_id, c.topic AS c_topic, cm.started_at AS c_started_at,
+  tm.parent_id AS merged_into, tm.group_title AS merge_group
+  FROM discussions d LEFT JOIN discussions c ON c.id = d.continues_id LEFT JOIN meetings cm ON cm.id = c.meeting_id
+  LEFT JOIN topic_merges tm ON tm.meeting_id = d.meeting_id AND tm.discussion_id = d.id`;
 
 /** id: keep this one's id, for a topic carried over as it was (see settle.ts). */
 export type DraftDiscussion = Pick<Discussion, "topic" | "positions" | "outcome" | "segmentIds"> & { continuesId: string | null; id?: string };
@@ -396,6 +407,8 @@ const toDiscussion = (r: Row): Discussion => ({
   continues: r.c_meeting_id
     ? { id: r.continues_id as string, meetingId: r.c_meeting_id as string, startedAt: r.c_started_at as number, topic: r.c_topic as string }
     : null,
+  mergedInto: (r.merged_into as string) ?? null,
+  group: (r.merge_group as string) ?? null,
   ts: r.ts as number,
 });
 
@@ -945,10 +958,25 @@ export function openDb(file?: string) {
         "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const ts = Date.now();
-      return notes.map((n) => {
+      // A run can write the same note twice under one topic: keep one, the one already kept if either was.
+      const keyOf = (n: (typeof notes)[number]) => `${n.discussionId ?? ""}\n${n.kind}\n${n.text}`;
+      const one = new Map<string, (typeof notes)[number]>();
+      for (const n of notes) if (!one.has(keyOf(n)) || (!one.get(keyOf(n))!.id && n.id)) one.set(keyOf(n), n);
+      // Each id once: notes kept as they were hold theirs, and only one note can take an old wording's id.
+      const taken = new Set(notes.flatMap((n) => (n.id ? [n.id] : [])));
+      const used = new Set<string>();
+      const idFor = (n: (typeof notes)[number]) => {
+        if (n.id && !used.has(n.id)) return n.id;
+        const old = sameText.get(`${n.kind}:${n.text}`);
+        return old && !taken.has(old) && !used.has(old) ? old : newId(12);
+      };
+      return notes.flatMap((n) => {
+        if (one.get(keyOf(n)) !== n) return [];
         const d = n.doneAt ? { doneAt: n.doneAt, doneBy: n.doneBy ?? null } : n.kind === "action" ? done.get(n.text) : undefined;
+        const id = idFor(n);
+        used.add(id);
         const note: Note = {
-          id: n.id ?? sameText.get(`${n.kind}:${n.text}`) ?? newId(12),
+          id,
           meetingId,
           itemId,
           kind: n.kind,
@@ -973,7 +1001,7 @@ export function openDb(file?: string) {
           note.discussionId,
           note.editedBy ?? null,
         );
-        return note;
+        return [note];
       });
     },
     /** The host's own wording for a note. Edited notes stay as written when the agent redrafts. */
@@ -1050,25 +1078,39 @@ export function openDb(file?: string) {
     },
     /** Discussions for one item in one meeting are regenerated as a whole, with its notes. */
     replaceDiscussions(meetingId: string, itemId: string | null, drafts: DraftDiscussion[]): Discussion[] {
-      // A topic that comes back under the same name keeps its id (see replaceNotes).
-      const sameTopic = new Map(
-        (db.prepare("SELECT id, topic FROM discussions WHERE meeting_id = ? AND item_id IS ?").all(meetingId, itemId) as Row[]).map((r) => [
-          (r.topic as string).trim().toLowerCase(),
-          r.id as string,
-        ]),
-      );
+      // A topic that comes back keeps its id, so references agents hold and the board's place in it
+      // survive (see replaceNotes): by its name, or, when a run renamed it, by holding most of its lines.
+      const prior = (
+        db.prepare("SELECT id, topic, segment_ids_json FROM discussions WHERE meeting_id = ? AND item_id IS ?").all(meetingId, itemId) as Row[]
+      ).map((r) => ({ id: r.id as string, name: (r.topic as string).trim().toLowerCase(), lines: new Set(JSON.parse(r.segment_ids_json as string) as string[]) }));
       db.prepare("DELETE FROM discussions WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
       const st = db.prepare(
         "INSERT INTO discussions (id, meeting_id, item_id, topic, positions_json, outcome, segment_ids_json, continues_id, position, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const ts = Date.now();
       const used = new Set(drafts.flatMap((d) => (d.id ? [d.id] : [])));
-      const ids = drafts.map((d, i) => {
-        const prior = sameTopic.get(d.topic.trim().toLowerCase());
-        const id = d.id ?? (prior && !used.has(prior) ? prior : newId(12));
-        used.add(id);
+      const ids: Array<string | undefined> = drafts.map((d) => d.id);
+      drafts.forEach((d, i) => {
+        const same = prior.find((p) => p.name === d.topic.trim().toLowerCase() && !used.has(p.id));
+        if (ids[i] || !same) return;
+        ids[i] = same.id;
+        used.add(same.id);
+      });
+      const overlaps = drafts
+        .flatMap((d, i) =>
+          prior.map((p) => ({ i, p, n: d.segmentIds.filter((s) => p.lines.has(s)).length, least: Math.min(d.segmentIds.length, p.lines.size) })),
+        )
+        .filter((o) => o.n > 0 && o.n * 2 >= o.least)
+        .sort((a, b) => b.n - a.n);
+      for (const o of overlaps) {
+        if (ids[o.i] || used.has(o.p.id)) continue;
+        ids[o.i] = o.p.id;
+        used.add(o.p.id);
+      }
+      drafts.forEach((d, i) => {
+        const id = ids[i] ?? newId(12);
+        ids[i] = id;
         st.run(id, meetingId, itemId, d.topic, JSON.stringify(d.positions), d.outcome, JSON.stringify(d.segmentIds), d.continuesId, i, ts);
-        return id;
       });
       const byId = new Map(
         (db.prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? AND d.item_id IS ?`).all(meetingId, itemId) as Row[]).map((r) => [
@@ -1076,7 +1118,13 @@ export function openDb(file?: string) {
           toDiscussion(r),
         ]),
       );
-      return ids.map((id) => byId.get(id)!);
+      return ids.map((id) => byId.get(id!)!);
+    },
+    /** Where each smaller topic of a meeting sits on the board, replacing the last grouping. */
+    replaceTopicMerges(meetingId: string, merges: Array<{ discussionId: string; parentId: string | null; group: string | null }>) {
+      db.prepare("DELETE FROM topic_merges WHERE meeting_id = ?").run(meetingId);
+      const st = db.prepare("INSERT OR REPLACE INTO topic_merges (meeting_id, discussion_id, parent_id, group_title) VALUES (?, ?, ?, ?)");
+      for (const m of merges) st.run(meetingId, m.discussionId, m.parentId, m.group);
     },
     getDiscussion(id: string): Discussion | null {
       const r = db.prepare(`${DISCUSSION_SELECT} WHERE d.id = ?`).get(id) as Row | undefined;
