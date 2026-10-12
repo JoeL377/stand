@@ -24,11 +24,15 @@ export const config = {
   /** For the calls that run once per meeting and merge things: the notes' tidy run as
    *  the meeting ends (it feeds the recap) and the suggested agenda. */
   notesTidyModel: env("NOTES_TIDY_MODEL") ?? "claude-sonnet-5-5",
-  /** Live notes experiments, for trying on a recorded meeting with scripts/replay-notes.ts; both
+  /** Live notes experiments, for trying on a recorded meeting with scripts/replay-notes.ts; all
    *  off unless set. NOTES_TURNS=ranges: the model lists a topic's lines as ranges ("3-17, 20")
-   *  instead of every number. NOTES_THINKING=off: live notes runs answer without thinking first. */
+   *  instead of every number. NOTES_THINKING=off: live notes runs answer without thinking first.
+   *  NOTES_LAST_TOPICS=on: each run is shown the topics the last run made, asked to keep their
+   *  titles, and to leave a short aside in the discussion around it. On Haiku that steadied the
+   *  titles but left far fewer topics (Conxt replay, 2026-10-12), so it stays off for now. */
   notesTurnsAsRanges: env("NOTES_TURNS") === "ranges",
   notesThinking: env("NOTES_THINKING") !== "off",
+  notesLastTopics: env("NOTES_LAST_TOPICS") === "on",
   linearKey: env("LINEAR_API_KEY"),
   google: {
     clientId: env("GOOGLE_CLIENT_ID"),

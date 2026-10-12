@@ -84,7 +84,17 @@ test("lines of a topic that went quiet drop out without renumbering the rest, so
   assert.match(gone[1].text, /^\[101\]/);
 });
 
-test("a notes run lists the last run's topics after the transcript, and reads lines back by their numbers", async () => {
+test("by default a notes run isn't shown the last run's topics", async () => {
+  const { agent, calls } = withApi(() => noteReply);
+  await agent.notesFor(null, said(5), [], [], undefined, { lastTopics: [{ topic: "Keep button", lines: [1, 2] }] });
+  const blocks = calls[0].body.messages[0].content as Anthropic.Beta.BetaTextBlockParam[];
+  assert.doesNotMatch(blocks.map((b) => b.text).join("\n"), /Topics so far|Keep button/);
+  assert.doesNotMatch(JSON.stringify(calls[0].body.system), /short aside/);
+});
+
+test("a notes run lists the last run's topics after the transcript (NOTES_LAST_TOPICS=on), and reads lines back by their numbers", async (t) => {
+  config.notesLastTopics = true;
+  t.after(() => (config.notesLastTopics = false));
   const { agent, calls } = withApi(() => noteReply);
   const segments = said(120).slice(30);
   const draft = await agent.notesFor(null, segments, [], [], undefined, {

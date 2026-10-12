@@ -464,7 +464,7 @@ export class ClaudeAgent implements Agent {
         ? `\n\nTopics still going that started a while ago. Their earlier talk isn't in the transcript above; this is where they stood:\n${topicLines(goingOnes)}`
         : ""
     }`;
-    const soFar = lastTopics.filter((t) => t.lines.some((n) => indexOf.has(n)));
+    const soFar = config.notesLastTopics ? lastTopics.filter((t) => t.lines.some((n) => indexOf.has(n))) : [];
     const lastRun = soFar.length
       ? `\n\nTopics so far, as the last run grouped the lines above. Keep each one's title word for word, and its lines under it, while the talk is still about the same thing; put the new lines where they belong:\n${soFar
           .map((t) => `- "${t.topic}": lines ${rangesOf(t.lines.filter((n) => indexOf.has(n)))}`)
@@ -493,7 +493,7 @@ What was said while this item was in focus (speech transcript and in-room chat, 
       ),
       `You take notes in a team meeting. You are given what was said while one agenda item (a ticket, task or slide) was in focus.
 
-Group the talk into discussions: a discussion is a stretch of back-and-forth about one question or subject. Most items have one to three. A status update with no back-and-forth is one discussion with outcome "info". Every line belongs to at most one discussion; skip small talk. A short aside of a line or two stays in the discussion around it rather than starting one of its own.
+Group the talk into discussions: a discussion is a stretch of back-and-forth about one question or subject. Most items have one to three. A status update with no back-and-forth is one discussion with outcome "info". Every line belongs to at most one discussion; skip small talk.${config.notesLastTopics ? " A short aside of a line or two stays in the discussion around it rather than starting one of its own." : ""}
 
 For each discussion, give each participant's position in one short line, how it ended, and the decisions actually made, the action items with their owner (the speaker's name; null if nobody took it), and the questions left open. Phrase action items as tasks, not quotes. If it picks up a discussion from an earlier meeting in the list, give that id.
 
