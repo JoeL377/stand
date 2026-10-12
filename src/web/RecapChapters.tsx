@@ -194,7 +194,6 @@ function ChapterRow(props: {
   const segById = new Map(props.segments.map((s) => [s.id, s]));
   const turns = c.segmentIds.flatMap((id) => segById.get(id) ?? []);
   const firstOf = (d: Discussion) => Math.min(...d.segmentIds.flatMap((id) => segById.get(id)?.ts ?? []));
-  const count = (kind: Note["kind"]) => props.notes.filter((n) => n.kind === kind).length;
   const shots = topics.flatMap((d) => props.snapsOnTopic(d.id));
   // A group has no main topic: where people stood is what each of its topics says.
   const positions = head?.positions ?? (inside.length === 1 ? inside[0].positions : []);
@@ -207,26 +206,6 @@ function ChapterRow(props: {
         <span className="rc-ch-mins">{Math.max(1, Math.round(c.minutes))} min</span>
       </summary>
       <div className="rc-ch-body">
-        <div className="rc-ch-meta">
-          <span className={`rc-outcome ${c.outcome}`}>
-            <o.Icon size={13} /> {o.label}
-          </span>
-          {(["action", "decision", "question"] as const).map((k) => {
-            const n = count(k);
-            const Icon = NOTE_ICON[k]!;
-            return n ? (
-              <span key={k} className={`rc-ch-count ${k}`} title={`${n} ${k === "action" ? "to do" : k === "decision" ? "decided" : "open"}`}>
-                <Icon size={12} />
-                {n}
-              </span>
-            ) : null;
-          })}
-          <span className="rc-ch-faces" aria-label={c.speakers.join(", ")}>
-            {c.speakers.slice(0, 4).map((name) => (
-              <Face key={name} name={name} color={props.colorOf(name)} size={18} />
-            ))}
-          </span>
-        </div>
         {props.crux?.crux && (
           <p className="rc-ch-crux">
             <span className="agent-mark" aria-hidden>
@@ -240,30 +219,6 @@ function ChapterRow(props: {
             Continues from <Link to={`/meetings/${head.continues.meetingId}`}>{fmtDate(head.continues.startedAt)}</Link>
           </p>
         )}
-        {props.crux && props.crux.moments.length > 0 && (
-          <div className="rc-ch-sub">
-            <h4>Moments</h4>
-            <ul className="rc-ch-times">
-              {props.crux.moments.map((m) => (
-                <li key={m.segmentId}>
-                  <span className="rc-ch-at">{clock(m.ts - startedAt)}</span>
-                  <span>{m.text}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {positions.length > 0 && (
-          <div className="rc-ch-sub">
-            <h4>Where people stood</h4>
-            {positions.map((p, k) => (
-              <p key={k} className="rc-ch-pos">
-                <Face name={p.speaker} color={props.colorOf(p.speaker)} size={18} />
-                <span>{p.position}</span>
-              </p>
-            ))}
-          </div>
-        )}
         {props.notes.length > 0 && (
           <div className="rc-ch-sub">
             <h4>What came of it</h4>
@@ -272,14 +227,40 @@ function ChapterRow(props: {
                 const Icon = NOTE_ICON[n.kind]!;
                 return (
                   <li key={n.id} className={n.kind}>
-                    <Icon size={13} />
-                    <span>
-                      {n.text}
-                      {n.owner && n.kind === "action" && <span className="muted"> · {n.owner}</span>}
-                    </span>
+                    <Icon size={14} />
+                    <span className="rc-ch-text">{n.text}</span>
+                    {n.owner && n.kind === "action" && <Face name={n.owner} color={props.colorOf(n.owner)} size={18} />}
                   </li>
                 );
               })}
+            </ul>
+          </div>
+        )}
+        {positions.length > 0 && (
+          <div className="rc-ch-sub">
+            <h4>Where people stood</h4>
+            <ul className="rc-ch-stood">
+              {positions.map((p, k) => (
+                <li key={k}>
+                  <Face name={p.speaker} color={props.colorOf(p.speaker)} size={20} />
+                  <span className="rc-ch-text">
+                    <b>{p.speaker.split(" ")[0]}</b> {p.position}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {props.crux && props.crux.moments.length > 0 && (
+          <div className="rc-ch-sub">
+            <h4>Moments</h4>
+            <ul className="rc-ch-times">
+              {props.crux.moments.map((m) => (
+                <li key={m.segmentId}>
+                  <span className="rc-ch-at">{clock(m.ts - startedAt)}</span>
+                  <span className="rc-ch-text">{m.text}</span>
+                </li>
+              ))}
             </ul>
           </div>
         )}
@@ -290,14 +271,14 @@ function ChapterRow(props: {
               {inside.map((d) => (
                 <li key={d.id}>
                   <span className="rc-ch-at">{clock(firstOf(d) - startedAt)}</span>
-                  <span>{d.topic}</span>
+                  <span className="rc-ch-text">{d.topic}</span>
                 </li>
               ))}
             </ul>
           </div>
         )}
         {shots.length > 0 && <SnapFigures snaps={shots} segments={props.segments} />}
-        <div className="disc-foot">
+        <div className="disc-foot rc-ch-foot">
           {turns.length > 0 && (
             <button className="link small" onClick={() => setSaid((s) => !s)}>
               {said ? "Hide what was said" : `What was said (${turns.length}) from ${clock(c.start - startedAt)}`}
