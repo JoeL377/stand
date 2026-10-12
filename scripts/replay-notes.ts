@@ -13,13 +13,14 @@
 //   node --import tsx scripts/replay-notes.ts meeting.json --out replay/current
 //   node --import tsx scripts/replay-notes.ts meeting.json --agent stand-in --gold gold-topics.json
 //
-// --agent claude     the real notes model (needs ANTHROPIC_API_KEY). The default when a key is set.
+// --agent claude     the real notes model (needs ANTHROPIC_API_KEY, or STAND_ANTHROPIC_API_KEY where that
+//                    name is reserved, as in Claude Code cloud sessions). The default when a key is set.
 // --agent stand-in   no model: a stand-in that groups the talk by a reference topic list and answers
 //                    the size a model would, to count runs and tokens for free. Its latency is modeled.
 // --gold FILE        reference topics ({topics:[{id,title,spans:[[a,b]]}]}) for the stand-in;
 //                    without it, the stand-in uses the topics the meeting ended with.
 // --debounce MS, --max-wait MS   the run cadence (the room uses 3000 and 12000).
-// --until MIN        stop after this many minutes of the meeting.
+// --until MIN        stop after this many minutes of talk.
 // REPLAY_DUMP_RUNS=50,300   also save those runs' requests (request-50.json...), to see what a run sends.
 import fs from "node:fs";
 import path from "node:path";
@@ -60,13 +61,15 @@ const { values: args, positionals } = parseArgs({
 const file = positionals[0];
 if (!file) throw new Error("Give the meeting file: scripts/replay-notes.ts meeting.json");
 const meeting: Meeting = JSON.parse(fs.readFileSync(file, "utf8"));
-const useModel = (args.agent ?? (config.anthropicKey ? "claude" : "stand-in")) === "claude";
-if (useModel && !config.anthropicKey) throw new Error("--agent claude needs ANTHROPIC_API_KEY");
+const apiKey = process.env.STAND_ANTHROPIC_API_KEY?.trim() || config.anthropicKey;
+const useModel = (args.agent ?? (apiKey ? "claude" : "stand-in")) === "claude";
+if (useModel && !apiKey) throw new Error("--agent claude needs ANTHROPIC_API_KEY or STAND_ANTHROPIC_API_KEY");
 const DEBOUNCE = Number(args.debounce);
 const MAX_WAIT = Number(args["max-wait"]);
 const out = path.resolve(args.out ?? `replay-${useModel ? "claude" : "stand-in"}-${DEBOUNCE}-${MAX_WAIT}`);
 fs.mkdirSync(out, { recursive: true });
-const lines = meeting.lines.filter((l) => !args.until || l.ts <= meeting.meeting.startedAt + Number(args.until) * 60_000);
+// --until counts from the first remark, not from when the meeting opened.
+const lines = meeting.lines.filter((l) => !args.until || l.ts <= meeting.lines[0].ts + Number(args.until) * 60_000);
 
 // The room logs every run; the replay keeps its own record instead.
 const print = console.log;
@@ -92,7 +95,7 @@ const made = db.addItems(
   agendaItems.map((i) => ({ source: "agenda" as const, externalId: null, title: i.title, url: null, description: null })),
 );
 const itemIdOf = new Map<string | null, string | null>([[null, null], ...agendaItems.map((i, k) => [i.id, made[k].id] as [string, string])]);
-const agent = new ClaudeAgent(config.anthropicKey ?? "stand-in");
+const agent = new ClaudeAgent(apiKey ?? "stand-in");
 const session = new RoomSession(db, agent, room, () => {});
 const meetingId = session.meetingId;
 // Private parts of the room the replay drives directly.
