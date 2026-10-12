@@ -574,8 +574,8 @@ export function Meeting(props: {
               !room.connected
                 ? "You can wrap up once Stand reconnects"
                 : state.alignment?.state.landing
-                  ? "Write where you landed again, with what was said since. Everyone answers again."
-                  : "Stand writes where you landed, and everyone says whether they're aligned with it. The meeting keeps going."
+                  ? "Write where you landed again, with what was said since"
+                  : "Stand freezes what's on the table with the outcome and who does what next. The meeting keeps going."
             }
             onClick={() => send({ type: "align.wrap" })}
           >

@@ -1,8 +1,9 @@
-// Alignment meetings: the board the agent keeps as people talk (the question, where each person
-// stands, what they differ on and already agree on), and how a run's changes are applied to it.
+// Alignment meetings: the board the agent keeps as people talk (the question, the proposal on
+// the table and each person's likely answer to it, where each person stands, what they differ
+// on and already agree on), and how a run's changes are applied to it.
 // Each run gets the board as it stands plus what was said since, and returns only what changed,
 // so a run stays small however long the meeting goes.
-import type { AlignmentState, Segment } from "../shared/protocol.ts";
+import type { AlignmentState, AlignmentVote, Segment } from "../shared/protocol.ts";
 
 /** At most this many of each, so the board stays one screen and the runs stay small. */
 const MAX_REASONS = 3;
@@ -19,22 +20,28 @@ export const emptyAlignment = (): AlignmentState => ({
   agreed: [],
   unanswered: [],
   parked: [],
+  proposal: null,
   landing: null,
 });
 
+export const ANSWERS: AlignmentVote[] = ["agree", "live_with", "concern", "block"];
+
 /** The next meeting on the same question starts from where this one stood: positions, what
- *  they differ on and agree on, the open test and questions. Not where it landed, nor who moved. */
+ *  they differ on and agree on, the open test and questions, and what was on the table with
+ *  its concern. Not where it landed, who moved, or anyone's answers: those are asked again. */
 export function carryOver(prev: AlignmentState): AlignmentState {
+  const p = prev.proposal ?? null;
   return {
     ...structuredClone(prev),
-    positions: prev.positions.map((p) => ({ ...p, movedAt: null, movedBecause: null })),
+    positions: prev.positions.map((x) => ({ ...x, movedAt: null, movedBecause: null })),
+    proposal: p ? { text: p.text, at: null, rewrittenAt: null, guesses: [], concern: p.concern ? { ...p.concern } : null } : null,
     landing: null,
   };
 }
 
-/** Whether an edited question is still the same one: a typo or a word changed, not a new
- *  question. Compares the words, so it doesn't matter how long the question is. */
-export function sameQuestion(a: string, b: string) {
+/** Whether an edited line is still the same one: a typo or a few words changed, not a new
+ *  question or proposal. Compares the words, so it doesn't matter how long the line is. */
+export function sameGist(a: string, b: string) {
   const words = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
   const x = words(a);
   const y = words(b);
@@ -66,6 +73,15 @@ export interface AlignmentDraft {
   /** Keys (U1, U2...) of questions that got their answer. */
   answered: string[];
   parkedAdd: string[];
+  /** The whole proposal when its text, a guess or the concern changed; null when nothing did.
+   *  `same`: the same proposal reworded, so people's answers stand. */
+  proposal: {
+    text: string;
+    same: boolean;
+    guesses: Array<{ person: string; answer: AlignmentVote }>;
+    concern: { person: string; text: string } | null;
+    line: number | null;
+  } | null;
   landing: AlignmentState["landing"];
 }
 
@@ -111,7 +127,13 @@ export function boardText(s: AlignmentState): string {
   const agreed = s.agreed.length ? s.agreed.map((a, i) => `- A${i + 1} ${a.text}`).join("\n") : "- none yet";
   const waiting = s.unanswered.length ? s.unanswered.map((u, i) => `- U${i + 1} ${u.asker}: ${u.question}`).join("\n") : "- none";
   const parked = s.parked.length ? s.parked.join("; ") : "none";
+  const p = s.proposal;
+  const table = p
+    ? `${p.text}\nGuessed answers: ${p.guesses.length ? p.guesses.map((g) => `${g.person}: ${g.answer}`).join("; ") : "none yet"}\nHolding it up: ${p.concern ? `${p.concern.person}: ${p.concern.text}` : "nothing"}`
+    : "nothing yet";
   return `${q}
+
+On the table: ${table}
 
 Positions:
 ${positions}
@@ -217,6 +239,27 @@ export function applyAlignment(state: AlignmentState, draft: AlignmentDraft, lin
   }
   next.parked = next.parked.slice(-MAX_PARKED);
 
+  const p = draft.proposal;
+  const text = p ? clip(p.text, 400) : "";
+  if (p && text) {
+    const had = next.proposal;
+    // A different proposal starts over; the same one reworded keeps when it was put forward.
+    const fresh = !had || (!p.same && !sameGist(had.text, text));
+    const guesses = new Map<string, AlignmentVote>();
+    for (const g of p.guesses) {
+      const person = who(g.person);
+      if (person && ANSWERS.includes(g.answer)) guesses.set(person, g.answer);
+    }
+    const concernBy = p.concern ? who(p.concern.person) : null;
+    next.proposal = {
+      text,
+      at: fresh ? at(p.line) : had!.at,
+      rewrittenAt: fresh ? null : norm(had!.text) === norm(text) ? had!.rewrittenAt : at(p.line),
+      guesses: [...guesses].map(([person, answer]) => ({ person, answer })),
+      concern: p.concern && concernBy && clip(p.concern.text, 200) ? { person: concernBy, text: clip(p.concern.text, 200) } : null,
+    };
+  }
+
   if (draft.landing && clip(draft.landing.text, 400)) {
     const l = draft.landing;
     next.landing = {
@@ -244,6 +287,7 @@ export function heuristicAlignment(input: AlignmentInput): AlignmentDraft {
     unansweredAdd: [],
     answered: [],
     parkedAdd: [],
+    proposal: null,
     landing: null,
   };
   const latest = new Map<string, { text: string; line: number }>();
@@ -259,10 +303,34 @@ export function heuristicAlignment(input: AlignmentInput): AlignmentDraft {
     const asked = input.lines.findIndex((s) => /\?\s*$/.test(s.text));
     if (asked >= 0) draft.question = { text: input.lines[asked].text, askedBy: input.lines[asked].speakerName, whyNow: null, line: asked + 1 };
   }
+  // On the table: the latest suggestion someone made ("we should…", "let's…"), with each
+  // speaker's answer guessed from their own words.
+  const proposed = [...input.lines.entries()].reverse().find(([, s]) => /\b(we should|let's|let us|i propose|how about|keep|go with)\b/i.test(s.text) && !/\?\s*$/.test(s.text));
+  const table = proposed ? proposed[1].text.slice(0, 200) : input.state.proposal?.text;
+  if (table) {
+    const guesses = new Map<string, AlignmentVote>((input.state.proposal?.guesses ?? []).map((g) => [g.person, g.answer]));
+    if (proposed) guesses.set(proposed[1].speakerName, "agree");
+    let concern = input.state.proposal?.concern ?? null;
+    for (const s of input.lines) {
+      if (proposed && s === proposed[1]) continue;
+      const answer = guessAnswer(s.text);
+      if (!answer) continue;
+      guesses.set(s.speakerName, answer);
+      if (answer === "concern" || answer === "block") concern = { person: s.speakerName, text: s.text.slice(0, 160) };
+    }
+    draft.proposal = {
+      text: table,
+      same: Boolean(input.state.proposal && sameGist(input.state.proposal.text, table)),
+      guesses: [...guesses].map(([person, answer]) => ({ person, answer })),
+      concern,
+      line: proposed ? proposed[0] + 1 : null,
+    };
+  }
   if (input.closing) {
+    const p = draft.proposal ?? input.state.proposal;
     draft.landing = {
       outcome: "held",
-      text: input.state.question ? `Not decided yet: ${input.state.question.text}` : "Not decided yet",
+      text: p ? p.text : input.state.question ? `Not decided yet: ${input.state.question.text}` : "Not decided yet",
       reopens: "The next meeting",
       changesIf: null,
       stillOpen: input.state.unanswered[0]?.question ?? null,
@@ -270,4 +338,13 @@ export function heuristicAlignment(input: AlignmentInput): AlignmentDraft {
     };
   }
   return draft;
+}
+
+/** Without a model: an answer only when the words say it plainly. */
+function guessAnswer(text: string): AlignmentVote | null {
+  if (/\b(no way|i'd block|i would block|can't accept|cannot accept|won't go along)\b/i.test(text)) return "block";
+  if (/\b(can live with|could live with|fine with it|i'll go along|okay with it)\b/i.test(text)) return "live_with";
+  if (/\b(but|concern|worried|not sure|unless|counter)\b/i.test(text)) return "concern";
+  if (/\b(agree|yes|sounds good|makes sense|works for me|can't argue)\b/i.test(text)) return "agree";
+  return null;
 }

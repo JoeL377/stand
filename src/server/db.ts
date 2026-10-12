@@ -420,6 +420,9 @@ export interface MeetingSetup {
   carry: string | null;
 }
 
+/** Answers from before there were four of them. */
+const LEGACY_VOTES: Record<string, AlignmentVote> = { aligned: "agree", commit: "live_with", not_aligned: "concern" };
+
 export function openDb(file?: string) {
   if (file && file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file ?? ":memory:");
@@ -616,7 +619,9 @@ export function openDb(file?: string) {
       const r = db.prepare("SELECT alignment, alignment_at FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
       if (!r?.alignment) return null;
       try {
-        return { state: JSON.parse(r.alignment as string) as AlignmentState, at: (r.alignment_at as number) ?? null };
+        const state = JSON.parse(r.alignment as string) as AlignmentState;
+        // Boards saved before proposals existed have none.
+        return { state: { ...state, proposal: state.proposal ?? null }, at: (r.alignment_at as number) ?? null };
       } catch {
         return null;
       }
@@ -634,7 +639,7 @@ export function openDb(file?: string) {
       return (db.prepare("SELECT user_id, name, vote, at FROM alignment_votes WHERE meeting_id = ? ORDER BY at").all(meetingId) as Row[]).map((r) => ({
         userId: r.user_id as string,
         name: r.name as string,
-        vote: r.vote as AlignmentVote,
+        vote: LEGACY_VOTES[r.vote as string] ?? (r.vote as AlignmentVote),
         at: r.at as number,
       }));
     },

@@ -29,7 +29,7 @@ import { importFromLinear } from "./linear.ts";
 import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
-import { emptyAlignment } from "./alignment.ts";
+import { ANSWERS, emptyAlignment } from "./alignment.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { toSpaceSummary } from "./spaces.ts";
@@ -979,14 +979,14 @@ app.get(
   }),
 );
 
-/** "Are you aligned with this?", answered from the recap after the meeting. */
+/** An answer to where it landed, given from the recap after the meeting. */
 app.post(
   "/api/meetings/:id/alignment/vote",
   route((req, res) => {
     const m = db.getMeeting(req.params.id);
     if (!m || !db.isMember(m.roomId, req.user!.id)) return notFound(res);
     const vote = req.body?.vote as AlignmentVote;
-    if (!["aligned", "commit", "not_aligned"].includes(vote)) return void res.status(400).json({ error: "Pick one of the three answers" });
+    if (!ANSWERS.includes(vote)) return void res.status(400).json({ error: "Pick one of the four answers" });
     if (m.kind !== "alignment" || !db.getAlignment(m.id)?.state.landing) return void res.status(400).json({ error: "This meeting hasn't landed anywhere yet" });
     db.setAlignmentVote(m.id, req.user!.id, req.user!.name, vote);
     const open = live(m.roomId);

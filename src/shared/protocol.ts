@@ -297,6 +297,18 @@ export interface AlignmentState {
   unanswered: Array<{ asker: string; question: string; at: number | null }>;
   /** Side ideas, recorded so they aren't lost. */
   parked: string[];
+  /** On the table: the one agreement the agent hears forming, written as something the group
+   *  could say yes to, with its guess at each person's answer from what they said, and the one
+   *  concern holding it up. Null until something forms. */
+  proposal: {
+    text: string;
+    /** When this proposal (in substance) was first put on the table. */
+    at: number | null;
+    /** When its wording last changed, once it has. */
+    rewrittenAt: number | null;
+    guesses: Array<{ person: string; answer: AlignmentVote }>;
+    concern: { person: string; text: string } | null;
+  } | null;
   /** Where it landed, once the meeting wraps up. */
   landing: {
     outcome: "decided" | "held" | "not_aligned";
@@ -309,7 +321,8 @@ export interface AlignmentState {
   } | null;
 }
 
-export type AlignmentVote = "aligned" | "commit" | "not_aligned";
+/** Each person's answer to what's on the table. */
+export type AlignmentVote = "agree" | "live_with" | "concern" | "block";
 
 export interface AlignmentView {
   state: AlignmentState;
@@ -323,7 +336,7 @@ export interface AlignmentView {
   failing: boolean;
   /** The last wrap-up failed: where it landed wasn't written. */
   wrapFailed: boolean;
-  /** Each person's answer to "Are you aligned with this?". */
+  /** Each person's own answer to what's on the table (a tap, not a guess). */
   votes: Array<{ userId: string; name: string; vote: AlignmentVote; at: number }>;
 }
 

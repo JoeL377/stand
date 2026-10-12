@@ -28,7 +28,7 @@ import { settle } from "./settle.ts";
 import { newId } from "./ids.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
-import { type AlignmentDraft, applyAlignment, carryOver, emptyAlignment, sameQuestion } from "./alignment.ts";
+import { ANSWERS, type AlignmentDraft, applyAlignment, carryOver, emptyAlignment, sameGist } from "./alignment.ts";
 import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 /** Below this the agent keeps its guess to itself. */
@@ -56,7 +56,7 @@ const NOTES_MAX_WAIT_MS = 12_000;
 const ALIGN_CONTEXT_LINES = 12;
 /** And at most this many new lines in one run (a long silence of the agent catches up in steps). */
 const ALIGN_MAX_LINES = 120;
-const ALIGN_VOTES = new Set<AlignmentVote>(["aligned", "commit", "not_aligned"]);
+const ALIGN_VOTES = new Set<AlignmentVote>(ANSWERS);
 /** A speaker's next words join their last entry when they pause for less than this. */
 const SPEECH_JOIN_GAP_MS = 2_000;
 /** ...as long as the entry stays a readable size. */
@@ -656,7 +656,7 @@ export class RoomSession implements SpeechSink {
         if (this.kind !== "alignment" || this.ended) return;
         const text = String(msg.text ?? "").trim().replace(/\s+/g, " ").slice(0, 300);
         // A small fix (a typo, a word) is the same question: who asked it and since when stay.
-        const same = Boolean(this.align.question && sameQuestion(this.align.question.text, text));
+        const same = Boolean(this.align.question && sameGist(this.align.question.text, text));
         this.align.question = text
           ? { text, askedBy: same ? this.align.question!.askedBy : conn.name, at: same ? this.align.question!.at : Date.now(), whyNow: same ? this.align.question!.whyNow : null, suggested: false }
           : null;
@@ -676,7 +676,8 @@ export class RoomSession implements SpeechSink {
         await this.wrapUp();
         break;
       case "align.vote":
-        if (this.kind !== "alignment" || !this.align.landing || !ALIGN_VOTES.has(msg.vote)) return;
+        // Anyone answers what's on the table, while it's live and once it's landed.
+        if (this.kind !== "alignment" || !(this.align.proposal || this.align.landing) || !ALIGN_VOTES.has(msg.vote)) return;
         this.db.setAlignmentVote(this.meetingId, conn.participantId, conn.name, msg.vote);
         this.broadcastState();
         break;
@@ -1411,9 +1412,13 @@ export class RoomSession implements SpeechSink {
         // what the run said about the old one (why it matters now) isn't about theirs.
         if ((this.align.question?.text ?? null) !== asked) draft.question = null;
         const question = this.align.question;
-        const landed = JSON.stringify(this.align.landing);
+        // People answer what's on the table. When it becomes a different proposal, their answers
+        // go and Stand's guesses show again; rewording it, or freezing it at wrap-up, keeps them.
+        const had = this.align.proposal;
+        const landedOnly = had ? null : (this.align.landing?.text ?? null);
         this.align = applyAlignment(this.align, draft, lines, attendees);
-        if (landed !== "null" && JSON.stringify(this.align.landing) !== landed) this.db.clearAlignmentVotes(this.meetingId);
+        const different = had ? this.align.proposal?.at !== had.at : Boolean(landedOnly && this.align.landing && !sameGist(landedOnly, this.align.landing.text));
+        if (different) this.db.clearAlignmentVotes(this.meetingId);
         if (question && !question.suggested) this.align.question = { ...question, whyNow: question.whyNow ?? this.align.question?.whyNow ?? null };
         const last = lines.at(-1);
         if (last) this.alignRead = { id: last.id, ts: last.ts, length: last.text.length };

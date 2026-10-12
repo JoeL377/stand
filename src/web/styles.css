@@ -1839,7 +1839,34 @@ textarea.align-question-input { display: block; width: calc(100% + 12px); margin
 .align-differ p, .align-settle p { margin: 0; font-size: 15px; font-weight: 500; line-height: 1.45; }
 .align-differ { display: flex; flex-direction: column; gap: 3px; }
 .align-settle { display: flex; flex-direction: column; gap: 4px; }
-.align-stood { margin-bottom: -12px; }
+/* On the table: the proposal, everyone's answer (a tap is solid, Stand's guess dashed), and what holds it up. */
+.align-table { gap: 12px; padding: 16px; }
+.align-table.landed { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.align-rewritten { margin-left: auto; padding: 2px 8px; border-radius: 999px; background: var(--panel); color: var(--muted); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.align-proposal { margin: 0; font-size: 16.5px; line-height: 1.4; font-weight: 600; }
+.align-forming { margin: 0; font-size: 13px; color: var(--muted); }
+.align-answers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 900px) { .align-answers { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.align-answer { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: none; color: var(--text); font-size: 12.5px; font-weight: 500; text-align: left; transition: background-color 120ms ease, border-color 120ms ease; }
+.align-answer:hover:not(:disabled) { background: var(--hover); }
+.align-answer:disabled { cursor: default; }
+.align-answer.mine { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.align-stack { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; }
+/* Recap: one short row of answers, people first, still tappable. */
+.align-answers.compact { display: flex; flex-wrap: wrap; gap: 6px; }
+.align-answers.compact .align-answer { flex-direction: row-reverse; align-items: center; gap: 6px; padding: 4px 10px 4px 6px; border-radius: 999px; font-size: 12.5px; }
+.align-answers.compact .align-answer:not(:has(.align-stack)) { padding-left: 10px; }
+.align-answers.compact .align-stack { min-height: 0; gap: 2px; }
+.align-dot.guess { background: none; border: 1.5px dashed color-mix(in srgb, var(--who) 60%, white); color: color-mix(in srgb, var(--who) 60%, white); }
+.align-concern { margin: -6px 0 0; display: flex; align-items: flex-start; gap: 8px; padding: 0 2px; font-size: 13.5px; line-height: 1.45; }
+.align-concern .align-dot { margin-top: 1px; }
+.align-next { margin-top: -8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 0 2px; font-size: 13px; }
+.align-next-step { display: inline-flex; align-items: center; gap: 6px; }
+.align-asked { margin: 0 0 -10px; font-size: 13px; color: var(--muted); }
+.align-q-line { flex: 0 1 auto; min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--muted); font-size: 12.5px; font-weight: 400; cursor: text; }
+.align-q-line:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.align-q-line:disabled { cursor: default; }
+.align-q-line-input { width: min(440px, 50%); padding: 3px 8px; font-size: 12.5px; }
 .align-more { align-self: flex-start; display: inline-flex; align-items: baseline; gap: 10px; margin-top: -6px; padding: 4px 0; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 12px; font-weight: 400; }
 .align-more-label { color: var(--accent-text); font-weight: 500; }
 .align-more:hover .align-more-label { text-decoration: underline; }
@@ -1853,9 +1880,6 @@ textarea.align-question-input { display: block; width: calc(100% + 12px); margin
 .align-chip { padding: 4px 10px; border-radius: 999px; background: var(--panel-2); font-size: 12px; line-height: 1.45; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .align-chip.waiting { background: none; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: 12px; color: var(--warn-text); white-space: normal; }
 .align-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--line); }
-.align-landing { gap: 10px; padding: 16px; border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.align-landing-q { flex: 1; min-width: 0; font-size: 13.5px; color: var(--muted); }
-.align-headline { margin: 0; font-size: 20px; line-height: 1.4; font-weight: 600; }
 .align-outcome { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent-text); }
 .align-outcome.decided { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok-text); }
 .align-outcome.not_aligned { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn-text); }
@@ -1863,27 +1887,13 @@ textarea.align-question-input { display: block; width: calc(100% + 12px); margin
 .align-terms div { display: flex; flex-direction: column; gap: 2px; }
 .align-terms dt { font-size: 12px; color: var(--muted); }
 .align-terms dd { margin: 0; font-size: 13.5px; line-height: 1.45; }
-.align-landing-part { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
-.align-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; font-size: 13.5px; line-height: 1.45; }
-.align-steps li { display: flex; align-items: flex-start; gap: 8px; }
-.align-vote-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.align-vote { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 13.5px; font-weight: 500; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }
-.align-vote:hover:not(:disabled) { background: var(--hover); }
-.align-vote:disabled { cursor: default; }
-.align-vote-row:has(.align-vote:disabled) .align-vote:not(.on) { opacity: 0.6; }
-.align-vote.on.aligned { background: color-mix(in srgb, var(--ok) 20%, transparent); border-color: color-mix(in srgb, var(--ok) 55%, transparent); color: var(--ok-text); }
-.align-vote.on.commit { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent-text); }
-.align-vote.on.not_aligned { background: color-mix(in srgb, var(--warn) 18%, transparent); border-color: color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn-text); }
-.align-stack { display: inline-flex; }
-.align-stack .align-dot + .align-dot { margin-left: -5px; box-shadow: 0 0 0 1.5px var(--panel-2); }
-.align-waiting { display: inline-flex; gap: 4px; margin-left: 4px; opacity: 0.5; }
 /* What just changed on a live board glows for a moment; a new landing also comes in from below. */
 @keyframes align-flash { from { background-color: var(--accent-soft); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); } }
 @keyframes align-in { from { opacity: 0; transform: translateY(6px); } }
 .align-new { animation: align-flash 1.6s ease-out; }
 .align-new:not(.align-card) { border-radius: 6px; }
-.align-landing.align-in { animation: align-in 240ms var(--ease-out), align-flash 1.6s ease-out; }
-@media (prefers-reduced-motion: reduce) { .align-landing.align-in { animation: align-flash 1.6s ease-out; } }
+.align-table.align-in { animation: align-in 240ms var(--ease-out), align-flash 1.6s ease-out; }
+@media (prefers-reduced-motion: reduce) { .align-table.align-in { animation: align-flash 1.6s ease-out; } }
 .rc-alignment .align-board { padding: 0; }
 .chatbox { position: relative; display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .chatbox input { flex: 1; background: var(--panel-2); border-color: transparent; border-radius: 999px; padding: 9px 42px 9px 14px; }

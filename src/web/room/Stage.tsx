@@ -8,7 +8,7 @@ import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
-import { AlignmentBoard } from "./AlignmentBoard.tsx";
+import { AlignmentBoard, QuestionLine } from "./AlignmentBoard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
@@ -274,6 +274,10 @@ export function Stage(props: {
           </span>
           <span className="spacer" />
           <BoardFreshness view={align} onRetry={canSteer && !props.ending ? () => send({ type: "align.wrap" }) : undefined} />
+          {/* Once something is on the table, the question steps back to this row. */}
+          {(align.state.proposal || align.state.landing) && (
+            <QuestionLine state={align.state} now={Date.now()} onQuestion={props.ending ? undefined : (text) => send({ type: "align.question", text })} />
+          )}
         </div>
       ) : (
       <div className="now">

@@ -108,6 +108,8 @@ export interface MeetingBrief {
 export interface BriefAlignment {
   question: string | null;
   whyNow: string | null;
+  /** What was on the table: the agreement Stand heard forming, and what held it up. */
+  proposal: { text: string; concern: { person: string; text: string } | null } | null;
   landing: AlignmentState["landing"];
   votes: Array<{ name: string; vote: AlignmentVote; at: string }>;
   positions: Array<{ person: string; stance: string; reasons: string[]; movedAt: string | null; movedBecause: string | null }>;
@@ -118,7 +120,7 @@ export interface BriefAlignment {
   parked: string[];
 }
 
-const VOTE_LABEL: Record<AlignmentVote, string> = { aligned: "Aligned", commit: "Disagree, but I'll commit", not_aligned: "Not aligned yet" };
+const VOTE_LABEL: Record<AlignmentVote, string> = { agree: "Agree", live_with: "Can live with it", concern: "Concern", block: "Block" };
 const LANDING_LABEL = { decided: "Decided", held: "Held, not decided", not_aligned: "Not aligned" } as const;
 
 function toBriefAlignment(a: { state: AlignmentState; votes: Array<{ name: string; vote: AlignmentVote; at: number }> }): BriefAlignment {
@@ -127,6 +129,7 @@ function toBriefAlignment(a: { state: AlignmentState; votes: Array<{ name: strin
   return {
     question: s.question?.text ?? null,
     whyNow: s.question?.whyNow ?? null,
+    proposal: s.proposal ? { text: s.proposal.text, concern: s.proposal.concern } : null,
     landing: s.landing,
     votes: a.votes.map((v) => ({ name: v.name, vote: v.vote, at: iso(v.at) })),
     positions: s.positions.map((p) => ({ ...p, movedAt: when(p.movedAt) })),
@@ -149,8 +152,9 @@ function alignmentLines(a: BriefAlignment): string[] {
     if (l.stillOpen) out.push(`- Still open: ${l.stillOpen}`);
     for (const s of l.nextSteps) out.push(`- [ ] ${s.owner ? `${s.owner}: ` : ""}${s.text}`);
     out.push("");
-  }
-  if (a.votes.length) out.push("**Are you aligned with this?**", ...a.votes.map((v) => `- ${v.name}: ${VOTE_LABEL[v.vote]}`), "");
+  } else if (a.proposal) out.push(`**On the table:** ${a.proposal.text}`, "");
+  if (a.proposal?.concern) out.push(`**Holding it up:** ${a.proposal.concern.person}: ${a.proposal.concern.text}`, "");
+  if (a.votes.length) out.push("**Answers**", ...a.votes.map((v) => `- ${v.name}: ${VOTE_LABEL[v.vote]}`), "");
   if (a.positions.length) {
     out.push("**Positions**");
     for (const p of a.positions) {
