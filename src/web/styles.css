@@ -1341,7 +1341,7 @@ li:hover > .note-edit-btn, li:focus-within > .note-edit-btn { opacity: 1; }
 .side-foot a { color: var(--muted); }
 .side-foot a:hover { color: var(--text); text-decoration: none; }
 .side-toggle { display: flex; gap: 2px; margin: 0 16px 8px; padding: 3px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); flex: none; }
-.side-toggle button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 5px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; box-shadow: none; }
+.side-toggle button { flex: 1 1 auto; min-width: 0; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 5px 8px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; box-shadow: none; }
 .side-toggle button:hover { color: var(--text); background: transparent; }
 .side-toggle button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
 .side-toggle-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: notes-pulse 1.4s ease-in-out infinite; }

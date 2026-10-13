@@ -21,11 +21,13 @@ export function SidePanel(props: {
 }) {
   const [earlierOpen, setEarlierOpen] = useState(true);
   const { state, segments, notes, interims, send } = props;
-  // Two tabs: the agent's notes and topics, and the raw transcript. The topics also sit on the
-  // middle screen, so the transcript opens first.
-  const [tab, setTab] = useState<"notes" | "transcript">("transcript");
+  // Three tabs: the agent's notes and topics, the spoken transcript, and the meeting's chat. The topics
+  // also sit on the middle screen, so the transcript opens first.
+  const [tab, setTab] = useState<"notes" | "transcript" | "chat">("transcript");
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
-  const shown = segments.filter((s) => s.itemId === state.focusItemId);
+  const shown = segments.filter((s) => s.itemId === state.focusItemId && s.kind !== "chat");
+  // Chat is one conversation for the whole meeting, whichever item it landed on.
+  const chats = segments.filter((s) => s.kind === "chat");
   const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
   const focusDiscussions = props.discussions.filter((d) => d.itemId === state.focusItemId);
   const notesUpdating = props.notesBusy.includes(state.focusItemId ?? "");
@@ -47,6 +49,13 @@ export function SidePanel(props: {
   }, [tab, shown.length]);
   useEffect(() => setSeen(shown.length), [state.focusItemId]);
   const unseen = Math.max(0, shown.length - seen);
+  // Messages from others since the Chat tab was last open; your own don't count.
+  const othersChats = chats.filter((s) => s.speakerId !== props.participantId).length;
+  const [chatSeen, setChatSeen] = useState(othersChats);
+  useEffect(() => {
+    if (tab === "chat") setChatSeen(othersChats);
+  }, [tab, othersChats]);
+  const chatUnseen = Math.max(0, othersChats - chatSeen);
   // The host can fix what the agent wrote: edit, delete or add notes for the item in focus.
   const isHost = state.participants.some((p) => p.id === props.participantId && p.isHost);
   const focusSnaps = (state.snaps ?? []).filter((p) => p.itemId === state.focusItemId);
@@ -114,6 +123,14 @@ export function SidePanel(props: {
           {tab !== "transcript" && unseen > 0 && (
             <span className="side-tab-badge" aria-label={`${unseen} new`}>
               {unseen}
+            </span>
+          )}
+        </button>
+        <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
+          Chat
+          {tab !== "chat" && chatUnseen > 0 && (
+            <span className="side-tab-badge" aria-label={`${chatUnseen} new`}>
+              {chatUnseen}
             </span>
           )}
         </button>
@@ -185,9 +202,11 @@ export function SidePanel(props: {
             </section>
           )}
         </div>
+      ) : tab === "transcript" ? (
+        <Transcript segments={shown} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." />
       ) : (
         <>
-          <Transcript segments={shown} items={state.items} interims={interims} send={send} />
+          <Transcript segments={chats} items={state.items} interims={{}} send={send} empty="No messages yet." />
           {!state.ending && <ChatBox send={send} />}
         </>
       )}
@@ -238,7 +257,13 @@ function LiveSliver(props: { segments: Segment[]; interims: Record<string, Inter
   );
 }
 
-function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => boolean }) {
+function Transcript(props: {
+  segments: Segment[];
+  items: Item[];
+  interims: Record<string, Interim>;
+  send: (m: ClientMessage) => boolean;
+  empty: string;
+}) {
   const { segments, items, interims, send } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -259,7 +284,7 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
       }}
     >
       {segments.length === 0 && interimList.length === 0 && (
-        <p className="muted empty">Nothing said about this yet.</p>
+        <p className="muted empty">{props.empty}</p>
       )}
       {segments.map((s) => (
         <SegmentRow key={s.id} segment={s} items={items} send={send} />
@@ -333,7 +358,6 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
         <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
           {s.speakerName}
         </span>
-        {s.kind === "chat" && <span className="seg-kind">chat</span>}
         <span className="seg-time">{fmtTime(s.ts)}</span>
         <button className="seg-move" onClick={() => setMoving((m) => !m)} title="This was about a different item">
           Move
