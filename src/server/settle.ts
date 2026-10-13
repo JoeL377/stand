@@ -21,11 +21,12 @@ const SMALL_TALK_STEP_MS = 5 * 60_000;
 export const FOLD_AFTER_MS = 15 * 60_000;
 /** ...once that's at least this many lines; less isn't worth losing the wording for. */
 export const FOLD_MIN_LINES = 30;
-/** Live, a topic's talk locks to it sooner than that: once it's this old (and there's a little of
- *  it), the runs no longer regroup it, so a stretch already on the board stops flipping between one
- *  topic and two. Only the last few minutes are drawn again. The run as the meeting ends still
- *  regroups everything for the recap. */
-export const LOCK_AFTER_MS = 4 * 60_000;
+/** Live, a topic's talk locks to it sooner than that: once it's this old (8 to 13 minutes, as the
+ *  edge moves in 5-minute steps) and there's a little of it, the runs no longer regroup it, so a
+ *  stretch already on the board stops flipping between one topic and two. On the Conxt replay 4
+ *  minutes steadied the board as much but picked the right topic 6 points less often; 8 cost about
+ *  2. The run as the meeting ends still regroups everything for the recap. */
+export const LOCK_AFTER_MS = 8 * 60_000;
 export const LOCK_MIN_LINES = 6;
 
 export interface Settled {
