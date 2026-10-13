@@ -1944,3 +1944,12 @@ a.sh-pill:hover { text-decoration: none; }
 @media (hover: none) { .rc-pop { display: none !important; } }
 .rc-stretch-tip.start { left: 0; transform: none; }
 .rc-stretch-tip.end { left: auto; right: 0; transform: none; }
+
+/* Wide screens: the recap's counts move to a rail in the right-hand gutter that stays put and marks where you are. */
+@media (min-width: 1240px) {
+  .recap .glance { position: fixed; top: 120px; left: calc(50% + 380px + 40px); width: 170px; margin: 0; flex-direction: column; flex-wrap: nowrap; gap: 2px; }
+  .recap .glance .glance-chip { background: none; padding: 6px 10px; border-radius: 8px; color: var(--muted); }
+  .recap .glance .glance-chip b { color: var(--text); }
+  .recap .glance .glance-chip:hover { box-shadow: none; background: var(--hover); color: var(--text); }
+  .recap .glance .glance-chip.here { background: var(--panel-2); color: var(--text); }
+}

@@ -23,6 +23,7 @@ export function RecapPage() {
   const [upNext, setUpNext] = useState<UpNext | null>(null);
   // Chapters someone opened or closed; the rest follow the default (long ones open).
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  const here = useSectionInView(["todo", "decided", "open", "chapters"], Boolean(data));
 
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -159,28 +160,28 @@ export function RecapPage() {
         </p>
         {data.summary && <p className="lede">{data.summary}</p>}
         {(actions.length > 0 || decided.length > 0 || questions.length > 0 || chapters.length > 0) && (
-          <div className="glance">
+          <nav className="glance" aria-label="Jump to">
             {actions.length > 0 && (
-              <a href="#todo" className="glance-chip todo">
+              <a href="#todo" className={`glance-chip todo${here === "todo" ? " here" : ""}`}>
                 <TodoIcon /> <b>{open}</b> to do{open < actions.length && <span className="muted"> · {actions.length - open} done</span>}
               </a>
             )}
             {decided.length > 0 && (
-              <a href="#decided" className="glance-chip decided">
+              <a href="#decided" className={`glance-chip decided${here === "decided" ? " here" : ""}`}>
                 <DecidedIcon /> <b>{decided.length}</b> decided
               </a>
             )}
             {questions.length > 0 && (
-              <a href="#open" className="glance-chip question">
+              <a href="#open" className={`glance-chip question${here === "open" ? " here" : ""}`}>
                 <QuestionIcon /> <b>{questions.length}</b> open
               </a>
             )}
             {chapters.length > 0 && (
-              <a href="#chapters" className="glance-chip topic">
+              <a href="#chapters" className={`glance-chip topic${here === "chapters" ? " here" : ""}`}>
                 <TopicIcon /> <b>{chapters.length}</b> chapter{chapters.length === 1 ? "" : "s"}
               </a>
             )}
-          </div>
+          </nav>
         )}
         {chapters.length > 1 && <ChapterBar chapters={chapters} from={data.startedAt} to={Math.max(endAt, lastTs)} onPick={jumpTo} />}
       </header>
@@ -414,4 +415,25 @@ function Turns({ segments }: { segments: Segment[] }) {
       ))}
     </div>
   );
+}
+
+/** Which of these sections the reader is in: the last one whose top has scrolled past the upper part of the screen. */
+function useSectionInView(ids: string[], ready: boolean): string | null {
+  const [here, setHere] = useState<string | null>(null);
+  const key = ids.join(",");
+  useEffect(() => {
+    if (!ready) return;
+    const pick = () => {
+      let at: string | null = null;
+      for (const id of key.split(",")) {
+        const el = document.getElementById(id);
+        if (el && el.getBoundingClientRect().top < window.innerHeight * 0.35) at = id;
+      }
+      setHere(at);
+    };
+    pick();
+    document.addEventListener("scroll", pick, { passive: true, capture: true });
+    return () => document.removeEventListener("scroll", pick, { capture: true });
+  }, [key, ready]);
+  return here;
 }
