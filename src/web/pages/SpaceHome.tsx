@@ -10,6 +10,7 @@ import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { CameraIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
@@ -229,7 +230,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
           </section>
 
           <aside className="sh-side" aria-label="Where the space stands">
-            <Card title="To do" count={room.followUps.length} empty="No open to-dos.">
+            <Card title="To do" tone="todo" count={room.followUps.length} empty="No open to-dos.">
               {(all) => (
                 <FollowUpList
                   compact
@@ -239,8 +240,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                 />
               )}
             </Card>
-            <NoteCard title="Decided" notes={feed?.decided ?? []} room={room} empty="No decisions yet." />
-            <NoteCard title="Open" notes={feed?.open ?? []} room={room} empty="No open questions from the last meeting." />
+            <NoteCard title="Decided" tone="decided" notes={feed?.decided ?? []} room={room} empty="No decisions yet." />
+            <NoteCard title="Open" tone="question" notes={feed?.open ?? []} room={room} empty="No open questions from the last meeting." />
             <Card
               title="Up next"
               count={agenda.length + suggested.length}
@@ -473,15 +474,18 @@ function Card(props: {
   /** How many rows are folded away; the rows past CARD_ROWS unless the card says. */
   folded?: number;
   mark?: boolean;
+  /** Colors the card like the meeting recap does: to do blue, decided green, open orange. */
+  tone?: Tone;
   empty: string;
   children: (all: boolean) => React.ReactNode;
 }) {
   const [all, setAll] = useState(false);
   const folded = props.folded ?? props.count - CARD_ROWS;
   return (
-    <section className="sh-card">
+    <section className={props.tone ? `sh-card ${props.tone}` : "sh-card"}>
       <h2>
         {props.mark && <span className="sh-mark">✦</span>}
+        {props.tone && TONE_ICON[props.tone]}
         {props.title}
         {props.count > 0 && <span className="count">{props.count}</span>}
       </h2>
@@ -495,13 +499,17 @@ function Card(props: {
   );
 }
 
-function NoteCard(props: { title: string; notes: Note[]; room: RoomInfo; empty: string }) {
+type Tone = "todo" | "decided" | "question";
+const TONE_ICON: Record<Tone, React.ReactNode> = { todo: <TodoIcon size={14} />, decided: <DecidedIcon size={14} />, question: <QuestionIcon size={14} /> };
+
+function NoteCard(props: { title: string; tone: "decided" | "question"; notes: Note[]; room: RoomInfo; empty: string }) {
   return (
-    <Card title={props.title} count={props.notes.length} empty={props.empty}>
+    <Card title={props.title} tone={props.tone} count={props.notes.length} empty={props.empty}>
       {(all) => (
         <ul className="sh-list">
           {(all ? props.notes : props.notes.slice(0, CARD_ROWS)).map((n) => (
             <li key={n.id}>
+              {TONE_ICON[props.tone]}
               <span>{n.text}</span>
             </li>
           ))}

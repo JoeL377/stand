@@ -1953,3 +1953,13 @@ a.sh-pill:hover { text-decoration: none; }
   .recap .glance .glance-chip:hover { box-shadow: none; background: var(--hover); color: var(--text); }
   .recap .glance .glance-chip.here { background: var(--panel-2); color: var(--text); }
 }
+
+/* Space page cards use the meeting recap's colors: to do blue, decided green, open orange. */
+.sh-card.todo { border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
+.sh-card.decided { border-color: color-mix(in srgb, var(--ok) 28%, var(--line)); }
+.sh-card.question { border-color: color-mix(in srgb, var(--warn) 28%, var(--line)); }
+.sh-card.todo h2 svg { color: var(--accent); }
+.sh-card.decided h2 svg, .sh-card.decided .sh-list li svg { color: var(--ok); }
+.sh-card.question h2 svg, .sh-card.question .sh-list li svg { color: var(--warn); }
+.sh-card.decided .sh-list li, .sh-card.question .sh-list li { align-items: flex-start; }
+.sh-card.decided .sh-list li svg, .sh-card.question .sh-list li svg { top: 2px; }
