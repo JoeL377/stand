@@ -1889,10 +1889,6 @@ a.sh-pill:hover { text-decoration: none; }
 .rc-bar-legend { display: flex; gap: 10px; }
 .rc-bar-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--muted); }
 .rc-bar-legend i.decided { background: var(--ok); } .rc-bar-legend i.action { background: var(--accent); } .rc-bar-legend i.open { background: var(--warn); }
-.rc-chip { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 200px; font-size: 11.5px; color: var(--muted); text-decoration: none; padding: 1px 8px; border-radius: 999px; background: var(--panel-2); white-space: nowrap; overflow: hidden; }
-.rc-chip:hover { color: var(--text); }
-.rc-chip-at { color: var(--accent-text); font-variant-numeric: tabular-nums; }
-.rc-chip-title { overflow: hidden; text-overflow: ellipsis; }
 .followups.one-line li { align-items: center; padding: 5px 0; }
 .followups.one-line .fu-body { flex: 1; }
 .rc-points li { align-items: center; }
@@ -1933,9 +1929,18 @@ a.sh-pill:hover { text-decoration: none; }
 .rc-next-fold > summary::-webkit-details-marker { display: none; }
 .rc-next-fold[open] > summary { margin-bottom: 8px; }
 @media (max-width: 560px) {
-  .rc-chip { display: none; }
   .rc-ch-body { margin: 0 12px; }
   .rc-ch[open] > summary { padding: 10px 12px; }
 }
+.rc-pill-wrap { position: relative; display: inline-block; margin-left: 8px; vertical-align: 1px; }
+.rc-pill { display: inline-block; font-size: 11.5px; line-height: 18px; padding: 0 7px; border-radius: 999px; background: var(--panel-2); color: var(--muted); text-decoration: none; font-variant-numeric: tabular-nums; }
+.rc-pill:hover, .rc-pill:focus-visible { color: var(--accent-text); background: var(--accent-soft); text-decoration: none; }
+.rc-pop { display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 5; width: max-content; max-width: min(320px, 70vw); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; color: var(--text); white-space: normal; text-decoration: none; }
+.rc-pill-wrap:hover .rc-pop, .rc-pill:focus-visible + .rc-pop { display: flex; }
+.rc-pop-title { font-weight: 600; }
+.rc-pop-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.rc-pop-crux { color: var(--text); }
+.rc-pop-crux .agent-mark { font-size: 12px; }
+@media (hover: none) { .rc-pop { display: none !important; } }
 .rc-stretch-tip.start { left: 0; transform: none; }
 .rc-stretch-tip.end { left: auto; right: 0; transform: none; }

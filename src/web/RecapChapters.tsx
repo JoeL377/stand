@@ -41,13 +41,30 @@ export function Face({ name, color, title, size = 20 }: { name: string; color: s
   );
 }
 
-/** Where a to-do, decision or open question came from: its chapter's start and name. */
-export function ChapterChip({ c, i, startedAt }: { c: MeetingChapter; i: number; startedAt: number }) {
+/** Where a to-do, decision or open question came from: a small time pill after its text, with the chapter in a pop-up. */
+export function ChapterChip({ c, i, startedAt, crux, onPick }: { c: MeetingChapter; i: number; startedAt: number; crux?: string; onPick?: (i: number) => void }) {
+  const o = OUTCOME[c.outcome];
   return (
-    <a className="rc-chip" href={`#${chapterAnchor(i)}`} title={`From the chapter "${c.title}"`}>
-      <span className="rc-chip-at">{clock(c.start - startedAt)}</span>
-      <span className="rc-chip-title">{c.title}</span>
-    </a>
+    <span className="rc-pill-wrap">
+      <a className="rc-pill" href={`#${chapterAnchor(i)}`} onClick={() => onPick?.(i)} aria-label={`From the chapter "${c.title}" at ${clock(c.start - startedAt)}`}>
+        {clock(c.start - startedAt)}
+      </a>
+      <span className="rc-pop" role="tooltip">
+        <span className="rc-pop-title">{c.title}</span>
+        <span className="rc-pop-meta">
+          <span className={`rc-ch-dot ${c.outcome}`} aria-hidden />
+          {o.label} · {clock(c.start - startedAt)} · {Math.max(1, Math.round(c.minutes))} min
+        </span>
+        {crux && (
+          <span className="rc-pop-crux">
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>{" "}
+            {crux}
+          </span>
+        )}
+      </span>
+    </span>
   );
 }
 

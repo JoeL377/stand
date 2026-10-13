@@ -110,7 +110,7 @@ export function RecapPage() {
   const chapterIndex = new Map(chapters.flatMap((c, i) => c.topicIds.map((id) => [id, i] as const)));
   const chipFor = (n: Note) => {
     const i = n.discussionId ? chapterIndex.get(n.discussionId) : undefined;
-    return i === undefined ? null : <ChapterChip c={chapters[i]} i={i} startedAt={data.startedAt} />;
+    return i === undefined ? null : <ChapterChip c={chapters[i]} i={i} startedAt={data.startedAt} crux={written.get(chapters[i].key)?.crux} onPick={jumpTo} />;
   };
   // Topics no chapter shows (notes carried in, nothing said this meeting) keep the old row.
   const inChapters = new Set(chapters.flatMap((c) => c.topicIds));
@@ -209,12 +209,8 @@ export function RecapPage() {
             onToggle={saveFollowUp(data.roomId)}
             below={shots}
             oneLine
-            tail={(n) => (
-              <>
-                {owner(n)}
-                {chipFor(n)}
-              </>
-            )}
+            after={chipFor}
+            tail={owner}
           />
         </section>
       )}
@@ -329,10 +325,12 @@ function PointList(props: {
           <li key={n.id}>
             <Icon />
             <span className="rc-point-body">
-              <span>{n.text}</span>
+              <span>
+                {n.text}
+                {props.chip?.(n)}
+              </span>
               {props.below?.(n)}
             </span>
-            {props.chip?.(n)}
             <CopyForAgent kind={props.kind === "decided" ? "decision" : "question"} id={n.id} />
           </li>
         );

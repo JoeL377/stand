@@ -36,6 +36,8 @@ export function FollowUpList(props: {
   /** One line per action: no line of owner and source under it; `tail` shows at its end instead. */
   oneLine?: boolean;
   tail?: (n: FollowUpNote) => ReactNode;
+  /** Shows inline right after the text, like a small pill. */
+  after?: (n: FollowUpNote) => ReactNode;
 }) {
   const [saved, setSaved] = useState<Record<string, Note>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -71,7 +73,10 @@ export function FollowUpList(props: {
               </svg>
             </button>
             <span className="fu-body">
-              <span className="fu-text">{n.text}</span>
+              <span className="fu-text">
+                {n.text}
+                {props.after?.(n)}
+              </span>
               {!props.oneLine && (
                 <span className="fu-meta">
                   <span className={n.owner ? "fu-owner" : "fu-owner none"}>{n.owner ?? "Unassigned"}</span>
