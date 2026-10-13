@@ -10,6 +10,7 @@ import { SnapFigures } from "./Snaps.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { colorFor, fmtDate, fmtTime, initials, itemLabel } from "./util.ts";
 import type { Item } from "../shared/protocol.ts";
+import { Linkified } from "./Linkified.tsx";
 
 /** Time into the meeting, like 15:21 or 1:02:04. */
 export function clock(ms: number): string {
@@ -314,7 +315,9 @@ function ChapterRow(props: {
                   {s.kind === "chat" && <span className="seg-kind">chat</span>}
                   <span className="seg-time">{fmtTime(s.ts)}</span>
                 </div>
-                <div className="seg-text">{s.text}</div>
+                <div className="seg-text">
+                  <Linkified text={s.text} />
+                </div>
               </div>
             ))}
           </div>

@@ -97,6 +97,12 @@ export const ChatIcon = ({ size = 15 }: { size?: number }) => (
   </Svg>
 );
 
+export const SendIcon = ({ size = 15 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M12 19V5M6 11l6-6 6 6" />
+  </Svg>
+);
+
 // Small row tools in the agenda (pin, history, remove, edit, more, expand).
 export const PinIcon = ({ size = 14 }: { size?: number }) => (
   <Svg size={size}>
