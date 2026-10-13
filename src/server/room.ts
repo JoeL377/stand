@@ -1081,7 +1081,7 @@ export class RoomSession implements SpeechSink {
             itemTopics,
             startedAt,
             this.notesReadUpTo.get(itemId),
-            config.notesLock ? { foldAfterMs: LOCK_AFTER_MS, foldMinLines: LOCK_MIN_LINES } : {},
+            config.notesLock ? { foldAfterMs: (config.notesLockMinutes ?? LOCK_AFTER_MS / 60_000) * 60_000, foldMinLines: LOCK_MIN_LINES } : {},
           );
       // Lines are numbered through the item, so a line keeps its number as others drop out.
       const lineOf = new Map(segments.map((s, i) => [s.id, i + 1]));
