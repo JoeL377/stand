@@ -6,10 +6,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { type DraftSlide, outlineToSlides } from "../shared/outline.ts";
-import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind, Segment } from "../shared/protocol.ts";
+import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind, Position, Quote, Segment } from "../shared/protocol.ts";
 import { config } from "./config.ts";
+import { findQuote, type Said } from "./quotes.ts";
 
-export type DraftNote = Pick<Note, "kind" | "text" | "owner">;
+export type DraftNote = Pick<Note, "kind" | "text" | "owner"> & { quote?: Quote | null };
 
 /** A discussion as the agent drafts it: the turns it covers are indexes into
  *  the segments it was given, and a note points at its discussion by index. */
@@ -20,7 +21,7 @@ export interface ItemNotesDraft {
   answered?: string[];
   discussions: Array<{
     topic: string;
-    positions: Array<{ speaker: string; position: string }>;
+    positions: Position[];
     outcome: DiscussionOutcome;
     segmentIndexes: number[];
     /** An earlier discussion of this item that this one picks up again. */
@@ -237,40 +238,61 @@ export function turnNumbers(turns: number[] | string): number[] {
   });
 }
 
-const NotesSchema = z.object({
-  summary: z.string().describe("One or two sentences on where this item stands after the discussion. Empty if nothing substantive was said."),
-  discussions: z.array(
-    z.object({
-      topic: z.string().describe("The question or subject discussed, as a short title under 70 characters"),
-      turns: Turns,
-      positions: z
-        .array(z.object({ speaker: z.string(), position: z.string().describe("Their stance or contribution, in one short line") }))
-        .describe("One per participant who contributed, in the order they first spoke"),
-      outcome: z.enum(["decided", "action", "open", "info"]).describe("decided: a decision was made. action: it ended with someone taking work. open: unresolved. info: an update with nothing to resolve."),
-      continues: z.string().nullable().describe("The id of the earlier discussion this picks up again, from the list given, or null"),
-      picks_up: z
-        .string()
-        .nullable()
-        .describe("The key (T1, T2...) of the topic listed from earlier in this meeting that this goes back to or carries on, or null"),
-      decisions: z.array(
-        z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (D1, D2...) of the already-captured decision this is, or null if new") }),
-      ),
-      action_items: z.array(
-        z.object({
-          text: z.string().describe("Phrased as a task, e.g. 'File the annual-plan pricing bug against billing'"),
-          owner: z.string().nullable(),
-          same_as: z.string().nullable().describe("The key (A1, A2...) of the already-captured action item this is, or null if new"),
-        }),
-      ),
-      open_questions: z.array(
-        z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (Q1, Q2...) of the already-captured open question this is, or null if new") }),
-      ),
-    }),
-  ),
-  answered_questions: z
-    .array(z.string())
-    .describe("Keys (Q1, Q2...) of already-captured open questions the talk has now answered or settled. Leave them out of the discussions."),
-});
+/** The words behind a position or decision: only the run as the meeting ends asks for them (see quotes.ts). */
+const SaidSchema = z
+  .object({
+    line: z.number().int().describe("The [number] of the line the words are in"),
+    words: z.string().describe("The words exactly as that line has them, a phrase or sentence of 4 to 30 words; no paraphrase, no joining of two lines"),
+  })
+  .nullable();
+
+/** Notes as the model writes them. With quotes, each position and decision also points at the words it came from. */
+function notesSchema(quotes: boolean) {
+  const positionSaid = quotes
+    ? { said: SaidSchema.describe("Where they said it most plainly in their own words, or null if no line of theirs does") }
+    : {};
+  const decisionSaid = quotes ? { said: SaidSchema.describe("The words it was proposed or agreed in, or null") } : {};
+  return z.object({
+    summary: z.string().describe("One or two sentences on where this item stands after the discussion. Empty if nothing substantive was said."),
+    discussions: z.array(
+      z.object({
+        topic: z.string().describe("The question or subject discussed, as a short title under 70 characters"),
+        turns: Turns,
+        positions: z
+          .array(z.object({ speaker: z.string(), position: z.string().describe("Their stance or contribution, in one short line"), ...positionSaid }))
+          .describe("One per participant who contributed, in the order they first spoke"),
+        outcome: z.enum(["decided", "action", "open", "info"]).describe("decided: a decision was made. action: it ended with someone taking work. open: unresolved. info: an update with nothing to resolve."),
+        continues: z.string().nullable().describe("The id of the earlier discussion this picks up again, from the list given, or null"),
+        picks_up: z
+          .string()
+          .nullable()
+          .describe("The key (T1, T2...) of the topic listed from earlier in this meeting that this goes back to or carries on, or null"),
+        decisions: z.array(
+          z.object({
+            text: z.string(),
+            same_as: z.string().nullable().describe("The key (D1, D2...) of the already-captured decision this is, or null if new"),
+            ...decisionSaid,
+          }),
+        ),
+        action_items: z.array(
+          z.object({
+            text: z.string().describe("Phrased as a task, e.g. 'File the annual-plan pricing bug against billing'"),
+            owner: z.string().nullable(),
+            same_as: z.string().nullable().describe("The key (A1, A2...) of the already-captured action item this is, or null if new"),
+          }),
+        ),
+        open_questions: z.array(
+          z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (Q1, Q2...) of the already-captured open question this is, or null if new") }),
+        ),
+      }),
+    ),
+    answered_questions: z
+      .array(z.string())
+      .describe("Keys (Q1, Q2...) of already-captured open questions the talk has now answered or settled. Leave them out of the discussions."),
+  });
+}
+const NotesSchema = notesSchema(false);
+const NotesSchemaQuoted = notesSchema(true);
 
 const ScreenSchema = z.object({
   item_id: z.string().nullable().describe("id of the agenda item shown on screen, or null if none clearly matches"),
@@ -529,7 +551,7 @@ export class ClaudeAgent implements Agent {
           .join("\n")}`
       : "";
     const out = await this.parse(
-      NotesSchema,
+      tidy ? NotesSchemaQuoted : NotesSchema,
       notesPrompt(
         classic
           ? `Item: ${itemLabel(item)}${item?.description ? `\nItem description: ${item.description.slice(0, 1500)}` : ""}${before}${quiet}
@@ -553,7 +575,13 @@ In a long meeting, topics that went quiet are listed as settled, with their keys
 
 A long topic that is still going is listed with its key too, with where it stood before the lines below. Carry it on: give its key in picks_up, its new lines in turns, its positions in full, and its decisions, action items and open questions in full, earlier ones included.
 
-Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.`,
+Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.${
+        tidy
+          ? `
+
+This is the record people will read after the meeting, and a position put in other words can tilt what someone meant. For each position, and each decision, also give the line it comes from and copy the words from it exactly as written: the phrase that carries the point in the speaker's own words. Write the position itself the way they framed it; if they hedged, keep the hedge.`
+          : ""
+      }`,
       tidy ? "medium" : "low",
       tidy ? config.notesTidyModel : config.notesModel,
       { timeout: tidy ? NOTES_TIDY_TIMEOUT_MS : NOTES_TIMEOUT_MS, maxTokens: NOTES_MAX_TOKENS, thinking: tidy || config.notesThinking },
@@ -564,10 +592,21 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
     if (!out) throw new Error("the model declined to write notes");
     const known = new Set(earlier.map((d) => d.id));
     const keys = new Set(settled.map((t) => t.key));
+    // The words behind a position or decision, checked against the lines (quotes.ts).
+    const lineOf = (n: number) => (indexOf.has(n) ? segments[indexOf.get(n)!] : undefined);
+    const linesOf = (d: (typeof out.discussions)[number]) => turnNumbers(d.turns).flatMap((n) => lineOf(n) ?? []);
+    const quote = (said: Said, speaker: string | null, near: Segment[]) => (tidy ? findQuote(said, lineOf, speaker, near, segments) : null);
     const notes: ItemNotesDraft["notes"] = out.summary.trim() ? [{ kind: "summary", text: out.summary.trim(), owner: null, discussion: null }] : [];
     out.discussions.forEach((d, i) => {
       notes.push(
-        ...d.decisions.map((t) => ({ kind: "decision" as const, text: t.text, owner: null, discussion: i, sameAs: t.same_as })),
+        ...d.decisions.map((t) => ({
+          kind: "decision" as const,
+          text: t.text,
+          owner: null,
+          discussion: i,
+          sameAs: t.same_as,
+          ...(tidy ? { quote: quote((t as { said?: Said }).said, null, linesOf(d)) } : {}),
+        })),
         ...d.action_items.map((a) => ({ kind: "action" as const, text: a.text, owner: a.owner, discussion: i, sameAs: a.same_as })),
         ...d.open_questions.map((q) => ({ kind: "question" as const, text: q.text, owner: null, discussion: i, sameAs: q.same_as })),
       );
@@ -577,7 +616,12 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
       answered: out.answered_questions ?? [],
       discussions: out.discussions.map((d) => ({
         topic: d.topic.trim().slice(0, 120),
-        positions: d.positions.filter((p) => p.position.trim()),
+        positions: d.positions
+          .filter((p) => p.position.trim())
+          .map((p) => {
+            const q = quote((p as { said?: Said }).said, p.speaker, linesOf(d));
+            return { speaker: p.speaker, position: p.position, ...(q ? { quote: q } : {}) };
+          }),
         outcome: d.outcome,
         segmentIndexes: [...new Set(turnNumbers(d.turns).flatMap((n) => indexOf.get(n) ?? []))].sort((a, b) => a - b),
         continuesId: d.continues && known.has(d.continues) ? d.continues : null,
@@ -808,7 +852,7 @@ Order: things blocked or waiting on a decision first, then open questions, then 
       chapterKey.set(k, c);
       const head = `### ${k} ${c.title} · from ${clock(c.start)} · ${Math.max(1, Math.round(c.minutes))} min · ${c.outcome} · ${itemLabel(c.item)}`;
       const topics = c.topicIds.map((id) => tKey.get(id)).filter(Boolean);
-      const out = [head, ...(topics.length ? [`Topics: ${topics.join(", ")}`] : []), ...c.positions.map((p) => `- ${p.speaker}: ${p.position}`)];
+      const out = [head, ...(topics.length ? [`Topics: ${topics.join(", ")}`] : []), ...c.positions.map((p) => `- ${p.speaker}: ${p.position}${p.quote ? ` (in their words: "${p.quote.text}")` : ""}`)];
       if (c.lines.length) {
         out.push("Lines:");
         for (const l of c.lines) {
@@ -995,8 +1039,8 @@ export class HeuristicAgent implements Agent {
     });
     // Without a model, the whole item is one discussion and each person's
     // position is the first thing they said.
-    const first = new Map<string, string>();
-    for (const s of segments) if (!first.has(s.speakerName)) first.set(s.speakerName, s.text);
+    const first = new Map<string, Segment>();
+    for (const s of segments) if (!first.has(s.speakerName)) first.set(s.speakerName, s);
     const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
     const has = (k: Note["kind"]) => notes.some((n) => n.kind === k);
     return {
@@ -1004,7 +1048,11 @@ export class HeuristicAgent implements Agent {
       discussions: [
         {
           topic: clip(item?.title ?? segments[0].text, 70),
-          positions: [...first].map(([speaker, text]) => ({ speaker, position: clip(text, 90) })),
+          positions: [...first].map(([speaker, s]) => ({
+            speaker,
+            position: clip(s.text, 90),
+            quote: { segmentId: s.id, ts: s.ts, speaker, text: clip(s.text, 320) },
+          })),
           outcome: has("decision") ? "decided" : has("action") ? "action" : has("question") ? "open" : "info",
           segmentIndexes: segments.map((_, i) => i),
           continuesId: null,

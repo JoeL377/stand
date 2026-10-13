@@ -3,7 +3,7 @@
 // ticket or slide) and a Markdown rendering of the same thing.
 
 import { meetingChapters } from "../shared/chapters.ts";
-import type { ChapterRecap, Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Segment, Snap } from "../shared/protocol.ts";
+import type { ChapterRecap, Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Quote, Segment, Snap } from "../shared/protocol.ts";
 
 type Meeting = {
   id: string;
@@ -45,7 +45,7 @@ export interface BriefAction {
   meetingId: string;
   item: BriefItemRef;
   /** The discussion it came out of: why this needs doing, and who said what. */
-  discussion: { id: string; topic: string; positions: Discussion["positions"] } | null;
+  discussion: { id: string; topic: string; positions: BriefPosition[] } | null;
   /** Screenshots that show what this is about (this meeting's brief only). */
   images?: BriefImage[];
   /** The chapter of the meeting it came out of (this meeting's brief only). */
@@ -87,7 +87,7 @@ export interface BriefDiscussion {
   id: string;
   topic: string;
   outcome: DiscussionOutcome;
-  positions: Discussion["positions"];
+  positions: BriefPosition[];
   decisions: string[];
   actionIds: string[];
   openQuestions: string[];
@@ -118,7 +118,8 @@ export interface MeetingBrief {
   actions: BriefAction[];
   /** Action items from the room's earlier meetings that are still open. */
   carriedOver: BriefAction[];
-  decisions: Array<{ id: string; text: string; item: BriefItemRef; images: BriefImage[] }>;
+  /** quote: the words it was settled in, as said (null when the meeting-end run found none). */
+  decisions: Array<{ id: string; text: string; item: BriefItemRef; images: BriefImage[]; quote: BriefQuote | null }>;
   openQuestions: Array<{ id: string; text: string; item: BriefItemRef; images: BriefImage[] }>;
   /** The meeting as chapters, in the order they were talked about. */
   chapters: BriefChapter[];
@@ -185,9 +186,18 @@ function toAction(n: Note, item: BriefItemRef, discussionById?: DiscussionLookup
     doneBy: n.doneBy,
     meetingId: n.meetingId,
     item,
-    discussion: d ? { id: d.id, topic: d.topic, positions: d.positions } : null,
+    discussion: d ? { id: d.id, topic: d.topic, positions: briefPositions(d.positions) } : null,
   };
 }
+
+/** Someone's own words, from the transcript, behind a position or decision. */
+export type BriefQuote = { speaker: string; text: string; at: string };
+/** Where someone stood, with their own words when the meeting-end run found them. */
+export type BriefPosition = { speaker: string; position: string; quote?: BriefQuote | null };
+const briefQuote = (q: Quote | null | undefined): BriefQuote | null => (q ? { speaker: q.speaker, text: q.text, at: iso(q.ts) } : null);
+/** Positions with their words as said, for people and agents reading the brief. */
+const briefPositions = (ps: Discussion["positions"]): BriefPosition[] =>
+  ps.map((p) => ({ speaker: p.speaker, position: p.position, ...(p.quote ? { quote: briefQuote(p.quote) } : {}) }));
 
 export function buildBrief(input: {
   meeting: Meeting;
@@ -245,7 +255,7 @@ export function buildBrief(input: {
     const of = (kind: Note["kind"]) => g.notes.filter((n) => n.kind === kind);
     const actions = of("action").map((n) => ({ ...toAction(n, r, (id) => here.get(id)), images: imagesOfNote(n.id) }));
     brief.actions.push(...actions);
-    brief.decisions.push(...of("decision").map((n) => ({ id: n.id, text: n.text, item: r, images: imagesOfNote(n.id) })));
+    brief.decisions.push(...of("decision").map((n) => ({ id: n.id, text: n.text, item: r, images: imagesOfNote(n.id), quote: briefQuote(n.quote) })));
     brief.openQuestions.push(...of("question").map((n) => ({ id: n.id, text: n.text, item: r, images: imagesOfNote(n.id) })));
     brief.items.push({
       item: r,
@@ -260,7 +270,7 @@ export function buildBrief(input: {
           id: d.id,
           topic: d.topic,
           outcome: d.outcome,
-          positions: d.positions,
+          positions: briefPositions(d.positions),
           decisions: mine("decision").map((n) => n.text),
           actionIds: mine("action").map((n) => n.id),
           openQuestions: mine("question").map((n) => n.text),
@@ -374,7 +384,7 @@ export function briefToMarkdown(b: MeetingBrief): string {
   }
   if (b.decisions.length) {
     out.push("## Decisions", "");
-    for (const d of b.decisions) out.push(`- ${d.text} · ${link(d.item)}`, ...imageLines(d.images));
+    for (const d of b.decisions) out.push(`- ${d.text}${d.quote ? ` (${d.quote.speaker}: "${d.quote.text}")` : ""} · ${link(d.item)}`, ...imageLines(d.images));
     out.push("");
   }
   if (b.openQuestions.length) {
@@ -407,7 +417,7 @@ export function briefToMarkdown(b: MeetingBrief): string {
     for (const d of g.discussions) {
       out.push(`#### ${d.topic} · ${OUTCOME_LABEL[d.outcome]}`, "");
       if (d.continues) out.push(`Continues "${d.continues.topic}" from [${d.continues.startedAt.slice(0, 10)}](${d.continues.recapUrl}).`, "");
-      for (const p of d.positions) out.push(`- ${p.speaker}: ${p.position}`);
+      for (const p of d.positions) out.push(`- ${p.speaker}: ${p.position}${p.quote ? ` (said: "${p.quote.text}")` : ""}`);
       if (d.positions.length) out.push("");
       for (const t of d.decisions) out.push(`- Decision: ${t}`);
       for (const id of d.actionIds) out.push(actionLine2(id));

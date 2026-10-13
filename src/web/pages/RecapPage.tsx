@@ -5,7 +5,7 @@ import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
 import { meetingChapters } from "../../shared/chapters.ts";
-import { ChapterBar, ChapterChip, ChapterList, Face } from "../RecapChapters.tsx";
+import { ChapterBar, ChapterChip, ChapterList, Face, QuoteMark } from "../RecapChapters.tsx";
 import { api, request, type RoomInfo } from "../api.ts";
 import { errorToast, toast } from "../Toasts.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
@@ -220,7 +220,7 @@ export function RecapPage() {
           <h2 className="rc-h decided">
             <DecidedIcon /> Decided
           </h2>
-          <PointList notes={decided} kind="decided" chip={chipFor} below={shots} />
+          <PointList notes={decided} kind="decided" chip={chipFor} below={shots} startedAt={data.startedAt} />
         </section>
       )}
       {questions.length > 0 && (
@@ -317,6 +317,7 @@ function PointList(props: {
   /** Where it came from: its chapter. */
   chip?: (n: Note) => React.ReactNode;
   below?: (n: Note) => React.ReactNode;
+  startedAt?: number;
 }) {
   const Icon = props.kind === "decided" ? DecidedIcon : QuestionIcon;
   return (
@@ -328,6 +329,7 @@ function PointList(props: {
             <span className="rc-point-body">
               <span>
                 {n.text}
+                {n.quote && <QuoteMark quote={n.quote} startedAt={props.startedAt} />}
                 {props.chip?.(n)}
               </span>
               {props.below?.(n)}
@@ -376,6 +378,7 @@ function TopicRow({ d, segments, snaps }: { d: Discussion; segments: Segment[]; 
                 {p.speaker}
               </span>
               {p.position}
+              {p.quote && <QuoteMark quote={p.quote} />}
             </p>
           ))}
           <div className="disc-foot">

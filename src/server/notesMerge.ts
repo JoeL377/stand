@@ -80,7 +80,7 @@ export function mergeNotes(
     }
     claimed.add(prev.id);
     const mine = prev.editedBy ? { text: prev.text, owner: prev.owner, editedBy: prev.editedBy } : { owner: n.owner ?? prev.owner };
-    out.push({ ...n, ...mine, id: prev.id, ts: prev.ts, doneAt: prev.doneAt, doneBy: prev.doneBy });
+    out.push({ ...n, ...mine, id: prev.id, ts: prev.ts, doneAt: prev.doneAt, doneBy: prev.doneBy, quote: n.quote ?? prev.quote ?? null });
   }
   // Whatever the redraft left out stays, as it was.
   for (const e of existing) {
@@ -95,6 +95,7 @@ export function mergeNotes(
       doneAt: e.doneAt,
       doneBy: e.doneBy,
       editedBy: e.editedBy ?? null,
+      quote: e.quote ?? null,
     });
   }
   return out;

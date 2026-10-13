@@ -8,6 +8,9 @@
 import type { AgentToken, Discussion, Item, ItemUpdate, Jot, Note, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
+
+/** A position as one line, with the person's own words when the meeting-end run kept them. */
+const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.position}${p.quote ? ` (in their words: "${p.quote.text}")` : ""}`;
 import { linkSnaps, type SnapRow } from "./snaps.ts";
 
 export type RefKind = "action" | "decision" | "question" | "topic";
@@ -235,7 +238,7 @@ export function agentApi(deps: AgentDeps) {
             ref: refOf("topic", r.topic.id),
             topic: r.topic.topic,
             outcome: r.topic.outcome,
-            positions: r.topic.positions.map((p) => `${p.speaker}: ${p.position}`),
+            positions: r.topic.positions.map(positionLine),
           }
         : undefined;
       if (!r.note) {
@@ -263,6 +266,7 @@ export function agentApi(deps: AgentDeps) {
         ref: refOf(r.ref.kind, n.id),
         kind: r.ref.kind,
         text: n.text,
+        in_their_words: n.quote ? `${n.quote.speaker}: "${n.quote.text}"` : undefined,
         owner: n.owner ?? undefined,
         status: n.kind === "action" ? (n.doneAt ? "done" : "open") : undefined,
         done_by: n.doneBy ?? undefined,
@@ -473,7 +477,7 @@ export function agentApi(deps: AgentDeps) {
           topic: d.topic,
           outcome: d.outcome,
           on: day(d.meetingStartedAt),
-          positions: d.positions.map((p) => `${p.speaker}: ${p.position}`),
+          positions: d.positions.map(positionLine),
         })),
         updates: db.itemUpdates(item.id, 10).map(updateInfo),
         saved_notes: (() => {
