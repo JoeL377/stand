@@ -579,7 +579,7 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
         tidy
           ? `
 
-This is the record people will read after the meeting, and a position put in other words can tilt what someone meant. For each position, and each decision, also give the line it comes from and copy the words from it exactly as written: the phrase that carries the point in the speaker's own words. Write the position itself the way they framed it; if they hedged, keep the hedge.`
+This is the record people will read after the meeting, and a position put in other words can tilt what someone meant. For each position, and each decision, also give the line it comes from and copy the words from it exactly as written: the phrase that carries the point in the speaker's own words. Write the position the way they framed it, qualifiers included: if they offered an analogy, agreed only in part, hedged, or credited someone else's view (\"I could agree with that\", \"think of it as\", \"maybe Joe is onto something\"), the position says so, and the words you copy are the ones that carry that nuance rather than the boldest line.`
           : ""
       }`,
       tidy ? "medium" : "low",
