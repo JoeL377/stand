@@ -16,15 +16,15 @@ import type {
   ServerMessage,
   Suggestion,
 } from "../shared/protocol.ts";
-import { capabilities } from "./config.ts";
+import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
 import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
 import { meetingChapters } from "../shared/chapters.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
-import { settle } from "./settle.ts";
-import { applyMerges, mergePrompt, planMerge } from "./topicMerge.ts";
+import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
+import { applyMerges, mergePrompt, planMerge, stickyMerges, type TopicMerge } from "./topicMerge.ts";
 import { newId } from "./ids.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
@@ -165,6 +165,9 @@ export class RoomSession implements SpeechSink {
   private mergedAt = -Infinity;
   private mergedSig = "";
   private merged = "[]";
+  /** Main topics as of the last placing, and placings the model changed only once (topicMerge.ts). */
+  private mainTopics = new Set<string>();
+  private pendingMoves = new Map<string, string>();
   /** Why, when it's the Anthropic account rather than one run: its rate limit or its credit. */
   private notesWhy: NotesTrouble["reason"] | null = null;
   /** Rate limited: no notes run starts before this, so retries don't keep it hit. */
@@ -1073,7 +1076,13 @@ export class RoomSession implements SpeechSink {
       const itemTopics = this.db.meetingDiscussions(this.meetingId).filter((d) => d.itemId === itemId);
       const { settled, folded, window } = tidy
         ? { settled: [], folded: [], window: segments }
-        : settle(segments, itemTopics, startedAt, this.notesReadUpTo.get(itemId));
+        : settle(
+            segments,
+            itemTopics,
+            startedAt,
+            this.notesReadUpTo.get(itemId),
+            config.notesLock ? { foldAfterMs: LOCK_AFTER_MS, foldMinLines: LOCK_MIN_LINES } : {},
+          );
       // Lines are numbered through the item, so a line keeps its number as others drop out.
       const lineOf = new Map(segments.map((s, i) => [s.id, i + 1]));
       const lineNumbers = window.map((s) => lineOf.get(s.id)!);
@@ -1244,7 +1253,7 @@ export class RoomSession implements SpeechSink {
   private async mergeTopics(final: boolean) {
     const run = this.mergeRun.then(async () => {
       const discussions = this.db.meetingDiscussions(this.meetingId);
-      const plan = planMerge(discussions, this.db.meetingSegments(this.meetingId), this.db.meetingNotes(this.meetingId), Date.now());
+      const plan = planMerge(discussions, this.db.meetingSegments(this.meetingId), this.db.meetingNotes(this.meetingId), Date.now(), final ? undefined : this.mainTopics);
       if (!final && plan.sig === this.mergedSig) return;
       this.mergedSig = plan.sig;
       this.mergedAt = Date.now();
@@ -1256,7 +1265,10 @@ export class RoomSession implements SpeechSink {
           })
         : [];
       if (!answer) return;
-      const merges = applyMerges(plan, keys, answer);
+      const proposed = applyMerges(plan, keys, answer);
+      // Live, a placing only moves when the model says so twice; the last one, for the recap, stands.
+      const merges = final ? proposed : stickyMerges(JSON.parse(this.merged) as TopicMerge[], proposed, plan, this.pendingMoves);
+      this.mainTopics = new Set(plan.main.map((t) => t.d.id));
       console.log(`[agent] topics: ${plan.main.length} main, ${merges.length} of ${plan.small.length} smaller placed${final ? ", whole meeting" : ""}`);
       const placed = JSON.stringify(merges);
       if (placed === this.merged) return;

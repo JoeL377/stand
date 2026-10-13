@@ -33,6 +33,9 @@ export const config = {
   notesTurnsAsRanges: env("NOTES_TURNS") === "ranges",
   notesThinking: env("NOTES_THINKING") !== "off",
   notesLastTopics: env("NOTES_LAST_TOPICS") === "on",
+  /** NOTES_LOCK=off: live runs regroup all of a topic's talk still going, up to 15 minutes of it
+   *  (settle.ts FOLD_AFTER_MS), instead of locking talk a few minutes old to its topic. */
+  notesLock: env("NOTES_LOCK") !== "off",
   /** NOTES_LAYOUT=stable: lines numbered through the item and topics that went quiet listed after
    *  the talk, so far more of the prompt comes back from the cache. In the Conxt replays on Haiku
    *  it cost about $0.08 a meeting hour less, but picked the right current topic 5 to 7 points less

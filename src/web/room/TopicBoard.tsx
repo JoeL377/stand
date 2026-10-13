@@ -9,6 +9,7 @@
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
 import type { Discussion, DiscussionOutcome, Item, Note, Participant, Segment } from "../../shared/protocol.ts";
 import { type ChapterTopic, chapterOf, remarkTimes, stretches as chapterStretches, type Stretch } from "../../shared/chapters.ts";
+import { type Focus, pickFocus } from "../../shared/boardFocus.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 
@@ -99,7 +100,19 @@ export function TopicBoard(props: {
     chapters.set(t.chapter, c);
   }
   const here = topics.filter((t) => t.d.itemId === props.focusItemId);
-  const current = (latest && here.find((t) => t.d.segmentIds.includes(latest.id))) ?? [...here].sort((a, b) => b.last - a.last)[0] ?? null;
+  const latestTopic = (latest && here.find((t) => t.d.segmentIds.includes(latest.id))) ?? [...here].sort((a, b) => b.last - a.last)[0] ?? null;
+  // The board waits a few remarks before it follows a new topic (shared/boardFocus.ts).
+  const onScreen = useRef<Focus | null>(null);
+  const focus = pickFocus(
+    onScreen.current,
+    latestTopic?.d.id ?? null,
+    here.map((t) => ({ id: t.d.id, lines: t.turns.map((s) => ({ id: s.id, ts: s.ts })) })),
+    latest?.ts ?? now,
+  );
+  useEffect(() => {
+    onScreen.current = focus;
+  });
+  const current = here.find((t) => t.d.id === focus?.id) ?? latestTopic;
   const currentChapter = current ? chapters.get(current.chapter)! : null;
   // The color for a person: by their id when they're here, else by name.
   const idOf = (name: string) => props.participants.find((p) => same(p.name, name))?.id ?? name;

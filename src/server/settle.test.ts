@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Discussion, Segment } from "../shared/protocol.ts";
-import { settle } from "./settle.ts";
+import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
 
 const MIN = 60_000;
 const now = Date.UTC(2026, 9, 11, 3, 0, 0);
@@ -80,4 +80,16 @@ test("inside a long topic still going, talk older than 15 minutes folds once the
   const unread = settle(lines, [topic("Pricing", lines.map((s) => s.id))], now, now - 20 * MIN);
   assert.deepEqual(unread.folded[0].segmentIds, lines.filter((s) => s.ts <= now - 20 * MIN).map((s) => s.id));
   assert.equal(unread.window[0].id, "pricing-41");
+});
+
+test("live, a topic's talk a few minutes old locks to it: the run reads only the latest talk", () => {
+  const lines = Array.from({ length: 12 }, (_, i) => line(`pricing-${i}`, 14 - i));
+  const { folded, window } = settle(lines, [topic("Pricing", lines.map((s) => s.id))], now, now, { foldAfterMs: LOCK_AFTER_MS, foldMinLines: LOCK_MIN_LINES });
+  assert.equal(folded.length, 1);
+  assert.ok(folded[0].segmentIds.length >= 6, "the older talk is locked to Pricing");
+  assert.ok(window.length < 12 && window.length >= 3, `the run reads ${window.length} lines`);
+  assert.deepEqual(window.at(-1)?.id, "pricing-11");
+  // Too little older talk to be worth locking: it's all read again.
+  const short = lines.slice(-5);
+  assert.deepEqual(settle(short, [topic("Pricing", short.map((s) => s.id))], now, now, { foldAfterMs: LOCK_AFTER_MS, foldMinLines: LOCK_MIN_LINES }).folded, []);
 });
