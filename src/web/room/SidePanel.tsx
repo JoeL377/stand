@@ -6,7 +6,8 @@ import { FollowUpList } from "../FollowUps.tsx";
 import { LiveItemNotes, type NoteEditing } from "../Discussions.tsx";
 import { SnapsPill } from "../Snaps.tsx";
 import { toast, undoing } from "../Toasts.tsx";
-import { ChevronIcon } from "../icons.tsx";
+import { ChevronIcon, SendIcon } from "../icons.tsx";
+import { Linkified } from "../Linkified.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
@@ -185,7 +186,10 @@ export function SidePanel(props: {
           )}
         </div>
       ) : (
-        <Transcript segments={shown} items={state.items} interims={interims} send={send} />
+        <>
+          <Transcript segments={shown} items={state.items} interims={interims} send={send} />
+          {!state.ending && <ChatBox send={send} />}
+        </>
       )}
       <div className="side-foot">
         <a
@@ -255,7 +259,7 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
       }}
     >
       {segments.length === 0 && interimList.length === 0 && (
-        <p className="muted empty">Nothing said about this yet. Speech and chat show up here, pinned to the item in focus.</p>
+        <p className="muted empty">Nothing said about this yet.</p>
       )}
       {segments.map((s) => (
         <SegmentRow key={s.id} segment={s} items={items} send={send} />
@@ -269,6 +273,55 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
         </div>
       ))}
     </div>
+  );
+}
+
+/** Typed messages for everyone in the meeting. They land in the transcript on the item in focus, and the notes read them like speech. */
+function ChatBox({ send }: { send: (m: ClientMessage) => boolean }) {
+  const [text, setText] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  // Grows with what's typed, up to a few lines.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
+  }, [text]);
+  const submit = () => {
+    const t = text.trim();
+    if (!t) return;
+    // Kept in the box if it couldn't go out, so nothing typed is lost.
+    if (send({ type: "chat", text: t })) setText("");
+  };
+  return (
+    <form
+      className="chat-box"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <textarea
+        ref={ref}
+        rows={1}
+        value={text}
+        maxLength={2000}
+        placeholder="Message everyone"
+        aria-label="Message everyone"
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            submit();
+          }
+        }}
+      />
+      {text.trim() && (
+        <button type="submit" className="chat-send" aria-label="Send">
+          <SendIcon />
+        </button>
+      )}
+    </form>
   );
 }
 
@@ -286,7 +339,9 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
           Move
         </button>
       </div>
-      <div className="seg-text">{s.text}</div>
+      <div className="seg-text">
+        <Linkified text={s.text} />
+      </div>
       {moving && (
         <select
           className="seg-select"

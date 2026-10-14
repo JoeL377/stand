@@ -1963,3 +1963,10 @@ a.sh-pill:hover { text-decoration: none; }
 .sh-card.question h2 svg, .sh-card.question .sh-list li svg { color: var(--warn); }
 .sh-card.decided .sh-list li, .sh-card.question .sh-list li { align-items: flex-start; }
 .sh-card.decided .sh-list li svg, .sh-card.question .sh-list li svg { top: 2px; }
+
+/* ---- in-meeting chat, under the transcript ---- */
+.chat-box { flex: none; position: relative; margin: 0 16px 8px; }
+.chat-box textarea { display: block; width: 100%; resize: none; min-height: 34px; max-height: 96px; padding: 7px 38px 7px 10px; font: inherit; font-size: 13px; line-height: 1.4; border-radius: 8px; }
+.chat-send { position: absolute; right: 5px; bottom: 5px; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+.chat-send:hover { filter: brightness(1.1); }
+.seg-text a { color: var(--accent); }
