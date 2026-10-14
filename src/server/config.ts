@@ -45,6 +45,9 @@ export const config = {
    *  stays the default. */
   notesStableLayout: env("NOTES_LAYOUT") === "stable",
   linearKey: env("LINEAR_API_KEY"),
+  /** Optional: a GitHub token that can read the repos agents open PRs in, so Stand can tell when a
+   *  to-do's PR merges (shipWatch.ts). Without it only public repos' PRs can be checked. */
+  githubToken: env("GITHUB_TOKEN"),
   google: {
     clientId: env("GOOGLE_CLIENT_ID"),
     clientSecret: env("GOOGLE_CLIENT_SECRET"),

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, UploadLinks, WORKING_QUIET_MS, workLog, workingOn } from "./workLog.ts";
+import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, UploadLinks, WORKING_QUIET_MS, prOf, readyToShip, workLog, workingOn } from "./workLog.ts";
+import { ShipWatch, githubPrState, type PrState } from "./shipWatch.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { openDb } from "./db.ts";
 import { addUpNext } from "./upNext.ts";
 import { upNextView } from "./upNextPolish.ts";
 
-function setup() {
+function setup(deps: { readyToShip?: () => void } = {}) {
   const db = openDb(":memory:");
   const joe = db.upsertUser({ googleSub: "g-joe", email: "joe@example.com", name: "Joe Liang", picture: null });
   const andy = db.upsertUser({ googleSub: "g-andy", email: "andy@example.com", name: "Andy Li", picture: null });
@@ -37,6 +38,7 @@ function setup() {
     brief: (id) => ({ meeting: id }),
     suggested: (r) => upNextView(db, r, null),
     uploads: new UploadLinks(),
+    ...deps,
   });
   const action = notes.find((n) => n.text.startsWith("Move"))!;
   return { db, api, joe, andy, room, item, topic, action, notes, notified };
@@ -330,4 +332,76 @@ test("notes saved from the bar reach agents: list_notes, get on stand:note, the 
   const ctx = api.itemContext(me, item.id, "http://stand.test");
   assert.deepEqual(ctx.saved_notes?.map((n) => n.ref), ["stand:note/jotchart1"]);
   assert.equal(ctx.snaps.some((s) => s.image_url.includes("pinnedsnap")), false);
+});
+
+test("a to-do finished as a PR shows ready to ship, and Stand checks it off when the PR merges", async () => {
+  let asked = 0;
+  const { db, api, joe, action, notes, notified } = setup({ readyToShip: () => asked++ });
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const caller = { user: joe, token: info };
+  const ref = `stand:action/${action.id}`;
+  const pr = "https://github.com/JoeL377/stand/pull/15";
+  assert.throws(() => api.postUpdate(caller, { itemId: action.itemId!, status: "ready", text: "x" }), /to-do/);
+  api.postUpdate(caller, { ref, status: "working" });
+  const res = api.postUpdate(caller, { ref, status: "ready", text: "The chapter bar fills from the left.", links: [pr] });
+  assert.match(res.ships!, /checks it off by itself when https:\/\/github\.com\/JoeL377\/stand\/pull\/15 merges/);
+  assert.equal(asked, 1, "Stand looks at the PR right away");
+  let ups = db.notesUpdates([action.id]);
+  assert.equal(workingOn(ups, false), null, "ready stops the spinner");
+  assert.deepEqual(readyToShip(ups, false), { by: "Joe Liang via Claude Code", since: ups.at(-1)!.ts, text: "The chapter bar fills from the left.", pr });
+
+  // Without a PR link it still shows ready, but the agent hears it has to come back.
+  const other = notes.find((n) => n.text.startsWith("Write"))!;
+  const bare = api.postUpdate(caller, { ref: `stand:action/${other.id}`, status: "ready", text: "Drafted in the doc." });
+  assert.match(bare.ships!, /can't tell when it ships/);
+  assert.equal(asked, 1);
+
+  const states = new Map<string, PrState | null>([[pr, "open"]]);
+  const watch = new ShipWatch(db, (r) => notified.push(`${r}:ship`), async (l) => states.get(l) ?? null);
+  await watch.check();
+  assert.equal(db.getNote(action.id)!.doneAt, null, "an open PR leaves it alone");
+
+  states.set(pr, "merged");
+  await watch.check();
+  const done = db.getNote(action.id)!;
+  assert.ok(done.doneAt);
+  assert.equal(done.doneBy, "Joe Liang via Claude Code");
+  ups = db.notesUpdates([action.id]);
+  assert.equal(ups.at(-1)!.status, "done");
+  assert.equal(ups.at(-1)!.text, "Shipped: PR #15 merged. The chapter bar fills from the left.");
+  assert.equal(readyToShip(ups, true), null);
+  assert.equal(db.readyToShip().some((u) => u.noteId === action.id), false, "a shipped to-do isn't watched any more");
+  assert.equal(db.getNote(other.id)!.doneAt, null, "no PR, nothing to watch");
+});
+
+test("a to-do whose PR closes without merging stays open and says why", async () => {
+  const { db, api, joe, action } = setup();
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const pr = "https://github.com/JoeL377/stand/pull/16";
+  api.postUpdate({ user: joe, token: info }, { ref: `stand:action/${action.id}`, status: "ready", text: "Done in a PR.", links: [pr] });
+  await new ShipWatch(db, () => {}, async () => "closed").check();
+  assert.equal(db.getNote(action.id)!.doneAt, null);
+  const last = db.notesUpdates([action.id]).at(-1)!;
+  assert.equal(last.status, "blocked");
+  assert.match(last.text, /PR #16 was closed without merging/);
+  assert.equal(db.readyToShip().length, 0);
+});
+
+test("PR links and GitHub's answer about them", async () => {
+  assert.deepEqual(prOf("https://github.com/JoeL377/stand/pull/15"), { owner: "JoeL377", repo: "stand", number: 15 });
+  assert.deepEqual(prOf("https://github.com/JoeL377/stand/pull/15/files"), { owner: "JoeL377", repo: "stand", number: 15 });
+  assert.equal(prOf("https://github.com/JoeL377/stand/issues/15"), null);
+  const seen: Array<{ url: string; auth?: string }> = [];
+  const answer = (body: unknown, status = 200) =>
+    (async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push({ url: String(url), auth: (init?.headers as Record<string, string>).Authorization });
+      return new Response(JSON.stringify(body), { status });
+    }) as typeof fetch;
+  const pr = "https://github.com/JoeL377/stand/pull/15";
+  assert.equal(await githubPrState(pr, "tok", answer({ state: "closed", merged: true })), "merged");
+  assert.deepEqual(seen[0], { url: "https://api.github.com/repos/JoeL377/stand/pulls/15", auth: "Bearer tok" });
+  assert.equal(await githubPrState(pr, undefined, answer({ state: "closed", merged: false })), "closed");
+  assert.equal(seen[1].auth, undefined);
+  assert.equal(await githubPrState(pr, undefined, answer({ state: "open", merged: false })), "open");
+  assert.equal(await githubPrState(pr, undefined, answer({ message: "Not Found" }, 404)), null);
 });

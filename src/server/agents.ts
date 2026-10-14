@@ -12,7 +12,7 @@ import { ownedBy } from "./spaces.ts";
 /** A position as one line, with the person's own words when the meeting-end run kept them. */
 const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.position}${p.quote ? ` (in their words: "${p.quote.text}")` : ""}`;
 import { linkSnaps, type SnapRow } from "./snaps.ts";
-import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, shotUrl, type UploadLinks } from "./workLog.ts";
+import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, prOf, shotUrl, type UploadLinks } from "./workLog.ts";
 
 export type RefKind = "action" | "decision" | "question" | "topic";
 const NOTE_KINDS: Record<string, RefKind> = { action: "action", decision: "decision", question: "question" };
@@ -55,9 +55,11 @@ export interface AgentDeps {
   suggested: (roomId: string) => { upNext: UpNext };
   /** Hands out the links agents upload screenshots to. */
   uploads: UploadLinks;
+  /** A to-do was just reported ready to ship: look at its PR now rather than on the next round. */
+  readyToShip?: () => void;
 }
 
-const UPDATE_STATUSES: UpdateStatus[] = ["working", "progress", "blocked", "needs_decision", "done"];
+const UPDATE_STATUSES: UpdateStatus[] = ["working", "progress", "blocked", "needs_decision", "ready", "done"];
 
 export function agentApi(deps: AgentDeps) {
   const { db } = deps;
@@ -292,7 +294,7 @@ export function agentApi(deps: AgentDeps) {
         url: refUrl(baseUrl, r.ref.kind, n.id),
         next:
           n.kind === "action"
-            ? "When you start, call post_update with this ref and status working so people see you're on it. When you finish, call complete_action with a short summary of what changed and the PR link (attach screenshots first with screenshot_upload_url if the change shows on screen). For progress or a blocker, call post_update."
+            ? "When you start, call post_update with this ref and status working so people see you're on it. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR waiting to ship, call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
             : undefined,
       };
     },
@@ -330,7 +332,7 @@ export function agentApi(deps: AgentDeps) {
         `"${clip(text, 200)}" (${where})`,
         ...[...decided, ...fallback].map((d) => `Decided: ${clip(d.text, 200)}`),
         r.ref.kind === "action"
-          ? "Pull the full context with the Stand MCP (get), post_update with status working when you start, do the work, then report back with complete_action (a summary of what changed) or post_update."
+          ? "Pull the full context with the Stand MCP (get), post_update with status working when you start, do the work, attach screenshots of anything that shows on screen (screenshot_upload_url), then report back: post_update with status ready and the PR link if it waits to ship (Stand checks it off when the PR merges), else complete_action with a summary of what changed."
           : r.ref.kind === "question"
             ? "Pull the full context with the Stand MCP (get), dig into it, then report what you found with post_update (status needs_decision if people must decide)."
             : "Pull the full context with the Stand MCP (get) before acting on it.",
@@ -520,6 +522,8 @@ export function agentApi(deps: AgentDeps) {
       const status = (UPDATE_STATUSES.find((s) => s === args.status && s !== "done") ?? "progress") as UpdateStatus;
       if (status === "working" && !(args.ref && parseRef(args.ref)?.kind === "action"))
         throw new AgentError("Working is for a to-do: give its ref, stand:action/<id>.");
+      if (status === "ready" && !(args.ref && parseRef(args.ref)?.kind === "action"))
+        throw new AgentError("Ready is for a to-do: give its ref, stand:action/<id>.");
       const text = (args.text ?? "").trim().slice(0, 4000) || (status === "working" ? "Started on it" : "");
       if (!text) throw new AgentError("An update needs some text.");
       let roomId: string;
@@ -550,12 +554,20 @@ export function agentApi(deps: AgentDeps) {
       });
       if (note) db.claimWorkShots(note.id, caller.user.id, update.id);
       deps.notify(roomId, "updates");
+      const pr = update.links.find((l) => prOf(l));
+      if (status === "ready" && pr) deps.readyToShip?.();
       return {
         posted: updateInfo(update, baseUrl),
         shows_on: note?.kind === "action" ? "the to-do in Stand, in its log" : itemId ? "the item in Stand, under Since last time" : "the space in Stand",
         working:
           note?.kind === "action" && (status === "working" || status === "progress")
-            ? "The to-do shows as being worked on until you complete it, post blocked or needs_decision, or go 30 minutes without an update."
+            ? "The to-do shows as being worked on until you complete it, post ready, blocked or needs_decision, or go 30 minutes without an update."
+            : undefined,
+        ships:
+          status === "ready"
+            ? pr
+              ? `The to-do shows as ready to ship. Stand checks it off by itself when ${pr} merges, with your text as the summary; no need to come back to it.`
+              : "The to-do shows as ready to ship, but with no GitHub PR link Stand can't tell when it ships: call complete_action when it does, or post ready again with the PR link."
             : undefined,
       };
     },

@@ -442,7 +442,7 @@ function MeetingRow({ m }: { m: SpaceFeed["meetings"][number] }) {
   );
 }
 
-const UPDATE_LABEL: Record<ItemUpdate["status"], string | null> = { working: "Started", progress: null, blocked: "Blocked", needs_decision: "Needs a decision", done: "Done" };
+const UPDATE_LABEL: Record<ItemUpdate["status"], string | null> = { working: "Started", progress: null, blocked: "Blocked", needs_decision: "Needs a decision", ready: "Ready to ship", done: "Done" };
 
 function UpdateRow({ u, room }: { u: ItemUpdate; room: RoomInfo }) {
   const item = room.items.find((i) => i.id === u.itemId);

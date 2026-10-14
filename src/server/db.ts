@@ -1738,6 +1738,18 @@ export function openDb(file?: string) {
         db.prepare(`SELECT * FROM work_shots WHERE note_id IN (${noteIds.map(() => "?").join(",")}) ORDER BY ts ASC`).all(...noteIds) as Row[]
       ).map(toWorkShot);
     },
+    /** To-dos still open whose last word is "ready" (finished, waiting to ship), with who said so. */
+    readyToShip(): Array<ItemUpdate & { userId: string }> {
+      return (
+        db
+          .prepare(
+            `SELECT u.* FROM updates u JOIN notes n ON n.id = u.note_id
+             WHERE n.kind = 'action' AND n.done_at IS NULL AND u.status = 'ready'
+             AND u.ts = (SELECT MAX(ts) FROM updates WHERE note_id = u.note_id) ORDER BY u.ts LIMIT 100`,
+          )
+          .all() as Row[]
+      ).map((r) => ({ ...toUpdate(r), userId: r.user_id as string }));
+    },
     noteUpdates(noteId: string): ItemUpdate[] {
       return (db.prepare("SELECT * FROM updates WHERE note_id = ? ORDER BY ts DESC LIMIT 50").all(noteId) as Row[]).map(toUpdate);
     },

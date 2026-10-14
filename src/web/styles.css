@@ -1691,7 +1691,7 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 .sh-status { flex: none; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--hover); color: var(--muted); }
 .sh-status.blocked { color: var(--warn-text); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .sh-status.needs_decision { color: var(--accent-text); background: var(--accent-soft); }
-.sh-status.done { color: var(--ok-text); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.sh-status.done, .sh-status.ready { color: var(--ok-text); background: color-mix(in srgb, var(--ok) 12%, transparent); }
 .sh-time { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 58px; text-align: right; }
 .sh-pill-wrap { position: relative; flex: none; display: inline-flex; }
 .sh-pill { display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: auto; min-height: 0; padding: 2px 9px; border: 1px solid transparent; border-radius: 999px; font-size: 12px; line-height: 1.5; color: var(--text); background: var(--hover); cursor: pointer; text-decoration: none; box-shadow: none; }
@@ -1983,6 +1983,9 @@ a.sh-pill:hover { text-decoration: none; }
 }
 .fu-work:hover, .fu-work.open { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .fu-work:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Finished, waiting on its PR to merge. */
+.fu-work.ready { color: var(--ok-text); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.fu-work.ready:hover, .fu-work.ready.open { background: color-mix(in srgb, var(--ok) 24%, transparent); }
 .fu-spin {
   width: 9px; height: 9px; border-radius: 50%;
   border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent);
@@ -2004,7 +2007,7 @@ a.sh-pill:hover { text-decoration: none; }
 .wl-entry + .wl-entry { border-top: 1px solid var(--line); }
 .wl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--muted); }
 .wl-status { font-weight: 600; color: var(--text); }
-.wl-status.done { color: var(--ok-text); }
+.wl-status.done, .wl-status.ready { color: var(--ok-text); }
 .wl-status.blocked, .wl-status.needs_decision { color: var(--warn-text); }
 .wl-by { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wl-link { padding: 0 7px; border-radius: 999px; background: var(--panel-2); color: var(--muted); line-height: 18px; text-decoration: none; }
