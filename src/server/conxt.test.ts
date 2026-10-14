@@ -246,6 +246,10 @@ test("finalized synthesis carries exact discussion evidence and holds tasks and 
   assert.equal(payload.synthesis.items.find((i: { primitive: string }) => i.primitive === "task").owner, "Alice");
   assert.equal(payload.synthesis.items.find((i: { content: string }) => i.content === "Use Redis.").disposition, "unresolved");
   assert.equal(payload.synthesis.items.find((i: { primitive: string }) => i.primitive === "question").disposition, "unresolved");
+  assert.deepEqual(payload.turns.map((t: { speaker_id: string }) => t.speaker_id), ["a", "b"]);
+  assert.equal(payload.turns[0].at, new Date(meeting.startedAt).toISOString());
+  const members = (db.raw.prepare("SELECT COALESCE(LOWER(u.email), m.user_id) AS person FROM room_members m LEFT JOIN users u ON u.id=m.user_id WHERE m.room_id=? ORDER BY person").all(room.id) as { person: string }[]).map(m => m.person);
+  assert.deepEqual(payload.members ?? [], members);
   db.endMeeting(meeting.id, "Changed summary");
   assert.equal(db.raw.prepare("SELECT payload FROM conxt_deliveries WHERE meeting_id=?").get(meeting.id)!.payload, row.payload);
   db.raw.close();
