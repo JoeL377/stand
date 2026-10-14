@@ -1,6 +1,6 @@
 # Live meeting and notes
 
-The meeting screen (`/s/<id>` after Start talking): agenda on the left (rows show the title; the row in focus also shows `N remarks · N to-dos`), "Now discussing" with the current topic in the middle and a chapter bar under it (topic board on the `topics` branch), the right panel with Notes & topics / Transcript, and the bottom controls (Mute, Share screen, Pop out, Play demo, Leave, End meeting). Live notes run on Claude Haiku a few seconds after each pause.
+The meeting screen (`/s/<id>` after Start talking): agenda on the left (rows show the title; the row in focus also shows `N remarks · N to-dos`), "Now discussing" with the current topic in the middle and a chapter bar under it (topic board on the `topics` branch), the right panel with Chat / Transcript (Transcript opens first; chat is one conversation for the meeting with a message box), and the bottom controls (Mute, Share screen, Pop out, Play demo, Leave, End meeting). Live notes run on Claude Haiku a few seconds after each pause.
 
 ## Sub-features
 - Host-driven focus: clicking an agenda item pins talk to it.
