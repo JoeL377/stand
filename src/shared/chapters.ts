@@ -28,6 +28,22 @@ export interface Stretch {
   to: number;
 }
 
+const MIN = 60_000;
+/** The lengths the live chapter bar can span, so it fills from left to right like a progress bar. */
+const SPANS = [30, 45, 60, 90, 120].map((m) => m * MIN);
+/** How close the meeting gets to the bar's end before the bar takes the next, longer span. */
+const HEADROOM_MS = 5 * MIN;
+
+/** How long a meeting the live chapter bar spans after `elapsed` ms: 30 minutes to begin with, then
+ *  45, 60, 90, 120 and on by the hour, taking the next one when the meeting is 5 minutes from the
+ *  end. The bar runs to this rather than to now, so talk fills it from the left and the stretches
+ *  don't squeeze as the clock moves. */
+export function barSpan(elapsed: number): number {
+  for (const span of SPANS) if (elapsed < span - HEADROOM_MS) return span;
+  const last = SPANS.at(-1)!;
+  return last + (Math.floor((elapsed + HEADROOM_MS - last) / (60 * MIN)) + 1) * 60 * MIN;
+}
+
 /** The chapter a topic draws in: the main topic it was placed inside, its group, or its own. */
 export function chapterOf(t: ChapterTopic, byId: Map<string, ChapterTopic>): string {
   const parent = t.mergedInto ? byId.get(t.mergedInto) : undefined;

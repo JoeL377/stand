@@ -170,8 +170,9 @@ export interface Snap {
 
 /** What an agent (or person) reported back on an item through the Stand MCP:
  *  progress, a blocker, a question for the next meeting, or a to-do checked off. */
-/** "working": an agent says it has started on a to-do; it shows as working until it reports again or goes quiet. */
-export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "done";
+/** "working": an agent says it has started on a to-do; it shows as working until it reports again or goes quiet.
+ *  "ready": the work is finished and waits to ship, usually as a PR; Stand checks the to-do off when the PR merges. */
+export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done";
 export interface ItemUpdate {
   id: string;
   roomId: string;
@@ -206,6 +207,9 @@ export interface ActionWork {
   /** Set while an agent is on it: who, since when, and what it said last. Clears when it reports
    *  done or stuck, or after a while with no word. */
   working: { by: string; since: number; text: string } | null;
+  /** Set while the finished work waits to ship: who said so, when, and the PR Stand watches (null
+   *  when the agent gave no GitHub PR link, so it can't be checked off on its own). */
+  ready: { by: string; since: number; text: string; pr: string | null } | null;
   /** Reports on it, newest first, with the screenshots that came with each. */
   log: Array<{
     id: string;

@@ -8,7 +8,7 @@
 // the discussions live notes already group the talk into; the current one holds the latest remark.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
 import type { Discussion, DiscussionOutcome, Item, Note, Participant, Segment } from "../../shared/protocol.ts";
-import { type ChapterTopic, chapterOf, remarkTimes, stretches as chapterStretches, type Stretch } from "../../shared/chapters.ts";
+import { barSpan, type ChapterTopic, chapterOf, remarkTimes, stretches as chapterStretches, type Stretch } from "../../shared/chapters.ts";
 import { type Focus, pickFocus } from "../../shared/boardFocus.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
@@ -126,6 +126,8 @@ export function TopicBoard(props: {
   const live = !!current && now - current.last < NOW_MS;
   const bar: Stretch[] = chapterStretches(shapes, live && current ? current.chapter : null, now);
   const start = Math.min(props.meetingStartedAt, bar[0]?.from ?? Infinity);
+  // The bar spans a set length, longer as the meeting runs on, so talk fills it from the left.
+  const span = barSpan(now - start);
   // A chapter that's only the topic on screen has nothing more to show.
   const peekable = (c: Chapter) => !(c.head === current && !c.inside.length);
   const peeked = peek ? chapters.get(peek.id) : undefined;
@@ -170,6 +172,7 @@ export function TopicBoard(props: {
       {bar.length > 0 && (
         <div className="topic-chapters">
           <div className="topic-bar" role="group" aria-label="Chapters so far">
+            <div className="topic-bar-elapsed" style={{ width: `${pct(now - start, span)}%` }} />
             {bar.map((s) => {
               const c = chapters.get(s.chapter)!;
               const isCurrent = c === currentChapter;
@@ -183,7 +186,7 @@ export function TopicBoard(props: {
                   data-key={key}
                   type="button"
                   className={["topic-stretch", isCurrent && "current", isCurrent && arrival && "arrived", canPeek && "peekable", peek?.id === s.chapter && "on"].filter(Boolean).join(" ")}
-                  style={{ left: `${pct(s.from - start, now - start)}%`, width: `${pct(s.to - s.from, now - start)}%` }}
+                  style={{ left: `${pct(s.from - start, span)}%`, width: `${pct(s.to - s.from, span)}%` }}
                   aria-label={`${at}, ${c.title}${c.head ? `, ${OUTCOME[c.head.d.outcome]}` : ""}${isCurrent ? ", now" : ""}`}
                   aria-expanded={canPeek ? peek?.id === s.chapter : undefined}
                   onMouseEnter={() => canPeek && open(false)}
@@ -196,8 +199,11 @@ export function TopicBoard(props: {
             })}
           </div>
           <div className="topic-bar-times" aria-hidden="true">
-            <span>0:00</span>
-            <span>{clock(now - start)}</span>
+            {pct(now - start, span) >= 15 && <span>0:00</span>}
+            {/* Shifted back by as much of its width as the bar is full, so it never hangs off either end. */}
+            <span className="topic-bar-now" style={{ left: `${pct(now - start, span)}%`, transform: `translateX(-${pct(now - start, span)}%)` }}>
+              {clock(now - start)}
+            </span>
           </div>
         </div>
       )}

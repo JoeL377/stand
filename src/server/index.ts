@@ -4,7 +4,8 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { type WebSocket, WebSocketServer } from "ws";
 import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, ItemHistory, Jot, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
-import { MAX_SHOT_BYTES, UploadLinks, saveShotFile, shotFile, workLog, workingOn } from "./workLog.ts";
+import { ShipWatch, githubPrState } from "./shipWatch.ts";
+import { MAX_SHOT_BYTES, UploadLinks, readyToShip, saveShotFile, shotFile, workLog, workingOn } from "./workLog.ts";
 import { MAX_SYNTHESIS_INSTRUCTIONS } from "../shared/protocol.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } from "./auth.ts";
@@ -145,6 +146,7 @@ const uploadLinks = new UploadLinks();
 const agents = agentApi({
   db,
   uploads: uploadLinks,
+  readyToShip: () => void shipWatch.check(),
   notify: (roomId, what) => {
     const s = live(roomId);
     if (s) what === "updates" ? s.updatesChanged() : s.followUpsChanged();
@@ -257,11 +259,24 @@ app.get(
       const mine = updates.filter((u) => u.noteId === n.id);
       const log = workLog(mine, shots.filter((s) => s.noteId === n.id));
       const working = workingOn(mine, !!n.doneAt);
-      if (log.length || working) out[n.id] = { working, log };
+      const ready = readyToShip(mine, !!n.doneAt);
+      if (log.length || working) out[n.id] = { working, ready, log };
     }
     res.json(out);
   }),
 );
+// To-dos an agent finished as a PR get checked off when the PR merges.
+const shipWatch = new ShipWatch(
+  db,
+  (roomId) => {
+    const s = live(roomId);
+    if (s) s.followUpsChanged();
+    else polisher.schedule(roomId, 60_000);
+  },
+  (link) => githubPrState(link, config.githubToken),
+);
+shipWatch.start();
+
 app.use("/api/rooms/:id/conxt", conxtRoutes(db, conxtDestinations));
 const conxtDelivery = new ConxtDelivery(db, conxtDestinations);
 conxtDelivery.start();

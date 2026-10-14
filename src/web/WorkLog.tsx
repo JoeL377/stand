@@ -40,17 +40,26 @@ export function useWork(ids: string[]): Record<string, ActionWork> {
   return work;
 }
 
-/** The pill after a to-do's text: "Working" with a spinner while an agent is on it, else the log's ✦. */
+/** The pill after a to-do's text: "Working" with a spinner while an agent is on it, "Ready to ship"
+ *  while its PR waits to merge, else the log's ✦. */
 export function WorkPill({ work, open, onToggle }: { work: ActionWork; open: boolean; onToggle: () => void }) {
   const done = work.log.find((e) => e.status === "done");
-  const label = work.working ? "Working" : done ? "Summary" : `${work.log.length} update${work.log.length === 1 ? "" : "s"}`;
+  const label = work.working
+    ? "Working"
+    : work.ready
+      ? "Ready to ship"
+      : done
+        ? "Summary"
+        : `${work.log.length} update${work.log.length === 1 ? "" : "s"}`;
   const title = work.working
     ? `${work.working.by} · started ${fmtAgo(work.working.since)}\n${work.working.text}`
-    : `${open ? "Hide" : "Show"} what was done`;
+    : work.ready
+      ? `${work.ready.by} · ${fmtAgo(work.ready.since)}\n${work.ready.pr ? `${linkLabel(work.ready.pr)} · checked off when it merges` : "Waiting to ship"}`
+      : `${open ? "Hide" : "Show"} what was done`;
   return (
     <button
       type="button"
-      className={`fu-work${work.working ? " working" : ""}${open ? " open" : ""}`}
+      className={`fu-work${work.working ? " working" : ""}${work.ready ? " ready" : ""}${open ? " open" : ""}`}
       aria-expanded={open}
       title={title}
       onClick={onToggle}
@@ -67,6 +76,7 @@ const STATUS: Record<ActionWork["log"][number]["status"], string> = {
   progress: "Progress",
   blocked: "Blocked",
   needs_decision: "Needs a decision",
+  ready: "Ready to ship",
   shots: "Screenshots",
 };
 

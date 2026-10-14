@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildBrief, briefToMarkdown, offset } from "./brief.ts";
 import type { Discussion, Note, Segment } from "../shared/protocol.ts";
-import { meetingChapters } from "../shared/chapters.ts";
+import { barSpan, meetingChapters } from "../shared/chapters.ts";
 
 const T0 = Date.UTC(2026, 9, 12, 10);
 
@@ -109,4 +109,12 @@ test("offsets read like a video's chapters", () => {
   assert.equal(offset(T0 + 921_000, T0), "15:21");
   assert.equal(offset(T0 + 3_724_000, T0), "1:02:04");
   assert.equal(offset(T0 - 5_000, T0), "0:00");
+});
+
+test("the live chapter bar spans a set length that grows in steps, so it fills from the left", () => {
+  const min = 60_000;
+  const spans = [0, 10, 24, 25, 39, 40, 55, 85, 114, 115, 175].map((m) => barSpan(m * min) / min);
+  assert.deepEqual(spans, [30, 30, 30, 45, 45, 60, 90, 120, 120, 180, 240]);
+  // The meeting so far never reaches the bar's end, and grows rightward between steps.
+  for (let m = 0; m < 300; m++) assert.ok(m * min < barSpan(m * min));
 });

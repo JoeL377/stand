@@ -31,6 +31,19 @@ export function workingOn(updates: ItemUpdate[], done: boolean, now = Date.now()
   return { by: by(last), since: updates[start].ts, text: last.text };
 }
 
+/** The finished work waiting to ship, if that's the last word on a to-do that isn't checked off. */
+export function readyToShip(updates: ItemUpdate[], done: boolean): ActionWork["ready"] {
+  const last = updates.at(-1);
+  if (done || !last || last.status !== "ready") return null;
+  return { by: by(last), since: last.ts, text: last.text, pr: last.links.find((l) => prOf(l)) ?? null };
+}
+
+/** A GitHub pull request link, as Stand watches it. */
+export function prOf(link: string): { owner: string; repo: string; number: number } | null {
+  const m = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:[/?#]|$)/.exec(link);
+  return m ? { owner: m[1], repo: m[2], number: Number(m[3]) } : null;
+}
+
 /** The log of one to-do, newest first: each report with the screenshots that came with it, and any
  *  screenshots no report has picked up yet as an entry of their own. */
 export function workLog(updates: ItemUpdate[], shots: WorkShot[]): ActionWork["log"] {
