@@ -67,8 +67,16 @@ export interface MergePlan {
   sig: string;
 }
 
-export function planMerge(discussions: Discussion[], segments: Segment[], notes: Note[], now: number): MergePlan {
-  const ranked = rankTopics(discussions, segments, notes, now);
+/** A main topic stays main until a smaller one outranks it by this much, so two topics close in
+ *  rank don't swap places (and the bar's chapters with them) on every placing. */
+export const KEEP_MAIN = 1.25;
+
+/** wasMain: the topics that were main last time, kept main unless clearly outranked. */
+export function planMerge(discussions: Discussion[], segments: Segment[], notes: Note[], now: number, wasMain: ReadonlySet<string> = new Set()): MergePlan {
+  const ranked = rankTopics(discussions, segments, notes, now)
+    .map((t) => ({ t, keep: wasMain.has(t.d.id) ? t.score * KEEP_MAIN : t.score }))
+    .sort((a, b) => b.keep - a.keep || a.t.d.ts - b.t.d.ts)
+    .map(({ t }) => t);
   const times = segments.map((s) => s.ts);
   const minutes = times.length ? (Math.max(...times) - Math.min(...times)) / 60_000 : 0;
   const n = mainCount(minutes);
@@ -136,4 +144,37 @@ export function applyMerges(plan: MergePlan, keys: Map<string, RankedTopic>, ans
     if ("parent" in p) return [{ discussionId: t.d.id, parentId: p.parent.d.id, group: null }];
     return (size.get(groupKey(t, p.group)) ?? 0) > 1 ? [{ discussionId: t.d.id, parentId: null, group: p.group }] : [];
   });
+}
+
+/** Placings change only when the model says so twice in a row: a smaller topic placed for the
+ *  first time goes in at once (that's what tidies the bar), but one that is already placed moves,
+ *  or comes out on its own again, only if the next placing agrees. `pending` holds the moves seen
+ *  once; it's updated in place. */
+export function stickyMerges(before: TopicMerge[], proposed: TopicMerge[], plan: MergePlan, pending: Map<string, string>): TopicMerge[] {
+  const was = new Map(before.map((m) => [m.discussionId, m]));
+  const now = new Map(proposed.map((m) => [m.discussionId, m]));
+  const where = (m: TopicMerge | undefined) => (m ? (m.parentId ? `in:${m.parentId}` : `group:${(m.group ?? "").toLowerCase()}`) : "own");
+  const main = new Set(plan.main.map((t) => t.d.id));
+  const out: TopicMerge[] = [];
+  for (const t of plan.small) {
+    const id = t.d.id;
+    const old = was.get(id);
+    const next = now.get(id);
+    // Its main topic is still main: anything else and the old placing can't stand.
+    const oldValid = old && (!old.parentId || main.has(old.parentId));
+    if (!oldValid || where(old) === where(next)) {
+      pending.delete(id);
+      if (next) out.push(next);
+      continue;
+    }
+    if (pending.get(id) === where(next)) {
+      pending.delete(id);
+      if (next) out.push(next);
+      continue;
+    }
+    pending.set(id, where(next));
+    out.push(old);
+  }
+  for (const id of [...pending.keys()]) if (!plan.small.some((t) => t.d.id === id)) pending.delete(id);
+  return out;
 }

@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { type ChapterTopic, chapterOf, stretches as barStretches } from "../src/shared/chapters.ts";
+import { type Focus, pickFocus } from "../src/shared/boardFocus.ts";
 
 interface Line {
   ts: number;
@@ -49,7 +50,19 @@ function score(dir: string) {
 
   // What the board showed at each moment, by the board's own rule: the topic holding the latest
   // remark, else the one talked about most recently, from the last notes run that had finished.
-  const samples: Array<{ t: number; truth: string | null; shown: string | null; shownTitle: string | null; shownId: string | null; bar: number; barBefore: number }> = [];
+  const samples: Array<{
+    t: number;
+    truth: string | null;
+    shown: string | null;
+    shownTitle: string | null;
+    shownId: string | null;
+    /** The same with the board waiting before it switches (shared/boardFocus.ts). */
+    held: string | null;
+    heldId: string | null;
+    bar: number;
+    barBefore: number;
+  }> = [];
+  let held: Focus | null = null;
   // The chapter bar at a moment: every item's topics as their last run left them.
   const shape = (d: Snapshot["topics"][number], itemId: string | null, placed: boolean): ChapterTopic => ({
     id: d.id,
@@ -79,6 +92,15 @@ function score(dir: string) {
         snap.topics.find((d) => d.lines.includes(li)) ??
         [...snap.topics].sort((a, b) => Math.max(-1, ...b.lines.filter((x) => x <= li)) - Math.max(-1, ...a.lines.filter((x) => x <= li)))[0];
     }
+    if (snap) {
+      held = pickFocus(
+        held,
+        shown?.id ?? null,
+        snap.topics.map((d) => ({ id: d.id, lines: d.lines.map((i) => ({ id: String(i), ts: lines[i].ts })) })),
+        lines[li].ts,
+      );
+    }
+    const heldTopic = snap?.topics.find((d) => d.id === held?.id) ?? null;
     const all = [...latestByItem].flatMap(([itemId, s]) => s.topics.map((d) => ({ d, itemId })));
     const lastSaid = shown ? Math.max(-Infinity, ...shown.lines.map((i) => lines[i].ts)) : -Infinity;
     const live = shown && t - lastSaid < 120_000 ? shown.id : null;
@@ -94,12 +116,15 @@ function score(dir: string) {
       shown: shown ? (majority(shown.lines)?.id ?? null) : null,
       shownTitle: shown?.topic ?? null,
       shownId: shown?.id ?? null,
+      held: heldTopic ? (majority(heldTopic.lines)?.id ?? null) : null,
+      heldId: heldTopic?.id ?? null,
       bar: bar(true, true),
       barBefore: bar(false, false),
     });
   }
   const judged = samples.filter((s) => s.truth);
   const right = judged.filter((s) => s.shown === s.truth).length;
+  const heldRight = judged.filter((s) => s.held === s.truth).length;
 
   // How long each stretch of talk on a topic took to show as the current topic, if it ever did.
   const stretches: Array<{ id: string; from: number; to: number }> = [];
@@ -110,6 +135,13 @@ function score(dir: string) {
     return { id: s.id, at: s.from, lag: hit ? hit.t - s.from : null, minutes: (s.to - s.from) / 60_000 };
   });
   const caught = lags.filter((l) => l.lag !== null).map((l) => l.lag!).sort((a, b) => a - b);
+  const heldLags = stretches
+    .map((st) => {
+      const hit = samples.find((x) => x.t >= st.from && x.t <= st.to + STEP && x.held === st.id);
+      return hit ? hit.t - st.from : null;
+    })
+    .filter((l): l is number => l !== null)
+    .sort((a, b) => a - b);
 
   // Topics as the board ended up with them: which reference topics have one, which were merged or split.
   const finals = new Map<string | null, Snapshot>();
@@ -173,6 +205,12 @@ function score(dir: string) {
     split: [...holders].filter(([, ts]) => ts.length > 1).map(([id, ts]) => `${id} -> ${ts.map((t) => `"${t}"`).join(", ")}`),
     merged,
     boardSwitchesPerHour: Math.round((switches / samples.length) * 360),
+    heldBoard: {
+      currentTopicRight: +(heldRight / judged.length).toFixed(3),
+      medianLagSeconds: heldLags.length ? heldLags[Math.floor(heldLags.length / 2)] / 1000 : null,
+      stretchesCaught: `${heldLags.length} of ${stretches.length}`,
+      switchesPerHour: Math.round((samples.filter((s, k) => k && s.heldId !== samples[k - 1].heldId).length / samples.length) * 360),
+    },
     realSwitchesPerHour: Math.round((truthSwitches / samples.length) * 360),
     finalTopics: finalTopics.length,
     referenceTopics: gold.length,

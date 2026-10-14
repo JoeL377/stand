@@ -32,6 +32,8 @@ export function Stage(props: {
   /** Live notes: the topics the talk is grouped into, and what came of them. */
   discussions: Discussion[];
   notes: Note[];
+  /** Items whose live notes are being redrawn right now (keyed "" for off the agenda). */
+  notesBusy: string[];
   livekit: boolean;
   /** Set to a function that snaps the shared screen while one is up, for the pop-out bar. */
   snapRef?: MutableRefObject<(() => Promise<boolean>) | null>;
@@ -381,6 +383,7 @@ export function Stage(props: {
             focusItem={focusItem}
             focusItemId={state.focusItemId}
             meetingStartedAt={state.meetingStartedAt}
+            updating={props.notesBusy.includes(state.focusItemId ?? "")}
           />
         )}
       </div>

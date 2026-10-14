@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { HeuristicAgent, type ItemNotesDraft } from "./llm.ts";
 import { RoomSession } from "./room.ts";
-import { applyMerges, mainCount, mergePrompt, planMerge, rankTopics } from "./topicMerge.ts";
+import { applyMerges, mainCount, mergePrompt, planMerge, rankTopics, stickyMerges } from "./topicMerge.ts";
 import type { Discussion, Note, Segment } from "../shared/protocol.ts";
 import { chapterOf, stretches } from "../shared/chapters.ts";
 
@@ -220,4 +220,35 @@ test("the chapter bar: placed topics join their chapter, and an aside under a mi
     stretches(topics, null, now).map((s) => s.chapter),
     ["pricing", "group::sign-in"],
   );
+});
+
+test("a main topic stays main until a smaller one clearly outranks it", () => {
+  const talk = meeting([{ id: "a", lines: 12 }, { id: "b", lines: 8 }, { id: "c", lines: 6 }, { id: "d", lines: 7 }]);
+  const fresh = planMerge(talk.discussions, talk.segments, [], talk.end);
+  assert.deepEqual(fresh.main.map((t) => t.d.id).sort(), ["a", "b", "d"], "d just edges c");
+  const kept = planMerge(talk.discussions, talk.segments, [], talk.end, new Set(["a", "b", "c"]));
+  assert.deepEqual(kept.main.map((t) => t.d.id).sort(), ["a", "b", "c"], "c was main and d isn't clearly ahead");
+  const far = meeting([{ id: "a", lines: 12 }, { id: "b", lines: 8 }, { id: "c", lines: 2 }, { id: "d", lines: 20 }]);
+  const moved = planMerge(far.discussions, far.segments, [], far.end, new Set(["a", "b", "c"]));
+  assert.ok(moved.main.some((t) => t.d.id === "d"), "d is far ahead");
+});
+
+test("a placed topic moves only when the model says so twice in a row; a first placing goes in at once", () => {
+  const talk = meeting([{ id: "a", lines: 12 }, { id: "b", lines: 10 }, { id: "c", lines: 9 }, { id: "x", lines: 2 }, { id: "y", lines: 1 }]);
+  const plan = planMerge(talk.discussions, talk.segments, [], talk.end);
+  const into = (id: string, parentId: string) => ({ discussionId: id, parentId, group: null });
+  const pending = new Map<string, string>();
+  const first = stickyMerges([], [into("x", "a"), into("y", "b")], plan, pending);
+  assert.deepEqual(first, [into("x", "a"), into("y", "b")]);
+  // The model moves x and lets y stand alone: once isn't enough.
+  const second = stickyMerges(first, [into("x", "b")], plan, pending);
+  assert.deepEqual(second, [into("x", "a"), into("y", "b")]);
+  // It says the same about x again, and changes its mind about y: x moves, y stays.
+  const third = stickyMerges(second, [into("x", "b"), into("y", "b")], plan, pending);
+  assert.deepEqual(third, [into("x", "b"), into("y", "b")]);
+  assert.equal(pending.size, 0);
+  // Its main topic is no longer main: the old placing can't stand, so the new one goes in.
+  const smaller = planMerge(talk.discussions, talk.segments, [], talk.end, new Set());
+  const gone = { ...smaller, main: smaller.main.filter((t) => t.d.id !== "b") };
+  assert.deepEqual(stickyMerges(third, [into("x", "a")], gone, new Map()), [into("x", "a")]);
 });

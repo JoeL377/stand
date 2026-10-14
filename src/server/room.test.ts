@@ -10,6 +10,7 @@ import type { ClientMessage, Item, Note, Segment, ServerMessage, User } from "..
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
 import { outlineToSlides } from "../shared/outline.ts";
+import { config } from "./config.ts";
 
 function setup() {
   const db = openDb(":memory:");
@@ -521,7 +522,12 @@ test("in a long meeting a quiet topic settles: runs read what's still going, and
   assert.ok(db.meetingNotes(session.meetingId).some((n) => n.id === keep.id && n.doneBy === "Joe"));
 });
 
-test("one topic for an hour: its older talk folds into where it stood, and the run carries it on", async () => {
+test("one topic for an hour: its older talk folds into where it stood, and the run carries it on", async (ctx) => {
+  // Regrouping talk still going (settle.ts LOCK_AFTER_MS locks it sooner).
+  config.notesLock = false;
+  ctx.after(() => {
+    config.notesLock = true;
+  });
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
   db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "One", url: null, description: null }]);
@@ -894,7 +900,12 @@ test("transcription that stops starts again by itself once, then asks people to 
   await session.end();
 });
 
-test("a line a notes run leaves out stays in its topic, and a topic left out whole comes back", async () => {
+test("a line a notes run leaves out stays in its topic, and a topic left out whole comes back", async (ctx) => {
+  // Regrouping talk still going (settle.ts LOCK_AFTER_MS locks it sooner).
+  config.notesLock = false;
+  ctx.after(() => {
+    config.notesLock = true;
+  });
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
   const MIN = 60_000;

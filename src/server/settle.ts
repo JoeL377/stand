@@ -21,6 +21,13 @@ const SMALL_TALK_STEP_MS = 5 * 60_000;
 export const FOLD_AFTER_MS = 15 * 60_000;
 /** ...once that's at least this many lines; less isn't worth losing the wording for. */
 export const FOLD_MIN_LINES = 30;
+/** Live, a topic's talk locks to it sooner than that: once it's this old (8 to 13 minutes, as the
+ *  edge moves in 5-minute steps) and there's a little of it, the runs no longer regroup it, so a
+ *  stretch already on the board stops flipping between one topic and two. On the Conxt replay 4
+ *  minutes steadied the board as much but picked the right topic 6 points less often; 8 cost about
+ *  2. The run as the meeting ends still regroups everything for the recap. */
+export const LOCK_AFTER_MS = 8 * 60_000;
+export const LOCK_MIN_LINES = 6;
 
 export interface Settled {
   /** Topics left as they are, oldest first. */
@@ -33,7 +40,13 @@ export interface Settled {
 
 /** readUpTo: the newest line the last run that worked had read. Talk after it hasn't been put
  *  under a topic yet, however old (the notes were failing, say), so it stays in. */
-export function settle(segments: Segment[], discussions: Discussion[], now: number, readUpTo = -Infinity): Settled {
+export function settle(
+  segments: Segment[],
+  discussions: Discussion[],
+  now: number,
+  readUpTo = -Infinity,
+  { foldAfterMs = FOLD_AFTER_MS, foldMinLines = FOLD_MIN_LINES }: { foldAfterMs?: number; foldMinLines?: number } = {},
+): Settled {
   const at = new Map(segments.map((s) => [s.id, s.ts]));
   const quiet = now - SETTLE_AFTER_MS;
   const settled: Array<{ d: Discussion; first: number }> = [];
@@ -44,12 +57,12 @@ export function settle(segments: Segment[], discussions: Discussion[], now: numb
     else for (const id of d.segmentIds) going.add(id);
   }
   const step = (t: number) => Math.min(Math.floor(t / SMALL_TALK_STEP_MS) * SMALL_TALK_STEP_MS, readUpTo + 1);
-  const foldEdge = step(now - FOLD_AFTER_MS);
+  const foldEdge = step(now - foldAfterMs);
   const folded: Array<{ d: Discussion; first: number }> = [];
   for (const d of discussions) {
     if (!d.segmentIds.some((id) => going.has(id))) continue;
     const old = d.segmentIds.filter((id) => (at.get(id) ?? Infinity) < foldEdge);
-    if (old.length < FOLD_MIN_LINES) continue;
+    if (old.length < foldMinLines) continue;
     folded.push({ d: { ...d, segmentIds: old }, first: Math.min(...old.map((id) => at.get(id)!)) });
     for (const id of old) going.delete(id);
   }

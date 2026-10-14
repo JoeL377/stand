@@ -461,6 +461,7 @@ export function Meeting(props: {
           segments={room.segments}
           discussions={room.discussions}
           notes={room.notes}
+          notesBusy={room.notesBusy}
           offline={!room.connected}
           ending={writingUp}
           livekit={caps.livekit}
