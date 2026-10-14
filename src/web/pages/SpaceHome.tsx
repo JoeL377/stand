@@ -453,7 +453,7 @@ function UpdateRow({ u, room }: { u: ItemUpdate; room: RoomInfo }) {
         ✦
       </span>
       <span className="sh-row-text">
-        <span className="sh-who">{u.client ? `${firstName(u.userName)}'s agent` : firstName(u.userName)}</span>
+        <span className="sh-who">{u.client === "GitHub" ? "GitHub" : u.client ? `${firstName(u.userName)}'s agent` : firstName(u.userName)}</span>
         {label && <span className={`sh-status ${u.status}`}>{label}</span>}
         <span className="sh-what">{u.text || u.noteText}</span>
       </span>

@@ -222,6 +222,26 @@ export interface ActionWork {
   }>;
 }
 
+/** A GitHub account (person or organization) where someone installed the Stand GitHub App. */
+export interface GithubInstallation {
+  id: number;
+  account: string;
+  accountType: "User" | "Organization";
+  /** Every repo of the account, or the ones picked on GitHub. */
+  repos: "all" | "selected";
+  connectedBy: string | null;
+  connectedAt: number;
+  /** GitHub's page for changing the repos or uninstalling. */
+  manageUrl: string;
+}
+
+/** The Stand GitHub App, as the Connect an agent page shows it. */
+export interface GithubStatus {
+  /** Whether this server has the app set up at all. */
+  available: boolean;
+  installations: GithubInstallation[];
+}
+
 /** A personal access token an agent uses to reach the Stand MCP. The secret is only shown once. */
 export interface AgentToken {
   id: string;

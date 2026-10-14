@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AgentToken, SpaceSummary } from "../../shared/protocol.ts";
+import type { AgentToken, GithubStatus, SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { fmtDate } from "../util.ts";
 import { SpacesShell } from "./SpacesShell.tsx";
@@ -40,11 +40,14 @@ export function ConnectAgentPage() {
   const [made, setMade] = useState<{ token: string; info: AgentToken } | null>(null);
   const [client, setClient] = useState<Client>("claude");
   const [copied, setCopied] = useState<string | null>(null);
+  const [github, setGithub] = useState<GithubStatus | null>(null);
   const url = `${location.origin}/mcp`;
+  const back = new URLSearchParams(location.search).get("github");
 
   useEffect(() => {
     api.spaces().then(setSpaces, () => setSpaces([]));
     api.tokens().then(setTokens, (e: Error) => setError(e.message));
+    api.github().then(setGithub, () => setGithub(null));
   }, []);
 
   const create = async (e: React.FormEvent) => {
@@ -186,6 +189,38 @@ export function ConnectAgentPage() {
               </button>
             </div>
           </form>
+        )}
+
+        {github?.available && (
+          <section className="sp-section ag-github">
+            <div className="ag-github-head">
+              <h2>GitHub</h2>
+              <a className="ag-gh-connect" href="/api/github/connect">
+                {github.installations.length ? "Add an account" : "Connect GitHub"}
+              </a>
+            </div>
+            {back === "failed" && <p className="error">GitHub didn’t finish connecting. Try Connect GitHub again.</p>}
+            {github.installations.length === 0 ? (
+              <p className="muted">When an agent’s PR merges, Stand checks its to-do off right away.</p>
+            ) : (
+              <div className="sp-rows">
+                {github.installations.map((i) => (
+                  <div key={i.id} className="sp-row ag-row">
+                    <div className="sp-row-main">
+                      <strong>{i.account}</strong>
+                      <span className="muted small">
+                        {i.repos === "all" ? "All repos" : "Selected repos"}
+                        {i.connectedBy ? ` · connected by ${i.connectedBy}` : ""} · {fmtDate(i.connectedAt)}
+                      </span>
+                    </div>
+                    <a className="ag-manage" href={i.manageUrl} target="_blank" rel="noreferrer">
+                      Manage on GitHub ↗
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         )}
 
         <section className="sp-section">

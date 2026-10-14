@@ -1291,6 +1291,12 @@ li:hover > .cfa .cfa-btn, li:focus-within > .cfa .cfa-btn, .cfa:has(.cfa-pop) .c
 .ag-made-foot { display: flex; justify-content: flex-end; }
 .ag-row { align-items: center; }
 .ag-revoke { font-size: 12px; color: var(--danger, #dc2626); }
+.ag-github-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ag-github-head h2 { margin: 0; }
+.ag-gh-connect { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; font-weight: 500; text-decoration: none; }
+.ag-gh-connect:hover { background: var(--hover); }
+.ag-manage { font-size: 12px; color: var(--muted); text-decoration: none; white-space: nowrap; }
+.ag-manage:hover { color: var(--text); }
 
 /* Host edits to the agent's notes */
 .note-edit-btn { flex: none; display: inline-flex; align-items: center; padding: 3px; min-height: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; box-shadow: none; }
