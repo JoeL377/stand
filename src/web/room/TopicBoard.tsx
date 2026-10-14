@@ -71,6 +71,8 @@ export function TopicBoard(props: {
   focusItem: Item | null;
   focusItemId: string | null;
   meetingStartedAt: number;
+  /** A live notes run for the item in focus is reading the latest talk. */
+  updating: boolean;
 }) {
   const now = useNow(15_000);
   const turnsById = new Map(props.segments.map((s) => [s.id, s]));
@@ -113,6 +115,7 @@ export function TopicBoard(props: {
     onScreen.current = focus;
   });
   const current = here.find((t) => t.d.id === focus?.id) ?? latestTopic;
+  const arrival = useArrival(current?.d.id ?? null);
   const currentChapter = current ? chapters.get(current.chapter)! : null;
   // The color for a person: by their id when they're here, else by name.
   const idOf = (name: string) => props.participants.find((p) => same(p.name, name))?.id ?? name;
@@ -140,6 +143,8 @@ export function TopicBoard(props: {
           spent={current.spent}
           partOf={currentChapter && currentChapter.head !== current ? currentChapter.title : null}
           live={live}
+          updating={props.updating}
+          arrival={arrival}
           remark={speaking ? { name: speaking.speakerName, id: speaking.speakerId, text: speaking.text, now: true } : lastTurn && { name: lastTurn.speakerName, id: idOf(lastTurn.speakerName), text: lastTurn.text, now: false }}
           idOf={idOf}
         />
@@ -157,7 +162,7 @@ export function TopicBoard(props: {
               )}
             </div>
           )}
-          <p className="topic-hint">
+          <p className={props.updating ? "topic-hint updating" : "topic-hint"}>
             <span className="agent-mark small">✦</span> Topics show up here as people talk
           </p>
         </div>
@@ -177,7 +182,7 @@ export function TopicBoard(props: {
                   key={key}
                   data-key={key}
                   type="button"
-                  className={["topic-stretch", isCurrent && "current", canPeek && "peekable", peek?.id === s.chapter && "on"].filter(Boolean).join(" ")}
+                  className={["topic-stretch", isCurrent && "current", isCurrent && arrival && "arrived", canPeek && "peekable", peek?.id === s.chapter && "on"].filter(Boolean).join(" ")}
                   style={{ left: `${pct(s.from - start, now - start)}%`, width: `${pct(s.to - s.from, now - start)}%` }}
                   aria-label={`${at}, ${c.title}${c.head ? `, ${OUTCOME[c.head.d.outcome]}` : ""}${isCurrent ? ", now" : ""}`}
                   aria-expanded={canPeek ? peek?.id === s.chapter : undefined}
@@ -235,16 +240,26 @@ function Current(props: {
   /** The chapter it was placed in, when that's another topic or a group. */
   partOf: string | null;
   live: boolean;
+  /** The notes are being redrawn from the latest talk: a light runs along the top edge. */
+  updating: boolean;
+  /** Just switched to: a topic new to this meeting, or one it came back to. */
+  arrival: Arrival;
   remark: { name: string; id: string; text: string; now: boolean } | undefined;
   idOf: (name: string) => string;
 }) {
   const { d } = props.t;
-  const fresh = useArrive(d.id);
   const positions = d.positions.slice(0, MAX_POSITIONS);
+  const label = props.arrival === "new" ? "New topic" : props.arrival === "back" ? "Back to" : props.live ? "Now" : "Last";
   return (
-    <section className={fresh ? "topic-now topic-in" : "topic-now"} aria-label="Current topic">
+    <section
+      className={["topic-now", props.arrival && "topic-in", props.updating && "updating"].filter(Boolean).join(" ")}
+      aria-label="Current topic"
+      aria-busy={props.updating}
+    >
       <div className="topic-now-head">
-        <span className={props.live ? "topic-now-label live" : "topic-now-label"}>{props.live ? "Now" : "Last"}</span>
+        <span key={label} className={["topic-now-label", props.live && "live", props.arrival && "arrived"].filter(Boolean).join(" ")}>
+          {label}
+        </span>
         <span className={`topic-outcome ${d.outcome}`}>{OUTCOME[d.outcome]}</span>
         {props.spent >= 60_000 && <span className="topic-mins">{fmtDuration(props.spent)}</span>}
         {props.partOf && <span className="topic-mins topic-part-of">· part of {props.partOf}</span>}
@@ -385,18 +400,30 @@ function NoteList({ notes, max }: { notes: Note[]; max: number }) {
   );
 }
 
-/** True for a moment when the current topic changes, so the switch is noticed. */
-function useArrive(id: string) {
+type Arrival = "new" | "back" | null;
+/** How long "New topic" or "Back to" stays up after the board switches. */
+const ARRIVAL_MS = 8_000;
+
+/** For a few seconds after the board switches topic: "new" for a topic this screen hasn't shown
+ *  before, "back" for one it showed earlier. The first topic of the meeting counts as new. */
+function useArrival(id: string | null): Arrival {
   const prev = useRef(id);
-  const [on, setOn] = useState(false);
+  const seen = useRef(new Set<string>(id ? [id] : []));
+  const [arrival, setArrival] = useState<Arrival>(null);
   useEffect(() => {
     if (prev.current === id) return;
+    const had = prev.current;
     prev.current = id;
-    setOn(true);
-    const t = setTimeout(() => setOn(false), 1600);
+    if (!id) return setArrival(null);
+    // A rename keeps the id; a run regrouping it under a new id while nothing was on screen isn't a switch.
+    const kind: Arrival = seen.current.has(id) ? "back" : "new";
+    seen.current.add(id);
+    if (!had && kind === "back") return;
+    setArrival(kind);
+    const t = setTimeout(() => setArrival(null), ARRIVAL_MS);
     return () => clearTimeout(t);
   }, [id]);
-  return on;
+  return arrival;
 }
 
 function Dot({ id, name, size }: { id: string; name: string; size: number }) {

@@ -1795,11 +1795,19 @@ a.sh-pill:hover { text-decoration: none; }
 .screen > .topic-board { position: relative; flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg); color: var(--text); text-align: left; }
 .topic-waiting { flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 18px; text-align: center; }
 .topic-hint { margin: 0; font-size: 13px; color: var(--muted); }
+/* Before the first topic: the ✦ pulses while the first notes are being written. */
+.topic-hint.updating .agent-mark { display: inline-block; animation: notes-pulse 1.2s ease-in-out infinite; }
 /* The current topic fills the screen; everything else waits in the strip under it. */
-.topic-now { flex: 1 0 auto; display: flex; flex-direction: column; gap: 16px; padding: 22px 24px 18px; border-radius: 12px; background: var(--panel-2); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); transition: opacity 160ms var(--ease-out, ease-out); }
+.topic-now { position: relative; overflow: hidden; flex: 1 0 auto; display: flex; flex-direction: column; gap: 16px; padding: 22px 24px 18px; border-radius: 12px; background: var(--panel-2); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); transition: opacity 160ms var(--ease-out, ease-out); }
 .topic-board.peeking .topic-now { opacity: 0.55; }
 .topic-now.topic-in { animation: topic-in 240ms var(--ease-out, ease-out), topic-flash 1.6s ease-out; }
+/* While the notes are being redrawn from the latest talk, a light runs left to right along the top edge. */
+.topic-now.updating::before { content: ""; position: absolute; top: 0; left: 0; width: 35%; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: topic-updating 1.6s ease-in-out infinite; }
 .topic-now-head { display: flex; align-items: center; gap: 8px; }
+/* "New topic" or "Back to" for a few seconds after the board switches, then "Now" again. */
+.topic-now-label.arrived, .topic-now-label.live.arrived { padding: 2px 8px; border-radius: 999px; background: var(--accent); color: #fff; animation: label-in 200ms var(--ease-out, ease-out); }
+.topic-now-label.arrived::before { display: none; }
+.topic-stretch.current.arrived::before { animation: stretch-arrive 1.2s ease-out 2; }
 .topic-now-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .topic-now-label.live { color: var(--accent-text); }
 .topic-now-label.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: notes-pulse 1.4s ease-in-out infinite; }
@@ -1864,8 +1872,17 @@ a.sh-pill:hover { text-decoration: none; }
   .topic-position { padding-left: 0; border-left: 0; }
 }
 @keyframes topic-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes topic-updating { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+@keyframes label-in { from { opacity: 0; transform: scale(0.92); } }
+@keyframes stretch-arrive { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); } }
 @keyframes topic-flash { from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .topic-now.topic-in, .topic-peek { animation: none; } .topic-now-label.live::before { animation: none; } .topic-stretch::before { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .topic-now.topic-in, .topic-peek, .topic-now-label.arrived, .topic-stretch.current.arrived::before { animation: none; }
+  .topic-now-label.live::before { animation: none; }
+  .topic-stretch::before { transition: none; }
+  /* No moving light: the top edge just brightens while the notes update. */
+  .topic-now.updating::before { animation: none; left: 0; width: 100%; opacity: 0.6; background: var(--accent); }
+}
 
 /* Recap chapters (RecapChapters.tsx): the chapter bar, chips on notes, the Chapters section. */
 .rc-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
