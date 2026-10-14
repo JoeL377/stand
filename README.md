@@ -45,8 +45,24 @@ Copy `.env.example` to `.env` and fill in what you have. Each one switches on in
 - Transcription needs nothing extra: it runs through [LiveKit Inference](https://docs.livekit.io/agents/models/stt/deepgram.md) on your LiveKit keys and is billed by LiveKit (about $0.005/min; the free plan includes some credit). `STT_MODEL` picks the model (default `deepgram/nova-3`). If you'd rather pay Deepgram directly, set `DEEPGRAM_API_KEY` and the agent talks to Deepgram instead.
 - `ANTHROPIC_API_KEY` for notes and screen reading. `ANTHROPIC_MODEL` overrides the model (default `claude-opus-5-5`).
 - `LINEAR_API_KEY`, a personal API key from Linear settings.
-- `GITHUB_TOKEN`, a GitHub token with read access to pull requests in the repos agents open PRs in (a fine-grained token with Pull requests: Read is enough). When an agent reports a to-do ready to ship with a PR link, Stand checks the to-do off once the PR merges. Public repos work without it.
+- `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` for the Stand GitHub App, so people connect GitHub with a click on the Connect an agent page and Stand checks a to-do off the moment its PR merges. See [GitHub](#github). Without the app, `GITHUB_TOKEN` (a token with read access to pull requests) lets Stand check the PRs every 2 minutes; public repos work with neither.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` from an OAuth client ID ("Web application") in Google Cloud. Add `<origin>/api/auth/google/callback` as an authorized redirect URI. `ALLOWED_EMAILS` (exact addresses) and `ALLOWED_EMAIL_DOMAINS` limit who can get in, checked on every request, so removing someone takes effect at once; once either is set, only Google sign-in works; `PUBLIC_URL` sets the origin when behind a proxy.
+
+## GitHub
+
+When an agent finishes a to-do as a pull request, it reports the to-do ready with the PR link and puts the to-do's ref in the PR description. Stand checks the to-do off when the PR merges. To hear about merges at once, and to read private repos without anyone making a token, set up the Stand GitHub App once per server:
+
+1. On GitHub: Settings → Developer settings → GitHub Apps → New GitHub App (or the same under an organization's settings).
+2. Name it (e.g. "Stand"); Homepage URL: your Stand origin.
+3. Setup URL: `<origin>/api/github/setup`, and tick **Redirect on update**. Leave "Request user authorization (OAuth) during installation" off.
+4. Webhook: active, URL `<origin>/api/github/webhook`, and a long random secret.
+5. Repository permissions: **Pull requests: Read-only** (Metadata: Read-only comes with it). Nothing else.
+6. Subscribe to events: **Pull request**.
+7. Where can it be installed: "Any account" if other teams' repos will use it, else "Only on this account".
+8. Create it, then generate a private key (a .pem file downloads).
+9. Set on the server: `GITHUB_APP_ID` (the App ID on its page), `GITHUB_APP_SLUG` (the name in its URL, github.com/apps/<slug>), `GITHUB_APP_PRIVATE_KEY` (the .pem's contents; newlines may be written as `\n`) and `GITHUB_WEBHOOK_SECRET`.
+
+Then anyone in Stand opens Connect an agent → Connect GitHub, picks the repos on GitHub, and comes back.
 
 ## Production
 

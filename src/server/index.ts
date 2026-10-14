@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { type WebSocket, WebSocketServer } from "ws";
-import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, ItemHistory, Jot, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
+import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, GithubStatus, ItemHistory, Jot, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { MAX_SHOT_BYTES, UploadLinks, readyToShip, saveShotFile, shotFile, workLog, workingOn } from "./workLog.ts";
 import { MAX_SYNTHESIS_INSTRUCTIONS } from "../shared/protocol.ts";
@@ -37,6 +37,7 @@ import { toSpaceSummary } from "./spaces.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
 import { ConxtLiveDelivery } from "./conxtLive.ts";
 import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
+import { GithubApp, appReady, readEvent, signedByGithub } from "./github.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 const conxtDestinations = parseDestinations(process.env.CONXT_DESTINATIONS);
@@ -119,11 +120,30 @@ function recoverMeetings() {
 recoverMeetings();
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+// The Stand GitHub App, when this server has it set up.
+const githubApp = appReady(config.githubApp) ? new GithubApp(config.githubApp, db.raw) : null;
 
 type Params = Record<string, string>;
 type Handler = (req: Request<Params>, res: Response) => unknown;
 const route = (fn: Handler) => (req: Request<Params>, res: Response, next: NextFunction) => Promise.resolve(fn(req, res)).catch(next);
+
+// GitHub tells Stand when a PR closes or the app is installed. Its signature is checked against the
+// raw body, so this comes before the JSON parser.
+app.post(
+  "/api/github/webhook",
+  express.raw({ type: () => true, limit: "10mb" }),
+  route(async (req, res) => {
+    if (!githubApp || !config.githubApp.webhookSecret) return notFound(res);
+    const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!signedByGithub(config.githubApp.webhookSecret, raw, req.header("x-hub-signature-256"))) return res.status(401).json({ error: "Bad signature" });
+    const ev = readEvent(req.header("x-github-event"), JSON.parse(raw.toString("utf8") || "{}"));
+    if (ev.kind === "pr-closed") shipWatch.settle(ev.pr);
+    else if (ev.kind === "installed") await githubApp.remember(ev.id, null).catch(() => null);
+    else if (ev.kind === "uninstalled") githubApp.forget(ev.id);
+    res.json({ ok: true });
+  }),
+);
+app.use(express.json({ limit: "1mb" }));
 
 const notFound = (res: Response, what = "Not found") => res.status(404).json({ error: what });
 
@@ -273,9 +293,30 @@ const shipWatch = new ShipWatch(
     if (s) s.followUpsChanged();
     else polisher.schedule(roomId, 60_000);
   },
-  (link) => githubPrState(link, config.githubToken),
+  (link) => (githubApp ? githubApp.prState(link, config.githubToken) : githubPrState(link, config.githubToken)),
 );
 shipWatch.start();
+
+// Connect GitHub, on the Connect an agent page: off to the app's install page, and back.
+app.get("/api/github", (_req, res) => {
+  res.json({ available: !!githubApp, installations: githubApp?.list() ?? [] } satisfies GithubStatus);
+});
+app.get("/api/github/connect", (req, res) => {
+  if (!githubApp) return notFound(res);
+  res.redirect(githubApp.installUrl(req.user!.id));
+});
+// GitHub's Setup URL: where people land after installing the app or changing its repos.
+app.get(
+  "/api/github/setup",
+  route(async (req, res) => {
+    if (!githubApp) return notFound(res);
+    const id = Number(req.query.installation_id);
+    const known = githubApp.list().some((i) => i.id === id);
+    const ok = Number.isSafeInteger(id) && id > 0 && (githubApp.takeState(String(req.query.state ?? ""), req.user!.id) || known);
+    const saved = ok ? await githubApp.remember(id, req.user!.id).catch(() => null) : null;
+    res.redirect(`/agents?github=${saved ? "connected" : "failed"}`);
+  }),
+);
 
 app.use("/api/rooms/:id/conxt", conxtRoutes(db, conxtDestinations));
 const conxtDelivery = new ConxtDelivery(db, conxtDestinations);
@@ -1164,6 +1205,6 @@ server.listen(config.port, () => {
   const c = capabilities();
   console.log(`standup server on http://localhost:${config.port}`);
   console.log(
-    `  audio: ${c.livekit ? "LiveKit" : "off (mock mode)"} · transcription: ${c.transcription} · notes: ${c.llm ? `${config.notesModel} (tidy: ${config.notesTidyModel})` : "heuristic"} · Linear: ${c.linear ? "on" : "off"}`,
+    `  audio: ${c.livekit ? "LiveKit" : "off (mock mode)"} · transcription: ${c.transcription} · notes: ${c.llm ? `${config.notesModel} (tidy: ${config.notesTidyModel})` : "heuristic"} · Linear: ${c.linear ? "on" : "off"} · GitHub app: ${githubApp ? "on" : "off"}`,
   );
 });

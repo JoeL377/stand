@@ -48,6 +48,15 @@ export const config = {
   /** Optional: a GitHub token that can read the repos agents open PRs in, so Stand can tell when a
    *  to-do's PR merges (shipWatch.ts). Without it only public repos' PRs can be checked. */
   githubToken: env("GITHUB_TOKEN"),
+  /** The Stand GitHub App (github.ts), so people connect GitHub with a click and Stand hears about
+   *  merged PRs at once. Set up once per server; see the README. */
+  githubApp: {
+    id: env("GITHUB_APP_ID"),
+    slug: env("GITHUB_APP_SLUG"),
+    /** The app's private key (PEM). Newlines may be written as \n. */
+    privateKey: env("GITHUB_APP_PRIVATE_KEY")?.replace(/\\n/g, "\n"),
+    webhookSecret: env("GITHUB_WEBHOOK_SECRET"),
+  },
   google: {
     clientId: env("GOOGLE_CLIENT_ID"),
     clientSecret: env("GOOGLE_CLIENT_SECRET"),

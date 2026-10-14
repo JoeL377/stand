@@ -27,6 +27,7 @@ import type {
 import { newId } from "./ids.ts";
 import type { SnapRow } from "./snaps.ts";
 import type { Polish, UpNextInput } from "./upNext.ts";
+import { initGithub } from "./github.ts";
 import { initConxt, enqueueConxtMeeting } from "./conxt.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -506,6 +507,7 @@ export function openDb(file?: string) {
     );
 
   initConxt(db);
+  initGithub(db);
 
   return {
     raw: db,

@@ -294,7 +294,7 @@ export function agentApi(deps: AgentDeps) {
         url: refUrl(baseUrl, r.ref.kind, n.id),
         next:
           n.kind === "action"
-            ? "When you start, call post_update with this ref and status working so people see you're on it. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR waiting to ship, call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
+            ? "When you start, call post_update with this ref and status working so people see you're on it. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR, put this ref in the PR description and call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
             : undefined,
       };
     },
@@ -332,7 +332,7 @@ export function agentApi(deps: AgentDeps) {
         `"${clip(text, 200)}" (${where})`,
         ...[...decided, ...fallback].map((d) => `Decided: ${clip(d.text, 200)}`),
         r.ref.kind === "action"
-          ? "Pull the full context with the Stand MCP (get), post_update with status working when you start, do the work, attach screenshots of anything that shows on screen (screenshot_upload_url), then report back: post_update with status ready and the PR link if it waits to ship (Stand checks it off when the PR merges), else complete_action with a summary of what changed."
+          ? "Pull the full context with the Stand MCP (get), post_update with status working when you start, do the work, attach screenshots of anything that shows on screen (screenshot_upload_url), then report back: if it's a PR, put the ref in its description and post_update with status ready and the PR link (Stand checks it off when the PR merges), else complete_action with a summary of what changed."
           : r.ref.kind === "question"
             ? "Pull the full context with the Stand MCP (get), dig into it, then report what you found with post_update (status needs_decision if people must decide)."
             : "Pull the full context with the Stand MCP (get) before acting on it.",
