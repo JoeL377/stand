@@ -85,9 +85,28 @@ export interface Note {
   discussionId: string | null;
   /** Who in the meeting last edited or added this by hand. The agent keeps edited notes as written. */
   editedBy?: string | null;
+  /** Decisions: the words it was settled in, as said (see Quote). */
+  quote?: Quote | null;
+}
+
+/** Someone's own words behind a line the agent wrote, copied from the transcript and checked
+ *  against it, so a reader can see what was actually said and not only how the agent put it. */
+export interface Quote {
+  segmentId: string;
+  ts: number;
+  speaker: string;
+  text: string;
 }
 
 export type DiscussionOutcome = "decided" | "action" | "open" | "info";
+
+/** Where one person stood in a discussion, in a line, with their own words behind it when the
+ *  meeting-end run found them (older meetings have none). */
+export interface Position {
+  speaker: string;
+  position: string;
+  quote?: Quote | null;
+}
 
 /** A stretch of back-and-forth about one question, within one agenda item.
  *  It records who argued what and how it ended; its decisions, action items
@@ -98,7 +117,7 @@ export interface Discussion {
   itemId: string | null;
   topic: string;
   /** Each participant's position, in a line, in the order they spoke. */
-  positions: Array<{ speaker: string; position: string }>;
+  positions: Position[];
   outcome: DiscussionOutcome;
   /** The speaker turns it covers, in order. */
   segmentIds: string[];

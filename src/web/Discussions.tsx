@@ -8,6 +8,7 @@ import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { colorFor, fmtDate, fmtTime, initials } from "./util.ts";
 import { useDismiss } from "./useDismiss.ts";
 import { toast } from "./Toasts.tsx";
+import { QuoteMark } from "./RecapChapters.tsx";
 import { useGlide } from "./useGlide.ts";
 
 /** An item's notes as the agent grouped them: the summary, then one block per
@@ -133,6 +134,7 @@ function DiscussionBlock(props: {
             {d.positions.map((p, i) => (
               <p key={i} className="disc-position">
                 <span className="who">{p.speaker}</span> {p.position}
+                {p.quote && <QuoteMark quote={p.quote} />}
               </p>
             ))}
           </div>

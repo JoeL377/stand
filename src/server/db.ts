@@ -17,6 +17,7 @@ import type {
   Jot,
   Note,
   NoteKind,
+  Quote,
   Segment,
   SegmentKind,
   UpdateStatus,
@@ -370,6 +371,7 @@ const toNote = (r: Row): Note => ({
   doneBy: (r.done_by as string) ?? null,
   discussionId: (r.discussion_id as string) ?? null,
   editedBy: (r.edited_by as string) ?? null,
+  quote: r.quote_json ? (JSON.parse(r.quote_json as string) as Quote) : null,
 });
 
 const toUpdate = (r: Row): ItemUpdate => ({
@@ -438,6 +440,8 @@ export function openDb(file?: string) {
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
+  // A decision's words as said (protocol.ts Quote), from the run as the meeting ends.
+  if (!noteCols.includes("quote_json")) db.exec("ALTER TABLE notes ADD COLUMN quote_json TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
   if (!meetingCols.includes("host_id")) db.exec("ALTER TABLE meetings ADD COLUMN host_id TEXT;");
   if (!meetingCols.includes("end_requested_at")) db.exec("ALTER TABLE meetings ADD COLUMN end_requested_at INTEGER;");
@@ -945,6 +949,7 @@ export function openDb(file?: string) {
           doneAt?: number | null;
           doneBy?: string | null;
           editedBy?: string | null;
+          quote?: Quote | null;
         }
       >,
     ): Note[] {
@@ -965,7 +970,7 @@ export function openDb(file?: string) {
       );
       db.prepare("DELETE FROM notes WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
       const st = db.prepare(
-        "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by, quote_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const ts = Date.now();
       // A run can write the same note twice under one topic: keep one, the one already kept if either was.
@@ -997,6 +1002,7 @@ export function openDb(file?: string) {
           doneBy: d?.doneBy ?? null,
           discussionId: n.discussionId ?? null,
           editedBy: n.editedBy ?? null,
+          quote: n.quote ?? null,
         };
         st.run(
           note.id,
@@ -1010,6 +1016,7 @@ export function openDb(file?: string) {
           note.doneBy,
           note.discussionId,
           note.editedBy ?? null,
+          note.quote ? JSON.stringify(note.quote) : null,
         );
         return [note];
       });

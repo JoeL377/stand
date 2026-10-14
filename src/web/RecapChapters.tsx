@@ -1,9 +1,9 @@
 // The recap's chapters: the same chapters people saw on the meeting's chapter bar (shared/chapters.ts),
 // as a bar for the whole meeting under the recap's header, a chip on every to-do, decision and open
 // question that leads to the chapter it came out of, and the Chapters section itself.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ChapterRecap, Discussion, DiscussionOutcome, Note, Segment, Snap } from "../shared/protocol.ts";
+import type { ChapterRecap, Discussion, DiscussionOutcome, Note, Quote, Segment, Snap } from "../shared/protocol.ts";
 import type { MeetingChapter } from "../shared/chapters.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { SnapFigures } from "./Snaps.tsx";
@@ -19,6 +19,34 @@ export function clock(ms: number): string {
   const m = Math.floor((s % 3600) / 60);
   const sec = String(s % 60).padStart(2, "0");
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+/** A small quote mark after a line the agent wrote (a position, a decision, a moment): the words
+ *  behind it, as said, show on hover or focus. The line stays as it was; this is for checking it. */
+export function QuoteMark({ quote, startedAt, onJump }: { quote: Quote; startedAt?: number; onJump?: (segmentId: string) => void }) {
+  const at = startedAt ? clock(quote.ts - startedAt) : fmtTime(quote.ts);
+  const who = quote.speaker.split(" ")[0];
+  return (
+    <span className="qm">
+      <button
+        type="button"
+        className="qm-mark"
+        aria-label={`What ${who} said: “${quote.text}”`}
+        onClick={(e) => {
+          e.preventDefault();
+          onJump?.(quote.segmentId);
+        }}
+      >
+        “
+      </button>
+      <span className="qm-pop" role="tooltip">
+        <span className="qm-text">“{quote.text}”</span>
+        <span className="qm-meta">
+          {who} · {at}
+        </span>
+      </span>
+    </span>
+  );
 }
 
 export const chapterAnchor = (i: number) => `chapter-${i + 1}`;
@@ -205,18 +233,39 @@ function ChapterRow(props: {
 }) {
   const { c, startedAt } = props;
   const [said, setSaid] = useState(false);
+  // A quote mark clicked: the transcript opens at that line.
+  const [jumpTo, setJumpTo] = useState<string | null>(null);
+  const body = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (!jumpTo || !said) return;
+    const el = body.current?.querySelector(`[data-seg="${jumpTo}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    el?.classList.add("qm-here");
+    const t = setTimeout(() => el?.classList.remove("qm-here"), 1600);
+    setJumpTo(null);
+    return () => clearTimeout(t);
+  }, [jumpTo, said]);
+  const jump = (id: string) => {
+    setSaid(true);
+    setJumpTo(id);
+  };
   const o = OUTCOME[c.outcome];
   const topics = c.topicIds.flatMap((id) => props.discussions.find((d) => d.id === id) ?? []);
   const head = topics.find((d) => d.id === c.headId) ?? null;
   const inside = topics.filter((d) => d !== head);
   const segById = new Map(props.segments.map((s) => [s.id, s]));
   const turns = c.segmentIds.flatMap((id) => segById.get(id) ?? []);
+  // A moment points at the line it starts at: that line, as said.
+  const lineAt = (id: string): Quote | null => {
+    const s = segById.get(id);
+    return s ? { segmentId: s.id, ts: s.ts, speaker: s.speakerName, text: s.text.length > 320 ? `${s.text.slice(0, 319).trimEnd()}…` : s.text } : null;
+  };
   const firstOf = (d: Discussion) => Math.min(...d.segmentIds.flatMap((id) => segById.get(id)?.ts ?? []));
   const shots = topics.flatMap((d) => props.snapsOnTopic(d.id));
   // A group has no main topic: where people stood is what each of its topics says.
   const positions = head?.positions ?? (inside.length === 1 ? inside[0].positions : []);
   return (
-    <details id={chapterAnchor(props.i)} className="rc-ch" open={props.open} onToggle={(e) => props.onToggle((e.currentTarget as HTMLDetailsElement).open)}>
+    <details ref={body} id={chapterAnchor(props.i)} className="rc-ch" open={props.open} onToggle={(e) => props.onToggle((e.currentTarget as HTMLDetailsElement).open)}>
       <summary>
         <span className="rc-ch-at">{clock(c.start - startedAt)}</span>
         <span className={`rc-ch-dot ${c.outcome}`} title={o.label} aria-label={o.label} />
@@ -246,7 +295,10 @@ function ChapterRow(props: {
                 return (
                   <li key={n.id} className={n.kind}>
                     <Icon size={14} />
-                    <span className="rc-ch-text">{n.text}</span>
+                    <span className="rc-ch-text">
+                      {n.text}
+                      {n.quote && <QuoteMark quote={n.quote} startedAt={startedAt} onJump={jump} />}
+                    </span>
                     {n.owner && n.kind === "action" && <Face name={n.owner} color={props.colorOf(n.owner)} size={18} />}
                   </li>
                 );
@@ -263,6 +315,7 @@ function ChapterRow(props: {
                   <Face name={p.speaker} color={props.colorOf(p.speaker)} size={20} />
                   <span className="rc-ch-text">
                     <b>{p.speaker.split(" ")[0]}</b> {p.position}
+                    {p.quote && <QuoteMark quote={p.quote} startedAt={startedAt} onJump={jump} />}
                   </span>
                 </li>
               ))}
@@ -273,12 +326,18 @@ function ChapterRow(props: {
           <div className="rc-ch-sub">
             <h4>Moments</h4>
             <ul className="rc-ch-times">
-              {props.crux.moments.map((m) => (
-                <li key={m.segmentId}>
-                  <span className="rc-ch-at">{clock(m.ts - startedAt)}</span>
-                  <span className="rc-ch-text">{m.text}</span>
-                </li>
-              ))}
+              {props.crux.moments.map((m) => {
+                const q = lineAt(m.segmentId);
+                return (
+                  <li key={m.segmentId}>
+                    <span className="rc-ch-at">{clock(m.ts - startedAt)}</span>
+                    <span className="rc-ch-text">
+                      {m.text}
+                      {q && <QuoteMark quote={q} startedAt={startedAt} onJump={jump} />}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
@@ -307,7 +366,7 @@ function ChapterRow(props: {
         {said && (
           <div className="transcript static">
             {turns.map((s) => (
-              <div key={s.id} className={s.kind === "chat" ? "seg chat" : "seg"}>
+              <div key={s.id} data-seg={s.id} className={s.kind === "chat" ? "seg chat" : "seg"}>
                 <div className="seg-head">
                   <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
                     {s.speakerName}

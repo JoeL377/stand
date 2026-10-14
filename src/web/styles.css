@@ -1957,3 +1957,13 @@ a.sh-pill:hover { text-decoration: none; }
 .chat-send { position: absolute; right: 5px; bottom: 5px; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
 .chat-send:hover { filter: brightness(1.1); }
 .seg-text a { color: var(--accent); }
+/* The words behind a line the agent wrote (QuoteMark in RecapChapters.tsx): a faint mark, the quote in a pop-up. */
+.qm { position: relative; display: inline-block; margin-left: 4px; vertical-align: baseline; }
+.qm-mark { all: unset; cursor: default; padding: 0 2px; font-family: Georgia, "Times New Roman", serif; font-size: 1.15em; line-height: 1; color: var(--muted); opacity: 0.55; }
+.qm-mark:hover, .qm-mark:focus-visible { opacity: 1; color: var(--accent-text); }
+.qm-mark:focus-visible { outline: 2px solid var(--accent-soft); border-radius: 4px; }
+.qm-pop { display: none; position: absolute; left: -8px; top: calc(100% + 6px); z-index: 6; width: max-content; max-width: min(340px, 72vw); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; font-weight: 400; color: var(--text); white-space: normal; text-align: left; }
+.qm:hover .qm-pop, .qm:focus-within .qm-pop { display: flex; }
+.qm-text { font-style: italic; text-wrap: pretty; }
+.qm-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.seg.qm-here { background: var(--accent-soft); border-radius: 8px; transition: background 1.2s; }
