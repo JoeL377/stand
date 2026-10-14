@@ -20,6 +20,7 @@ import type {
   Segment,
   SegmentKind,
   UpdateStatus,
+  WorkShot,
   User,
 } from "../shared/protocol.ts";
 import { newId } from "./ids.ts";
@@ -264,6 +265,21 @@ CREATE TABLE IF NOT EXISTS updates (
 CREATE INDEX IF NOT EXISTS updates_room ON updates(room_id, ts);
 CREATE INDEX IF NOT EXISTS updates_item ON updates(item_id, ts);
 CREATE INDEX IF NOT EXISTS updates_note ON updates(note_id);
+-- Screenshots an agent attaches to a to-do's work log. They join the next
+-- update it posts on that to-do (update_id); until then they show on their own.
+CREATE TABLE IF NOT EXISTS work_shots (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  note_id TEXT NOT NULL,
+  update_id TEXT,
+  user_id TEXT NOT NULL,
+  user_name TEXT NOT NULL,
+  client TEXT,
+  caption TEXT,
+  ext TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS work_shots_note ON work_shots(note_id, ts);
 `;
 
 /** Reads a discussion with the earlier one it continues, if any. */
@@ -383,6 +399,17 @@ const toUpdate = (r: Row): ItemUpdate => ({
   status: r.status as UpdateStatus,
   text: r.text as string,
   links: JSON.parse(r.links_json as string),
+  ts: r.ts as number,
+});
+
+const toWorkShot = (r: Row): WorkShot => ({
+  id: r.id as string,
+  noteId: r.note_id as string,
+  updateId: (r.update_id as string) ?? null,
+  userName: r.user_name as string,
+  client: (r.client as string) ?? null,
+  caption: (r.caption as string) ?? null,
+  ext: r.ext as string,
   ts: r.ts as number,
 });
 
@@ -1675,6 +1702,34 @@ export function openDb(file?: string) {
     },
     itemUpdates(itemId: string, limit = 50): ItemUpdate[] {
       return (db.prepare("SELECT * FROM updates WHERE item_id = ? ORDER BY ts DESC LIMIT ?").all(itemId, limit) as Row[]).map(toUpdate);
+    },
+    /** Every update on these to-dos, oldest first. */
+    notesUpdates(noteIds: string[]): ItemUpdate[] {
+      if (!noteIds.length) return [];
+      return (
+        db.prepare(`SELECT * FROM updates WHERE note_id IN (${noteIds.map(() => "?").join(",")}) ORDER BY ts ASC`).all(...noteIds) as Row[]
+      ).map(toUpdate);
+    },
+    addWorkShot(s: Omit<WorkShot, "id" | "ts" | "updateId"> & { roomId: string; userId: string }): WorkShot {
+      const shot: WorkShot = { id: newId(14), noteId: s.noteId, updateId: null, userName: s.userName, client: s.client, caption: s.caption, ext: s.ext, ts: Date.now() };
+      db.prepare(
+        "INSERT INTO work_shots (id, room_id, note_id, update_id, user_id, user_name, client, caption, ext, ts) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)",
+      ).run(shot.id, s.roomId, shot.noteId, s.userId, shot.userName, shot.client, shot.caption, shot.ext, shot.ts);
+      return shot;
+    },
+    getWorkShot(id: string): (WorkShot & { roomId: string }) | null {
+      const r = db.prepare("SELECT * FROM work_shots WHERE id = ?").get(id) as Row | undefined;
+      return r ? { ...toWorkShot(r), roomId: r.room_id as string } : null;
+    },
+    /** Screenshots someone's agent attached to a to-do that no update has picked up yet join this one. */
+    claimWorkShots(noteId: string, userId: string, updateId: string) {
+      db.prepare("UPDATE work_shots SET update_id = ? WHERE note_id = ? AND user_id = ? AND update_id IS NULL").run(updateId, noteId, userId);
+    },
+    noteWorkShots(noteIds: string[]): WorkShot[] {
+      if (!noteIds.length) return [];
+      return (
+        db.prepare(`SELECT * FROM work_shots WHERE note_id IN (${noteIds.map(() => "?").join(",")}) ORDER BY ts ASC`).all(...noteIds) as Row[]
+      ).map(toWorkShot);
     },
     noteUpdates(noteId: string): ItemUpdate[] {
       return (db.prepare("SELECT * FROM updates WHERE note_id = ? ORDER BY ts DESC LIMIT 50").all(noteId) as Row[]).map(toUpdate);

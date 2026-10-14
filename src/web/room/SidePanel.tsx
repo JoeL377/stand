@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Discussion, Item, ItemUpdate, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
-import { colorFor, fmtTime, keyOf } from "../util.ts";
+import { colorFor, fmtAgo, fmtTime, keyOf, linkLabel } from "../util.ts";
 import { FollowUpList } from "../FollowUps.tsx";
 import { LiveItemNotes, type NoteEditing } from "../Discussions.tsx";
 import { SnapsPill } from "../Snaps.tsx";
@@ -375,19 +375,8 @@ const STATUS: Record<ItemUpdate["status"], string> = {
   blocked: "Blocked",
   needs_decision: "Needs a decision",
   progress: "Progress",
+  working: "Started",
 };
-
-/** Links read as "PR #12" or the site's name rather than a raw URL. */
-function linkLabel(url: string) {
-  try {
-    const u = new URL(url);
-    const pr = /\/pull\/(\d+)/.exec(u.pathname);
-    if (u.hostname === "github.com" && pr) return `PR #${pr[1]}`;
-    return u.hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
 
 /** Updates agents and people posted on the item in focus since the last meeting. */
 function SinceLastTime({ updates }: { updates: ItemUpdate[] }) {
@@ -415,14 +404,6 @@ function SinceLastTime({ updates }: { updates: ItemUpdate[] }) {
       </ul>
     </section>
   );
-}
-
-function fmtAgo(ts: number) {
-  const m = Math.round((Date.now() - ts) / 60_000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
 
 export function NoteList({ notes }: { notes: Note[] }) {

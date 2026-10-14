@@ -151,7 +151,8 @@ export interface Snap {
 
 /** What an agent (or person) reported back on an item through the Stand MCP:
  *  progress, a blocker, a question for the next meeting, or a to-do checked off. */
-export type UpdateStatus = "progress" | "blocked" | "needs_decision" | "done";
+/** "working": an agent says it has started on a to-do; it shows as working until it reports again or goes quiet. */
+export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "done";
 export interface ItemUpdate {
   id: string;
   roomId: string;
@@ -166,6 +167,36 @@ export interface ItemUpdate {
   text: string;
   links: string[];
   ts: number;
+}
+
+/** A screenshot an agent attached to a to-do's work log. */
+export interface WorkShot {
+  id: string;
+  noteId: string;
+  /** The update it was attached with; null until the agent posts one. */
+  updateId: string | null;
+  userName: string;
+  client: string | null;
+  caption: string | null;
+  ext: string;
+  ts: number;
+}
+
+/** What agents have done on one to-do: whether one is on it now, and the log of its reports. */
+export interface ActionWork {
+  /** Set while an agent is on it: who, since when, and what it said last. Clears when it reports
+   *  done or stuck, or after a while with no word. */
+  working: { by: string; since: number; text: string } | null;
+  /** Reports on it, newest first, with the screenshots that came with each. */
+  log: Array<{
+    id: string;
+    by: string;
+    status: UpdateStatus | "shots";
+    text: string;
+    links: string[];
+    shots: Array<{ url: string; caption: string | null }>;
+    ts: number;
+  }>;
 }
 
 /** A personal access token an agent uses to reach the Stand MCP. The secret is only shown once. */

@@ -5,6 +5,7 @@ import type { Deck, Item, Note } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { fmtDate, keyOf } from "./util.ts";
 import { errorToast } from "./Toasts.tsx";
+import { WorkCard, WorkPill, useWork } from "./WorkLog.tsx";
 
 /** An action item as a follow-up: the note plus, when it came from another
  *  meeting, when that meeting was. */
@@ -41,14 +42,18 @@ export function FollowUpList(props: {
 }) {
   const [saved, setSaved] = useState<Record<string, Note>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const work = useWork(props.notes.map((n) => n.id));
+  const [opened, setOpened] = useState<string | null>(null);
   return (
     <ul className={["followups", props.compact && "compact", props.oneLine && "one-line"].filter(Boolean).join(" ")}>
       {props.notes.map((orig) => {
         const n = { ...orig, ...saved[orig.id] };
         const done = Boolean(n.doneAt);
         const src = props.source?.(n);
+        const w = work[n.id];
+        const open = opened === n.id && !!w?.log.length;
         return (
-          <li key={n.id} className={done ? "done" : undefined}>
+          <li key={n.id} className={[done && "done", w?.working && "working"].filter(Boolean).join(" ") || undefined}>
             <button
               className="check"
               role="checkbox"
@@ -76,6 +81,7 @@ export function FollowUpList(props: {
               <span className="fu-text">
                 {n.text}
                 {props.after?.(n)}
+                {w && <WorkPill work={w} open={open} onToggle={() => setOpened(open ? null : n.id)} />}
               </span>
               {!props.oneLine && (
                 <span className="fu-meta">
@@ -86,6 +92,7 @@ export function FollowUpList(props: {
                 </span>
               )}
               {props.below?.(n)}
+              {open && <WorkCard work={w} />}
             </span>
             {props.tail?.(n)}
             <CopyForAgent kind="action" id={n.id} />

@@ -16,7 +16,7 @@ Between meetings people also save notes to a space from the Stand bar on their M
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
 "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
-Report back when you finish or get stuck: complete_action for a to-do you finished (add a note and the PR link), post_update for progress, a blocker, or something people need to decide. Reports show up on that item in Stand.`;
+Working on a to-do: post_update with its ref and status working when you start, so people see it's being worked on. Report back when you finish or get stuck: complete_action for a to-do you finished (a short summary of what changed and the PR link), post_update for progress, a blocker, or something people need to decide. If the change shows on screen, attach screenshots first: screenshot_upload_url gives a link to curl them to, and they join your next report. Reports show up on that to-do in Stand as its log.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
 const fail = (err: unknown) => {
@@ -157,17 +157,17 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Post an update to Stand",
       description:
-        "Reports progress, a blocker, or something people need to decide on an item (or on one to-do, by its ref). It shows on that item in Stand under Since last time, attributed to this person via this agent. Append only.",
+        "Reports progress, a blocker, or something people need to decide on an item (or on one to-do, by its ref). It shows on that item in Stand under Since last time and in the to-do's log, attributed to this person via this agent. Append only. Status working on a to-do (by its ref) marks it as being worked on, with a loading mark in Stand; it stays that way through progress updates until you complete it, post blocked or needs_decision, or go 30 minutes without an update.",
       inputSchema: {
         ref: z.string().optional().describe("The to-do, decision, question or topic this is about (stand:action/<id> …)"),
         item_id: z.string().optional().describe("Or the item it's about"),
-        text: z.string().describe("What happened, in a sentence or two"),
-        status: z.enum(["progress", "blocked", "needs_decision"]).optional().describe("Default progress"),
+        text: z.string().optional().describe("What happened, in a sentence or two. Optional for working"),
+        status: z.enum(["working", "progress", "blocked", "needs_decision"]).optional().describe("Default progress. working: you've started on this to-do"),
         links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5)"),
       },
       annotations: WRITE,
     },
-    ({ ref, item_id, text, status, links }) => run(() => api.postUpdate(caller, { ref, itemId: item_id, text, status, links })),
+    ({ ref, item_id, text, status, links }) => run(() => api.postUpdate(caller, { ref, itemId: item_id, text, status, links }, baseUrl)),
   );
 
   server.registerTool(
@@ -175,15 +175,27 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Check off a Stand to-do",
       description:
-        "Marks a to-do done in Stand (the same as ticking its box), with an optional closing note and links such as the PR. Shows as done by this person via this agent.",
+        "Marks a to-do done in Stand (the same as ticking its box), with a summary of what changed and links such as the PR. The summary opens first in the to-do's log in Stand, with any screenshots uploaded since your last report (see screenshot_upload_url). Shows as done by this person via this agent.",
       inputSchema: {
         ref: z.string().describe("The to-do's reference, stand:action/<id>"),
-        note: z.string().optional().describe("What was done"),
+        note: z.string().optional().describe("What changed, for the people who asked: a short paragraph, or a few lines starting with - "),
         links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5)"),
       },
       annotations: WRITE,
     },
-    ({ ref, note, links }) => run(() => api.completeAction(caller, { ref, note, links })),
+    ({ ref, note, links }) => run(() => api.completeAction(caller, { ref, note, links }, baseUrl)),
+  );
+
+  server.registerTool(
+    "screenshot_upload_url",
+    {
+      title: "Get a link to attach screenshots to a Stand to-do",
+      description:
+        "Returns a short-lived link to upload screenshots of your work on a to-do (curl the image file to it; the reply shows the exact command). They join your next post_update or complete_action on that to-do and show in its log in Stand. Use it when the change is something people would want to see, like a UI change.",
+      inputSchema: { ref: z.string().describe("The to-do's reference, stand:action/<id>") },
+      annotations: WRITE,
+    },
+    ({ ref }) => run(() => api.screenshotUploadUrl(caller, { ref }, baseUrl)),
   );
 
   return server;
