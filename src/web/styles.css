@@ -2002,9 +2002,17 @@ a.sh-pill:hover { text-decoration: none; }
   .fu-spin, .followups li.working .check::after { animation: none; }
 }
 
-.fu-log { margin: 6px 0 2px; padding: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
-.wl-entry { padding: 8px 0; }
-.wl-entry + .wl-entry { border-top: 1px solid var(--line); }
+.fu-log { margin: 6px 0 2px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+/* Each report is a step on a thin timeline: a dot per step, joined by a line down to the next. */
+.wl-entry { position: relative; padding: 8px 0 8px 20px; }
+.wl-entry::before {
+  content: ""; position: absolute; left: 1px; top: 13px; width: 7px; height: 7px; border-radius: 50%;
+  border: 1.5px solid var(--muted); background: var(--panel); box-sizing: content-box;
+}
+.wl-entry:not(:last-of-type)::after { content: ""; position: absolute; left: 5px; top: 25px; bottom: -9px; width: 1px; background: var(--line); }
+.wl-entry.done::before, .wl-entry.ready::before { border-color: var(--ok); background: var(--ok); }
+.wl-entry.blocked::before, .wl-entry.needs_decision::before { border-color: var(--warn); }
+.wl-entry.working::before, .wl-entry.progress::before { border-color: var(--accent); }
 .wl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--muted); }
 .wl-status { font-weight: 600; color: var(--text); }
 .wl-status.done, .wl-status.ready { color: var(--ok-text); }
