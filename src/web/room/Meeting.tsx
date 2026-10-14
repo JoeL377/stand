@@ -470,8 +470,6 @@ export function Meeting(props: {
         <SidePanel
           state={state}
           segments={room.segments}
-          notes={room.notes}
-          discussions={room.discussions}
           notesBusy={room.notesBusy}
           interims={room.interims}
           send={send}

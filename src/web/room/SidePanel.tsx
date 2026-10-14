@@ -1,45 +1,30 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Discussion, Item, ItemUpdate, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import type { ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
-import { FollowUpList } from "../FollowUps.tsx";
-import { LiveItemNotes, type NoteEditing } from "../Discussions.tsx";
 import { SnapsPill } from "../Snaps.tsx";
-import { toast, undoing } from "../Toasts.tsx";
-import { ChevronIcon, SendIcon } from "../icons.tsx";
+import { SendIcon } from "../icons.tsx";
 import { Linkified } from "../Linkified.tsx";
 
 export function SidePanel(props: {
   state: RoomState;
   segments: Segment[];
-  notes: Note[];
-  discussions: Discussion[];
   notesBusy: string[];
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => boolean;
   participantId: string;
 }) {
-  const [earlierOpen, setEarlierOpen] = useState(true);
-  const { state, segments, notes, interims, send } = props;
-  // Two tabs: the agent's notes and topics, and the raw transcript. The topics also sit on the
+  const { state, segments, interims, send } = props;
+  // Two tabs: the meeting's chat and the spoken transcript. The topics and their notes sit on the
   // middle screen, so the transcript opens first.
-  const [tab, setTab] = useState<"notes" | "transcript">("transcript");
+  const [tab, setTab] = useState<"chat" | "transcript">("transcript");
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
-  const shown = segments.filter((s) => s.itemId === state.focusItemId);
-  const focusNotes = notes.filter((n) => n.itemId === state.focusItemId);
-  const focusDiscussions = props.discussions.filter((d) => d.itemId === state.focusItemId);
+  const shown = segments.filter((s) => s.itemId === state.focusItemId && s.kind !== "chat");
+  // Chat is one conversation for the whole meeting, whichever item it landed on.
+  const chats = segments.filter((s) => s.kind === "chat");
   const notesUpdating = props.notesBusy.includes(state.focusItemId ?? "");
   // The agent's last try at this item failed: it says so here until a later try works.
   const notesFailed = (state.notesFailing ?? []).includes(state.focusItemId);
-  // Action items about this item from earlier meetings, still open (or just checked off).
-  const earlier = (state.followUps ?? []).filter((f) => f.itemId === state.focusItemId);
-  const earlierOpenCount = earlier.filter((f) => !f.doneAt).length;
-  // What agents and people reported on this item since the last meeting.
-  const since = (state.updates ?? []).filter((u) => u.itemId === state.focusItemId);
-  const hasNotes = since.length > 0 || earlier.length > 0 || focusNotes.length > 0 || notesUpdating;
-  // Someone is speaking right now (their words land on the item in focus), or has said something in this meeting.
-  const talking = Object.keys(interims).length > 0;
-  const talkStarted = talking || segments.length > 0;
   // New remarks for this item while the Transcript tab isn't open.
   const [seen, setSeen] = useState(0);
   useEffect(() => {
@@ -47,47 +32,15 @@ export function SidePanel(props: {
   }, [tab, shown.length]);
   useEffect(() => setSeen(shown.length), [state.focusItemId]);
   const unseen = Math.max(0, shown.length - seen);
-  // The host can fix what the agent wrote: edit, delete or add notes for the item in focus.
+  // Messages from others since the Chat tab was last open; your own don't count.
+  const othersChats = chats.filter((s) => s.speakerId !== props.participantId).length;
+  const [chatSeen, setChatSeen] = useState(othersChats);
+  useEffect(() => {
+    if (tab === "chat") setChatSeen(othersChats);
+  }, [tab, othersChats]);
+  const chatUnseen = Math.max(0, othersChats - chatSeen);
   const isHost = state.participants.some((p) => p.id === props.participantId && p.isHost);
   const focusSnaps = (state.snaps ?? []).filter((p) => p.itemId === state.focusItemId);
-  const editing: NoteEditing | undefined = isHost
-    ? {
-        change: (n, text, owner) => send({ type: "note.edit", noteId: n.id, text, owner }),
-        remove: (n) => {
-          send({ type: "note.remove", noteId: n.id });
-          toast({
-            text: "Note deleted",
-            action: {
-              label: "Undo",
-              run: undoing(() => send({ type: "note.restore", noteId: n.id })),
-            },
-          });
-        },
-        add: (kind, text, owner) => send({ type: "note.add", itemId: state.focusItemId, kind, text, owner }),
-      }
-    : undefined;
-
-  // What the agent just wrote or changed lights up for a moment, so people see what's new without rereading.
-  const seenNotes = useRef(new Map<string | null, Set<string>>());
-  const [fresh, setFresh] = useState<string[]>([]);
-  const freshTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const noteSig = (n: Note) => `${n.kind}:${n.text.trim().toLowerCase()}`;
-  const notesKey = focusNotes.map((n) => `${n.id}=${noteSig(n)}`).join("|");
-  useEffect(() => {
-    const seen = seenNotes.current.get(state.focusItemId);
-    if (!seen) {
-      // First look at this item: everything here is already "seen".
-      seenNotes.current.set(state.focusItemId, new Set(focusNotes.map(noteSig)));
-      return;
-    }
-    const added = focusNotes.filter((n) => !seen.has(noteSig(n)));
-    if (!added.length) return;
-    for (const n of added) seen.add(noteSig(n));
-    setFresh(added.map((n) => n.id));
-    clearTimeout(freshTimer.current);
-    freshTimer.current = setTimeout(() => setFresh([]), 2500);
-  }, [notesKey, state.focusItemId]);
-  useEffect(() => () => clearTimeout(freshTimer.current), []);
 
   return (
     <aside className="panel side">
@@ -100,9 +53,13 @@ export function SidePanel(props: {
       </div>
 
       <div className="side-toggle" role="tablist" aria-label="Discussion views">
-        <button role="tab" aria-selected={tab === "notes"} className={tab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>
-          Notes & topics
-          {notesUpdating && <span className="side-toggle-dot" title="Updating notes" aria-label="Updating" />}
+        <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
+          Chat
+          {tab !== "chat" && chatUnseen > 0 && (
+            <span className="side-tab-badge" aria-label={`${chatUnseen} new`}>
+              {chatUnseen}
+            </span>
+          )}
         </button>
         <button
           role="tab"
@@ -118,76 +75,26 @@ export function SidePanel(props: {
           )}
         </button>
       </div>
-      {tab === "notes" ? (
-        <div className="side-notes-tab">
-          {!hasNotes && (shown.length > 0 || talking) && (
-            <p className="side-notes-empty">
-              {`Listening${shown.length > 0 ? ` · ${shown.length} remark${shown.length === 1 ? "" : "s"} so far` : ""}. `}
-              Notes show up after a short pause in the talk.
-            </p>
+      {/* The topics on the middle screen come from these notes, so a failure still says so here. */}
+      {notesFailed && (
+        <p className="notes-paused side-notes-paused" role="status">
+          {state.notesTrouble === "credit"
+            ? "Notes stopped: the Anthropic account Stand uses is out of credit. Everything said is kept."
+            : state.notesTrouble === "busy"
+              ? "Notes are behind: the model's rate limit was hit. They catch up by themselves."
+              : "The agent couldn't update the notes. Everything said is kept."}
+          {!notesUpdating && state.notesTrouble !== "busy" && (
+            <button className="link" onClick={() => send({ type: "notes.retry", itemId: state.focusItemId })}>
+              Try again
+            </button>
           )}
-          {/* Only until the first words: after that it's clear where notes go. */}
-          {!hasNotes && !talkStarted && (
-            <p className="side-notes-empty">Agent notes and topics for this item show up here once people start talking.</p>
-          )}
-          {notesFailed && (
-            <p className="notes-paused" role="status">
-              {state.notesTrouble === "credit"
-                ? "Notes stopped: the Anthropic account Stand uses is out of credit. Everything said is kept."
-                : state.notesTrouble === "busy"
-                  ? "Notes are behind: the model's rate limit was hit. They catch up by themselves."
-                  : "The agent couldn't update these notes. Everything said is kept."}
-              {!notesUpdating && state.notesTrouble !== "busy" && (
-                <button className="link" onClick={() => send({ type: "notes.retry", itemId: state.focusItemId })}>
-                  Try again
-                </button>
-              )}
-            </p>
-          )}
-          {since.length > 0 && <SinceLastTime updates={since} />}
-          {earlier.length > 0 && (
-            <section className={earlierOpen ? "focus-notes earlier open" : "focus-notes earlier"}>
-              <button className="focus-notes-head" aria-expanded={earlierOpen} onClick={() => setEarlierOpen((o) => !o)}>
-                <span>From earlier meetings</span>
-                <span className="muted">{earlierOpenCount} open</span>
-                <span className="chev" aria-hidden>
-                  <ChevronIcon />
-                </span>
-              </button>
-              {earlierOpen && (
-                <div className="focus-notes-body">
-                  <FollowUpList
-                    compact
-                    showDate
-                    notes={earlier}
-                    onToggle={(n, done) => void send({ type: "followup.done", noteId: n.id, done })}
-                  />
-                </div>
-              )}
-            </section>
-          )}
-          {/* One list whether or not there are notes yet, so a form the host has open stays open when the first ones arrive. */}
-          {(focusNotes.length > 0 || notesUpdating || isHost) && (
-            <section className="side-agent-notes">
-              {!focusNotes.length && notesUpdating && <p className="tk-empty">Writing the first notes…</p>}
-              {(focusNotes.length > 0 || isHost) && (
-                <LiveItemNotes
-                  key={state.focusItemId ?? "general"}
-                  fresh={fresh}
-                  notes={focusNotes}
-                  discussions={focusDiscussions}
-                  segments={segments}
-                  onToggle={(n, done) => send({ type: "followup.done", noteId: n.id, done })}
-                  editing={editing}
-                  snaps={{ list: focusSnaps, me: props.participantId, isHost }}
-                />
-              )}
-            </section>
-          )}
-        </div>
+        </p>
+      )}
+      {tab === "transcript" ? (
+        <Transcript segments={shown} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." />
       ) : (
         <>
-          <Transcript segments={shown} items={state.items} interims={interims} send={send} />
+          <Transcript segments={chats} items={state.items} interims={{}} send={send} empty="No messages yet." />
           {!state.ending && <ChatBox send={send} />}
         </>
       )}
@@ -201,44 +108,17 @@ export function SidePanel(props: {
           Meeting recap ↗
         </a>
       </div>
-      {tab === "notes" && <LiveSliver segments={shown} interims={interims} onOpen={() => setTab("transcript")} />}
     </aside>
   );
 }
 
-/** The last thing heard about this item, so people can tell at a glance that Stand is capturing. */
-/** The last few remarks about the item in focus, newest at the bottom; the live one has a red dot. */
-function LiveSliver(props: { segments: Segment[]; interims: Record<string, Interim>; onOpen: () => void }) {
-  const live = Object.values(props.interims).at(-1);
-  const rows = [
-    ...props.segments.map((s) => ({
-      key: s.id,
-      who: s.speakerName,
-      id: s.speakerId,
-      text: s.text,
-      ts: s.ts as number | null,
-      live: false,
-    })),
-    ...(live ? [{ key: "live", who: live.speakerName, id: live.speakerId, text: `${live.text}…`, ts: null, live: true }] : []),
-  ].slice(-3);
-  if (rows.length === 0) return null;
-  return (
-    <button className="side-sliver" onClick={props.onOpen} title="Open the transcript">
-      {rows.map((r) => (
-        <span key={r.key} className={r.live ? "side-sliver-row live" : "side-sliver-row"}>
-          <span className="side-sliver-dot" aria-hidden />
-          <span className="side-sliver-who" style={{ color: colorFor(r.id) }}>
-            {r.who}
-          </span>
-          <span className="side-sliver-text">{r.text}</span>
-          {r.ts !== null && <span className="side-sliver-time">{fmtTime(r.ts)}</span>}
-        </span>
-      ))}
-    </button>
-  );
-}
-
-function Transcript(props: { segments: Segment[]; items: Item[]; interims: Record<string, Interim>; send: (m: ClientMessage) => boolean }) {
+function Transcript(props: {
+  segments: Segment[];
+  items: Item[];
+  interims: Record<string, Interim>;
+  send: (m: ClientMessage) => boolean;
+  empty: string;
+}) {
   const { segments, items, interims, send } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -259,7 +139,7 @@ function Transcript(props: { segments: Segment[]; items: Item[]; interims: Recor
       }}
     >
       {segments.length === 0 && interimList.length === 0 && (
-        <p className="muted empty">Nothing said about this yet.</p>
+        <p className="muted empty">{props.empty}</p>
       )}
       {segments.map((s) => (
         <SegmentRow key={s.id} segment={s} items={items} send={send} />
@@ -333,7 +213,6 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
         <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
           {s.speakerName}
         </span>
-        {s.kind === "chat" && <span className="seg-kind">chat</span>}
         <span className="seg-time">{fmtTime(s.ts)}</span>
         <button className="seg-move" onClick={() => setMoving((m) => !m)} title="This was about a different item">
           Move
@@ -368,61 +247,6 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
       )}
     </div>
   );
-}
-
-const STATUS: Record<ItemUpdate["status"], string> = {
-  done: "Done",
-  blocked: "Blocked",
-  needs_decision: "Needs a decision",
-  progress: "Progress",
-};
-
-/** Links read as "PR #12" or the site's name rather than a raw URL. */
-function linkLabel(url: string) {
-  try {
-    const u = new URL(url);
-    const pr = /\/pull\/(\d+)/.exec(u.pathname);
-    if (u.hostname === "github.com" && pr) return `PR #${pr[1]}`;
-    return u.hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
-
-/** Updates agents and people posted on the item in focus since the last meeting. */
-function SinceLastTime({ updates }: { updates: ItemUpdate[] }) {
-  return (
-    <section className="side-since tk-card">
-      <h4>Since last time</h4>
-      <ul>
-        {updates.map((u) => (
-          <li key={u.id} className={`since ${u.status}`}>
-            <span className={`since-status ${u.status}`}>{STATUS[u.status]}</span>
-            <span className="since-body">
-              <span className="since-text">{u.text}</span>
-              {u.noteText && <span className="since-on">On: {u.noteText}</span>}
-              <span className="since-meta">
-                {u.client ? `${u.userName.split(/\s+/)[0]} via ${u.client}` : u.userName} · {fmtAgo(u.ts)}
-                {u.links.map((l) => (
-                  <a key={l} href={l} target="_blank" rel="noreferrer">
-                    {linkLabel(l)}
-                  </a>
-                ))}
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function fmtAgo(ts: number) {
-  const m = Math.round((Date.now() - ts) / 60_000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
 
 export function NoteList({ notes }: { notes: Note[] }) {
