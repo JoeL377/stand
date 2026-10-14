@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, UploadLinks, WORKING_QUIET_MS, workLog, workingOn } from "./workLog.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { openDb } from "./db.ts";
 import { addUpNext } from "./upNext.ts";
@@ -35,6 +36,7 @@ function setup() {
     notify: (r, what) => notified.push(`${r}:${what}`),
     brief: (id) => ({ meeting: id }),
     suggested: (r) => upNextView(db, r, null),
+    uploads: new UploadLinks(),
   });
   const action = notes.find((n) => n.text.startsWith("Move"))!;
   return { db, api, joe, andy, room, item, topic, action, notes, notified };
@@ -149,6 +151,45 @@ test("agents report back: complete_action checks off and records who, via which 
 
   api.postUpdate(caller, { ref: `stand:action/${action.id}`, text: "Waiting on infra", status: "blocked" });
   assert.equal(db.roomUpdates(room.id)[0].status, "blocked");
+});
+
+test("an agent working on a to-do: working shows, clears when it's done, and the log carries its screenshots", () => {
+  const { db, api, joe, andy, action, room } = setup();
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const caller = { user: joe, token: info };
+  const ref = `stand:action/${action.id}`;
+  assert.throws(() => api.postUpdate(caller, { itemId: action.itemId!, status: "working" }), /to-do/);
+  api.postUpdate(caller, { ref, status: "working" });
+  const t0 = Date.now();
+  let ups = db.notesUpdates([action.id]);
+  assert.equal(ups[0].text, "Started on it");
+  assert.equal(workingOn(ups, false)?.by, "Joe Liang via Claude Code");
+  assert.equal(workingOn(ups, false, t0 + WORKING_QUIET_MS + 1), null, "quiet for too long reads as stopped");
+
+  // A screenshot sent to the upload link joins the next report.
+  const link = api.screenshotUploadUrl(caller, { ref }, "https://stand.test");
+  const grant = link.upload_url.split("/").pop()!;
+  assert.ok(grant.length > 20);
+  db.addWorkShot({ roomId: room.id, noteId: action.id, userId: joe.id, userName: joe.name, client: "Claude Code", caption: "New panel", ext: "png" });
+  db.addWorkShot({ roomId: room.id, noteId: action.id, userId: andy.id, userName: andy.name, client: null, caption: "Andy's", ext: "png" });
+  api.completeAction(caller, { ref, note: "Moved capture to the server.\n- New worker\n- Old path removed" });
+  ups = db.notesUpdates([action.id]);
+  assert.equal(workingOn(ups, true), null);
+  const log = workLog(ups, db.noteWorkShots([action.id]));
+  assert.equal(log[0].status, "done");
+  assert.deepEqual(log[0].shots.map((s) => s.caption), ["New panel"]);
+  assert.ok(log.some((e) => e.status === "shots" && e.shots[0].caption === "Andy's"), "someone else's loose screenshot stays on its own");
+  const got = api.get({ user: joe, token: null }, ref, "https://stand.test") as Record<string, any>;
+  assert.match(got.updates[0].screenshots[0].image_url, /^https:\/\/stand\.test\/api\/work-shots\//);
+});
+
+test("upload links run out", () => {
+  const links = new UploadLinks();
+  const s = links.create({ roomId: "r", noteId: "n", userId: "u", userName: "U", client: null }, 0);
+  for (let i = 0; i < UPLOAD_LINK_MAX; i++) assert.ok(links.use(s, 1));
+  assert.equal(links.use(s, 1), null);
+  const t = links.create({ roomId: "r", noteId: "n", userId: "u", userName: "U", client: null }, 0);
+  assert.equal(links.use(t, UPLOAD_LINK_MS + 1), null);
 });
 
 test("a read-only token can't report back", () => {

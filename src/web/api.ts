@@ -1,5 +1,6 @@
 import type { DraftSlide } from "../shared/outline.ts";
 import type {
+  ActionWork,
   AgentToken,
   Capabilities,
   Deck,
@@ -93,6 +94,7 @@ export const api = {
   disconnectConxt: (roomId: string) => call<{ ok: true }>("DELETE", `/api/rooms/${roomId}/conxt`),
   retryLiveConxt: (roomId: string, meetingId: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/conxt/live/${meetingId}/retry`, {}),
   retryConxt: (roomId: string, deliveryId: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/conxt/${deliveryId}/retry`, {}),
+  work: (ids: string[]) => call<Record<string, ActionWork>>("GET", `/api/work?ids=${ids.join(",")}`),
   tokens: () => call<AgentToken[]>("GET", "/api/tokens"),
   createToken: (label: string, scope: AgentToken["scope"]) => call<{ token: string; info: AgentToken }>("POST", "/api/tokens", { label, scope }),
   revokeToken: (id: string) => call<{ ok: true }>("DELETE", `/api/tokens/${id}`),

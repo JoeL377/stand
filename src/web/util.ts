@@ -29,3 +29,24 @@ export function keyOf(item: Pick<Item, "externalId" | "slideNo"> | null | undefi
   if (!item) return null;
   return item.externalId ?? (item.slideNo ? `Slide ${item.slideNo}` : null);
 }
+
+/** Links read as "PR #12" or the site's name rather than a raw URL. */
+export function linkLabel(url: string) {
+  try {
+    const u = new URL(url);
+    const pr = /\/pull\/(\d+)/.exec(u.pathname);
+    if (u.hostname === "github.com" && pr) return `PR #${pr[1]}`;
+    return u.hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/** "just now", "4 min ago", "3h ago", "2d ago". */
+export function fmtAgo(ts: number) {
+  const m = Math.round((Date.now() - ts) / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}

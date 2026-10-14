@@ -12,6 +12,7 @@ import { ownedBy } from "./spaces.ts";
 /** A position as one line, with the person's own words when the meeting-end run kept them. */
 const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.position}${p.quote ? ` (in their words: "${p.quote.text}")` : ""}`;
 import { linkSnaps, type SnapRow } from "./snaps.ts";
+import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, shotUrl, type UploadLinks } from "./workLog.ts";
 
 export type RefKind = "action" | "decision" | "question" | "topic";
 const NOTE_KINDS: Record<string, RefKind> = { action: "action", decision: "decision", question: "question" };
@@ -52,9 +53,11 @@ export interface AgentDeps {
   brief: (meetingId: string, baseUrl: string, transcript: boolean) => unknown;
   /** The space's suggested agenda as people see it in the app. */
   suggested: (roomId: string) => { upNext: UpNext };
+  /** Hands out the links agents upload screenshots to. */
+  uploads: UploadLinks;
 }
 
-const UPDATE_STATUSES: UpdateStatus[] = ["progress", "blocked", "needs_decision", "done"];
+const UPDATE_STATUSES: UpdateStatus[] = ["working", "progress", "blocked", "needs_decision", "done"];
 
 export function agentApi(deps: AgentDeps) {
   const { db } = deps;
@@ -79,14 +82,18 @@ export function agentApi(deps: AgentDeps) {
     };
   };
 
-  const updateInfo = (u: ItemUpdate) => ({
-    by: u.client ? `${u.userName} via ${u.client}` : u.userName,
-    status: u.status,
-    text: u.text,
-    links: u.links.length ? u.links : undefined,
-    on: u.noteText ? clip(u.noteText, 120) : undefined,
-    at: new Date(u.ts).toISOString(),
-  });
+  const updateInfo = (u: ItemUpdate, baseUrl?: string) => {
+    const shots = baseUrl && u.noteId ? db.noteWorkShots([u.noteId]).filter((s) => s.updateId === u.id) : [];
+    return {
+      by: u.client ? `${u.userName} via ${u.client}` : u.userName,
+      status: u.status,
+      text: u.text,
+      links: u.links.length ? u.links : undefined,
+      screenshots: shots.length ? shots.map((s) => ({ image_url: shotUrl(s, baseUrl), caption: s.caption ?? undefined })) : undefined,
+      on: u.noteText ? clip(u.noteText, 120) : undefined,
+      at: new Date(u.ts).toISOString(),
+    };
+  };
 
   const actionInfo = (n: Note) => ({
     ref: refOf("action", n.id),
@@ -281,11 +288,11 @@ export function agentApi(deps: AgentDeps) {
           (s) => s.noteId === n.id || (!s.noteId && n.discussionId !== null && s.discussionId === n.discussionId),
           baseUrl,
         ),
-        updates: updates.length ? updates.map(updateInfo) : undefined,
+        updates: updates.length ? updates.map((u) => updateInfo(u, baseUrl)) : undefined,
         url: refUrl(baseUrl, r.ref.kind, n.id),
         next:
           n.kind === "action"
-            ? "When you finish, call complete_action with this ref (add a note and PR link). For progress or a blocker, call post_update."
+            ? "When you start, call post_update with this ref and status working so people see you're on it. When you finish, call complete_action with a short summary of what changed and the PR link (attach screenshots first with screenshot_upload_url if the change shows on screen). For progress or a blocker, call post_update."
             : undefined,
       };
     },
@@ -323,7 +330,7 @@ export function agentApi(deps: AgentDeps) {
         `"${clip(text, 200)}" (${where})`,
         ...[...decided, ...fallback].map((d) => `Decided: ${clip(d.text, 200)}`),
         r.ref.kind === "action"
-          ? "Pull the full context with the Stand MCP (get), do the work, then report back with complete_action or post_update."
+          ? "Pull the full context with the Stand MCP (get), post_update with status working when you start, do the work, then report back with complete_action (a summary of what changed) or post_update."
           : r.ref.kind === "question"
             ? "Pull the full context with the Stand MCP (get), dig into it, then report what you found with post_update (status needs_decision if people must decide)."
             : "Pull the full context with the Stand MCP (get) before acting on it.",
@@ -479,7 +486,7 @@ export function agentApi(deps: AgentDeps) {
           on: day(d.meetingStartedAt),
           positions: d.positions.map(positionLine),
         })),
-        updates: db.itemUpdates(item.id, 10).map(updateInfo),
+        updates: db.itemUpdates(item.id, 10).map((u) => updateInfo(u, baseUrl)),
         saved_notes: (() => {
           const saved = db.itemJots(item.id, 8);
           return saved.length ? saved.map((j) => noteInfo(j, baseUrl)) : undefined;
@@ -508,11 +515,13 @@ export function agentApi(deps: AgentDeps) {
       return deps.brief(m.id, baseUrl, !!opts.transcript);
     },
 
-    postUpdate(caller: Caller, args: { itemId?: string; ref?: string; text: string; status?: string; links?: string[] }) {
+    postUpdate(caller: Caller, args: { itemId?: string; ref?: string; text?: string; status?: string; links?: string[] }, baseUrl = "") {
       requireWrite(caller);
-      const text = args.text.trim().slice(0, 2000);
+      const status = (UPDATE_STATUSES.find((s) => s === args.status && s !== "done") ?? "progress") as UpdateStatus;
+      if (status === "working" && !(args.ref && parseRef(args.ref)?.kind === "action"))
+        throw new AgentError("Working is for a to-do: give its ref, stand:action/<id>.");
+      const text = (args.text ?? "").trim().slice(0, 4000) || (status === "working" ? "Started on it" : "");
       if (!text) throw new AgentError("An update needs some text.");
-      const status = (UPDATE_STATUSES.find((s) => s === args.status) ?? "progress") as UpdateStatus;
       let roomId: string;
       let itemId: string | null = null;
       let note: Note | null = null;
@@ -539,11 +548,19 @@ export function agentApi(deps: AgentDeps) {
         text,
         links: cleanLinks(args.links),
       });
+      if (note) db.claimWorkShots(note.id, caller.user.id, update.id);
       deps.notify(roomId, "updates");
-      return { posted: updateInfo(update), shows_on: itemId ? "the item in Stand, under Since last time" : "the space in Stand" };
+      return {
+        posted: updateInfo(update, baseUrl),
+        shows_on: note?.kind === "action" ? "the to-do in Stand, in its log" : itemId ? "the item in Stand, under Since last time" : "the space in Stand",
+        working:
+          note?.kind === "action" && (status === "working" || status === "progress")
+            ? "The to-do shows as being worked on until you complete it, post blocked or needs_decision, or go 30 minutes without an update."
+            : undefined,
+      };
     },
 
-    completeAction(caller: Caller, args: { ref: string; note?: string; links?: string[] }) {
+    completeAction(caller: Caller, args: { ref: string; note?: string; links?: string[] }, baseUrl = "") {
       requireWrite(caller);
       const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`);
       if (!r.note || r.note.kind !== "action") throw new AgentError("Only to-dos (stand:action/...) can be completed.");
@@ -560,16 +577,37 @@ export function agentApi(deps: AgentDeps) {
         userName: caller.user.name,
         client: caller.token?.label ?? null,
         status: "done",
-        text: args.note?.trim().slice(0, 2000) || `Done: ${clip(r.note.text, 200)}`,
+        text: args.note?.trim().slice(0, 4000) || `Done: ${clip(r.note.text, 200)}`,
         links: cleanLinks(args.links),
       });
+      db.claimWorkShots(r.note.id, caller.user.id, update.id);
       deps.notify(r.room.id, "followups");
       return {
         ref: refOf("action", r.note.id),
         status: "done",
         was_already_done: already || undefined,
         done_by: done.doneBy,
-        update: updateInfo(update),
+        update: updateInfo(update, baseUrl),
+      };
+    },
+
+    /** A link the agent uploads screenshots to (with curl); they join its next report on the to-do. */
+    screenshotUploadUrl(caller: Caller, args: { ref: string }, baseUrl: string) {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`);
+      if (!r.note || r.note.kind !== "action") throw new AgentError("Screenshots go on a to-do (stand:action/...).");
+      const secret = deps.uploads.create({
+        roomId: r.room.id,
+        noteId: r.note.id,
+        userId: caller.user.id,
+        userName: caller.user.name,
+        client: caller.token?.label ?? null,
+      });
+      const url = `${baseUrl}/api/work-uploads/${secret}`;
+      return {
+        upload_url: url,
+        how: `curl -sS --data-binary @screenshot.png -H "Content-Type: image/png" "${url}?caption=What%20it%20shows"`,
+        rules: `PNG, JPEG, WebP or GIF, up to 10 MB each, up to ${UPLOAD_LINK_MAX} images, for ${UPLOAD_LINK_MS / 60_000} minutes. No token needed: the link is the permission, so don't share it. The screenshots join your next post_update or complete_action on this to-do.`,
       };
     },
   };

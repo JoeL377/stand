@@ -3,7 +3,8 @@ import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { type WebSocket, WebSocketServer } from "ws";
-import type { DeckDraft, DeckHistory, DeckTheme, ItemHistory, Jot, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
+import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, ItemHistory, Jot, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
+import { MAX_SHOT_BYTES, UploadLinks, saveShotFile, shotFile, workLog, workingOn } from "./workLog.ts";
 import { MAX_SYNTHESIS_INSTRUCTIONS } from "../shared/protocol.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } from "./auth.ts";
@@ -140,8 +141,10 @@ app.use(oauthRoutes(db));
 
 // ---- agents: the Stand MCP and the Copy for agent button ---------------------
 
+const uploadLinks = new UploadLinks();
 const agents = agentApi({
   db,
+  uploads: uploadLinks,
   notify: (roomId, what) => {
     const s = live(roomId);
     if (s) what === "updates" ? s.updatesChanged() : s.followUpsChanged();
@@ -196,8 +199,69 @@ app.get(
   }),
 );
 
+// ---- to-do work logs: what agents report on a to-do -------------------------
+
+// Screenshots an agent attaches to a to-do. The link (from the MCP's screenshot_upload_url) is
+// the permission, so an agent can curl a file here without its token. ?caption= says what it shows.
+app.post(
+  "/api/work-uploads/:secret",
+  express.raw({ type: () => true, limit: MAX_SHOT_BYTES }),
+  route((req, res) => {
+    const grant = uploadLinks.use(req.params.secret);
+    if (!grant) return res.status(403).json({ error: "That upload link has expired or been used up. Ask Stand for a new one." });
+    const buf = req.body as Buffer;
+    const ext = Buffer.isBuffer(buf) ? imageType(buf) : null;
+    if (!ext) return res.status(400).json({ error: "Send a PNG, JPEG, WebP or GIF image as the request body." });
+    const caption = typeof req.query.caption === "string" ? req.query.caption.trim().slice(0, 300) || null : null;
+    const shot = db.addWorkShot({ ...grant, caption, ext });
+    saveShotFile(shot.id, ext, buf);
+    live(grant.roomId)?.updatesChanged();
+    res.json({ ok: true, id: shot.id, joins: "your next post_update or complete_action on this to-do" });
+  }),
+);
+
+// A work-log screenshot, for people in its space and their agents.
+app.get(
+  "/api/work-shots/:file",
+  route((req, res) => {
+    const user = userFromRequest(db, req) ?? agentFromRequest(db, req)?.user ?? null;
+    if (!user) return res.status(401).json({ error: "Sign in first" });
+    const m = /^([a-z0-9]+)\.(png|jpg|webp|gif)$/.exec(req.params.file);
+    const shot = m ? db.getWorkShot(m[1]) : null;
+    const file = shot && shot.ext === m![2] ? shotFile(shot.id, shot.ext) : null;
+    if (!shot || !file || !db.isMember(shot.roomId, user.id)) return notFound(res);
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.sendFile(file);
+  }),
+);
+
 // Everything else needs a signed-in user.
 app.use("/api", requireUser(db));
+
+// Whether an agent is on each of these to-dos, and what's been reported on them. ?ids=a,b,c
+app.get(
+  "/api/work",
+  route((req, res) => {
+    const ids = String(req.query.ids ?? "")
+      .split(",")
+      .filter((id) => /^[a-z0-9]{4,24}$/.test(id))
+      .slice(0, 200);
+    const notes = ids
+      .map((id) => db.getNote(id))
+      .filter((n): n is NonNullable<typeof n> => !!n && n.kind === "action" && db.isMember(n.roomId, req.user!.id));
+    const keep = notes.map((n) => n.id);
+    const updates = db.notesUpdates(keep);
+    const shots = db.noteWorkShots(keep);
+    const out: Record<string, ActionWork> = {};
+    for (const n of notes) {
+      const mine = updates.filter((u) => u.noteId === n.id);
+      const log = workLog(mine, shots.filter((s) => s.noteId === n.id));
+      const working = workingOn(mine, !!n.doneAt);
+      if (log.length || working) out[n.id] = { working, log };
+    }
+    res.json(out);
+  }),
+);
 app.use("/api/rooms/:id/conxt", conxtRoutes(db, conxtDestinations));
 const conxtDelivery = new ConxtDelivery(db, conxtDestinations);
 conxtDelivery.start();
