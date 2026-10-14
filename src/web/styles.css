@@ -1809,13 +1809,20 @@ a.sh-pill:hover { text-decoration: none; }
 /* The chapter bar: the meeting so far, a stretch per topic at the time it was talked about. */
 .topic-chapters { flex: none; display: flex; flex-direction: column; gap: 2px; }
 .topic-bar { position: relative; height: 20px; }
-.topic-stretch { position: absolute; top: 0; height: 100%; min-width: 5px; padding: 0; border: 0; border-radius: 0; background: none; cursor: pointer; }
+/* The rest of the meeting, still to fill: a faint track to the bar's end. */
+.topic-bar::before { content: ""; position: absolute; left: 1px; right: 1px; top: 9px; height: 2px; border-radius: 1px; background: rgb(255 255 255 / 0.08); }
+/* The meeting so far, filling the track from the left as the clock runs, talk or no talk. */
+.topic-bar-elapsed { position: absolute; left: 1px; top: 9px; height: 2px; border-radius: 1px; background: rgb(255 255 255 / 0.22); transition: width 400ms var(--ease-out, ease-out); }
+.topic-stretch { position: absolute; top: 0; height: 100%; min-width: 5px; padding: 0; border: 0; border-radius: 0; background: none; cursor: pointer; transition: left 400ms var(--ease-out, ease-out), width 400ms var(--ease-out, ease-out); }
 .topic-stretch::before { content: ""; position: absolute; left: 1px; right: 1px; top: 7px; height: 6px; border-radius: 3px; background: rgb(255 255 255 / 0.2); transition: top 120ms var(--ease-out, ease-out), height 120ms var(--ease-out, ease-out), background-color 120ms; }
 .topic-stretch:hover::before, .topic-stretch.on::before, .topic-stretch:focus-visible::before { top: 5px; height: 10px; background: rgb(255 255 255 / 0.45); }
 .topic-stretch.current:not(.peekable) { cursor: default; }
 .topic-stretch.current::before, .topic-stretch.current:hover::before { top: 5px; height: 10px; background: var(--accent); }
 .topic-stretch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
-.topic-bar-times { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.topic-bar-times { position: relative; height: 15px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.topic-bar-times > span { position: absolute; top: 0; left: 0; }
+/* The time now rides the end of the filled bar (TopicBoard keeps it inside the bar). */
+.topic-bar-times > .topic-bar-now { transition: left 400ms var(--ease-out, ease-out), transform 400ms var(--ease-out, ease-out); }
 /* Another topic, opened from its stretch of the bar, on your own screen. */
 .topic-peek { position: absolute; z-index: 5; width: min(360px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 12px; background: #2c2c31; border: 1px solid rgb(255 255 255 / 0.12); box-shadow: var(--shadow); font-size: 13px; line-height: 1.4; animation: fade-up 150ms var(--ease-out, ease-out); }
 .topic-peek-title { font-size: 15px; font-weight: 600; line-height: 1.3; }
@@ -1849,7 +1856,7 @@ a.sh-pill:hover { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .topic-now.topic-in, .topic-peek, .topic-now-label.arrived, .topic-stretch.current.arrived::before { animation: none; }
   .topic-now-label.live::before { animation: none; }
-  .topic-stretch::before { transition: none; }
+  .topic-stretch::before, .topic-stretch, .topic-bar-elapsed, .topic-bar-times > .topic-bar-now { transition: none; }
   /* No moving light: the top edge just brightens while the notes update. */
   .topic-now.updating::before { animation: none; left: 0; width: 100%; opacity: 0.6; background: var(--accent); }
 }
