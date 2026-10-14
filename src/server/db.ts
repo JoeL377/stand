@@ -1714,7 +1714,7 @@ export function openDb(file?: string) {
     notesUpdates(noteIds: string[]): ItemUpdate[] {
       if (!noteIds.length) return [];
       return (
-        db.prepare(`SELECT * FROM updates WHERE note_id IN (${noteIds.map(() => "?").join(",")}) ORDER BY ts ASC`).all(...noteIds) as Row[]
+        db.prepare(`SELECT * FROM updates WHERE note_id IN (${noteIds.map(() => "?").join(",")}) ORDER BY ts ASC, rowid ASC`).all(...noteIds) as Row[]
       ).map(toUpdate);
     },
     addWorkShot(s: Omit<WorkShot, "id" | "ts" | "updateId"> & { roomId: string; userId: string }): WorkShot {
@@ -1745,13 +1745,14 @@ export function openDb(file?: string) {
           .prepare(
             `SELECT u.* FROM updates u JOIN notes n ON n.id = u.note_id
              WHERE n.kind = 'action' AND n.done_at IS NULL AND u.status = 'ready'
-             AND u.ts = (SELECT MAX(ts) FROM updates WHERE note_id = u.note_id) ORDER BY u.ts LIMIT 100`,
+             AND u.rowid = (SELECT rowid FROM updates WHERE note_id = u.note_id ORDER BY ts DESC, rowid DESC LIMIT 1)
+             ORDER BY u.ts LIMIT 100`,
           )
           .all() as Row[]
       ).map((r) => ({ ...toUpdate(r), userId: r.user_id as string }));
     },
     noteUpdates(noteId: string): ItemUpdate[] {
-      return (db.prepare("SELECT * FROM updates WHERE note_id = ? ORDER BY ts DESC LIMIT 50").all(noteId) as Row[]).map(toUpdate);
+      return (db.prepare("SELECT * FROM updates WHERE note_id = ? ORDER BY ts DESC, rowid DESC LIMIT 50").all(noteId) as Row[]).map(toUpdate);
     },
     /** When the meeting before this one started: "since last time" starts there. */
     previousMeetingStart(roomId: string, before: number): number | null {
