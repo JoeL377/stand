@@ -4,7 +4,7 @@ import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
-import { meetingChapters } from "../../shared/chapters.ts";
+import { meetingChapters, saidAt } from "../../shared/chapters.ts";
 import { ChapterBar, ChapterChip, ChapterList, Face, QuoteMark } from "../RecapChapters.tsx";
 import { api, request, type RoomInfo } from "../api.ts";
 import { errorToast, toast } from "../Toasts.tsx";
@@ -118,7 +118,9 @@ export function RecapPage() {
   const chapterIndex = new Map(chapters.flatMap((c, i) => c.topicIds.map((id) => [id, i] as const)));
   const chipFor = (n: Note) => {
     const i = n.discussionId ? chapterIndex.get(n.discussionId) : undefined;
-    return i === undefined ? null : <ChapterChip c={chapters[i]} i={i} startedAt={data.startedAt} crux={written.get(chapters[i].key)?.crux} onPick={jumpTo} />;
+    return i === undefined ? null : (
+      <ChapterChip c={chapters[i]} i={i} startedAt={data.startedAt} at={saidAt(n, data.startedAt, lastTs)} crux={written.get(chapters[i].key)?.crux} onPick={jumpTo} />
+    );
   };
   // Topics no chapter shows (notes carried in, nothing said this meeting) keep the old row.
   const inChapters = new Set(chapters.flatMap((c) => c.topicIds));
