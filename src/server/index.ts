@@ -718,6 +718,13 @@ app.get(
       decks: db.listDecks(room.id),
       meetings: db.listMeetings(room.id),
       followUps: withFrom(db, db.roomFollowUps(room.id).filter((f) => !f.doneAt)),
+      doneFollowUps: withFrom(
+        db,
+        db
+          .roomFollowUps(room.id)
+          .filter((f) => f.doneAt)
+          .sort((a, b) => b.doneAt! - a.doneAt!),
+      ),
       liveMeetingId: live && !live.ended ? live.meetingId : null,
       // Who is in the call now, for the lobby's avatars.
       people: live && !live.ended ? live.state().participants.map(({ name, picture }) => ({ name, picture })) : [],

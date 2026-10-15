@@ -1,16 +1,16 @@
 // A space's own page, the one people open between meetings: what came into the space since
-// last time (snaps and notes people saved, meetings, agents' updates), and where the space stands
+// last time (snaps and notes people saved, and meetings), and where the space stands
 // (to-dos, decisions, open questions and the suggested agenda). Start talking turns it into the
 // meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ItemUpdate, Jot, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { Jot, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
-import { FollowUpList, itemHref, saveFollowUp } from "../FollowUps.tsx";
+import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
-import { CameraIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { CameraIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
@@ -25,8 +25,7 @@ import { SpacesShell } from "./SpacesShell.tsx";
 type Entry =
   | { kind: "snap"; at: number; snap: Snap }
   | { kind: "jot"; at: number; jot: Jot }
-  | { kind: "meeting"; at: number; meeting: SpaceFeed["meetings"][number] }
-  | { kind: "update"; at: number; update: ItemUpdate };
+  | { kind: "meeting"; at: number; meeting: SpaceFeed["meetings"][number] };
 
 export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: () => void }) {
   const { room, reload } = props;
@@ -38,6 +37,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   // The snap open big: one on its own, or a note's pictures with the note.
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showDone, setShowDone] = useState(false);
   // The tab someone last looked at in this space; a new space opens on Meetings.
   const [tab, setTab] = useState<TabKey>(() => {
     try {
@@ -145,14 +145,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     next: agenda.length + suggested.length,
   };
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
-  const fromOf = new Map(room.followUps.flatMap((f) => (f.from ? [[f.id, f.from] as const] : [])));
+  const done = room.doneFollowUps ?? [];
+  const fromOf = new Map([...room.followUps, ...done].flatMap((f) => (f.from ? [[f.id, f.from] as const] : [])));
 
   const entries: Entry[] = feed
     ? [
         ...feed.captures.map((snap) => ({ kind: "snap" as const, at: snap.ts, snap })),
         ...(feed.jots ?? []).map((jot) => ({ kind: "jot" as const, at: jot.ts, jot })),
         ...feed.meetings.map((meeting) => ({ kind: "meeting" as const, at: meeting.endedAt, meeting })),
-        ...feed.updates.map((update) => ({ kind: "update" as const, at: update.ts, update })),
       ].sort((a, b) => b.at - a.at)
     : [];
   const days: Array<{ label: string; entries: Entry[] }> = [];
@@ -224,7 +224,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                   <CameraIcon size={18} />
                   <p>
                     Nothing here yet. Meetings land here once they end, and so do snaps and notes saved from the Stand bar in the Mac app (
-                    <strong>Control + Shift + S</strong> snaps, <strong>Control + Shift + N</strong> writes a note) and what agents report.
+                    <strong>Control + Shift + S</strong> snaps, <strong>Control + Shift + N</strong> writes a note).
                   </p>
                 </div>
               )}
@@ -245,10 +245,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                           onPick={(id) => pickJotItem(e.jot, id)}
                           onDelete={() => deleteJot(e.jot)}
                         />
-                      ) : e.kind === "meeting" ? (
-                        <MeetingRow key={e.meeting.id} m={e.meeting} />
                       ) : (
-                        <UpdateRow key={e.update.id} u={e.update} room={room} />
+                        <MeetingRow key={e.meeting.id} m={e.meeting} />
                       ),
                     )}
                   </ul>
@@ -257,26 +255,22 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </>
           )}
 
-          {tab === "todo" &&
-            (room.followUps.length ? (
-              <FollowUpList
-                oneLine
-                notes={room.followUps}
-                onToggle={saveFollowUp(room.id)}
-                after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
-                tail={(n) =>
-                  n.owner ? (
-                    <Face name={n.owner} color={colorFor(n.owner)} />
-                  ) : (
-                    <span className="rc-face none" title="Unassigned">
-                      ?
-                    </span>
-                  )
-                }
-              />
-            ) : (
-              <p className="sh-card-empty">No open to-dos.</p>
-            ))}
+          {tab === "todo" && (
+            <>
+              {room.followUps.length ? <TodoList room={room} notes={room.followUps} fromOf={fromOf} /> : <p className="sh-card-empty">No open to-dos.</p>}
+              {done.length > 0 && (
+                <div className={showDone ? "sh-done open" : "sh-done"}>
+                  <button className="sh-done-toggle" aria-expanded={showDone} onClick={() => setShowDone((v) => !v)}>
+                    <ChevronIcon />
+                    <DoneIcon />
+                    Done
+                    <span className="count">{done.length}</span>
+                  </button>
+                  {showDone && <TodoList room={room} notes={done} fromOf={fromOf} />}
+                </div>
+              )}
+            </>
+          )}
 
           {tab === "questions" && <PointList kind="question" notes={feed?.open ?? []} empty="No open questions." />}
           {tab === "decisions" && <PointList kind="decided" notes={feed?.decided ?? []} empty="No decisions yet." />}
@@ -477,30 +471,35 @@ function MeetingRow({ m }: { m: SpaceFeed["meetings"][number] }) {
   );
 }
 
-const UPDATE_LABEL: Record<ItemUpdate["status"], string | null> = { working: "Started", progress: null, blocked: "Blocked", needs_decision: "Needs a decision", ready: "Ready to ship", done: "Done" };
-
-function UpdateRow({ u, room }: { u: ItemUpdate; room: RoomInfo }) {
-  const item = room.items.find((i) => i.id === u.itemId);
-  const label = UPDATE_LABEL[u.status];
+/** To-dos as the recap lists them: one line, the chapter pill, the owner's face at the end. */
+function TodoList(props: { room: RoomInfo; notes: RoomInfo["followUps"]; fromOf: Map<string, NoteFrom> }) {
+  const { fromOf } = props;
   return (
-    <li className="sh-row">
-      <span className="sh-icon agent" aria-hidden>
-        ✦
-      </span>
-      <span className="sh-row-text">
-        <span className="sh-who">{u.client === "GitHub" ? "GitHub" : u.client ? `${firstName(u.userName)}'s agent` : firstName(u.userName)}</span>
-        {label && <span className={`sh-status ${u.status}`}>{label}</span>}
-        <span className="sh-what">{u.text || u.noteText}</span>
-      </span>
-      {item && (
-        <Link className="sh-pill" to={itemHref(item.id, room.items) ?? `/items/${item.id}`}>
-          {item.title}
-        </Link>
-      )}
-      <time className="sh-time">{fmtTime(u.ts)}</time>
-    </li>
+    <FollowUpList
+      oneLine
+      notes={props.notes}
+      onToggle={saveFollowUp(props.room.id)}
+      after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
+      tail={(n) =>
+        n.owner ? (
+          <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · done by ${n.doneBy}` : ""}`} />
+        ) : (
+          <span className="rc-face none" title="Unassigned">
+            ?
+          </span>
+        )
+      }
+    />
   );
 }
+
+/** A checked box, as a finished to-do shows. */
+const DoneIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden>
+    <rect x="0.75" y="0.75" width="12.5" height="12.5" rx="3.5" fill="currentColor" />
+    <path d="M3.8 7.2 6 9.3l4.2-4.6" fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 type TabKey = "meetings" | "todo" | "questions" | "decisions" | "next";
 /** The space's tabs, in the order people look at them. */

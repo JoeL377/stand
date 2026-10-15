@@ -75,6 +75,8 @@ export interface RoomInfo {
   meetings: Array<{ id: string; startedAt: number; endedAt: number | null; summary: string | null; segmentCount: number }>;
   /** Open action items from the room's past meetings. */
   followUps: FollowUp[];
+  /** To-dos already checked off, most recently done first (the space page's To do tab folds them). */
+  doneFollowUps?: FollowUp[];
   liveMeetingId: string | null;
 }
 

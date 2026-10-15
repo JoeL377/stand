@@ -2045,3 +2045,14 @@ a.sh-pill:hover { text-decoration: none; }
 .sh-panel .sh-list { font-size: 14px; gap: 8px; }
 .sh-tabs .sh-tab:hover, .sh-tabs .sh-tab:focus, .sh-tabs .sh-tab:active { background: none; box-shadow: none; }
 .sh-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px 4px 0 0; }
+/* Finished to-dos fold under the open ones behind a quiet divider; opened, they read as done, not as work. */
+.sh-done { margin-top: 18px; }
+.sh-panel .sh-done-toggle { display: flex; align-items: center; gap: 7px; width: 100%; height: auto; min-height: 0; padding: 6px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+.sh-panel .sh-done-toggle:hover, .sh-panel .sh-done-toggle:focus { background: none; color: var(--text); }
+.sh-done-toggle > svg:first-child { transition: transform 0.15s ease; }
+.sh-done.open .sh-done-toggle > svg:first-child { transform: rotate(90deg); }
+.sh-done-toggle > svg:nth-child(2) { color: var(--ok); }
+.sh-done-toggle .count { font-weight: 500; opacity: 0.8; }
+.sh-done .followups li.done .fu-text { text-decoration: none; }
+.sh-done .followups li.done .check { background: color-mix(in srgb, var(--ok) 70%, var(--panel)); border-color: transparent; }
+.sh-done .followups li.done .rc-pill, .sh-done .followups li.done .rc-face { opacity: 0.6; }
