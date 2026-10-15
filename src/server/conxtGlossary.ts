@@ -4,8 +4,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ConxtDestination } from "./conxt.ts";
 
-export interface Vocabulary { keyterms: string[]; prompt: string | null }
-const EMPTY: Vocabulary = { keyterms: [], prompt: null };
+export interface Term { term: string; aliases: string[] }
+export interface Vocabulary { keyterms: string[]; terms: Term[] }
+const EMPTY: Vocabulary = { keyterms: [], terms: [] };
 const TTL_MS = 5 * 60_000;
 const MAX_KEYTERMS = 50;
 
@@ -58,11 +59,14 @@ export class ConxtGlossary {
       try {
         const r = await this.send(url, { redirect: "error", signal: AbortSignal.timeout(3000), headers: { Authorization: `Bearer ${d.token}` } });
         if (!r.ok) return hit?.value ?? EMPTY;
-        const body = await r.json() as { keyterms?: unknown; prompt?: unknown };
-        const keyterms = Array.isArray(body.keyterms)
-          ? body.keyterms.filter((t): t is string => typeof t === "string" && t.trim().length > 0 && t.length <= 100).slice(0, MAX_KEYTERMS)
+        const body = await r.json() as { keyterms?: unknown; terms?: unknown };
+        const word = (t: unknown): t is string => typeof t === "string" && t.trim().length > 0 && t.length <= 100;
+        const keyterms = Array.isArray(body.keyterms) ? body.keyterms.filter(word).slice(0, MAX_KEYTERMS) : [];
+        const terms = Array.isArray(body.terms)
+          ? body.terms.flatMap((t: { term?: unknown; aliases?: unknown }) =>
+              word(t?.term) ? [{ term: t.term, aliases: Array.isArray(t.aliases) ? t.aliases.filter(word).slice(0, 8) : [] }] : [])
           : [];
-        const value = { keyterms, prompt: typeof body.prompt === "string" && body.prompt.trim() ? body.prompt.trim() : null };
+        const value = { keyterms, terms };
         this.cache.set(d.submissionUrl, { at: Date.now(), value });
         return value;
       } catch {
@@ -80,3 +84,15 @@ let shared: ConxtGlossary | null = null;
 export function setConxtGlossary(g: ConxtGlossary | null) { shared = g; }
 export function roomVocabulary(roomId: string): Vocabulary { return shared?.cached(roomId) ?? EMPTY; }
 export function refreshRoomVocabulary(roomId: string) { void shared?.refresh(roomId); }
+
+const escape = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const said = (word: string, text: string) => new RegExp(`(^|[^\\w-])${escape(word)}($|[^\\w-])`, "i").test(text);
+
+/** The vocabulary line for one notes call: only terms said in this stretch, often none.
+ *  Keeps the prompt from growing with the glossary. */
+export function vocabularyLine(terms: Term[], text: string): string | null {
+  const used = terms.filter((t) => said(t.term, text) || t.aliases.some((a) => said(a, text)));
+  if (!used.length) return null;
+  const entries = used.map((t) => (t.aliases.length ? `${t.term} (also heard as ${t.aliases.join(", ")})` : t.term)).join("; ");
+  return `Project vocabulary: ${entries}. Write the project's own term even where the transcript has another name or a mis-hearing.`;
+}
