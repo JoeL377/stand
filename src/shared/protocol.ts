@@ -413,11 +413,14 @@ export interface RoomState {
  *  is in the meeting, and only they can confirm it; a divergence shows once its
  *  word is said again. */
 export interface ConxtLive {
-  kind: "confirmation" | "divergence";
+  /** exploring: someone here has agent work held in Conxt, theirs to share.
+   *  came_back: their explore work came back with things to review. */
+  kind: "confirmation" | "divergence" | "exploring" | "came_back";
   id: string;
   title: string;
   why: string;
-  /** For a confirmation, the people it waits on who are here now. */
+  /** For a confirmation, the people it waits on who are here now; for explore
+   *  work, its person, when they are here. */
   here: Array<{ participantId: string; name: string }>;
   term: string | null;
 }
@@ -443,6 +446,8 @@ export type ClientMessage = (
   | { type: "upnext.undismiss"; key: string }
   /** The signed-in person confirms a Conxt decision that waits on them. */
   | { type: "conxt.confirm"; itemId: string }
+  /** The signed-in person shares their explore work in Conxt with the team. */
+  | { type: "conxt.share"; itemId: string }
   | { type: "note.restore"; noteId: string }
   | { type: "suggestion.dismiss" }
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */

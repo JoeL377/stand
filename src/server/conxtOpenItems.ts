@@ -1,6 +1,7 @@
 // What the connected Conxt project says needs people (decisions waiting on
-// someone who was away, conflicts, words used two ways, open questions), for
-// the space's suggested agenda. Read with the room's integration credential,
+// someone who was away, conflicts, words used two ways, open questions, and
+// agent work someone explored on their own), for the space's suggested agenda
+// and live panel. See Conxt's docs/design/connector-contract.md. Read with the room's integration credential,
 // refreshed in the background and cached: the agenda never waits on Conxt, and
 // no connection or Conxt being down leaves it as it was.
 import type { DatabaseSync } from "node:sqlite";
@@ -8,7 +9,7 @@ import type { ConxtLive } from "../shared/protocol.ts";
 import type { ConxtDestination } from "./conxt.ts";
 
 export interface ConxtOpenItem {
-  kind: "confirmation" | "conflict" | "divergence" | "question";
+  kind: "confirmation" | "conflict" | "divergence" | "question" | "exploring" | "came_back";
   id: string;
   title: string;
   why: string;
@@ -19,13 +20,15 @@ export interface ConxtOpenItem {
   contentHash: string | null;
   /** The word used two ways, for a divergence. */
   term: string | null;
+  /** For explore work: the branch the person's agent session works on. */
+  branch?: string | null;
 }
 
 const TTL_MS = 2 * 60_000;
 const MAX_ITEMS = 20;
 /** Cards on the live panel at once. */
 const MAX_LIVE = 3;
-const KINDS = new Set(["confirmation", "conflict", "divergence", "question"]);
+const KINDS = new Set(["confirmation", "conflict", "divergence", "question", "exploring", "came_back"]);
 
 /** The integration's open-items URL beside its source submission URL. */
 export function openItemsUrl(submissionUrl: string): string | null {
@@ -55,6 +58,7 @@ function parse(body: unknown): ConxtOpenItem[] {
     out.push({
       kind: i.kind as ConxtOpenItem["kind"], id, title, why, needs, path: text(i.path, 300), at: text(i.at, 64),
       contentHash: hash, term: i.kind === "divergence" ? text(i.term, 80) : null,
+      ...(i.kind === "exploring" || i.kind === "came_back" ? { branch: text(i.branch, 255) } : {}),
     });
     if (out.length >= MAX_ITEMS) break;
   }
@@ -136,10 +140,35 @@ export class ConxtOpenItems {
       void this.refresh(roomId);
     }
   }
+
+  /** Shares a person's explore work for them: their agent session comes back and
+   *  what it held goes to the team's review. Conxt checks the session is theirs. */
+  async share(roomId: string, itemId: string, person: string): Promise<{ ok: true } | { ok: false; why: string }> {
+    const d = this.destination(roomId);
+    const item = this.cached(roomId).find((i) => i.id === itemId && i.kind === "exploring");
+    const base = d && openItemsUrl(d.submissionUrl);
+    if (!d || !base || !item) return { ok: false, why: "there's no explore work to share now" };
+    try {
+      const r = await this.send(`${base}/${encodeURIComponent(item.id)}/share`, {
+        method: "POST", redirect: "error", signal: AbortSignal.timeout(5000),
+        headers: { Authorization: `Bearer ${d.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ person }),
+      });
+      if (r.ok) return { ok: true };
+      return { ok: false, why: r.status === 409 ? "that explore work isn't yours" : `Conxt returned HTTP ${r.status}` };
+    } catch {
+      return { ok: false, why: "Conxt didn't answer" };
+    } finally {
+      this.cache.delete(d.submissionUrl);
+      void this.refresh(roomId);
+    }
+  }
 }
 
 /** Conxt items worth raising while people talk: a decision waiting on someone who
- *  is here now, and a word used two ways that was just said again. */
+ *  is here now, a word used two ways that was just said again, and explore work
+ *  of someone who is here: what they are exploring (theirs to share), or what
+ *  came back from it. */
 export function liveCards(
   items: ConxtOpenItem[],
   here: Array<{ participantId: string; name: string; email: string | null }>,
@@ -153,6 +182,10 @@ export function liveCards(
       if (present.length) out.push({ kind: "confirmation", id: i.id, title: i.title, why: i.why, here: present, term: null });
     } else if (i.kind === "divergence" && i.term && said.has(i.id)) {
       out.push({ kind: "divergence", id: i.id, title: i.title, why: i.why, here: [], term: i.term });
+    } else if (i.kind === "exploring" || i.kind === "came_back") {
+      const whose = new Set(i.needs.map((n) => n.id.toLowerCase()));
+      const present = here.filter((p) => p.email && whose.has(p.email.toLowerCase())).map(({ participantId, name }) => ({ participantId, name }));
+      if (present.length) out.push({ kind: i.kind, id: i.id, title: i.title, why: i.why, here: present, term: null });
     }
     if (out.length >= MAX_LIVE) break;
   }
@@ -202,6 +235,9 @@ export function meetingAddresses(sql: DatabaseSync, meetingId: string, roomId: s
 let shared: ConxtOpenItems | null = null;
 export function setConxtOpenItems(o: ConxtOpenItems | null) { shared = o; }
 export function roomOpenItems(roomId: string): ConxtOpenItem[] { return shared?.cached(roomId) ?? []; }
+export function shareRoomOpenItem(roomId: string, itemId: string, person: string) {
+  return shared ? shared.share(roomId, itemId, person) : Promise.resolve({ ok: false as const, why: "this space isn't connected to Conxt" });
+}
 export function confirmRoomOpenItem(roomId: string, itemId: string, person: string) {
   return shared ? shared.confirm(roomId, itemId, person) : Promise.resolve({ ok: false as const, why: "this space isn't connected to Conxt" });
 }

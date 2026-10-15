@@ -592,33 +592,53 @@ function ConxtNudges(props: { cards: ConxtLive[]; me: string; offline?: boolean;
     const t = setTimeout(() => setConfirming(null), 8000);
     return () => clearTimeout(t);
   }, [confirming]);
-  const cards = props.cards.filter((c) => !hidden.includes(c.id));
+  // An explore session can be held and come back at once, so the id alone is not a key.
+  const cardKey = (c: ConxtLive) => `${c.kind}:${c.id}`;
+  const cards = props.cards.filter((c) => !hidden.includes(cardKey(c)));
   if (!cards.length) return null;
   return (
     <>
       {cards.map((c) => {
         const mine = c.here.some((p) => p.participantId === props.me);
         const who = mine ? "you" : c.here.map((p) => p.name).join(" and ");
+        const lead =
+          c.kind === "confirmation"
+            ? `Conxt: waiting on ${who} · `
+            : c.kind === "divergence"
+              ? `Conxt: “${c.term}” is used two ways · `
+              : c.kind === "exploring"
+                ? "Conxt: explore work · "
+                : "Conxt: came back · ";
         return (
-          <div key={c.id} className="nudge conxt" role="status" title={c.why}>
+          <div key={cardKey(c)} className="nudge conxt" role="status" title={c.why}>
             <span className="agent-mark" aria-hidden>
               ✦
             </span>
             <span className="nudge-text">
-              {c.kind === "confirmation" ? `Conxt: waiting on ${who} · ` : `Conxt: “${c.term}” is used two ways · `}
+              {lead}
               <strong>{c.title}</strong>
             </span>
+            {c.kind === "exploring" && mine && (
+              <button
+                className="link"
+                disabled={props.offline || confirming === cardKey(c)}
+                title={props.offline ? "You can share once Stand reconnects" : "Send what your agent explored to the team's review in Conxt"}
+                onClick={() => props.send({ type: "conxt.share", itemId: c.id }) && setConfirming(cardKey(c))}
+              >
+                {confirming === cardKey(c) ? "Sharing…" : "Share now"}
+              </button>
+            )}
             {c.kind === "confirmation" && mine && (
               <button
                 className="link"
-                disabled={props.offline || confirming === c.id}
+                disabled={props.offline || confirming === cardKey(c)}
                 title={props.offline ? "You can confirm once Stand reconnects" : "Agree to this decision in Conxt, as yourself"}
-                onClick={() => props.send({ type: "conxt.confirm", itemId: c.id }) && setConfirming(c.id)}
+                onClick={() => props.send({ type: "conxt.confirm", itemId: c.id }) && setConfirming(cardKey(c))}
               >
-                {confirming === c.id ? "Confirming…" : "Confirm"}
+                {confirming === cardKey(c) ? "Confirming…" : "Confirm"}
               </button>
             )}
-            <button className="link muted" onClick={() => setHidden((h) => [...h, c.id])} aria-label="Hide">
+            <button className="link muted" onClick={() => setHidden((h) => [...h, cardKey(c)])} aria-label="Hide">
               ✕
             </button>
           </div>
