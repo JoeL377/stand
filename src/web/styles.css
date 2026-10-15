@@ -1666,8 +1666,7 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 .sh-faces-more { font-size: 11px; color: var(--muted); padding-left: 10px; box-shadow: none; }
 .sh-invite, .sh-join { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; font-size: 13px; }
 .sh-invite svg, .sh-join svg { width: 15px; height: 15px; }
-.sh-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 32px; align-items: start; }
-.sh-feed h2, .sh-card h2 { margin: 0 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.sh-card h2 { margin: 0 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .sh-card h2 .count { font-weight: 500; opacity: 0.75; }
 .sh-mark { color: var(--accent-text); text-transform: none; }
 .sh-day + .sh-day { margin-top: 14px; }
@@ -1715,9 +1714,8 @@ a.sh-pill:hover { text-decoration: none; }
 .sh-empty { display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 14px; line-height: 1.5; }
 .sh-empty svg { flex: none; margin-top: 3px; }
 .sh-empty p { margin: 0; }
-.sh-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 24px; }
 .sh-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
-.sh-card-empty { margin: 0; font-size: 13px; color: var(--muted); }
+.sh-card-empty { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
 .sh-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.4; }
 .sh-list li { display: flex; gap: 6px; align-items: baseline; }
 .sh-list li svg { flex: none; color: var(--muted); position: relative; top: 1px; }
@@ -1739,10 +1737,6 @@ a.sh-pill:hover { text-decoration: none; }
 .sh-view-caption { margin: 0; font-size: 13px; color: var(--muted); }
 .sh-view-text summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .sh-view-text pre { margin: 6px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-@media (max-width: 960px) {
-  .sh-cols { grid-template-columns: minmax(0, 1fr); }
-  .sh-side { position: static; order: -1; }
-}
 @media (max-width: 760px) {
   .sh-main { padding: 16px 16px 48px; }
   .sh-head { flex-wrap: wrap; }
@@ -2036,8 +2030,20 @@ a.sh-pill:hover { text-decoration: none; }
 .wl-more:hover { color: var(--accent-text); }
 .followups li:has(.fu-log) { align-items: flex-start; }
 
-/* The space page's cards sit on the right edge: their chapter pop-ups open leftward. */
-.sh-side .rc-pop, .sh-side .qm-pop { left: auto; right: 0; }
-.sh-side .followups.one-line .rc-pill-wrap { margin-left: 6px; }
-.sh-card .sh-list li.replaced > span { color: var(--muted); }
-.sh-card .sh-list li.replaced svg { opacity: 0.5; }
+/* ---- space page: one page, a tab per kind of thing ---- */
+.sh-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.sh-tab { flex: none; display: flex; align-items: center; gap: 6px; height: auto; min-height: 0; margin-bottom: -1px; padding: 8px 10px 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; font-size: 14px; color: var(--muted); cursor: pointer; }
+.sh-tab:hover { color: var(--text); }
+.sh-tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.sh-tab .count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sh-tab svg { color: var(--muted); }
+.sh-tab:nth-child(2) svg { color: var(--accent); }
+.sh-tab:nth-child(3) svg { color: var(--warn); }
+.sh-tab:nth-child(4) svg { color: var(--ok); }
+.sh-panel { max-width: 780px; min-height: 240px; }
+.sh-panel .followups.one-line .rc-pill-wrap { margin-left: 8px; }
+.rc-points li.replaced .rc-point-body { color: var(--muted); }
+.rc-points li.replaced > svg { opacity: 0.5; }
+.sh-panel .sh-list { font-size: 14px; gap: 8px; }
+.sh-tabs .sh-tab:hover, .sh-tabs .sh-tab:focus, .sh-tabs .sh-tab:active { background: none; box-shadow: none; }
+.sh-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px 4px 0 0; }

@@ -18,13 +18,10 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { colorFor, fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
+import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { SynthesisLine } from "../Synthesis.tsx";
 
-/** Rows each right-hand card shows before folding the rest into "N more". */
-const CARD_ROWS = 4;
-/** Suggestions Up next shows under the agenda before folding. */
-const SUGGESTED_ROWS = 3;
 
 type Entry =
   | { kind: "snap"; at: number; snap: Snap }
@@ -42,6 +39,20 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   // The snap open big: one on its own, or a note's pictures with the note.
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
+  // The tab someone last looked at in this space; a new space opens on Meetings.
+  const [tab, setTab] = useState<TabKey>(() => {
+    try {
+      const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
+      if (saved && TABS.some((t) => t.key === saved)) return saved as TabKey;
+    } catch {}
+    return "meetings";
+  });
+  const pickTab = (key: TabKey) => {
+    setTab(key);
+    try {
+      localStorage.setItem(`stand.spaceTab.${room.id}`, key);
+    } catch {}
+  };
 
   const load = useCallback(() => {
     reload();
@@ -127,6 +138,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     if (row) row.open++;
   }
   const suggested = upNext?.suggestions ?? [];
+  const counts: Record<TabKey, number> = {
+    meetings: feed?.meetings.length ?? 0,
+    todo: room.followUps.length,
+    questions: feed?.open.length ?? 0,
+    decisions: feed?.decided.filter((n) => !n.replacedBy).length ?? 0,
+    next: agenda.length + suggested.length,
+  };
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
   const fromOf = new Map(room.followUps.flatMap((f) => (f.from ? [[f.id, f.from] as const] : [])));
 
@@ -184,112 +202,120 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         </div>
         <ModeNote caps={caps} />
 
-        <div className="sh-cols">
-          <section className="sh-feed" aria-labelledby="sh-feed-title">
-            <h2 id="sh-feed-title">Since last time</h2>
-            {error && !feed && (
-              <p className="error">
-                {error}{" "}
-                <button className="link" onClick={load}>
-                  Try again
-                </button>
-              </p>
-            )}
-            {feed && !entries.length && (
-              <div className="sh-empty">
-                <CameraIcon size={18} />
-                <p>
-                  Nothing here yet. Snaps and notes you save from the Stand bar in the Mac app land here (<strong>Control + Shift + S</strong>{" "}
-                  snaps, <strong>Control + Shift + N</strong> writes a note), and so do meetings once they end and what agents report.
-                </p>
-              </div>
-            )}
-            {days.map((d) => (
-              <div key={d.label} className="sh-day">
-                <h3>{d.label}</h3>
-                <ul className="sh-rows">
-                  {d.entries.map((e) =>
-                    e.kind === "snap" ? (
-                      <SnapRow key={e.snap.id} snap={e.snap} room={room} me={user.id} onOpen={() => setViewing({ snaps: [e.snap], i: 0 })} onPick={(id) => pickItem(e.snap, id)} />
-                    ) : e.kind === "jot" ? (
-                      <JotRow
-                        key={e.jot.id}
-                        jot={e.jot}
-                        room={room}
-                        me={user.id}
-                        onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
-                        onPick={(id) => pickJotItem(e.jot, id)}
-                        onDelete={() => deleteJot(e.jot)}
-                      />
-                    ) : e.kind === "meeting" ? (
-                      <MeetingRow key={e.meeting.id} m={e.meeting} />
-                    ) : (
-                      <UpdateRow key={e.update.id} u={e.update} room={room} />
-                    ),
-                  )}
-                </ul>
-              </div>
-            ))}
-          </section>
-
-          <aside className="sh-side" aria-label="Where the space stands">
-            <Card title="To do" tone="todo" count={room.followUps.length} empty="No open to-dos.">
-              {(all) => (
-                <FollowUpList
-                  compact
-                  oneLine
-                  notes={all ? room.followUps : room.followUps.slice(0, CARD_ROWS)}
-                  onToggle={saveFollowUp(room.id)}
-                  after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
-                  tail={(n) =>
-                    n.owner ? (
-                      <Face name={n.owner} color={colorFor(n.owner)} />
-                    ) : (
-                      <span className="rc-face none" title="Unassigned">
-                        ?
-                      </span>
-                    )
-                  }
-                />
-              )}
-            </Card>
-            <NoteCard title="Decided" tone="decided" notes={feed?.decided ?? []} room={room} empty="No decisions yet." />
-            <NoteCard title="Open" tone="question" notes={feed?.open ?? []} room={room} empty="No open questions." />
-            <Card
-              title="Up next"
-              count={agenda.length + suggested.length}
-              folded={Math.max(0, agenda.length - CARD_ROWS) + Math.max(0, suggested.length - SUGGESTED_ROWS)}
-              empty="Nothing on the agenda yet. Suggestions come from meetings and what people save here.">
-              {(all) => (
-                <>
-                  <ul className="sh-list">
-                    {(all ? agenda : agenda.slice(0, CARD_ROWS)).map((e) => (
-                      <li key={e.key}>
-                        <Link to={e.href}>{e.title}</Link>
-                        {e.open > 0 && <span className="sh-open-count">{e.open} open</span>}
-                      </li>
-                    ))}
-                  </ul>
-                  {suggested.length > 0 && (
-                    <>
-                      <p className="sh-group" title="What the agent suggests adding when the next meeting starts">
-                        <span className="sh-mark">✦</span>Suggested · {suggested.length}
-                      </p>
-                      <ul className="sh-list suggested">
-                        {(all ? suggested : suggested.slice(0, SUGGESTED_ROWS)).map((s) => (
-                          <li key={s.key} title={s.reason}>
-                            {s.kind === "capture" && (s.key.startsWith("jot:") ? <EditIcon size={12} /> : <CameraIcon size={12} />)}
-                            <span>{s.title}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </>
-              )}
-            </Card>
-          </aside>
+        <div className="sh-tabs" role="tablist" aria-label="The space">
+          {TABS.map((t) => (
+            <button key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "sh-tab on" : "sh-tab"} onClick={() => pickTab(t.key)}>
+              {t.icon}
+              {t.label}
+              {counts[t.key] > 0 && <span className="count">{counts[t.key]}</span>}
+            </button>
+          ))}
         </div>
+
+        <section className={`sh-panel ${tab}`} role="tabpanel">
+          {tab === "meetings" && (
+            <>
+              {error && !feed && (
+                <p className="error">
+                  {error}{" "}
+                  <button className="link" onClick={load}>
+                    Try again
+                  </button>
+                </p>
+              )}
+              {feed && !entries.length && (
+                <div className="sh-empty">
+                  <CameraIcon size={18} />
+                  <p>
+                    Nothing here yet. Meetings land here once they end, and so do snaps and notes saved from the Stand bar in the Mac app (
+                    <strong>Control + Shift + S</strong> snaps, <strong>Control + Shift + N</strong> writes a note) and what agents report.
+                  </p>
+                </div>
+              )}
+              {days.map((d) => (
+                <div key={d.label} className="sh-day">
+                  <h3>{d.label}</h3>
+                  <ul className="sh-rows">
+                    {d.entries.map((e) =>
+                      e.kind === "snap" ? (
+                        <SnapRow key={e.snap.id} snap={e.snap} room={room} me={user.id} onOpen={() => setViewing({ snaps: [e.snap], i: 0 })} onPick={(id) => pickItem(e.snap, id)} />
+                      ) : e.kind === "jot" ? (
+                        <JotRow
+                          key={e.jot.id}
+                          jot={e.jot}
+                          room={room}
+                          me={user.id}
+                          onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
+                          onPick={(id) => pickJotItem(e.jot, id)}
+                          onDelete={() => deleteJot(e.jot)}
+                        />
+                      ) : e.kind === "meeting" ? (
+                        <MeetingRow key={e.meeting.id} m={e.meeting} />
+                      ) : (
+                        <UpdateRow key={e.update.id} u={e.update} room={room} />
+                      ),
+                    )}
+                  </ul>
+                </div>
+              ))}
+            </>
+          )}
+
+          {tab === "todo" &&
+            (room.followUps.length ? (
+              <FollowUpList
+                oneLine
+                notes={room.followUps}
+                onToggle={saveFollowUp(room.id)}
+                after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
+                tail={(n) =>
+                  n.owner ? (
+                    <Face name={n.owner} color={colorFor(n.owner)} />
+                  ) : (
+                    <span className="rc-face none" title="Unassigned">
+                      ?
+                    </span>
+                  )
+                }
+              />
+            ) : (
+              <p className="sh-card-empty">No open to-dos.</p>
+            ))}
+
+          {tab === "questions" && <PointList kind="question" notes={feed?.open ?? []} empty="No open questions." />}
+          {tab === "decisions" && <PointList kind="decided" notes={feed?.decided ?? []} empty="No decisions yet." />}
+
+          {tab === "next" &&
+            (agenda.length + suggested.length ? (
+              <>
+                <ul className="sh-list">
+                  {agenda.map((e) => (
+                    <li key={e.key}>
+                      <Link to={e.href}>{e.title}</Link>
+                      {e.open > 0 && <span className="sh-open-count">{e.open} open</span>}
+                    </li>
+                  ))}
+                </ul>
+                {suggested.length > 0 && (
+                  <>
+                    <p className="sh-group" title="What the agent suggests adding when the next meeting starts">
+                      <span className="sh-mark">✦</span>Suggested · {suggested.length}
+                    </p>
+                    <ul className="sh-list suggested">
+                      {suggested.map((s) => (
+                        <li key={s.key} title={s.reason}>
+                          {s.kind === "capture" && (s.key.startsWith("jot:") ? <EditIcon size={12} /> : <CameraIcon size={12} />)}
+                          <span>{s.title}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </>
+            ) : (
+              <p className="sh-card-empty">Nothing on the agenda yet. Suggestions come from meetings and what people save here.</p>
+            ))}
+        </section>
         {viewing && viewing.snaps[viewing.i] && (
           <SnapView
             snap={viewing.snaps[viewing.i]}
@@ -480,62 +506,38 @@ function UpdateRow({ u, room }: { u: ItemUpdate; room: RoomInfo }) {
   );
 }
 
-/** A right-hand card: a small header with a count, and its rows folded past CARD_ROWS. */
-function Card(props: {
-  title: string;
-  count: number;
-  /** How many rows are folded away; the rows past CARD_ROWS unless the card says. */
-  folded?: number;
-  mark?: boolean;
-  /** Colors the card like the meeting recap does: to do blue, decided green, open orange. */
-  tone?: Tone;
-  empty: string;
-  children: (all: boolean) => React.ReactNode;
-}) {
-  const [all, setAll] = useState(false);
-  const folded = props.folded ?? props.count - CARD_ROWS;
-  return (
-    <section className={props.tone ? `sh-card ${props.tone}` : "sh-card"}>
-      <h2>
-        {props.mark && <span className="sh-mark">✦</span>}
-        {props.tone && TONE_ICON[props.tone]}
-        {props.title}
-        {props.count > 0 && <span className="count">{props.count}</span>}
-      </h2>
-      {props.count ? props.children(all) : <p className="sh-card-empty">{props.empty}</p>}
-      {folded > 0 && (
-        <button className="sh-more" onClick={() => setAll((a) => !a)}>
-          {all ? "Show fewer" : `${folded} more`}
-        </button>
-      )}
-    </section>
-  );
-}
+type TabKey = "meetings" | "todo" | "questions" | "decisions" | "next";
+/** The space's tabs, in the order people look at them. */
+const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
+  { key: "meetings", label: "Meetings", icon: <MicIcon /> },
+  { key: "todo", label: "To do", icon: <TodoIcon size={14} /> },
+  { key: "questions", label: "Questions", icon: <QuestionIcon size={14} /> },
+  { key: "decisions", label: "Decisions", icon: <DecidedIcon size={14} /> },
+  { key: "next", label: "Up next" },
+];
 
-type Tone = "todo" | "decided" | "question";
-const TONE_ICON: Record<Tone, React.ReactNode> = { todo: <TodoIcon size={14} />, decided: <DecidedIcon size={14} />, question: <QuestionIcon size={14} /> };
-
-function NoteCard(props: { title: string; tone: "decided" | "question"; notes: SpaceFeed["decided"]; room: RoomInfo; empty: string }) {
-  // A decision a later one replaced stays, muted and last, so the change of mind is still on record.
-  const standing = props.notes.filter((n) => !n.replacedBy).length;
+/** Decisions or open questions across the space's meetings, as the recap lists them. A decision a
+ *  later one replaced stays, muted and last, so the change of mind is still on record. */
+function PointList(props: { kind: "decided" | "question"; notes: SpaceFeed["decided"]; empty: string }) {
+  if (!props.notes.length) return <p className="sh-card-empty">{props.empty}</p>;
+  const Icon = props.kind === "decided" ? DecidedIcon : QuestionIcon;
   return (
-    <Card title={props.title} tone={props.tone} count={standing} folded={props.notes.length - CARD_ROWS} empty={props.empty}>
-      {(all) => (
-        <ul className="sh-list">
-          {(all ? props.notes : props.notes.slice(0, CARD_ROWS)).map((n) => (
-            <li key={n.id} className={n.replacedBy ? "replaced" : undefined}>
-              {TONE_ICON[props.tone]}
-              <span>
-                {n.text}
-                {n.quote && <QuoteMark quote={n.quote} />}
-                {n.from && <FromChip from={n.from} />}
-                {n.replacedBy && <ReplacedChip by={n.replacedBy} />}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
+    <ul className={`rc-points ${props.kind}`}>
+      {props.notes.map((n) => (
+        <li key={n.id} className={n.replacedBy ? "replaced" : undefined}>
+          <Icon />
+          <span className="rc-point-body">
+            <span>
+              {n.text}
+              {n.quote && <QuoteMark quote={n.quote} />}
+              {n.from && <FromChip from={n.from} />}
+              {n.replacedBy && <ReplacedChip by={n.replacedBy} />}
+            </span>
+          </span>
+          <CopyForAgent kind={props.kind === "decided" ? "decision" : "question"} id={n.id} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
