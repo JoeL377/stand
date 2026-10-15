@@ -3,9 +3,10 @@
 // that opens under the to-do. Agents report through the Stand MCP.
 
 import { useEffect, useState } from "react";
-import type { ActionWork } from "../shared/protocol.ts";
+import type { ActionWork, Snap } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { Linkified } from "./Linkified.tsx";
+import { SnapGallery } from "./Snaps.tsx";
 import { fmtAgo, linkLabel } from "./util.ts";
 
 /** Polls what agents are doing on these to-dos: often while one is working, rarely otherwise. */
@@ -82,9 +83,36 @@ const STATUS: Record<ActionWork["log"][number]["status"], string> = {
 
 const FIRST = 3;
 
+type Entry = ActionWork["log"][number];
+
+/** An entry's screenshots in the shape the snap viewer shows (no crop or delete: they're the agent's). */
+const asSnaps = (e: Entry): Snap[] =>
+  e.shots.map((s, k) => ({
+    id: `${e.id}-${k}`,
+    meetingId: null,
+    itemId: null,
+    itemSuggested: false,
+    ts: e.ts,
+    url: s.url,
+    width: 0,
+    height: 0,
+    source: "person",
+    takenById: null,
+    takenBy: e.by,
+    sharerId: null,
+    sharerName: null,
+    caption: s.caption,
+    line: null,
+    screenText: null,
+    noteId: null,
+    discussionId: null,
+    segmentIds: [],
+  }));
+
 /** The to-do's log, newest first, as a bordered card under it. */
 export function WorkCard({ work }: { work: ActionWork }) {
   const [all, setAll] = useState(false);
+  const [viewing, setViewing] = useState<{ entry: Entry; at: number } | null>(null);
   const shown = all ? work.log : work.log.slice(0, FIRST);
   return (
     <div className="fu-log">
@@ -107,11 +135,11 @@ export function WorkCard({ work }: { work: ActionWork }) {
           )}
           {e.shots.length > 0 && (
             <div className="wl-shots">
-              {e.shots.map((s) => (
-                <a key={s.url} href={s.url} target="_blank" rel="noreferrer" title={s.caption ?? "Open the screenshot"}>
+              {e.shots.map((s, k) => (
+                <button key={s.url} type="button" onClick={() => setViewing({ entry: e, at: k })} title={s.caption ?? "Open the screenshot"}>
                   <img src={s.url} alt={s.caption ?? "Screenshot"} loading="lazy" />
                   {s.caption && <span>{s.caption}</span>}
-                </a>
+                </button>
               ))}
             </div>
           )}
@@ -122,6 +150,7 @@ export function WorkCard({ work }: { work: ActionWork }) {
           {all ? "Fewer" : `${work.log.length - FIRST} earlier`}
         </button>
       )}
+      {viewing && <SnapGallery snaps={asSnaps(viewing.entry)} me="" isHost={false} start={viewing.at} onClose={() => setViewing(null)} />}
     </div>
   );
 }
