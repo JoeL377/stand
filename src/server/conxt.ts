@@ -73,8 +73,9 @@ export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
     JOIN conxt_connections c ON c.id=cm.connection_id
     WHERE m.id=? AND m.ended_at IS NOT NULL AND c.enabled=1`).get(meetingId) as Row | undefined;
   if (!row) return;
-  const segments = sql.prepare(`SELECT id,speaker_name,kind,text,ts FROM segments
-    WHERE meeting_id=? ORDER BY ts,rowid`).all(meetingId) as Row[];
+  const segments = sql.prepare(`SELECT s.id,s.speaker_id,u.email AS speaker_email,s.speaker_name,s.kind,s.text,s.ts
+    FROM segments s LEFT JOIN users u ON u.id=s.speaker_id
+    WHERE s.meeting_id=? ORDER BY s.ts,s.rowid`).all(meetingId) as Row[];
   // Canonical evidence stays separate from Stand's existing synthesis.
   const canonical = (text: string) => text.replace(/\r\n?/g, "\n");
   const content = segments.map(s => `[${new Date(s.ts as number).toISOString()}] ${s.speaker_name} (${s.kind}): ${canonical(s.text as string)}`).join("\n");
@@ -84,7 +85,11 @@ export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
     const text = canonical(s.text as string);
     const start = cursor + Array.from(prefix).length;
     cursor = start + Array.from(text).length + 1;
-    return { id: s.id, speaker: s.speaker_name, text, start };
+    // The speaker's Google email is the person id Conxt members sign in with, so an
+    // absent member can confirm a decision; the Stand id is the fallback.
+    const person = s.speaker_email ? String(s.speaker_email).toLowerCase() : s.speaker_id ? String(s.speaker_id) : undefined;
+    return { id: s.id, speaker: s.speaker_name, speaker_id: person,
+      at: new Date(s.ts as number).toISOString(), text, start };
   });
   const byId = new Map(turns.map(t => [t.id, t]));
   const notes = sql.prepare(`SELECT n.*,d.outcome,d.segment_ids_json FROM notes n
@@ -103,6 +108,10 @@ export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
       owner: n.owner, completed: n.kind === "action" ? n.done_at != null : null,
     };
   });
+  // Everyone who has joined the space has a say; an absent member keeps a decision from settling.
+  const members = (sql.prepare(`SELECT COALESCE(LOWER(u.email), m.user_id) AS person FROM room_members m
+    LEFT JOIN users u ON u.id=m.user_id WHERE m.room_id=? ORDER BY person`)
+    .all(row.room_id as string) as Row[]).map(m => String(m.person)).slice(0, 500);
   const instance = (sql.prepare("SELECT value FROM conxt_settings WHERE key='instance_id'").get() as Row).value;
   const id = randomUUID();
   const body: Record<string, unknown> = {
@@ -111,6 +120,7 @@ export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
     occurred_at: new Date(row.started_at as number).toISOString(), timezone: "UTC",
     turns, synthesis: { version: 1, summary: row.summary, narrative: row.synthesis, items },
   };
+  if (members.length) body.members = members;
   if (config.publicUrl) {
     try {
       const url = new URL(`/meetings/${encodeURIComponent(meetingId)}`, config.publicUrl);

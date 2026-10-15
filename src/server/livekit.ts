@@ -39,7 +39,7 @@ async function agentToken(roomId: string) {
   return at.toJwt();
 }
 
-export function startLiveKitTranscriber(roomId: string, sink: SpeechSink): Transcriber {
+export function startLiveKitTranscriber(roomId: string, sink: SpeechSink, keyterms: () => string[] = () => []): Transcriber {
   const room = new Room();
   const listeners = new Map<string, SpeakerStream>();
   let stopped = false;
@@ -48,7 +48,7 @@ export function startLiveKitTranscriber(roomId: string, sink: SpeechSink): Trans
     if (track.kind !== TrackKind.KIND_AUDIO || pub.source !== TrackSource.SOURCE_MICROPHONE) return;
     listeners.get(p.identity)?.close();
     const name = () => sink.nameOf(p.identity) ?? p.name ?? "Someone";
-    listeners.set(p.identity, new SpeakerStream(track, p.identity, name, sink, recognizerFactory()));
+    listeners.set(p.identity, new SpeakerStream(track, p.identity, name, sink, recognizerFactory(keyterms())));
   });
   room.on(RoomEvent.TrackUnsubscribed, (_t: RemoteTrack, pub: RemoteTrackPublication, p: RemoteParticipant) => {
     if (pub.source !== TrackSource.SOURCE_MICROPHONE) return;
@@ -101,8 +101,8 @@ interface Recognizer {
 }
 
 let loggerReady = false;
-function recognizerFactory(): () => Recognizer {
-  if (config.deepgramKey) return () => new DeepgramRecognizer();
+function recognizerFactory(keyterms: string[] = []): () => Recognizer {
+  if (config.deepgramKey) return () => new DeepgramRecognizer(keyterms);
   if (!loggerReady) {
     // @livekit/agents refuses to run until its logger is set up.
     initializeLogger({ pretty: false, level: "warn" });
@@ -293,7 +293,7 @@ class DeepgramRecognizer implements Recognizer {
   private ws: WebSocket;
   private closed = false;
 
-  constructor() {
+  constructor(keyterms: string[] = []) {
     const params = new URLSearchParams({
       model: "nova-3",
       encoding: "linear16",
@@ -305,6 +305,8 @@ class DeepgramRecognizer implements Recognizer {
       endpointing: "300",
       utterance_end_ms: "1000",
     });
+    // The Conxt glossary's words (product and people names), so Nova-3 hears them right.
+    for (const term of keyterms) params.append("keyterm", term);
     this.ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, {
       headers: { Authorization: `Token ${config.deepgramKey}` },
     });
