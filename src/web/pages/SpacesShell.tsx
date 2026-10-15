@@ -3,7 +3,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { UserMenu } from "../auth.tsx";
-import { Logo, MicIcon } from "../icons.tsx";
+import { Logo, MicIcon, PanelIcon } from "../icons.tsx";
 
 export const spaceHref = (id: string) => `/s/${id}`;
 /** Straight into talking in the space, past its overview page. */
@@ -13,35 +13,84 @@ export const joinHref = (id: string) => `/s/${id}?join=1`;
 const NewSpaceContext = createContext<(name?: string) => void>(() => {});
 export const useNewSpace = () => useContext(NewSpaceContext);
 
+const IS_MAC = /Mac/.test(navigator.platform);
+const SHORTCUT = IS_MAC ? "Command + B" : "Control + B";
+const COLLAPSED_KEY = "stand.sideCollapsed";
+
+/** Whether the sidebar is folded to a rail of icons, remembered in this browser. */
+function useCollapsed() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () =>
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(COLLAPSED_KEY, c ? "0" : "1");
+      } catch {}
+      return !c;
+    });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "b") return;
+      // Typing keeps its own Command + B.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      toggle();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return [collapsed, toggle] as const;
+}
+
 /** The frame around the spaces pages: a left sidebar for creating, navigating and
  *  jumping into a space, and the page itself on the right. */
 export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: React.ReactNode }) {
   const [creating, setCreating] = useState<string | null>(null);
+  const [collapsed, toggle] = useCollapsed();
+  // Folded, each item says what it is on hover.
+  const tip = (label: string) => (collapsed ? label : undefined);
   const quick = [...(props.spaces ?? [])].sort((a, b) => Number(!!b.live) - Number(!!a.live) || b.activeAt - a.activeAt);
   return (
     <NewSpaceContext.Provider value={(name = "") => setCreating(name)}>
-      <div className="spaces-page sp-shell">
+      <div className={collapsed ? "spaces-page sp-shell collapsed" : "spaces-page sp-shell"}>
         <aside className="sp-side" aria-label="Spaces navigation">
-          <Link to="/" className="lobby-brand sp-side-brand">
-            <Logo />
-            Stand
-          </Link>
-          <button className="sp-side-new" onClick={() => setCreating("")}>
+          <div className="sp-side-head">
+            <Link to="/" className="lobby-brand sp-side-brand" title={tip("Stand")}>
+              <Logo />
+              <span className="sp-side-text">Stand</span>
+            </Link>
+            <button
+              className="sp-side-fold"
+              onClick={toggle}
+              aria-label={collapsed ? "Expand the sidebar" : "Collapse the sidebar"}
+              aria-expanded={!collapsed}
+              title={`${collapsed ? "Expand" : "Collapse"} the sidebar (${SHORTCUT})`}
+            >
+              <PanelIcon size={16} open={!collapsed} />
+            </button>
+          </div>
+          <button className="sp-side-new" onClick={() => setCreating("")} title={tip("New space")} aria-label="New space">
             <PlusIcon />
-            New space
+            <span className="sp-side-text">New space</span>
           </button>
           <nav className="sp-side-nav">
-            <NavLink to="/" end>
+            <NavLink to="/" end title={tip("All spaces")} aria-label="All spaces">
               <GridIcon />
-              All spaces
+              <span className="sp-side-text">All spaces</span>
             </NavLink>
-            <NavLink to="/spaces/manage">
+            <NavLink to="/spaces/manage" title={tip("Manage spaces")} aria-label="Manage spaces">
               <SlidersIcon />
-              Manage spaces
+              <span className="sp-side-text">Manage spaces</span>
             </NavLink>
-            <NavLink to="/agents">
+            <NavLink to="/agents" title={tip("Connect an agent")} aria-label="Connect an agent">
               <PlugIcon />
-              Connect an agent
+              <span className="sp-side-text">Connect an agent</span>
             </NavLink>
           </nav>
           {quick.length > 0 && (
@@ -49,8 +98,11 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
               <div className="sp-side-label">Your spaces</div>
               {quick.map((s) => (
                 <div key={s.id} className="sp-side-row">
-                  <Link to={spaceHref(s.id)} className="sp-side-space" title={s.purpose || s.name}>
+                  <Link to={spaceHref(s.id)} className="sp-side-space" title={collapsed ? s.name : s.purpose || s.name}>
                     <span className={s.live ? "sp-side-dot live" : "sp-side-dot"} aria-hidden />
+                    <span className="sp-side-initial" aria-hidden>
+                      {s.name.trim().charAt(0).toUpperCase()}
+                    </span>
                     <span className="sp-side-name">{s.name}</span>
                     {s.live && <span className="sr-only">(talking now)</span>}
                   </Link>

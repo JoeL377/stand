@@ -560,9 +560,12 @@ function ItemPill(props: {
 function MeetingRow({ m, onArchive }: { m: SpaceFeed["meetings"][number]; onArchive: () => void }) {
   const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  const out = [m.todos && plural(m.todos, "to-do"), m.decided && `${m.decided} decided`, m.open && `${m.open} open`]
-    .filter(Boolean)
-    .join(" · ");
+  // What came out of it, in the tabs' order and colors.
+  const counts = [
+    { n: m.todos, kind: "todo", Icon: TodoIcon, label: plural(m.todos, "to-do") },
+    { n: m.open, kind: "question", Icon: QuestionIcon, label: plural(m.open, "open question") },
+    { n: m.decided, kind: "decided", Icon: DecidedIcon, label: plural(m.decided, "decision") },
+  ].filter((c) => c.n > 0);
   return (
     <li className="sh-row">
       <Link to={`/meetings/${m.id}`} className="sh-row-link" title={m.summary ?? undefined}>
@@ -571,9 +574,17 @@ function MeetingRow({ m, onArchive }: { m: SpaceFeed["meetings"][number]; onArch
         </span>
         <span className="sh-row-text">
           <span className="sh-who">Meeting</span>
-          <span className="sh-what">
-            {minutes} min{out && <span className="muted"> · {out}</span>}
-          </span>
+          <span className="sh-what muted">{minutes} min</span>
+          {counts.length > 0 && (
+            <span className="sh-counts">
+              {counts.map(({ n, kind, Icon, label }) => (
+                <span key={kind} className={`sh-count ${kind}`} title={label} aria-label={label}>
+                  <Icon size={13} />
+                  {n}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
         <time className="sh-time">{fmtTime(m.endedAt)}</time>
       </Link>
