@@ -29,7 +29,8 @@ interface Snapshot {
 
 const [meetingFile, goldFile, ...replays] = process.argv.slice(2);
 if (!replays.length) throw new Error("score-replay.ts meeting.json gold-topics.json replayDir [...]");
-const lines: Line[] = JSON.parse(fs.readFileSync(meetingFile, "utf8")).lines;
+const meeting = JSON.parse(fs.readFileSync(meetingFile, "utf8"));
+const lines: Line[] = meeting.lines;
 const gold: Gold[] = JSON.parse(fs.readFileSync(goldFile, "utf8")).topics;
 const goldOf: Array<string | null> = lines.map((_, i) => gold.find((g) => g.spans.some(([a, b]) => i >= a && i <= b))?.id ?? null);
 const goldById = new Map(gold.map((g) => [g.id, g]));
@@ -97,7 +98,8 @@ function score(dir: string) {
         held,
         shown?.id ?? null,
         snap.topics.map((d) => ({ id: d.id, lines: d.lines.map((i) => ({ id: String(i), ts: lines[i].ts })) })),
-        lines[li].ts,
+        t,
+        meeting.meeting?.startedAt ?? lines[0].ts,
       );
     }
     const heldTopic = snap?.topics.find((d) => d.id === held?.id) ?? null;

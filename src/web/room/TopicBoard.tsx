@@ -103,13 +103,14 @@ export function TopicBoard(props: {
   }
   const here = topics.filter((t) => t.d.itemId === props.focusItemId);
   const latestTopic = (latest && here.find((t) => t.d.segmentIds.includes(latest.id))) ?? [...here].sort((a, b) => b.last - a.last)[0] ?? null;
-  // The board waits a few remarks before it follows a new topic (shared/boardFocus.ts).
+  // The board looks again only every two minutes (shared/boardFocus.ts).
   const onScreen = useRef<Focus | null>(null);
   const focus = pickFocus(
     onScreen.current,
     latestTopic?.d.id ?? null,
     here.map((t) => ({ id: t.d.id, lines: t.turns.map((s) => ({ id: s.id, ts: s.ts })) })),
-    latest?.ts ?? now,
+    Math.max(now, latest?.ts ?? 0),
+    props.meetingStartedAt,
   );
   useEffect(() => {
     onScreen.current = focus;
