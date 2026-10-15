@@ -2071,3 +2071,11 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .sh-archived-by { flex: none; font-size: 12px; }
 .sh-archived-restore { flex: none; padding: 3px 8px; min-height: 0; border: 1px solid var(--line); border-radius: 6px; background: none; box-shadow: none; color: var(--text); font-size: 12px; cursor: pointer; }
 .rc-points .sh-archive svg, .rc-points .cfa-btn svg { color: inherit; }
+
+/* A meeting row's to-dos, open questions and decisions: small chips in the tabs' colors. */
+.sh-counts { display: inline-flex; align-items: center; gap: 6px; align-self: center; flex: none; }
+.sh-count { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px 1px 5px; border-radius: 999px; background: var(--hover); color: var(--text); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 18px; }
+.sh-count svg { flex: none; }
+.sh-count.todo svg { color: var(--accent); }
+.sh-count.question svg { color: var(--warn); }
+.sh-count.decided svg { color: var(--ok); }
