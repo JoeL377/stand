@@ -93,3 +93,45 @@ test("a word used two ways shows once it is said again, as a whole word", () => 
   assert.deepEqual(saysTerm(open, "Our standup ran long."), []);
   assert.deepEqual(liveCards(open, [], new Set(["d1"])).map((c) => c.term), ["stand"]);
 });
+
+const exploring = {
+  kind: "exploring", id: "s-joe", title: "Joe is exploring feat/retries: 2 items held",
+  why: "Held until the session comes back; they can share it in a meeting",
+  needs: [{ id: "joe@example.com", name: "Joe" }], path: "/governance#work-modes",
+  at: "2026-10-15T20:00:00Z", branch: "feat/retries", held: 2,
+};
+
+test("explore work arrives with its branch, and only its person sees Share on the live panel", async () => {
+  const send = (async () => ({ ok: true, json: async () => ({ items: [exploring] }) })) as unknown as typeof fetch;
+  const o = new ConxtOpenItems(db(), [destination], send);
+  const [item] = await o.refresh("room");
+  assert.equal(item.kind, "exploring");
+  assert.equal(item.branch, "feat/retries");
+  const huy = { participantId: "u-huy", name: "Huy", email: "huy@example.com" };
+  const joe = { participantId: "u-joe", name: "Joe", email: "joe@example.com" };
+  assert.deepEqual(liveCards([item], [huy], new Set()), []);
+  const [card] = liveCards([item], [huy, joe], new Set());
+  assert.equal(card.kind, "exploring");
+  assert.deepEqual(card.here, [{ participantId: "u-joe", name: "Joe" }]);
+});
+
+test("sharing explore work goes to Conxt as the person, and is refused for anyone else", async () => {
+  const posts: Array<{ url: string; body: unknown }> = [];
+  let status = 200;
+  const send = (async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      posts.push({ url, body: JSON.parse(init.body as string) });
+      return { ok: status === 200, status, json: async () => ({}) };
+    }
+    return { ok: true, json: async () => ({ items: [exploring] }) };
+  }) as unknown as typeof fetch;
+  const o = new ConxtOpenItems(db(), [destination], send);
+  await o.refresh("room");
+  assert.deepEqual(await o.share("room", "s-joe", "joe@example.com"), { ok: true });
+  assert.equal(posts[0].url, "https://conxt.test/api/v1/integrations/0b6430a1-307c-4516-b582-36f20104048a/open-items/s-joe/share");
+  assert.deepEqual(posts[0].body, { person: "joe@example.com" });
+  await o.refresh("room");
+  status = 409;
+  assert.deepEqual(await o.share("room", "s-joe", "huy@example.com"), { ok: false, why: "that explore work isn't yours" });
+  assert.equal((await o.share("room", "missing", "joe@example.com")).ok, false);
+});

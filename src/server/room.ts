@@ -2,7 +2,7 @@
 // agent's pinning of speech and chat to that item.
 
 import { roomVocabulary, vocabularyLine } from "./conxtGlossary.ts";
-import { confirmRoomOpenItem, liveCards, refreshRoomOpenItems, roomOpenItems, saysTerm } from "./conxtOpenItems.ts";
+import { confirmRoomOpenItem, liveCards, refreshRoomOpenItems, roomOpenItems, saysTerm, shareRoomOpenItem } from "./conxtOpenItems.ts";
 import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
@@ -757,6 +757,25 @@ export class RoomSession implements SpeechSink {
         try {
           const r = await confirmRoomOpenItem(this.roomId, card.id, email);
           if (!r.ok) this.send(ws, { type: "error", message: `Couldn't confirm: ${r.why}.` });
+          await refreshRoomOpenItems(this.roomId);
+        } finally {
+          this.conxtConfirming.delete(card.id);
+        }
+        this.broadcastState();
+        break;
+      }
+      case "conxt.share": {
+        // Only the person whose explore work it is shares it, as with confirming.
+        const email = this.emails.get(conn.participantId);
+        const card = this.conxtLive().find((c) => c.id === msg.itemId && c.kind === "exploring");
+        if (!email || !card?.here.some((p) => p.participantId === conn.participantId)) {
+          return this.send(ws, { type: "error", message: "Couldn't share: that explore work isn't yours." });
+        }
+        if (this.conxtConfirming.has(card.id)) return;
+        this.conxtConfirming.add(card.id);
+        try {
+          const r = await shareRoomOpenItem(this.roomId, card.id, email);
+          if (!r.ok) this.send(ws, { type: "error", message: `Couldn't share: ${r.why}.` });
           await refreshRoomOpenItems(this.roomId);
         } finally {
           this.conxtConfirming.delete(card.id);

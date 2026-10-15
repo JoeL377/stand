@@ -976,3 +976,34 @@ test("a Conxt decision waiting on someone shows while they're here, and only the
     setConxtOpenItems(null);
   }
 });
+
+test("only the person exploring can share their explore work from the meeting", async () => {
+  const { db, session } = setup();
+  const owner = db.upsertUser({ googleSub: null, email: "huy@example.com", name: "Huy", picture: null });
+  const d = { key: "p", label: "P", token: "t", submissionUrl: "https://conxt.test/api/v1/integrations/i1/sources" };
+  db.raw.prepare("INSERT INTO conxt_connections VALUES ('k',?,?,?,?,?,?,1)").run(session.roomId, d.key, d.submissionUrl, d.label, owner.id, Date.now());
+  const item = { kind: "exploring", id: "s-joe", title: "Joe is exploring feat/retries: 2 items held", why: "Held",
+    needs: [{ id: "joe@example.com", name: "Joe" }], path: null, at: null, branch: "feat/retries" };
+  const posted: string[] = [];
+  let holding = true;
+  setConxtOpenItems(new ConxtOpenItems(db.raw, [d], (async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") { posted.push(`${url} ${init.body}`); holding = false; return { ok: true, json: async () => ({}) }; }
+    return { ok: true, json: async () => ({ items: holding ? [item] : [] }) };
+  }) as unknown as typeof fetch));
+  try {
+    await refreshRoomOpenItems(session.roomId);
+    const huy = await join(session, { id: owner.id, name: "Huy", email: "huy@example.com" } as User);
+    const joe = await join(session, { id: "u-joe", name: "Joe", email: "joe@example.com" } as User);
+    assert.deepEqual(session.state().conxt?.map((c) => c.kind), ["exploring"]);
+    await say(huy, { type: "conxt.share", itemId: "s-joe" });
+    assert.equal(posted.length, 0);
+    assert.ok(huy.got.some((m) => m.type === "error"));
+    await say(joe, { type: "conxt.share", itemId: "s-joe" });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(posted.length, 1);
+    assert.match(posted[0], /open-items\/s-joe\/share \{"person":"joe@example.com"\}$/);
+    assert.deepEqual(session.state().conxt, []);
+  } finally {
+    setConxtOpenItems(null);
+  }
+});
