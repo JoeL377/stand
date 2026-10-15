@@ -37,6 +37,7 @@ import { toSpaceSummary } from "./spaces.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
 import { ConxtLiveDelivery } from "./conxtLive.ts";
 import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
+import { ConxtGlossary, refreshRoomVocabulary, roomVocabulary, setConxtGlossary } from "./conxtGlossary.ts";
 import { GithubApp, appReady, readEvent, signedByGithub } from "./github.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
@@ -82,11 +83,13 @@ function session(roomId: string): RoomSession | null {
     (closed) => {
       if (sessions.get(roomId) === closed) sessions.delete(roomId);
     },
-    capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r) : undefined,
+    capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r, () => roomVocabulary(roomId).keyterms) : undefined,
     polisher,
     resume,
   );
   sessions.set(roomId, s);
+  // Warm the Conxt vocabulary before anyone speaks; the meeting never waits on it.
+  refreshRoomVocabulary(roomId);
   if (resume) console.log(`[room] ${roomId}: picked up meeting ${resume.id} after a restart`);
   // It was being written up when the server stopped: finish that, with everyone watching.
   if (resume?.endRequestedAt) void s.end();
@@ -320,6 +323,7 @@ app.get(
 
 app.use("/api/rooms/:id/conxt", conxtRoutes(db, conxtDestinations));
 const conxtDelivery = new ConxtDelivery(db, conxtDestinations);
+setConxtGlossary(new ConxtGlossary(db.raw, conxtDestinations));
 conxtDelivery.start();
 const conxtLiveDelivery = new ConxtLiveDelivery(db, conxtDestinations);
 conxtLiveDelivery.start();

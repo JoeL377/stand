@@ -1,6 +1,7 @@
 // One live meeting in a room: who is here, which item is in focus, and the
 // agent's pinning of speech and chat to that item.
 
+import { roomVocabulary } from "./conxtGlossary.ts";
 import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
@@ -1113,7 +1114,9 @@ export class RoomSession implements SpeechSink {
           .meetingSnaps(this.meetingId)
           .filter((p) => p.itemId === itemId && p.caption)
           .map((p) => ({ at: p.ts, by: p.source === "agent" ? "Stand agent" : p.takenBy, caption: p.caption! }));
-        const instructions = this.db.getRoom(this.roomId)?.synthesisInstructions;
+        // The team's own instructions, then the Conxt project's vocabulary so notes use its words.
+        const vocabulary = roomVocabulary(this.roomId).prompt;
+        const instructions = [this.db.getRoom(this.roomId)?.synthesisInstructions, vocabulary].filter(Boolean).join("\n\n") || undefined;
         // Nothing said since every topic settled: the notes stand as they are.
         notes =
           !window.length && settled.length
