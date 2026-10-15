@@ -8,11 +8,15 @@ import type { SpaceFeed } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
 import { newId } from "./ids.ts";
+import { withFrom } from "./noteFrom.ts";
+import { settledView } from "./spaceSettle.ts";
 import { linkSnaps, saveSnapFile } from "./snaps.ts";
 
 /** What the feed shows of the space's history. */
 const FEED_CAPTURES = 100;
 const FEED_UPDATES = 60;
+/** Decisions and open questions the space page lists. */
+const FEED_NOTES = 40;
 /** The typed line, and the text read off a screen: enough for a paragraph of an error, not a novel. */
 export const MAX_LINE = 300;
 /** A note: a few sentences said or typed in one go. */
@@ -143,13 +147,13 @@ async function describe(db: DB, agent: Agent, id: string, buf: Buffer, ext: stri
 
 export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
   const meetings = db.feedMeetings(roomId);
-  const latest = meetings.find((m) => m.todos + m.decided + m.open > 0);
+  const { decided, open } = settledView(db, roomId);
   return {
     captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES), [], [], baseUrl),
     jots: db.spaceJots(roomId, 0, FEED_CAPTURES).map((j) => ({ ...j, snaps: linkSnaps(db.jotSnaps(j.id), [], [], baseUrl) })),
     meetings,
     updates: db.roomUpdates(roomId, 0, FEED_UPDATES),
-    decided: db.spaceNotes(roomId, "decision", 20),
-    open: latest ? db.meetingNotes(latest.id).filter((n) => n.kind === "question") : [],
+    decided: withFrom(db, decided.slice(0, FEED_NOTES)),
+    open: withFrom(db, open.slice(0, FEED_NOTES)),
   };
 }

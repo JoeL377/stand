@@ -3,7 +3,7 @@
 // question that leads to the chapter it came out of, and the Chapters section itself.
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ChapterRecap, Discussion, DiscussionOutcome, Note, Quote, Segment, Snap } from "../shared/protocol.ts";
+import type { ChapterRecap, Discussion, DiscussionOutcome, Note, NoteFrom, Quote, Segment, Snap } from "../shared/protocol.ts";
 import type { MeetingChapter } from "../shared/chapters.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { SnapFigures } from "./Snaps.tsx";
@@ -91,6 +91,42 @@ export function ChapterChip({ c, i, startedAt, crux, onPick }: { c: MeetingChapt
             </span>{" "}
             {crux}
           </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+/** The same pill on a page that lists several meetings (the space page): the meeting's day, with
+ *  the chapter in the pop-up, and a click opens the recap at that chapter. */
+export function FromChip({ from }: { from: NoteFrom }) {
+  const c = from.chapter;
+  const day = new Date(from.startedAt).toLocaleDateString([], { month: "short", day: "numeric" });
+  const o = c && OUTCOME[c.outcome];
+  return (
+    <span className="rc-pill-wrap">
+      <Link className="rc-pill" to={`/meetings/${from.meetingId}${c ? `#${chapterAnchor(c.i)}` : ""}`} aria-label={c ? `From the chapter "${c.title}" on ${day}` : `From the meeting on ${day}`}>
+        {day}
+      </Link>
+      <span className="rc-pop" role="tooltip">
+        {c && o ? (
+          <>
+            <span className="rc-pop-title">{c.title}</span>
+            <span className="rc-pop-meta">
+              <span className={`rc-ch-dot ${c.outcome}`} aria-hidden />
+              {o.label} · {fmtDate(from.startedAt)} · {clock(c.at - from.startedAt)} · {c.minutes} min
+            </span>
+            {c.crux && (
+              <span className="rc-pop-crux">
+                <span className="agent-mark" aria-hidden>
+                  ✦
+                </span>{" "}
+                {c.crux}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="rc-pop-meta">Meeting on {fmtDate(from.startedAt)}</span>
         )}
       </span>
     </span>

@@ -1,6 +1,6 @@
 # Bar notes and snaps
 
-The always-on Stand bar in the Mac app: a space switcher, "Write a note…" (Control + Shift + N, typed or dictated), Snap (Control + Shift + S) which pins up to 6 screen pictures to the note, and in a call the meeting controls. Notes land on the space page under Since last time and in the MCP (`list_notes`).
+The always-on Stand bar in the Mac app: a space switcher, "Write a note…" (Control + Shift + N, typed or dictated), Snap (Control + Shift + S) which pins up to 6 screen pictures to the note, and in a call the meeting controls. Notes land on the space page under the Meetings tab and in the MCP (`list_notes`).
 
 ## Sub-features
 - Note box unfolding from the bar, Enter saves.

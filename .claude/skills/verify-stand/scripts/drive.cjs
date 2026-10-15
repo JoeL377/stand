@@ -84,7 +84,7 @@ async function newSpace() {
     await page.getByPlaceholder("One line, e.g. Ship one-page checkout by Nov 15").fill("Prove Stand works");
     await page.getByRole("button", { name: "Create and enter" }).click();
     await page.waitForURL(/\/s\/[a-z0-9]+$/);
-    await page.getByRole("heading", { name: "Since last time" }).waitFor();
+    await page.getByRole("tab", { name: /^Meetings/ }).waitFor();
     await snap("space-page");
   });
   summary.spaceUrl = page.url();
@@ -127,17 +127,19 @@ async function meeting() {
 
   // The write-up (Sonnet tidy per item, then the recap) runs after End meeting returns,
   // so the meeting shows up on the space page a little later. Reload until it does.
-  await step("meeting shows on the space page under Since last time", async () => {
+  await step("meeting shows on the space page under Meetings", async () => {
     const deadline = Date.now() + 180_000;
     for (;;) {
       await page.goto(summary.spaceUrl);
-      await page.getByRole("heading", { name: "Since last time" }).waitFor();
+      await page.getByRole("tab", { name: /^Meetings/ }).click();
       await page.waitForLoadState("networkidle");
       if (await page.locator('a[href^="/meetings/"]').count()) break;
       if (Date.now() > deadline) throw new Error("no meeting on the space page after 3 minutes");
       await page.waitForTimeout(5_000);
     }
     await snap("space-after-meeting");
+    await page.getByRole("tab", { name: /^To do/ }).click();
+    await snap("space-todo-tab");
   });
   const spaceText = await page.locator("body").innerText();
   fs.writeFileSync(path.join(out, "space-after-meeting.txt"), spaceText);
