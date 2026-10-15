@@ -259,3 +259,20 @@ test("snaps saved to the space since the last meeting are suggested, unless thei
   );
   assert.equal(upNext.suggestions.find((s) => s.key === "snap:webhooks")?.reason, "Snap saved by Huy Ngo · Webhooks retry");
 });
+
+test("Conxt's open items join the agenda as needing people, and can be dismissed", () => {
+  const conxt = [
+    { kind: "confirmation" as const, id: "c1", title: "Build Stand and Conxt together.", why: "Decided while Joe Liang was away",
+      needs: [{ id: "joe@example.com", name: "Joe Liang" }], path: "/ingestions/r1", at: null },
+    { kind: "question" as const, id: "q1", title: "Who reviews in a shared queue?", why: "Asked and not yet answered", needs: [], path: null, at: null },
+  ];
+  const { upNext } = computeUpNext(base({ conxt }));
+  const c1 = upNext.suggestions.find((s) => s.key === "conxt:c1")!;
+  assert.equal(c1.kind, "needs_people");
+  assert.equal(c1.owner, "Joe Liang");
+  assert.equal(c1.reason, "Decided while Joe Liang was away · from Conxt");
+  assert.equal(upNext.suggestions.find((s) => s.key === "conxt:q1")!.kind, "question");
+  assert.ok(upNext.suggestions.indexOf(c1) < upNext.suggestions.findIndex((s) => s.key === "conxt:q1"));
+  const dismissed = computeUpNext(base({ conxt, dismissed: new Map([["conxt:c1", 400]]) })).upNext;
+  assert.equal(dismissed.suggestions.some((s) => s.key === "conxt:c1"), false);
+});

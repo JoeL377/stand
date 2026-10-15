@@ -9,10 +9,13 @@ import type { DB } from "./db.ts";
 import type { Agent, AgendaDraftRow } from "./llm.ts";
 import { settleSpace } from "./spaceSettle.ts";
 import { applyPolish, computeUpNext, polishBasis } from "./upNext.ts";
+import { refreshRoomOpenItems, roomOpenItems } from "./conxtOpenItems.ts";
 
 /** The suggested agenda as people see it: the plain ranking with Claude's last pass laid over it. */
 export function upNextView(db: DB, roomId: string, currentStart: number | null, polishing = false): Pick<RoomState, "upNext" | "carried"> {
-  const { upNext, carried } = computeUpNext(db.upNextInput(roomId, currentStart));
+  // Conxt's open items, as last fetched; a stale cache refreshes in the background.
+  void refreshRoomOpenItems(roomId);
+  const { upNext, carried } = computeUpNext({ ...db.upNextInput(roomId, currentStart), conxt: roomOpenItems(roomId) });
   return { upNext: { ...applyPolish(upNext, db.getPolish(roomId)), polishing }, carried };
 }
 
@@ -50,7 +53,7 @@ export class UpNextPolisher {
     if (!room) return;
     // The space's decisions and open questions change at the same moments its agenda does.
     await settleSpace(this.db, this.agent, roomId).catch((err) => console.error("[agent] settling decisions and questions failed:", err));
-    const input = this.db.upNextInput(roomId, this.liveStart(roomId));
+    const input = { ...this.db.upNextInput(roomId, this.liveStart(roomId)), conxt: roomOpenItems(roomId) };
     const { suggestions } = computeUpNext(input).upNext;
     // Nothing new since the last pass: every suggestion was written from the same facts.
     const last = this.db.getPolish(roomId);
