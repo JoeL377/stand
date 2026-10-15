@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ItemUpdate, Jot, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ItemUpdate, Jot, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, itemHref, saveFollowUp } from "../FollowUps.tsx";
@@ -38,6 +38,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   // The snap open big: one on its own, or a note's pictures with the note.
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showDone, setShowDone] = useState(false);
   // The tab someone last looked at in this space; a new space opens on Meetings.
   const [tab, setTab] = useState<TabKey>(() => {
     try {
@@ -145,7 +146,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     next: agenda.length + suggested.length,
   };
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
-  const fromOf = new Map(room.followUps.flatMap((f) => (f.from ? [[f.id, f.from] as const] : [])));
+  const done = room.doneFollowUps ?? [];
+  const fromOf = new Map([...room.followUps, ...done].flatMap((f) => (f.from ? [[f.id, f.from] as const] : [])));
 
   const entries: Entry[] = feed
     ? [
@@ -257,26 +259,19 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </>
           )}
 
-          {tab === "todo" &&
-            (room.followUps.length ? (
-              <FollowUpList
-                oneLine
-                notes={room.followUps}
-                onToggle={saveFollowUp(room.id)}
-                after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
-                tail={(n) =>
-                  n.owner ? (
-                    <Face name={n.owner} color={colorFor(n.owner)} />
-                  ) : (
-                    <span className="rc-face none" title="Unassigned">
-                      ?
-                    </span>
-                  )
-                }
-              />
-            ) : (
-              <p className="sh-card-empty">No open to-dos.</p>
-            ))}
+          {tab === "todo" && (
+            <>
+              {room.followUps.length ? <TodoList room={room} notes={room.followUps} fromOf={fromOf} /> : <p className="sh-card-empty">No open to-dos.</p>}
+              {done.length > 0 && (
+                <>
+                  <button className="sh-more sh-done-toggle" aria-expanded={showDone} onClick={() => setShowDone((v) => !v)}>
+                    {showDone ? "Hide done" : `${done.length} done`}
+                  </button>
+                  {showDone && <TodoList room={room} notes={done} fromOf={fromOf} />}
+                </>
+              )}
+            </>
+          )}
 
           {tab === "questions" && <PointList kind="question" notes={feed?.open ?? []} empty="No open questions." />}
           {tab === "decisions" && <PointList kind="decided" notes={feed?.decided ?? []} empty="No decisions yet." />}
@@ -499,6 +494,28 @@ function UpdateRow({ u, room }: { u: ItemUpdate; room: RoomInfo }) {
       )}
       <time className="sh-time">{fmtTime(u.ts)}</time>
     </li>
+  );
+}
+
+/** To-dos as the recap lists them: one line, the chapter pill, the owner's face at the end. */
+function TodoList(props: { room: RoomInfo; notes: RoomInfo["followUps"]; fromOf: Map<string, NoteFrom> }) {
+  const { fromOf } = props;
+  return (
+    <FollowUpList
+      oneLine
+      notes={props.notes}
+      onToggle={saveFollowUp(props.room.id)}
+      after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
+      tail={(n) =>
+        n.owner ? (
+          <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · done by ${n.doneBy}` : ""}`} />
+        ) : (
+          <span className="rc-face none" title="Unassigned">
+            ?
+          </span>
+        )
+      }
+    />
   );
 }
 
