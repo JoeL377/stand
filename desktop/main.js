@@ -1850,7 +1850,9 @@ function native() {
 /** Up whenever the app runs and you're signed in, Stand in front or not (joe's call): the
  *  meeting's bar in one, the space's out of one. Down while a snap reads the screen. */
 function updateBar() {
-  if (barHold) return;
+  // While quitting, the windows close one by one: the main window closing ends the meeting and
+  // asks for the bar again, and a new bar made then would hold the quit up, so none comes.
+  if (barHold || quitting) return;
   const want = Boolean((meeting ? win : resting) && !barAway && !barOff);
   if (want && !bar) makeBar();
   if (!barLoaded) return;
