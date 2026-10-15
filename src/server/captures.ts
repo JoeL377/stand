@@ -8,6 +8,7 @@ import type { SpaceFeed } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
 import { newId } from "./ids.ts";
+import { archivedRows } from "./archive.ts";
 import { withFrom } from "./noteFrom.ts";
 import { settledView } from "./spaceSettle.ts";
 import { linkSnaps, saveSnapFile } from "./snaps.ts";
@@ -146,14 +147,21 @@ async function describe(db: DB, agent: Agent, id: string, buf: Buffer, ext: stri
 }
 
 export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
-  const meetings = db.feedMeetings(roomId);
+  const archived = archivedRows(db, roomId);
+  // Archived rows leave the page; the Archived list shows them instead.
+  const gone = new Set(archived.map((a) => a.ref));
+  const keep = (kind: string) => (x: { id: string }) => !gone.has(`${kind}:${x.id}`);
   const { decided, open } = settledView(db, roomId);
   return {
-    captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES), [], [], baseUrl),
-    jots: db.spaceJots(roomId, 0, FEED_CAPTURES).map((j) => ({ ...j, snaps: linkSnaps(db.jotSnaps(j.id), [], [], baseUrl) })),
-    meetings,
+    archived,
+    captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES).filter(keep("snap")), [], [], baseUrl),
+    jots: db
+      .spaceJots(roomId, 0, FEED_CAPTURES)
+      .filter(keep("jot"))
+      .map((j) => ({ ...j, snaps: linkSnaps(db.jotSnaps(j.id), [], [], baseUrl) })),
+    meetings: db.feedMeetings(roomId).filter(keep("meeting")),
     updates: db.roomUpdates(roomId, 0, FEED_UPDATES),
-    decided: withFrom(db, decided.slice(0, FEED_NOTES)),
-    open: withFrom(db, open.slice(0, FEED_NOTES)),
+    decided: withFrom(db, decided.filter(keep("decision")).slice(0, FEED_NOTES)),
+    open: withFrom(db, open.filter(keep("question")).slice(0, FEED_NOTES)),
   };
 }

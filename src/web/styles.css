@@ -2056,3 +2056,18 @@ a.sh-pill:hover { text-decoration: none; }
 .sh-done .followups li.done .fu-text { text-decoration: none; }
 .sh-done .followups li.done .check { background: color-mix(in srgb, var(--ok) 70%, var(--panel)); border-color: transparent; }
 .sh-done .followups li.done .rc-pill, .sh-done .followups li.done .rc-face { opacity: 0.6; }
+
+/* Archive: a quiet button at the end of every space page row, and the tab's Archived list. */
+.sh-archive { flex: none; display: inline-flex; align-items: center; padding: 4px; min-height: 0; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--muted); cursor: pointer; opacity: 0; }
+li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible { opacity: 1; }
+.sh-archive:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.sh-archive svg { width: 14px; height: 14px; }
+@media (hover: none) { .sh-archive { opacity: 1; } }
+.sh-list li .sh-archive { align-self: center; padding: 2px; }
+.sh-done.archived .sh-done-toggle > svg:nth-child(2) { color: var(--muted); }
+.sh-archived { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; }
+.sh-archived li { display: flex; align-items: center; gap: 10px; min-height: 34px; font-size: 13.5px; color: var(--muted); }
+.sh-archived-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-archived-by { flex: none; font-size: 12px; }
+.sh-archived-restore { flex: none; padding: 3px 8px; min-height: 0; border: 1px solid var(--line); border-radius: 6px; background: none; box-shadow: none; color: var(--text); font-size: 12px; cursor: pointer; }
+.rc-points .sh-archive svg, .rc-points .cfa-btn svg { color: inherit; }

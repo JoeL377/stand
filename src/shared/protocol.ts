@@ -533,7 +533,23 @@ export interface Jot {
   snaps?: Snap[];
 }
 
+/** What a row archived off the space page was. */
+export type ArchivedKind = "meeting" | "snap" | "jot" | "todo" | "decision" | "question" | "item" | "deck" | "suggestion";
+export interface ArchivedRow {
+  /** "<kind>:<id>"; a suggestion's id is its key. */
+  ref: string;
+  kind: ArchivedKind;
+  title: string;
+  /** When the thing itself happened (a meeting's end, a note's time); when it was archived for agenda rows. */
+  ts: number;
+  /** When it was archived, and by whom. */
+  at: number;
+  by: string;
+}
+
 export interface SpaceFeed {
+  /** Rows archived off the space page, newest first. The page hides them and lists them under Archived. */
+  archived: ArchivedRow[];
   /** Snaps saved straight to the space, newest first. */
   captures: Snap[];
   /** Notes saved straight to the space, newest first. */

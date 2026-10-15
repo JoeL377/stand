@@ -118,6 +118,9 @@ export const api = {
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
   saveJot: (roomId: string, jot: { text: string; itemId?: string | null; at?: number }) => call<Jot>("POST", `/api/rooms/${roomId}/jots`, jot),
   updateJot: (id: string, patch: { itemId?: string | null; text?: string }) => call<Jot>("PATCH", `/api/jots/${id}`, patch),
+  /** Archives a row off the space page ("todo:<id>", see server/archive.ts), or restores it. */
+  archive: (roomId: string, body: { ref: string; archived?: boolean; title?: string; keys?: string[] }) =>
+    call<{ ok: true }>("POST", `/api/rooms/${roomId}/archive`, body),
   deleteJot: (id: string) => call<{ ok: true }>("DELETE", `/api/jots/${id}`),
   /** Brings back a note deleted in the last minute, with its snaps. */
   restoreJot: (id: string) => call<Jot>("POST", `/api/jots/${id}/restore`),
