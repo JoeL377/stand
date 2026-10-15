@@ -170,6 +170,22 @@ export interface Agent {
    *  the main topic it belongs to or a group title. `final`: the pass as the meeting ends, on the tidy
    *  model. Null without a model. */
   mergeTopics(prompt: string, final: boolean): Promise<Array<{ key: string; into: string }> | null>;
+  /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
+   *  question asked again, and which decisions a later one replaced. Null without a model. */
+  settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
+}
+
+export interface SettleInput {
+  key: string;
+  kind: "decision" | "question";
+  text: string;
+  /** When its meeting started. */
+  meeting: number;
+}
+export interface SettleRow {
+  key: string;
+  by: string;
+  how: "answered" | "repeated" | "replaced";
 }
 
 export type SnapMedia = "image/jpeg" | "image/png" | "image/webp";
@@ -363,6 +379,20 @@ const RecapSchema = z.object({
       }),
     )
     .describe("One entry per screenshot given"),
+});
+
+const SettleSchema = z.object({
+  settled: z
+    .array(
+      z.object({
+        key: z.string().describe("The earlier question or decision, by its key"),
+        by: z.string().describe("The key of the later decision or question that settles it"),
+        how: z
+          .enum(["answered", "repeated", "replaced"])
+          .describe("answered: a decision answers this question. repeated: a later question asks the same thing. replaced: a later decision reverses or overrides this decision."),
+      }),
+    )
+    .describe("Only the ones that are plainly settled; leave the rest out"),
 });
 
 const AgendaSchema = z.object({
@@ -765,6 +795,32 @@ Answer for every smaller topic exactly once.`,
     return out?.merges ?? null;
   }
 
+  async settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null> {
+    if (!notes.length) return [];
+    const day = (ts: number) => new Date(ts).toISOString().slice(0, 10);
+    const out = await this.parse(
+      SettleSchema,
+      `Space: ${space.name}${space.purpose ? `\nPurpose: ${space.purpose.slice(0, 500)}` : ""}
+
+Decisions (D) and open questions (Q) from the space's meetings, oldest first:
+${notes.map((n) => `- ${n.key} · meeting ${day(n.meeting)} · ${n.kind}: ${n.text}`).join("\n")}`,
+      `You keep a team's space current across its meetings. People open it to see what's decided and what's still open now, not what was said in each meeting.
+
+Go through every open question and every decision:
+- An open question is answered when a decision from the same or a later meeting settles it, even in other words or by settling the larger question it was part of. Give that decision's key, how=answered.
+- An open question is repeated when a later question asks the same thing. Give the later question's key, how=repeated.
+- A decision is replaced only when a later decision contradicts it, so the team can't follow both (for example "keep them separate" then "build them as one"). A later decision that agrees with it, restates it, adds detail or goes further the same way does not replace it. Give the later decision's key, how=replaced.
+- A question that asks for something to happen (a person to weigh in, a step to be taken) is answered only by a decision showing that happened.
+
+Only point forward in time. Be conservative: list something only when someone reading both lines would agree it is settled. Leave everything else out.`,
+      "medium",
+      // One short call whenever the space's decisions or questions change; getting it wrong hides an open question.
+      config.anthropicModel,
+      { maxTokens: 8000 },
+    );
+    return out?.settled ?? null;
+  }
+
   async polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null> {
     if (!suggestions.length) return [];
     const list = suggestions
@@ -1075,6 +1131,9 @@ export class HeuristicAgent implements Agent {
   }
 
   async polishAgenda(): Promise<AgendaPolishRow[] | null> {
+    return null;
+  }
+  async settleSpace(): Promise<SettleRow[] | null> {
     return null;
   }
   async mergeTopics(): Promise<Array<{ key: string; into: string }> | null> {

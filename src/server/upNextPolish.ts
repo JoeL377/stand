@@ -7,6 +7,7 @@
 import type { RoomState } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import type { Agent, AgendaDraftRow } from "./llm.ts";
+import { settleSpace } from "./spaceSettle.ts";
 import { applyPolish, computeUpNext, polishBasis } from "./upNext.ts";
 
 /** The suggested agenda as people see it: the plain ranking with Claude's last pass laid over it. */
@@ -47,6 +48,8 @@ export class UpNextPolisher {
     if (this.running.has(roomId)) return;
     const room = this.db.getRoom(roomId);
     if (!room) return;
+    // The space's decisions and open questions change at the same moments its agenda does.
+    await settleSpace(this.db, this.agent, roomId).catch((err) => console.error("[agent] settling decisions and questions failed:", err));
     const input = this.db.upNextInput(roomId, this.liveStart(roomId));
     const { suggestions } = computeUpNext(input).upNext;
     // Nothing new since the last pass: every suggestion was written from the same facts.

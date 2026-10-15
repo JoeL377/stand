@@ -550,9 +550,9 @@ export interface SpaceFeed {
   }>;
   /** What agents and people reported through the MCP, newest first. */
   updates: ItemUpdate[];
-  /** Decisions from the space's meetings, newest first. */
-  decided: Array<Note & { from?: NoteFrom }>;
-  /** Open questions from its latest meeting with notes. */
+  /** Decisions from the space's meetings, newest first, the ones a later decision replaced last. */
+  decided: Array<Note & { from?: NoteFrom; replacedBy?: { text: string; meetingId: string; startedAt: number } }>;
+  /** Open questions from all its meetings that no later decision answered, newest first. */
   open: Array<Note & { from?: NoteFrom }>;
 }
 

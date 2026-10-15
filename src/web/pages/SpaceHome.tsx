@@ -254,7 +254,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               )}
             </Card>
             <NoteCard title="Decided" tone="decided" notes={feed?.decided ?? []} room={room} empty="No decisions yet." />
-            <NoteCard title="Open" tone="question" notes={feed?.open ?? []} room={room} empty="No open questions from the last meeting." />
+            <NoteCard title="Open" tone="question" notes={feed?.open ?? []} room={room} empty="No open questions." />
             <Card
               title="Up next"
               count={agenda.length + suggested.length}
@@ -516,23 +516,42 @@ type Tone = "todo" | "decided" | "question";
 const TONE_ICON: Record<Tone, React.ReactNode> = { todo: <TodoIcon size={14} />, decided: <DecidedIcon size={14} />, question: <QuestionIcon size={14} /> };
 
 function NoteCard(props: { title: string; tone: "decided" | "question"; notes: SpaceFeed["decided"]; room: RoomInfo; empty: string }) {
+  // A decision a later one replaced stays, muted and last, so the change of mind is still on record.
+  const standing = props.notes.filter((n) => !n.replacedBy).length;
   return (
-    <Card title={props.title} tone={props.tone} count={props.notes.length} empty={props.empty}>
+    <Card title={props.title} tone={props.tone} count={standing} folded={props.notes.length - CARD_ROWS} empty={props.empty}>
       {(all) => (
         <ul className="sh-list">
           {(all ? props.notes : props.notes.slice(0, CARD_ROWS)).map((n) => (
-            <li key={n.id}>
+            <li key={n.id} className={n.replacedBy ? "replaced" : undefined}>
               {TONE_ICON[props.tone]}
               <span>
                 {n.text}
                 {n.quote && <QuoteMark quote={n.quote} />}
                 {n.from && <FromChip from={n.from} />}
+                {n.replacedBy && <ReplacedChip by={n.replacedBy} />}
               </span>
             </li>
           ))}
         </ul>
       )}
     </Card>
+  );
+}
+
+/** On a decision a later meeting reversed: what it was replaced with, and when. */
+function ReplacedChip({ by }: { by: NonNullable<SpaceFeed["decided"][number]["replacedBy"]> }) {
+  const day = new Date(by.startedAt).toLocaleDateString([], { month: "short", day: "numeric" });
+  return (
+    <span className="rc-pill-wrap">
+      <Link className="rc-pill sh-replaced" to={`/meetings/${by.meetingId}`} aria-label={`Replaced on ${day}: ${by.text}`}>
+        Replaced
+      </Link>
+      <span className="rc-pop" role="tooltip">
+        <span className="rc-pop-meta">Replaced on {fmtDate(by.startedAt)} by</span>
+        <span className="rc-pop-crux">{by.text}</span>
+      </span>
+    </span>
   );
 }
 

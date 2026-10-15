@@ -27,6 +27,7 @@ import type {
 import { newId } from "./ids.ts";
 import type { SnapRow } from "./snaps.ts";
 import type { Polish, UpNextInput } from "./upNext.ts";
+import type { Settled } from "./spaceSettle.ts";
 import { initGithub } from "./github.ts";
 import { initConxt, enqueueConxtMeeting } from "./conxt.ts";
 
@@ -193,6 +194,14 @@ CREATE INDEX IF NOT EXISTS snaps_item ON snaps(item_id, ts);
 CREATE TABLE IF NOT EXISTS upnext_polish (
   room_id TEXT PRIMARY KEY,
   at INTEGER NOT NULL,
+  rows_json TEXT NOT NULL
+);
+-- Claude's pass over a space's decisions and open questions across its meetings (spaceSettle.ts):
+-- which questions a later decision answered and which decisions a later one replaced, as JSON.
+CREATE TABLE IF NOT EXISTS space_settled (
+  room_id TEXT PRIMARY KEY,
+  at INTEGER NOT NULL,
+  basis TEXT NOT NULL,
   rows_json TEXT NOT NULL
 );
 -- The agent's grouping of an item's talk into discussions, one per question.
@@ -1463,6 +1472,15 @@ export function openDb(file?: string) {
     deleteJot(id: string) {
       db.prepare("DELETE FROM snaps WHERE jot_id = ?").run(id);
       db.prepare("DELETE FROM jots WHERE id = ?").run(id);
+    },
+    getSettled(roomId: string): Settled | null {
+      const r = db.prepare("SELECT at, basis, rows_json FROM space_settled WHERE room_id = ?").get(roomId) as Row | undefined;
+      return r ? { at: r.at as number, basis: r.basis as string, rows: JSON.parse(r.rows_json as string) } : null;
+    },
+    saveSettled(roomId: string, settled: Settled) {
+      db.prepare(
+        "INSERT INTO space_settled (room_id, at, basis, rows_json) VALUES (?, ?, ?, ?) ON CONFLICT (room_id) DO UPDATE SET at = excluded.at, basis = excluded.basis, rows_json = excluded.rows_json",
+      ).run(roomId, settled.at, settled.basis, JSON.stringify(settled.rows));
     },
     getPolish(roomId: string): Polish | null {
       const r = db.prepare("SELECT at, rows_json FROM upnext_polish WHERE room_id = ?").get(roomId) as Row | undefined;

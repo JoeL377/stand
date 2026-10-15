@@ -2039,3 +2039,5 @@ a.sh-pill:hover { text-decoration: none; }
 /* The space page's cards sit on the right edge: their chapter pop-ups open leftward. */
 .sh-side .rc-pop, .sh-side .qm-pop { left: auto; right: 0; }
 .sh-side .followups.one-line .rc-pill-wrap { margin-left: 6px; }
+.sh-card .sh-list li.replaced > span { color: var(--muted); }
+.sh-card .sh-list li.replaced svg { opacity: 0.5; }
