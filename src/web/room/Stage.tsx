@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import type { ClientMessage, Discussion, Item, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { ClientMessage, ConxtLive, Discussion, Item, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -278,6 +278,7 @@ export function Stage(props: {
       </div>
 
       <div className="screen" ref={screenRef}>
+        <div className="nudges">
         {/* A quiet nudge for the host only: their click is what moves the meeting. */}
         {canSteer && !props.ending && suggested && state.suggestion && (
           <div className="nudge" role="status" title={state.suggestion.reason}>
@@ -310,6 +311,8 @@ export function Stage(props: {
             </button>
           </div>
         )}
+        {!props.ending && <ConxtNudges cards={state.conxt ?? []} me={props.participantId} offline={props.offline} send={send} />}
+        </div>
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
         {cropSnap && (
           <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
@@ -575,5 +578,52 @@ function RemoteVideo({ screen, label }: { screen: RemoteScreen; label: string })
       <video ref={ref} autoPlay muted playsInline />
       <figcaption>{label}</figcaption>
     </figure>
+  );
+}
+
+/** What the connected Conxt project raises while these people are here: a decision
+ *  waiting on someone in the room, which only they can confirm, and a word people
+ *  use two ways that was just said again. Hiding one is yours alone. */
+function ConxtNudges(props: { cards: ConxtLive[]; me: string; offline?: boolean; send: (m: ClientMessage) => boolean }) {
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  useEffect(() => {
+    if (!confirming) return;
+    const t = setTimeout(() => setConfirming(null), 8000);
+    return () => clearTimeout(t);
+  }, [confirming]);
+  const cards = props.cards.filter((c) => !hidden.includes(c.id));
+  if (!cards.length) return null;
+  return (
+    <>
+      {cards.map((c) => {
+        const mine = c.here.some((p) => p.participantId === props.me);
+        const who = mine ? "you" : c.here.map((p) => p.name).join(" and ");
+        return (
+          <div key={c.id} className="nudge conxt" role="status" title={c.why}>
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>
+            <span className="nudge-text">
+              {c.kind === "confirmation" ? `Conxt: waiting on ${who} · ` : `Conxt: “${c.term}” is used two ways · `}
+              <strong>{c.title}</strong>
+            </span>
+            {c.kind === "confirmation" && mine && (
+              <button
+                className="link"
+                disabled={props.offline || confirming === c.id}
+                title={props.offline ? "You can confirm once Stand reconnects" : "Agree to this decision in Conxt, as yourself"}
+                onClick={() => props.send({ type: "conxt.confirm", itemId: c.id }) && setConfirming(c.id)}
+              >
+                {confirming === c.id ? "Confirming…" : "Confirm"}
+              </button>
+            )}
+            <button className="link muted" onClick={() => setHidden((h) => [...h, c.id])} aria-label="Hide">
+              ✕
+            </button>
+          </div>
+        );
+      })}
+    </>
   );
 }

@@ -9,6 +9,7 @@ import express from "express";
 import { openDb, type DB } from "./db.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
 import { ConxtDelivery, conxtRoutes, parseDestinations, type ConxtDestination } from "./conxt.ts";
+import { linkAgendaLine } from "./conxtOpenItems.ts";
 import { requireUser } from "./auth.ts";
 
 const integration = "2198de80-af06-4b54-90e3-5f4232c43e93";
@@ -252,5 +253,24 @@ test("finalized synthesis carries exact discussion evidence and holds tasks and 
   assert.deepEqual(payload.members ?? [], members);
   db.endMeeting(meeting.id, "Changed summary");
   assert.equal(db.raw.prepare("SELECT payload FROM conxt_deliveries WHERE meeting_id=?").get(meeting.id)!.payload, row.payload);
+  db.raw.close();
+});
+
+test("what is said under an agenda line raised from Conxt goes back as discussing that item", () => {
+  const { db, owner, room } = setup();
+  connect(db, room.id, owner.id);
+  const [line, other] = db.addItems(room.id, [
+    { source: "agenda", externalId: null, title: "Build Stand and Conxt together.", url: null, description: "From Conxt" },
+    { source: "agenda", externalId: null, title: "Hiring", url: null, description: null },
+  ]);
+  linkAgendaLine(db.raw, room.id, line.id, { kind: "confirmation", id: "c1", title: line.title, why: "w", needs: [], path: null, at: null, contentHash: null, term: null });
+  linkAgendaLine(db.raw, room.id, other.id, { kind: "question", id: "q1", title: other.title, why: "w", needs: [], path: null, at: null, contentHash: null, term: null });
+  const meeting = db.startMeeting(room.id);
+  const a = db.addSegment({ meetingId: meeting.id, itemId: line.id, speakerId: "a", speakerName: "Alice", kind: "speech", text: "Joe, are you good with this?", ts: meeting.startedAt });
+  const b = db.addSegment({ meetingId: meeting.id, itemId: line.id, speakerId: "b", speakerName: "Joe", kind: "speech", text: "Yes, build them together.", ts: meeting.startedAt + 1 });
+  db.addSegment({ meetingId: meeting.id, itemId: null, speakerId: "a", speakerName: "Alice", kind: "speech", text: "Anything else?", ts: meeting.startedAt + 2 });
+  db.endMeeting(meeting.id, "Joe agreed.");
+  const payload = JSON.parse(db.raw.prepare("SELECT payload FROM conxt_deliveries WHERE meeting_id=?").get(meeting.id)!.payload as string);
+  assert.deepEqual(payload.addresses, [{ open_item_id: "c1", kind: "confirmation", turn_ids: [a.id, b.id] }]);
   db.raw.close();
 });

@@ -4,6 +4,7 @@
 // refreshed in the background and cached: the agenda never waits on Conxt, and
 // no connection or Conxt being down leaves it as it was.
 import type { DatabaseSync } from "node:sqlite";
+import type { ConxtLive } from "../shared/protocol.ts";
 import type { ConxtDestination } from "./conxt.ts";
 
 export interface ConxtOpenItem {
@@ -14,10 +15,16 @@ export interface ConxtOpenItem {
   needs: Array<{ id: string; name: string }>;
   path: string | null;
   at: string | null;
+  /** The decision as it was when it waited on these people; a confirmation sends it back. */
+  contentHash: string | null;
+  /** The word used two ways, for a divergence. */
+  term: string | null;
 }
 
 const TTL_MS = 2 * 60_000;
 const MAX_ITEMS = 20;
+/** Cards on the live panel at once. */
+const MAX_LIVE = 3;
 const KINDS = new Set(["confirmation", "conflict", "divergence", "question"]);
 
 /** The integration's open-items URL beside its source submission URL. */
@@ -44,7 +51,11 @@ function parse(body: unknown): ConxtOpenItem[] {
           return nid && name ? [{ id: nid, name }] : [];
         })
       : [];
-    out.push({ kind: i.kind as ConxtOpenItem["kind"], id, title, why, needs, path: text(i.path, 300), at: text(i.at, 64) });
+    const hash = typeof i.content_hash === "string" && /^[0-9a-f]{64}$/.test(i.content_hash) ? i.content_hash : null;
+    out.push({
+      kind: i.kind as ConxtOpenItem["kind"], id, title, why, needs, path: text(i.path, 300), at: text(i.at, 64),
+      contentHash: hash, term: i.kind === "divergence" ? text(i.term, 80) : null,
+    });
     if (out.length >= MAX_ITEMS) break;
   }
   return out;
@@ -102,9 +113,96 @@ export class ConxtOpenItems {
     this.inflight.set(d.submissionUrl, job);
     return job;
   }
+
+  /** Confirms a decision for a person signed in here, as one of the people it waits on.
+   *  Conxt checks they are; the list is fetched again either way. */
+  async confirm(roomId: string, itemId: string, person: string): Promise<{ ok: true } | { ok: false; why: string }> {
+    const d = this.destination(roomId);
+    const item = this.cached(roomId).find((i) => i.id === itemId && i.kind === "confirmation");
+    const base = d && openItemsUrl(d.submissionUrl);
+    if (!d || !base || !item?.contentHash) return { ok: false, why: "this decision isn't waiting on anyone now" };
+    try {
+      const r = await this.send(`${base}/${encodeURIComponent(item.id)}/confirm`, {
+        method: "POST", redirect: "error", signal: AbortSignal.timeout(5000),
+        headers: { Authorization: `Bearer ${d.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ person, content_hash: item.contentHash }),
+      });
+      if (r.ok) return { ok: true };
+      return { ok: false, why: r.status === 409 ? "it changed or doesn't wait on you" : `Conxt returned HTTP ${r.status}` };
+    } catch {
+      return { ok: false, why: "Conxt didn't answer" };
+    } finally {
+      this.cache.delete(d.submissionUrl);
+      void this.refresh(roomId);
+    }
+  }
+}
+
+/** Conxt items worth raising while people talk: a decision waiting on someone who
+ *  is here now, and a word used two ways that was just said again. */
+export function liveCards(
+  items: ConxtOpenItem[],
+  here: Array<{ participantId: string; name: string; email: string | null }>,
+  said: ReadonlySet<string>,
+): ConxtLive[] {
+  const out: ConxtLive[] = [];
+  for (const i of items) {
+    if (i.kind === "confirmation" && i.contentHash) {
+      const waits = new Set(i.needs.map((n) => n.id.toLowerCase()));
+      const present = here.filter((p) => p.email && waits.has(p.email.toLowerCase())).map(({ participantId, name }) => ({ participantId, name }));
+      if (present.length) out.push({ kind: "confirmation", id: i.id, title: i.title, why: i.why, here: present, term: null });
+    } else if (i.kind === "divergence" && i.term && said.has(i.id)) {
+      out.push({ kind: "divergence", id: i.id, title: i.title, why: i.why, here: [], term: i.term });
+    }
+    if (out.length >= MAX_LIVE) break;
+  }
+  return out;
+}
+
+/** The divergences whose word this remark says, matched as a whole word. */
+export function saysTerm(items: ConxtOpenItem[], remark: string): string[] {
+  const lower = remark.toLowerCase();
+  return items.filter((i) => {
+    if (i.kind !== "divergence" || !i.term) return false;
+    const t = i.term.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^\\p{L}\\p{N}])${t}($|[^\\p{L}\\p{N}])`, "u").test(lower);
+  }).map((i) => i.id);
+}
+
+// ---- agenda lines raised from Conxt ------------------------------------------
+// An agenda line added from a Conxt item remembers it, so what the meeting says
+// under that line goes back to Conxt as discussing it.
+
+export function initConxtAgendaLinks(sql: DatabaseSync) {
+  sql.exec(`CREATE TABLE IF NOT EXISTS conxt_agenda_links (
+    item_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, open_item_id TEXT NOT NULL,
+    kind TEXT NOT NULL, created_at INTEGER NOT NULL
+  )`);
+}
+
+export function linkAgendaLine(sql: DatabaseSync, roomId: string, itemId: string, item: ConxtOpenItem) {
+  sql.prepare("INSERT OR REPLACE INTO conxt_agenda_links VALUES (?,?,?,?,?)").run(itemId, roomId, item.id, item.kind, Date.now());
+}
+
+/** For a meeting's delivery: each Conxt item an agenda line came from, with the
+ *  remarks filed under that line. Lines nobody spoke under are left out. */
+export function meetingAddresses(sql: DatabaseSync, meetingId: string, roomId: string) {
+  const rows = sql.prepare(`SELECT l.open_item_id, l.kind, s.id AS turn_id FROM conxt_agenda_links l
+    JOIN segments s ON s.item_id=l.item_id AND s.meeting_id=?
+    WHERE l.room_id=? ORDER BY l.created_at, s.ts, s.rowid`).all(meetingId, roomId) as Array<{ open_item_id: string; kind: string; turn_id: string }>;
+  const by = new Map<string, { open_item_id: string; kind: string; turn_ids: string[] }>();
+  for (const r of rows) {
+    const a = by.get(r.open_item_id) ?? { open_item_id: r.open_item_id, kind: r.kind, turn_ids: [] };
+    if (a.turn_ids.length < 500) a.turn_ids.push(r.turn_id);
+    by.set(r.open_item_id, a);
+  }
+  return [...by.values()].filter((a) => KINDS.has(a.kind)).slice(0, 100);
 }
 
 let shared: ConxtOpenItems | null = null;
 export function setConxtOpenItems(o: ConxtOpenItems | null) { shared = o; }
 export function roomOpenItems(roomId: string): ConxtOpenItem[] { return shared?.cached(roomId) ?? []; }
+export function confirmRoomOpenItem(roomId: string, itemId: string, person: string) {
+  return shared ? shared.confirm(roomId, itemId, person) : Promise.resolve({ ok: false as const, why: "this space isn't connected to Conxt" });
+}
 export function refreshRoomOpenItems(roomId: string): Promise<ConxtOpenItem[]> { return shared?.refresh(roomId) ?? Promise.resolve([]); }

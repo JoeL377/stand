@@ -93,7 +93,8 @@ function session(roomId: string): RoomSession | null {
   sessions.set(roomId, s);
   // Warm the Conxt vocabulary before anyone speaks; the meeting never waits on it.
   refreshRoomVocabulary(roomId);
-  void refreshRoomOpenItems(roomId);
+  // Conxt's open items too; once they arrive, the people here see what waits on them.
+  void refreshRoomOpenItems(roomId).then((items) => items.length && s.upNextChanged());
   if (resume) console.log(`[room] ${roomId}: picked up meeting ${resume.id} after a restart`);
   // It was being written up when the server stopped: finish that, with everyone watching.
   if (resume?.endRequestedAt) void s.end();

@@ -1,6 +1,7 @@
 // Shared transcripts travel through a durable SQLite outbox; credentials stay in env.
 import { initConxtDefault, inheritAppDefault } from "./conxtDefault.ts";
 import { initConxtLive } from "./conxtLive.ts";
+import { initConxtAgendaLinks, meetingAddresses } from "./conxtOpenItems.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import express, { type Request } from "express";
@@ -62,6 +63,7 @@ export function initConxt(sql: DatabaseSync) {
   `);
   sql.prepare("INSERT OR IGNORE INTO conxt_settings VALUES ('instance_id', ?)").run(randomUUID());
   initConxtLive(sql);
+  initConxtAgendaLinks(sql);
   initConxtDefault(sql);
 }
 
@@ -121,6 +123,9 @@ export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
     turns, synthesis: { version: 1, summary: row.summary, narrative: row.synthesis, items },
   };
   if (members.length) body.members = members;
+  // Agenda lines raised from Conxt items: what was said under each goes back to that item.
+  const addresses = meetingAddresses(sql, meetingId, row.room_id as string);
+  if (addresses.length) body.addresses = addresses;
   if (config.publicUrl) {
     try {
       const url = new URL(`/meetings/${encodeURIComponent(meetingId)}`, config.publicUrl);

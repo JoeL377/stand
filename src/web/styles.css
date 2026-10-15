@@ -459,12 +459,23 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 .person-action { font-size: 11px; }
 .focus-desc { max-height: 40vh; overflow-y: auto; text-align: left; }
 /* Floats over the top of the screen, so the slide or shared screen under it doesn't move. */
-.nudge {
+/* Nudges stack in the top left corner of the middle screen. */
+.nudges {
   position: absolute;
   top: 10px;
   left: 10px;
   z-index: 6;
   max-width: calc(100% - 68px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+}
+.nudges:empty { display: none; }
+.nudge {
+  pointer-events: auto;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -476,7 +487,7 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 }
 @starting-style { .nudge { opacity: 0; transform: translateY(-6px); } }
 /* The latest snap sits in the top right corner: the nudge stops short of it. */
-.screen:has(.stage-snap) .nudge { max-width: calc(100% - 320px); }
+.screen:has(.stage-snap) .nudges { max-width: calc(100% - 320px); }
 .nudge .agent-mark { font-size: 14px; }
 .nudge-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

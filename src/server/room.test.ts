@@ -11,6 +11,7 @@ import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
 import { outlineToSlides } from "../shared/outline.ts";
 import { config } from "./config.ts";
+import { ConxtOpenItems, refreshRoomOpenItems, setConxtOpenItems } from "./conxtOpenItems.ts";
 
 function setup() {
   const db = openDb(":memory:");
@@ -943,4 +944,35 @@ test("a line a notes run leaves out stays in its topic, and a topic left out who
     db.meetingDiscussions(session.meetingId).map((d) => d.topic),
     ["Pricing for teams", "Lunch"],
   );
+});
+
+test("a Conxt decision waiting on someone shows while they're here, and only they can confirm it", async () => {
+  const { db, session } = setup();
+  const owner = db.upsertUser({ googleSub: null, email: "huy@example.com", name: "Huy", picture: null });
+  const d = { key: "p", label: "P", token: "t", submissionUrl: "https://conxt.test/api/v1/integrations/i1/sources" };
+  db.raw.prepare("INSERT INTO conxt_connections VALUES ('k',?,?,?,?,?,?,1)").run(session.roomId, d.key, d.submissionUrl, d.label, owner.id, Date.now());
+  const item = { kind: "confirmation", id: "c1", title: "Build Stand and Conxt together.", why: "Decided while Joe was away",
+    needs: [{ id: "joe@example.com", name: "Joe" }], path: null, at: null, content_hash: "b".repeat(64) };
+  const posted: string[] = [];
+  let waiting = true;
+  setConxtOpenItems(new ConxtOpenItems(db.raw, [d], (async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") { posted.push(init.body as string); waiting = false; return { ok: true, json: async () => ({}) }; }
+    return { ok: true, json: async () => ({ items: waiting ? [item] : [] }) };
+  }) as unknown as typeof fetch));
+  try {
+    await refreshRoomOpenItems(session.roomId);
+    const huy = await join(session, { id: owner.id, name: "Huy", email: "huy@example.com" } as User);
+    assert.deepEqual(session.state().conxt, []);
+    const joe = await join(session, { id: "u-joe", name: "Joe", email: "Joe@example.com" } as User);
+    assert.deepEqual(session.state().conxt?.map((c) => c.here), [[{ participantId: "u-joe", name: "Joe" }]]);
+    await say(huy, { type: "conxt.confirm", itemId: "c1" });
+    assert.equal(posted.length, 0);
+    assert.ok(huy.got.some((m) => m.type === "error"));
+    await say(joe, { type: "conxt.confirm", itemId: "c1" });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(posted.map((b) => JSON.parse(b)), [{ person: "joe@example.com", content_hash: "b".repeat(64) }]);
+    assert.deepEqual(session.state().conxt, []);
+  } finally {
+    setConxtOpenItems(null);
+  }
 });

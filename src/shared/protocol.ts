@@ -405,6 +405,21 @@ export interface RoomState {
   capabilities: Capabilities;
   /** The host pressed End meeting and the recap is being written. */
   ending?: boolean;
+  /** From the connected Conxt project: what to raise while these people are here. */
+  conxt?: ConxtLive[];
+}
+
+/** A Conxt item on the live panel. A confirmation shows while someone it waits on
+ *  is in the meeting, and only they can confirm it; a divergence shows once its
+ *  word is said again. */
+export interface ConxtLive {
+  kind: "confirmation" | "divergence";
+  id: string;
+  title: string;
+  why: string;
+  /** For a confirmation, the people it waits on who are here now. */
+  here: Array<{ participantId: string; name: string }>;
+  term: string | null;
 }
 
 /** What a client asks of the room. Messages that change something carry a
@@ -426,6 +441,8 @@ export type ClientMessage = (
   | { type: "upnext.dismiss"; key: string }
   /** Host: Undo for a dismissed suggestion or a deleted note, within a minute. */
   | { type: "upnext.undismiss"; key: string }
+  /** The signed-in person confirms a Conxt decision that waits on them. */
+  | { type: "conxt.confirm"; itemId: string }
   | { type: "note.restore"; noteId: string }
   | { type: "suggestion.dismiss" }
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */

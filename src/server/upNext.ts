@@ -5,7 +5,7 @@
 
 import type { ItemUpdate, Note, UpNext, UpNextSuggestion } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
-import { type ConxtOpenItem, roomOpenItems } from "./conxtOpenItems.ts";
+import { type ConxtOpenItem, linkAgendaLine, roomOpenItems } from "./conxtOpenItems.ts";
 
 export interface UpNextInput {
   now: number;
@@ -370,7 +370,10 @@ function addOne(db: DB, roomId: string, key: string, meeting: { id: string }): s
     const c = roomOpenItems(roomId).find((i) => i.id === id);
     if (!c) return null;
     const title = c.title.length > 140 ? `${c.title.slice(0, 139)}…` : c.title;
-    return newAgendaLine(db, roomId, title, `From Conxt: ${c.why}`);
+    const created = newAgendaLine(db, roomId, title, `From Conxt: ${c.why}`);
+    // What is said under this line goes back to Conxt as discussing the item.
+    if (created) linkAgendaLine(db.raw, roomId, created, c);
+    return created;
   }
   if (kind !== "note") return null;
   const note = db.getNote(id);
