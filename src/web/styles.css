@@ -2079,3 +2079,34 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .sh-count.todo svg { color: var(--accent); }
 .sh-count.question svg { color: var(--warn); }
 .sh-count.decided svg { color: var(--ok); }
+
+/* The sidebar folds to a rail of icons (Command + B); on phones it's the top bar either way. */
+.sp-side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sp-side-fold { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--muted); cursor: pointer; }
+.sp-side-fold:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.sp-side-initial { display: none; }
+.sp-side { transition: width 0.15s ease, padding 0.15s ease; }
+@media (min-width: 761px) {
+  .sp-shell.collapsed .sp-side { width: 60px; padding: 16px 10px; align-items: center; }
+  .sp-shell.collapsed .sp-side-text,
+  .sp-shell.collapsed .sp-side-label,
+  .sp-shell.collapsed .sp-side-name,
+  .sp-shell.collapsed .sp-side-join,
+  .sp-shell.collapsed .sp-side-user .user-name,
+  .sp-shell.collapsed .sp-side-user .link { display: none; }
+  .sp-shell.collapsed .sp-side-head { flex-direction: column; gap: 10px; }
+  .sp-shell.collapsed .sp-side-brand { padding: 4px; }
+  .sp-shell.collapsed .sp-side-new { width: 36px; padding: 0; }
+  .sp-shell.collapsed .sp-side-nav a { justify-content: center; width: 36px; padding: 8px 0; }
+  .sp-shell.collapsed .sp-side-list { align-items: center; gap: 4px; padding-top: 6px; border-top: 1px solid var(--line); width: 100%; }
+  .sp-shell.collapsed .sp-side-row .sp-side-space { position: relative; justify-content: center; width: 36px; height: 32px; padding: 0; }
+  .sp-shell.collapsed .sp-side-initial { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; background: var(--hover); font-size: 12px; font-weight: 600; color: var(--text); }
+  .sp-shell.collapsed .sp-side-dot { position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; box-shadow: 0 0 0 2px var(--panel-2); }
+  .sp-shell.collapsed .sp-side-dot:not(.live) { display: none; }
+  .sp-shell.collapsed .sp-side-user { padding: 12px 0 0; width: 100%; }
+  .sp-shell.collapsed .sp-side-user .user-menu { justify-content: center; }
+}
+@media (max-width: 760px) {
+  .sp-side-fold { display: none; }
+  .sp-side-head { order: 1; }
+}
