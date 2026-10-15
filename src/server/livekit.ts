@@ -108,7 +108,7 @@ function recognizerFactory(keyterms: string[] = []): () => Recognizer {
     initializeLogger({ pretty: false, level: "warn" });
     loggerReady = true;
   }
-  return () => new LiveKitInferenceRecognizer();
+  return () => new LiveKitInferenceRecognizer(keyterms);
 }
 
 /** One person's mic → one speech-to-text stream. */
@@ -235,13 +235,16 @@ class LiveKitInferenceRecognizer implements Recognizer {
   private stream: stt.SpeechStream;
   private closed = false;
 
-  constructor() {
+  constructor(keyterms: string[] = []) {
     const model = new inference.STT({
       model: config.sttModel as never,
       language: "en",
       sampleRate: SAMPLE_RATE,
       apiKey: config.livekit.apiKey,
       apiSecret: config.livekit.apiSecret,
+      // The Conxt glossary's words, through LiveKit's own Deepgram (up to 100 terms):
+      // no separate Deepgram account needed.
+      ...(keyterms.length ? { modelOptions: { keyterm: keyterms.slice(0, 100) } as never } : {}),
     });
     this.stream = model.stream();
     void this.read();
