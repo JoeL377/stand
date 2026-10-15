@@ -8,6 +8,7 @@ import type { SpaceFeed } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
 import { newId } from "./ids.ts";
+import { withFrom } from "./noteFrom.ts";
 import { linkSnaps, saveSnapFile } from "./snaps.ts";
 
 /** What the feed shows of the space's history. */
@@ -149,7 +150,7 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
     jots: db.spaceJots(roomId, 0, FEED_CAPTURES).map((j) => ({ ...j, snaps: linkSnaps(db.jotSnaps(j.id), [], [], baseUrl) })),
     meetings,
     updates: db.roomUpdates(roomId, 0, FEED_UPDATES),
-    decided: db.spaceNotes(roomId, "decision", 20),
-    open: latest ? db.meetingNotes(latest.id).filter((n) => n.kind === "question") : [],
+    decided: withFrom(db, db.spaceNotes(roomId, "decision", 20)),
+    open: withFrom(db, latest ? db.meetingNotes(latest.id).filter((n) => n.kind === "question") : []),
   };
 }

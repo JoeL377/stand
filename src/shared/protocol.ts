@@ -257,6 +257,27 @@ export interface AgentToken {
  *  checks it off. It stays linked to the task, ticket or slide it came from. */
 export interface FollowUp extends Note {
   meetingStartedAt: number;
+  /** Space page only: the meeting and chapter it came out of. */
+  from?: NoteFrom;
+}
+
+/** Where a to-do, decision or question came from, for a page that shows several meetings at
+ *  once: the meeting, and the chapter of it the recap files it under. */
+export interface NoteFrom {
+  meetingId: string;
+  /** When the meeting started. */
+  startedAt: number;
+  chapter: {
+    /** Its place in the recap's chapter list, for the link (chapterAnchor). */
+    i: number;
+    title: string;
+    /** When talk turned to it. */
+    at: number;
+    minutes: number;
+    outcome: DiscussionOutcome;
+    /** The recap's ✦ line about it, when it has one. */
+    crux: string | null;
+  } | null;
 }
 
 /** One thing the agent proposes for the agenda, with why. Nothing joins the
@@ -530,9 +551,9 @@ export interface SpaceFeed {
   /** What agents and people reported through the MCP, newest first. */
   updates: ItemUpdate[];
   /** Decisions from the space's meetings, newest first. */
-  decided: Note[];
+  decided: Array<Note & { from?: NoteFrom }>;
   /** Open questions from its latest meeting with notes. */
-  open: Note[];
+  open: Array<Note & { from?: NoteFrom }>;
 }
 
 export interface SpaceSummary {

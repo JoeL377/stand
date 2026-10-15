@@ -13,6 +13,7 @@ import { handleMcp } from "./mcp.ts";
 import { oauthRoutes } from "./oauth.ts";
 import { capabilities, config } from "./config.ts";
 import { type DB, type OpenMeeting, openDb } from "./db.ts";
+import { withFrom } from "./noteFrom.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "./brief.ts";
 import {
   MAX_DECK_BYTES,
@@ -716,7 +717,7 @@ app.get(
       items: db.listItems(room.id),
       decks: db.listDecks(room.id),
       meetings: db.listMeetings(room.id),
-      followUps: db.roomFollowUps(room.id).filter((f) => !f.doneAt),
+      followUps: withFrom(db, db.roomFollowUps(room.id).filter((f) => !f.doneAt)),
       liveMeetingId: live && !live.ended ? live.meetingId : null,
       // Who is in the call now, for the lobby's avatars.
       people: live && !live.ended ? live.state().participants.map(({ name, picture }) => ({ name, picture })) : [],

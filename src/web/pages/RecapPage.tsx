@@ -39,6 +39,13 @@ export function RecapPage() {
       })
       .catch((e) => setError(e.message));
   }, [meetingId, attempt]);
+  // Arriving from a chapter pill elsewhere (the space page): open that chapter and go to it.
+  useEffect(() => {
+    if (!data || !location.hash.startsWith("#chapter-")) return;
+    const el = document.getElementById(location.hash.slice(1));
+    if (el instanceof HTMLDetailsElement) el.open = true;
+    el?.scrollIntoView({ block: "start" });
+  }, [data]);
 
   if (error)
     return (

@@ -5,17 +5,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ItemUpdate, Jot, Note, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ItemUpdate, Jot, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
-import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
+import { FollowUpList, itemHref, saveFollowUp } from "../FollowUps.tsx";
+import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
 import { CameraIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
-import { fmtDate, fmtTime } from "../util.ts";
+import { colorFor, fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { SynthesisLine } from "../Synthesis.tsx";
@@ -126,6 +127,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     if (row) row.open++;
   }
   const suggested = upNext?.suggestions ?? [];
+  // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
+  const fromOf = new Map(room.followUps.flatMap((f) => (f.from ? [[f.id, f.from] as const] : [])));
 
   const entries: Entry[] = feed
     ? [
@@ -234,9 +237,19 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               {(all) => (
                 <FollowUpList
                   compact
+                  oneLine
                   notes={all ? room.followUps : room.followUps.slice(0, CARD_ROWS)}
                   onToggle={saveFollowUp(room.id)}
-                  source={(n) => ({ label: sourceLabel(n.itemId, room.items, room.decks), href: itemHref(n.itemId, room.items) })}
+                  after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
+                  tail={(n) =>
+                    n.owner ? (
+                      <Face name={n.owner} color={colorFor(n.owner)} />
+                    ) : (
+                      <span className="rc-face none" title="Unassigned">
+                        ?
+                      </span>
+                    )
+                  }
                 />
               )}
             </Card>
@@ -502,7 +515,7 @@ function Card(props: {
 type Tone = "todo" | "decided" | "question";
 const TONE_ICON: Record<Tone, React.ReactNode> = { todo: <TodoIcon size={14} />, decided: <DecidedIcon size={14} />, question: <QuestionIcon size={14} /> };
 
-function NoteCard(props: { title: string; tone: "decided" | "question"; notes: Note[]; room: RoomInfo; empty: string }) {
+function NoteCard(props: { title: string; tone: "decided" | "question"; notes: SpaceFeed["decided"]; room: RoomInfo; empty: string }) {
   return (
     <Card title={props.title} tone={props.tone} count={props.notes.length} empty={props.empty}>
       {(all) => (
@@ -510,7 +523,11 @@ function NoteCard(props: { title: string; tone: "decided" | "question"; notes: N
           {(all ? props.notes : props.notes.slice(0, CARD_ROWS)).map((n) => (
             <li key={n.id}>
               {TONE_ICON[props.tone]}
-              <span>{n.text}</span>
+              <span>
+                {n.text}
+                {n.quote && <QuoteMark quote={n.quote} />}
+                {n.from && <FromChip from={n.from} />}
+              </span>
             </li>
           ))}
         </ul>
