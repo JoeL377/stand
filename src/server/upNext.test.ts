@@ -263,8 +263,8 @@ test("snaps saved to the space since the last meeting are suggested, unless thei
 test("Conxt's open items join the agenda as needing people, and can be dismissed", () => {
   const conxt = [
     { kind: "confirmation" as const, id: "c1", title: "Build Stand and Conxt together.", why: "Decided while Joe Liang was away",
-      needs: [{ id: "joe@example.com", name: "Joe Liang" }], path: "/ingestions/r1", at: null },
-    { kind: "question" as const, id: "q1", title: "Who reviews in a shared queue?", why: "Asked and not yet answered", needs: [], path: null, at: null },
+      needs: [{ id: "joe@example.com", name: "Joe Liang" }], path: "/ingestions/r1", at: null, contentHash: null, term: null },
+    { kind: "question" as const, id: "q1", title: "Who reviews in a shared queue?", why: "Asked and not yet answered", needs: [], path: null, at: null, contentHash: null, term: null },
   ];
   const { upNext } = computeUpNext(base({ conxt }));
   const c1 = upNext.suggestions.find((s) => s.key === "conxt:c1")!;

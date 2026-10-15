@@ -606,6 +606,7 @@ const REFUSED: Partial<Record<string, string>> = {
   "upnext.addAll": "couldn't add the suggestions yet",
   "upnext.dismiss": "couldn't dismiss the suggestion yet",
   "upnext.undismiss": "couldn't undo yet",
+  "conxt.confirm": "confirming waits for the connection",
   "host.give": "handing over hosting waits for the connection",
   "stage.snap.close": "couldn't take the snap down yet",
   "meeting.end": "ending the meeting waits for the connection",
