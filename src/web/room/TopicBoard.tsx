@@ -18,6 +18,8 @@ const OUTCOME: Record<DiscussionOutcome, string> = { open: "Open", action: "To d
 const NOW_MS = 120_000;
 const MAX_POSITIONS = 3;
 const MAX_NOTES = 4;
+/** Remarks the middle shows before the first topic. */
+const WARMUP_REMARKS = 4;
 const PEEK_NOTES = 3;
 /** Topics placed inside a chapter that its peek lists, with a note or two each. */
 const PEEK_TOPICS = 3;
@@ -135,6 +137,9 @@ export function TopicBoard(props: {
   const shown = peeked && peekable(peeked) ? peeked : null;
   const speaking = live ? Object.values(props.interims).find((i) => i.text.trim()) : undefined;
   const lastTurn = current?.turns.at(-1);
+  // Before the notes have a first topic for the item in focus, the middle shows the talk so far.
+  const talkSoFar = current ? [] : props.segments.filter((s) => s.itemId === props.focusItemId).sort((a, b) => a.ts - b.ts).slice(-WARMUP_REMARKS);
+  const speakingNow = current ? undefined : Object.values(props.interims).find((i) => i.text.trim());
   const item = props.focusItem;
 
   return (
@@ -150,6 +155,12 @@ export function TopicBoard(props: {
           arrival={arrival}
           remark={speaking ? { name: speaking.speakerName, id: speaking.speakerId, text: speaking.text, now: true } : lastTurn && { name: lastTurn.speakerName, id: idOf(lastTurn.speakerName), text: lastTurn.text, now: false }}
           idOf={idOf}
+        />
+      ) : talkSoFar.length || speakingNow ? (
+        <Warmup
+          remarks={talkSoFar.map((s) => ({ key: s.id, name: s.speakerName, id: idOf(s.speakerName), text: s.text, now: false }))}
+          speaking={speakingNow && { key: "now", name: speakingNow.speakerName, id: speakingNow.speakerId, text: speakingNow.text, now: true }}
+          updating={props.updating}
         />
       ) : (
         <div className="topic-waiting">
@@ -296,6 +307,36 @@ function Current(props: {
           </span>
         </p>
       )}
+    </section>
+  );
+}
+
+/** The middle before the first topic: the latest remarks on the item in focus (named above the board), while the notes
+ *  work out what's being talked about. */
+function Warmup(props: {
+  remarks: Array<{ key: string; name: string; id: string; text: string; now: boolean }>;
+  speaking: { key: string; name: string; id: string; text: string; now: boolean } | undefined | false;
+  updating: boolean;
+}) {
+  const rows = props.speaking ? [...props.remarks.slice(1 - WARMUP_REMARKS), props.speaking] : props.remarks;
+  return (
+    <section className={props.updating ? "topic-now topic-warmup updating" : "topic-now topic-warmup"} aria-label="Talk so far" aria-busy={props.updating}>
+      <div className="topic-now-head">
+        <span className="topic-now-label live">Now</span>
+      </div>
+      <div className="topic-warmup-talk">
+        {rows.map((r) => (
+          <p key={r.key} className={r.now ? "topic-remark now" : "topic-remark"}>
+            <Dot id={r.id} name={r.name} size={20} />
+            <span className="topic-remark-text">
+              <strong>{first(r.name)}</strong> · {r.text}
+            </span>
+          </p>
+        ))}
+      </div>
+      <p className={props.updating ? "topic-hint updating" : "topic-hint"}>
+        <span className="agent-mark small">✦</span> Working out the first topic
+      </p>
     </section>
   );
 }
