@@ -10,7 +10,7 @@ import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, itemHref, saveFollowUp } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
-import { CameraIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { CameraIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
@@ -263,12 +263,15 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             <>
               {room.followUps.length ? <TodoList room={room} notes={room.followUps} fromOf={fromOf} /> : <p className="sh-card-empty">No open to-dos.</p>}
               {done.length > 0 && (
-                <>
-                  <button className="sh-more sh-done-toggle" aria-expanded={showDone} onClick={() => setShowDone((v) => !v)}>
-                    {showDone ? "Hide done" : `${done.length} done`}
+                <div className={showDone ? "sh-done open" : "sh-done"}>
+                  <button className="sh-done-toggle" aria-expanded={showDone} onClick={() => setShowDone((v) => !v)}>
+                    <ChevronIcon />
+                    <DoneIcon />
+                    Done
+                    <span className="count">{done.length}</span>
                   </button>
                   {showDone && <TodoList room={room} notes={done} fromOf={fromOf} />}
-                </>
+                </div>
               )}
             </>
           )}
@@ -518,6 +521,14 @@ function TodoList(props: { room: RoomInfo; notes: RoomInfo["followUps"]; fromOf:
     />
   );
 }
+
+/** A checked box, as a finished to-do shows. */
+const DoneIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden>
+    <rect x="0.75" y="0.75" width="12.5" height="12.5" rx="3.5" fill="currentColor" />
+    <path d="M3.8 7.2 6 9.3l4.2-4.6" fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 type TabKey = "meetings" | "todo" | "questions" | "decisions" | "next";
 /** The space's tabs, in the order people look at them. */
