@@ -111,7 +111,7 @@ export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
   // Everyone who has joined the space has a say; an absent member keeps a decision from settling.
   const members = (sql.prepare(`SELECT COALESCE(LOWER(u.email), m.user_id) AS person FROM room_members m
     LEFT JOIN users u ON u.id=m.user_id WHERE m.room_id=? ORDER BY person`)
-    .all(row.room_id) as Row[]).map(m => String(m.person)).slice(0, 500);
+    .all(row.room_id as string) as Row[]).map(m => String(m.person)).slice(0, 500);
   const instance = (sql.prepare("SELECT value FROM conxt_settings WHERE key='instance_id'").get() as Row).value;
   const id = randomUUID();
   const body: Record<string, unknown> = {
