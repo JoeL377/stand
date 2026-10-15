@@ -1,14 +1,14 @@
 // A space's own page, the one people open between meetings: what came into the space since
-// last time (snaps and notes people saved, meetings, agents' updates), and where the space stands
+// last time (snaps and notes people saved, and meetings), and where the space stands
 // (to-dos, decisions, open questions and the suggested agenda). Start talking turns it into the
 // meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ItemUpdate, Jot, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { Jot, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
-import { FollowUpList, itemHref, saveFollowUp } from "../FollowUps.tsx";
+import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
 import { CameraIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
@@ -25,8 +25,7 @@ import { SpacesShell } from "./SpacesShell.tsx";
 type Entry =
   | { kind: "snap"; at: number; snap: Snap }
   | { kind: "jot"; at: number; jot: Jot }
-  | { kind: "meeting"; at: number; meeting: SpaceFeed["meetings"][number] }
-  | { kind: "update"; at: number; update: ItemUpdate };
+  | { kind: "meeting"; at: number; meeting: SpaceFeed["meetings"][number] };
 
 export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: () => void }) {
   const { room, reload } = props;
@@ -154,7 +153,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         ...feed.captures.map((snap) => ({ kind: "snap" as const, at: snap.ts, snap })),
         ...(feed.jots ?? []).map((jot) => ({ kind: "jot" as const, at: jot.ts, jot })),
         ...feed.meetings.map((meeting) => ({ kind: "meeting" as const, at: meeting.endedAt, meeting })),
-        ...feed.updates.map((update) => ({ kind: "update" as const, at: update.ts, update })),
       ].sort((a, b) => b.at - a.at)
     : [];
   const days: Array<{ label: string; entries: Entry[] }> = [];
@@ -226,7 +224,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                   <CameraIcon size={18} />
                   <p>
                     Nothing here yet. Meetings land here once they end, and so do snaps and notes saved from the Stand bar in the Mac app (
-                    <strong>Control + Shift + S</strong> snaps, <strong>Control + Shift + N</strong> writes a note) and what agents report.
+                    <strong>Control + Shift + S</strong> snaps, <strong>Control + Shift + N</strong> writes a note).
                   </p>
                 </div>
               )}
@@ -247,10 +245,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                           onPick={(id) => pickJotItem(e.jot, id)}
                           onDelete={() => deleteJot(e.jot)}
                         />
-                      ) : e.kind === "meeting" ? (
-                        <MeetingRow key={e.meeting.id} m={e.meeting} />
                       ) : (
-                        <UpdateRow key={e.update.id} u={e.update} room={room} />
+                        <MeetingRow key={e.meeting.id} m={e.meeting} />
                       ),
                     )}
                   </ul>
@@ -471,31 +467,6 @@ function MeetingRow({ m }: { m: SpaceFeed["meetings"][number] }) {
         </span>
         <time className="sh-time">{fmtTime(m.endedAt)}</time>
       </Link>
-    </li>
-  );
-}
-
-const UPDATE_LABEL: Record<ItemUpdate["status"], string | null> = { working: "Started", progress: null, blocked: "Blocked", needs_decision: "Needs a decision", ready: "Ready to ship", done: "Done" };
-
-function UpdateRow({ u, room }: { u: ItemUpdate; room: RoomInfo }) {
-  const item = room.items.find((i) => i.id === u.itemId);
-  const label = UPDATE_LABEL[u.status];
-  return (
-    <li className="sh-row">
-      <span className="sh-icon agent" aria-hidden>
-        ✦
-      </span>
-      <span className="sh-row-text">
-        <span className="sh-who">{u.client === "GitHub" ? "GitHub" : u.client ? `${firstName(u.userName)}'s agent` : firstName(u.userName)}</span>
-        {label && <span className={`sh-status ${u.status}`}>{label}</span>}
-        <span className="sh-what">{u.text || u.noteText}</span>
-      </span>
-      {item && (
-        <Link className="sh-pill" to={itemHref(item.id, room.items) ?? `/items/${item.id}`}>
-          {item.title}
-        </Link>
-      )}
-      <time className="sh-time">{fmtTime(u.ts)}</time>
     </li>
   );
 }
