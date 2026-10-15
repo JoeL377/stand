@@ -5,12 +5,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { Jot, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, Jot, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
-import { CameraIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { ArchiveIcon, CameraIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
@@ -20,7 +20,6 @@ import { colorFor, fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
-
 
 type Entry =
   | { kind: "snap"; at: number; snap: Snap }
@@ -38,6 +37,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   // The tab someone last looked at in this space; a new space opens on Meetings.
   const [tab, setTab] = useState<TabKey>(() => {
     try {
@@ -62,7 +62,10 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       },
       (e: Error) => setError(e.message),
     );
-    api.suggested(room.id).then((s) => setUpNext(s.upNext), () => {});
+    api.suggested(room.id).then(
+      (s) => setUpNext(s.upNext),
+      () => {},
+    );
   }, [room.id, reload]);
 
   useEffect(() => {
@@ -108,6 +111,38 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     );
   };
 
+  // Archiving takes a row off the page right away; Archived at the bottom of its tab brings it back.
+  const archived = feed?.archived ?? [];
+  const gone = new Set(archived.map((a) => a.ref));
+  const restore = (ref: string) => {
+    setFeed((f) => f && { ...f, archived: f.archived.filter((a) => a.ref !== ref) });
+    api.archive(room.id, { ref, archived: false }).then(load, (err) => {
+      load();
+      errorToast("Couldn't bring it back")(err);
+    });
+  };
+  const archive = (ref: string, suggestion?: { title: string; keys: string[] }) => {
+    const row: ArchivedRow = {
+      ref,
+      kind: ref.split(":")[0] as ArchivedKind,
+      title: suggestion?.title ?? "",
+      ts: Date.now(),
+      at: Date.now(),
+      by: user.name,
+    };
+    setFeed((f) => f && { ...f, archived: [row, ...f.archived] });
+    api.archive(room.id, { ref, ...suggestion }).then(
+      () => {
+        load();
+        toast({ text: "Archived", action: { label: "Undo", run: () => restore(ref) } });
+      },
+      (err) => {
+        load();
+        errorToast("Couldn't archive it")(err);
+      },
+    );
+  };
+
   const live = !!room.liveMeetingId;
   const wrapping = live && room.people.length === 0;
   const members = spaces?.find((s) => s.id === room.id)?.people ?? [];
@@ -124,35 +159,41 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   };
 
   // The agenda as the meeting shows it, a deck as one line, then what the agent would add.
-  const agenda: Array<{ key: string; title: string; href: string; open: number }> = [];
+  const agenda: Array<{ key: string; ref: string; title: string; href: string; open: number }> = [];
   for (const it of room.items) {
     const key = it.deckId ?? it.id;
     if (agenda.some((a) => a.key === key)) continue;
     const deck = it.deckId ? room.decks.find((d) => d.id === it.deckId) : null;
-    agenda.push({ key, title: deck ? deck.title : it.title, href: deck ? `/decks/${deck.id}` : `/items/${it.id}`, open: 0 });
+    const ref = deck ? `deck:${deck.id}` : `item:${it.id}`;
+    if (gone.has(ref)) continue;
+    agenda.push({ key, ref, title: deck ? deck.title : it.title, href: deck ? `/decks/${deck.id}` : `/items/${it.id}`, open: 0 });
   }
-  for (const f of room.followUps) {
+  const todos = room.followUps.filter((f) => !gone.has(`todo:${f.id}`));
+  for (const f of todos) {
     const it = room.items.find((i) => i.id === f.itemId);
     const row = it && agenda.find((a) => a.key === (it.deckId ?? it.id));
     if (row) row.open++;
   }
-  const suggested = upNext?.suggestions ?? [];
+  const suggested = (upNext?.suggestions ?? []).filter((s) => !gone.has(`suggestion:${s.key}`));
+  const questions = (feed?.open ?? []).filter((n) => !gone.has(`question:${n.id}`));
+  const decisions = (feed?.decided ?? []).filter((n) => !gone.has(`decision:${n.id}`));
+  const meetings = (feed?.meetings ?? []).filter((m) => !gone.has(`meeting:${m.id}`));
   const counts: Record<TabKey, number> = {
-    meetings: feed?.meetings.length ?? 0,
-    todo: room.followUps.length,
-    questions: feed?.open.length ?? 0,
-    decisions: feed?.decided.filter((n) => !n.replacedBy).length ?? 0,
+    meetings: meetings.length,
+    todo: todos.length,
+    questions: questions.length,
+    decisions: decisions.filter((n) => !n.replacedBy).length,
     next: agenda.length + suggested.length,
   };
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
-  const done = room.doneFollowUps ?? [];
+  const done = (room.doneFollowUps ?? []).filter((f) => !gone.has(`todo:${f.id}`));
   const fromOf = new Map([...room.followUps, ...done].flatMap((f) => (f.from ? [[f.id, f.from] as const] : [])));
 
   const entries: Entry[] = feed
     ? [
-        ...feed.captures.map((snap) => ({ kind: "snap" as const, at: snap.ts, snap })),
-        ...(feed.jots ?? []).map((jot) => ({ kind: "jot" as const, at: jot.ts, jot })),
-        ...feed.meetings.map((meeting) => ({ kind: "meeting" as const, at: meeting.endedAt, meeting })),
+        ...feed.captures.filter((x) => !gone.has(`snap:${x.id}`)).map((snap) => ({ kind: "snap" as const, at: snap.ts, snap })),
+        ...(feed.jots ?? []).filter((x) => !gone.has(`jot:${x.id}`)).map((jot) => ({ kind: "jot" as const, at: jot.ts, jot })),
+        ...meetings.map((meeting) => ({ kind: "meeting" as const, at: meeting.endedAt, meeting })),
       ].sort((a, b) => b.at - a.at)
     : [];
   const days: Array<{ label: string; entries: Entry[] }> = [];
@@ -200,7 +241,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
 
         <div className="sh-tabs" role="tablist" aria-label="The space">
           {TABS.map((t) => (
-            <button key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "sh-tab on" : "sh-tab"} onClick={() => pickTab(t.key)}>
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
+              className={tab === t.key ? "sh-tab on" : "sh-tab"}
+              onClick={() => pickTab(t.key)}
+            >
               {t.icon}
               {t.label}
               {counts[t.key] > 0 && <span className="count">{counts[t.key]}</span>}
@@ -234,7 +281,15 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                   <ul className="sh-rows">
                     {d.entries.map((e) =>
                       e.kind === "snap" ? (
-                        <SnapRow key={e.snap.id} snap={e.snap} room={room} me={user.id} onOpen={() => setViewing({ snaps: [e.snap], i: 0 })} onPick={(id) => pickItem(e.snap, id)} />
+                        <SnapRow
+                          key={e.snap.id}
+                          snap={e.snap}
+                          room={room}
+                          me={user.id}
+                          onOpen={() => setViewing({ snaps: [e.snap], i: 0 })}
+                          onPick={(id) => pickItem(e.snap, id)}
+                          onArchive={() => archive(`snap:${e.snap.id}`)}
+                        />
                       ) : e.kind === "jot" ? (
                         <JotRow
                           key={e.jot.id}
@@ -244,9 +299,10 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                           onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
                           onPick={(id) => pickJotItem(e.jot, id)}
                           onDelete={() => deleteJot(e.jot)}
+                          onArchive={() => archive(`jot:${e.jot.id}`)}
                         />
                       ) : (
-                        <MeetingRow key={e.meeting.id} m={e.meeting} />
+                        <MeetingRow key={e.meeting.id} m={e.meeting} onArchive={() => archive(`meeting:${e.meeting.id}`)} />
                       ),
                     )}
                   </ul>
@@ -257,7 +313,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
 
           {tab === "todo" && (
             <>
-              {room.followUps.length ? <TodoList room={room} notes={room.followUps} fromOf={fromOf} /> : <p className="sh-card-empty">No open to-dos.</p>}
+              {todos.length ? (
+                <TodoList room={room} notes={todos} fromOf={fromOf} onArchive={(id) => archive(`todo:${id}`)} />
+              ) : (
+                <p className="sh-card-empty">No open to-dos.</p>
+              )}
               {done.length > 0 && (
                 <div className={showDone ? "sh-done open" : "sh-done"}>
                   <button className="sh-done-toggle" aria-expanded={showDone} onClick={() => setShowDone((v) => !v)}>
@@ -266,14 +326,18 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                     Done
                     <span className="count">{done.length}</span>
                   </button>
-                  {showDone && <TodoList room={room} notes={done} fromOf={fromOf} />}
+                  {showDone && <TodoList room={room} notes={done} fromOf={fromOf} onArchive={(id) => archive(`todo:${id}`)} />}
                 </div>
               )}
             </>
           )}
 
-          {tab === "questions" && <PointList kind="question" notes={feed?.open ?? []} empty="No open questions." />}
-          {tab === "decisions" && <PointList kind="decided" notes={feed?.decided ?? []} empty="No decisions yet." />}
+          {tab === "questions" && (
+            <PointList kind="question" notes={questions} empty="No open questions." onArchive={(id) => archive(`question:${id}`)} />
+          )}
+          {tab === "decisions" && (
+            <PointList kind="decided" notes={decisions} empty="No decisions yet." onArchive={(id) => archive(`decision:${id}`)} />
+          )}
 
           {tab === "next" &&
             (agenda.length + suggested.length ? (
@@ -283,6 +347,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                     <li key={e.key}>
                       <Link to={e.href}>{e.title}</Link>
                       {e.open > 0 && <span className="sh-open-count">{e.open} open</span>}
+                      <ArchiveButton onClick={() => archive(e.ref)} />
                     </li>
                   ))}
                 </ul>
@@ -296,6 +361,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                         <li key={s.key} title={s.reason}>
                           {s.kind === "capture" && (s.key.startsWith("jot:") ? <EditIcon size={12} /> : <CameraIcon size={12} />)}
                           <span>{s.title}</span>
+                          <ArchiveButton onClick={() => archive(`suggestion:${s.key}`, { title: s.title, keys: s.merged })} />
                         </li>
                       ))}
                     </ul>
@@ -305,6 +371,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             ) : (
               <p className="sh-card-empty">Nothing on the agenda yet. Suggestions come from meetings and what people save here.</p>
             ))}
+
+          <ArchivedList
+            rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
+            open={showArchived}
+            onToggle={() => setShowArchived((v) => !v)}
+            onRestore={restore}
+          />
         </section>
         {viewing && viewing.snaps[viewing.i] && (
           <SnapView
@@ -330,7 +403,14 @@ function dayLabel(ts: number) {
 
 const firstName = (name: string) => name.split(" ")[0];
 
-function SnapRow(props: { snap: Snap; room: RoomInfo; me: string; onOpen: () => void; onPick: (itemId: string | null) => void }) {
+function SnapRow(props: {
+  snap: Snap;
+  room: RoomInfo;
+  me: string;
+  onOpen: () => void;
+  onPick: (itemId: string | null) => void;
+  onArchive: () => void;
+}) {
   const { snap } = props;
   const who = snap.takenById === props.me ? "You" : firstName(snap.takenBy);
   return (
@@ -350,6 +430,7 @@ function SnapRow(props: { snap: Snap; room: RoomInfo; me: string; onOpen: () => 
       </span>
       <ItemPill of={snap} room={props.room} onPick={props.onPick} />
       <time className="sh-time">{fmtTime(snap.ts)}</time>
+      <ArchiveButton onClick={props.onArchive} />
     </li>
   );
 }
@@ -358,7 +439,15 @@ function SnapRow(props: { snap: Snap; room: RoomInfo; me: string; onOpen: () => 
  * A note saved from the bar: its first line, all of it when clicked, and the snaps pinned to it
  * (the first as the thumbnail, "+2" for more). Whoever wrote it can delete it.
  */
-function JotRow(props: { jot: Jot; room: RoomInfo; me: string; onOpen: () => void; onPick: (itemId: string | null) => void; onDelete: () => void }) {
+function JotRow(props: {
+  jot: Jot;
+  room: RoomInfo;
+  me: string;
+  onOpen: () => void;
+  onPick: (itemId: string | null) => void;
+  onDelete: () => void;
+  onArchive: () => void;
+}) {
   const { jot } = props;
   const [open, setOpen] = useState(false);
   const mine = jot.byId === props.me;
@@ -367,7 +456,11 @@ function JotRow(props: { jot: Jot; room: RoomInfo; me: string; onOpen: () => voi
   return (
     <li className="sh-row">
       {snaps.length ? (
-        <button className="sh-thumb" onClick={props.onOpen} aria-label={snaps.length > 1 ? `Open its ${snaps.length} snaps` : "Open its snap"}>
+        <button
+          className="sh-thumb"
+          onClick={props.onOpen}
+          aria-label={snaps.length > 1 ? `Open its ${snaps.length} snaps` : "Open its snap"}
+        >
           <img src={snaps[0].url} alt="" loading="lazy" />
           {snaps.length > 1 && <span className="sh-thumb-more">+{snaps.length - 1}</span>}
         </button>
@@ -379,7 +472,12 @@ function JotRow(props: { jot: Jot; room: RoomInfo; me: string; onOpen: () => voi
       <span className="sh-row-text">
         <span className="sh-who">{mine ? "You" : firstName(jot.by)}</span>
         {long ? (
-          <button className={`sh-what sh-jot${open ? " open" : ""}`} aria-expanded={open} onClick={() => setOpen((o) => !o)} title={open ? undefined : jot.text}>
+          <button
+            className={`sh-what sh-jot${open ? " open" : ""}`}
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+            title={open ? undefined : jot.text}
+          >
             {jot.text}
           </button>
         ) : (
@@ -398,11 +496,16 @@ function JotRow(props: { jot: Jot; room: RoomInfo; me: string; onOpen: () => voi
       )}
       <ItemPill of={jot} room={props.room} onPick={props.onPick} />
       <time className="sh-time">{fmtTime(jot.ts)}</time>
+      <ArchiveButton onClick={props.onArchive} />
     </li>
   );
 }
 
-function ItemPill(props: { of: { itemId: string | null; itemSuggested: boolean }; room: RoomInfo; onPick: (itemId: string | null) => void }) {
+function ItemPill(props: {
+  of: { itemId: string | null; itemSuggested: boolean };
+  room: RoomInfo;
+  onPick: (itemId: string | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
   const items = props.room.items.filter((i) => !i.deckId);
@@ -431,7 +534,12 @@ function ItemPill(props: { of: { itemId: string | null; itemSuggested: boolean }
             </button>
           )}
           {items.map((it) => (
-            <button key={it.id} role="menuitem" className={it.id === props.of.itemId && !suggested ? "on" : undefined} onClick={() => pick(it.id)}>
+            <button
+              key={it.id}
+              role="menuitem"
+              className={it.id === props.of.itemId && !suggested ? "on" : undefined}
+              onClick={() => pick(it.id)}
+            >
               {it.title}
             </button>
           ))}
@@ -449,10 +557,12 @@ function ItemPill(props: { of: { itemId: string | null; itemSuggested: boolean }
   );
 }
 
-function MeetingRow({ m }: { m: SpaceFeed["meetings"][number] }) {
+function MeetingRow({ m, onArchive }: { m: SpaceFeed["meetings"][number]; onArchive: () => void }) {
   const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  const out = [m.todos && plural(m.todos, "to-do"), m.decided && `${m.decided} decided`, m.open && `${m.open} open`].filter(Boolean).join(" · ");
+  const out = [m.todos && plural(m.todos, "to-do"), m.decided && `${m.decided} decided`, m.open && `${m.open} open`]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <li className="sh-row">
       <Link to={`/meetings/${m.id}`} className="sh-row-link" title={m.summary ?? undefined}>
@@ -467,12 +577,13 @@ function MeetingRow({ m }: { m: SpaceFeed["meetings"][number] }) {
         </span>
         <time className="sh-time">{fmtTime(m.endedAt)}</time>
       </Link>
+      <ArchiveButton onClick={onArchive} />
     </li>
   );
 }
 
 /** To-dos as the recap lists them: one line, the chapter pill, the owner's face at the end. */
-function TodoList(props: { room: RoomInfo; notes: RoomInfo["followUps"]; fromOf: Map<string, NoteFrom> }) {
+function TodoList(props: { room: RoomInfo; notes: RoomInfo["followUps"]; fromOf: Map<string, NoteFrom>; onArchive: (id: string) => void }) {
   const { fromOf } = props;
   return (
     <FollowUpList
@@ -480,15 +591,18 @@ function TodoList(props: { room: RoomInfo; notes: RoomInfo["followUps"]; fromOf:
       notes={props.notes}
       onToggle={saveFollowUp(props.room.id)}
       after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
-      tail={(n) =>
-        n.owner ? (
-          <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · done by ${n.doneBy}` : ""}`} />
-        ) : (
-          <span className="rc-face none" title="Unassigned">
-            ?
-          </span>
-        )
-      }
+      tail={(n) => (
+        <>
+          <ArchiveButton onClick={() => props.onArchive(n.id)} />
+          {n.owner ? (
+            <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · done by ${n.doneBy}` : ""}`} />
+          ) : (
+            <span className="rc-face none" title="Unassigned">
+              ?
+            </span>
+          )}
+        </>
+      )}
     />
   );
 }
@@ -503,6 +617,63 @@ const DoneIcon = () => (
 
 type TabKey = "meetings" | "todo" | "questions" | "decisions" | "next";
 /** The space's tabs, in the order people look at them. */
+/** Shows on a row while the pointer is on it (always on touch screens). */
+function ArchiveButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      className="sh-archive"
+      aria-label="Archive"
+      title="Archive"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <ArchiveIcon />
+    </button>
+  );
+}
+
+/** Which archived rows each tab lists at its bottom. */
+const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
+  meetings: ["meeting", "snap", "jot"],
+  todo: ["todo"],
+  questions: ["question"],
+  decisions: ["decision"],
+  next: ["item", "deck", "suggestion"],
+};
+
+/** A tab's archived rows, folded at its bottom like Done, each with Restore. */
+function ArchivedList(props: { rows: ArchivedRow[]; open: boolean; onToggle: () => void; onRestore: (ref: string) => void }) {
+  if (!props.rows.length) return null;
+  return (
+    <div className={props.open ? "sh-done archived open" : "sh-done archived"}>
+      <button className="sh-done-toggle" aria-expanded={props.open} onClick={props.onToggle}>
+        <ChevronIcon />
+        <ArchiveIcon size={13} />
+        Archived
+        <span className="count">{props.rows.length}</span>
+      </button>
+      {props.open && (
+        <ul className="sh-archived">
+          {props.rows.map((a) => (
+            <li key={a.ref}>
+              <span className="sh-archived-title">{a.kind === "meeting" ? `Meeting · ${fmtDate(a.ts)}` : a.title}</span>
+              <span className="sh-archived-by" title={`Archived ${fmtDate(a.at)} by ${a.by}`}>
+                {firstName(a.by)}
+              </span>
+              <button className="sh-archived-restore" onClick={() => props.onRestore(a.ref)}>
+                Restore
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
   { key: "todo", label: "To do", icon: <TodoIcon size={14} /> },
@@ -513,7 +684,7 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
 
 /** Decisions or open questions across the space's meetings, as the recap lists them. A decision a
  *  later one replaced stays, muted and last, so the change of mind is still on record. */
-function PointList(props: { kind: "decided" | "question"; notes: SpaceFeed["decided"]; empty: string }) {
+function PointList(props: { kind: "decided" | "question"; notes: SpaceFeed["decided"]; empty: string; onArchive: (id: string) => void }) {
   if (!props.notes.length) return <p className="sh-card-empty">{props.empty}</p>;
   const Icon = props.kind === "decided" ? DecidedIcon : QuestionIcon;
   return (
@@ -530,6 +701,7 @@ function PointList(props: { kind: "decided" | "question"; notes: SpaceFeed["deci
             </span>
           </span>
           <CopyForAgent kind={props.kind === "decided" ? "decision" : "question"} id={n.id} />
+          <ArchiveButton onClick={() => props.onArchive(n.id)} />
         </li>
       ))}
     </ul>

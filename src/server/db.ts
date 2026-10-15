@@ -204,6 +204,18 @@ CREATE TABLE IF NOT EXISTS space_settled (
   basis TEXT NOT NULL,
   rows_json TEXT NOT NULL
 );
+-- Rows someone archived off the space page (archive.ts): ref is "<kind>:<id>". title and ts are kept so
+-- the Archived list can show it; extra holds what restoring needs (a deck's items, a suggestion's keys).
+CREATE TABLE IF NOT EXISTS space_archived (
+  room_id TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  title TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  by_name TEXT NOT NULL,
+  extra_json TEXT,
+  PRIMARY KEY (room_id, ref)
+);
 -- The agent's grouping of an item's talk into discussions, one per question.
 CREATE TABLE IF NOT EXISTS discussions (
   id TEXT PRIMARY KEY,
@@ -1472,6 +1484,30 @@ export function openDb(file?: string) {
     deleteJot(id: string) {
       db.prepare("DELETE FROM snaps WHERE jot_id = ?").run(id);
       db.prepare("DELETE FROM jots WHERE id = ?").run(id);
+    },
+    /** What was archived off a space's page, newest first. */
+    listArchived(roomId: string): Array<{ ref: string; title: string; ts: number; at: number; by: string; extra: string[] }> {
+      return (db.prepare("SELECT * FROM space_archived WHERE room_id = ? ORDER BY at DESC").all(roomId) as Row[]).map((r) => ({
+        ref: r.ref as string,
+        title: r.title as string,
+        ts: r.ts as number,
+        at: r.at as number,
+        by: r.by_name as string,
+        extra: r.extra_json ? JSON.parse(r.extra_json as string) : [],
+      }));
+    },
+    putArchived(roomId: string, a: { ref: string; title: string; ts: number; by: string; extra?: string[] }) {
+      db.prepare(
+        `INSERT INTO space_archived (room_id, ref, title, ts, at, by_name, extra_json) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (room_id, ref) DO UPDATE SET title = excluded.title, ts = excluded.ts, at = excluded.at, by_name = excluded.by_name, extra_json = excluded.extra_json`,
+      ).run(roomId, a.ref, a.title, a.ts, Date.now(), a.by, a.extra?.length ? JSON.stringify(a.extra) : null);
+    },
+    dropArchived(roomId: string, ref: string) {
+      db.prepare("DELETE FROM space_archived WHERE room_id = ? AND ref = ?").run(roomId, ref);
+    },
+    /** A deck's slides that are still on the agenda. */
+    deckItemIds(deckId: string): string[] {
+      return (db.prepare("SELECT id FROM items WHERE deck_id = ? AND archived = 0").all(deckId) as Row[]).map((r) => r.id as string);
     },
     getSettled(roomId: string): Settled | null {
       const r = db.prepare("SELECT at, basis, rows_json FROM space_settled WHERE room_id = ?").get(roomId) as Row | undefined;

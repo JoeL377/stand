@@ -14,6 +14,7 @@ import { oauthRoutes } from "./oauth.ts";
 import { capabilities, config } from "./config.ts";
 import { type DB, type OpenMeeting, openDb } from "./db.ts";
 import { withFrom } from "./noteFrom.ts";
+import { archiveRow, restoreRow } from "./archive.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "./brief.ts";
 import {
   MAX_DECK_BYTES,
@@ -1139,6 +1140,28 @@ app.get(
       space: { id: room.id, name: room.name },
       ...upNextView(db, room.id, live(room.id)?.meetingStartedAt ?? null, polisher.busy(room.id)),
     });
+  }),
+);
+
+// Archive a row off the space page ({ ref: "todo:<id>" }, see archive.ts), or restore it ({ archived: false }).
+app.post(
+  "/api/rooms/:id/archive",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room) return notFound(res);
+    const ref = String(req.body?.ref ?? "");
+    const keys: unknown[] = Array.isArray(req.body?.keys) ? req.body.keys : [];
+    const ok =
+      req.body?.archived === false
+        ? restoreRow(db, room.id, ref)
+        : archiveRow(db, room.id, ref, req.user!.name, {
+            title: String(req.body?.title ?? ""),
+            keys: keys.filter((k): k is string => typeof k === "string"),
+          });
+    if (!ok) return notFound(res);
+    // Agenda items, decks and suggestions came off (or back onto) the agenda too.
+    if (/^(item|deck|suggestion):/.test(ref)) afterItemsChange(room.id);
+    res.json({ ok: true });
   }),
 );
 

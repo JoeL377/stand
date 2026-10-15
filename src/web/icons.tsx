@@ -172,3 +172,9 @@ export const TrashIcon = ({ size = 14 }: { size?: number }) => (
     <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
   </Svg>
 );
+
+export const ArchiveIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />
+  </Svg>
+);
