@@ -1,11 +1,11 @@
 # Sign in and spaces
 
-Home (`/`) is find-and-enter: a left sidebar (New space, All spaces, Manage spaces, Connect an agent, Your spaces) and the space cards. A space (`/s/<id>`) is invite-only and holds the team's context: one page of tabs: Meetings (meetings, bar notes, snaps, agent reports), To do, Questions, Decisions, Up next, synthesis instructions, Invite and Start talking (Join when someone is in a meeting).
+Home (`/`) is find-and-enter: a left sidebar (New space, All spaces, Manage spaces, Connect an agent, Your spaces) and the space cards. A space (`/s/<id>`) is invite-only and holds the team's context: one page of tabs: Meetings (meetings, bar notes, snaps, agent reports), To do, Questions, Decisions, Up next, Invite and Start talking (synthesis instructions live under Manage spaces) (Join when someone is in a meeting).
 
 ## Sub-features
 - Stand-in sign-in (name + email), only while Google isn't configured.
 - New space pop-up: name + "What is it for?" line, Create and enter.
-- Space page: the Meetings, To do, Questions, Decisions and Up next tabs, Add synthesis instructions, Invite (copies the link).
+- Space page: the Meetings, To do, Questions, Decisions and Up next tabs, Invite (copies the link).
 - Manage spaces (`/spaces/manage`), not yet in a journey.
 
 ## How to get to it (user POV)

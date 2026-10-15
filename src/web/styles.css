@@ -1471,8 +1471,6 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .rc-point-body .rc-shots, .fu-body .rc-shots { margin-top: 6px; }
 /* Synthesis instructions: the space's line and pop-up, the Manage spaces field, the recap section */
 .synth-line { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; margin-top: -6px; font-size: 13px; text-align: left; }
-.sh-synth { margin: -4px 0 10px; }
-.sh-synth .synth-line { margin-top: 0; }
 .synth-line .agent-mark { font-size: 12px; }
 button.link.synth-line.set { color: var(--muted); }
 button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }

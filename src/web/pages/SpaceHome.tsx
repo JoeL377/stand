@@ -20,7 +20,6 @@ import { colorFor, fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
-import { SynthesisLine } from "../Synthesis.tsx";
 
 
 type Entry =
@@ -197,9 +196,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </button>
           </span>
         </header>
-        <div className="sh-synth">
-          <SynthesisLine roomId={room.id} instructions={room.synthesisInstructions} onSaved={() => reload()} />
-        </div>
         <ModeNote caps={caps} />
 
         <div className="sh-tabs" role="tablist" aria-label="The space">
