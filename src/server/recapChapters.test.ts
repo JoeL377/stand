@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildBrief, briefToMarkdown, offset } from "./brief.ts";
 import type { Discussion, Note, Segment } from "../shared/protocol.ts";
-import { barSpan, meetingChapters } from "../shared/chapters.ts";
+import { barSpan, meetingChapters, saidAt } from "../shared/chapters.ts";
 
 const T0 = Date.UTC(2026, 9, 12, 10);
 
@@ -117,4 +117,15 @@ test("the live chapter bar spans a set length that grows in steps, so it fills f
   assert.deepEqual(spans, [30, 30, 30, 45, 45, 60, 90, 120, 120, 180, 240]);
   // The meeting so far never reaches the bar's end, and grows rightward between steps.
   for (let m = 0; m < 300; m++) assert.ok(m * min < barSpan(m * min));
+});
+
+test("a to-do's pill shows when it was said, not when its chapter started", () => {
+  const start = 1_000_000;
+  const lastTalk = start + 80 * 60_000;
+  // The words it was said in win.
+  assert.equal(saidAt({ ts: start + 5 * 60_000, quote: { ts: start + 66 * 60_000 } }, start, lastTalk), start + 66 * 60_000);
+  // Else when the live notes first caught it.
+  assert.equal(saidAt({ ts: start + 49 * 60_000 }, start, lastTalk), start + 49 * 60_000);
+  // A note the run as the meeting ends wrote fresh has no moment of its own: its chapter's start stands in.
+  assert.equal(saidAt({ ts: lastTalk + 30_000, quote: null }, start, lastTalk), null);
 });

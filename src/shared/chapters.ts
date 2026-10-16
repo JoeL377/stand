@@ -116,6 +116,16 @@ export interface MeetingChapter {
   stretches: Stretch[];
 }
 
+/** When a to-do, decision or open question came up, for its time pill: the moment of the words it
+ *  was said in, when the run as the meeting ends found them; otherwise when the live notes first
+ *  caught it, as long as that was while people were still talking (a note the end run wrote fresh
+ *  has no moment of its own). Null when neither: the pill falls back to its chapter's start. A
+ *  chapter can come back late in a meeting, so its start can be an hour off. */
+export function saidAt(n: { ts: number; quote?: { ts: number } | null }, startedAt: number, lastTalk: number): number | null {
+  if (n.quote && n.quote.ts >= startedAt) return n.quote.ts;
+  return n.ts >= startedAt && n.ts <= lastTalk ? n.ts : null;
+}
+
 /** For a group, which outcome its topics add up to. */
 const OUTCOME_RANK: Record<DiscussionOutcome, number> = { decided: 3, action: 2, open: 1, info: 0 };
 

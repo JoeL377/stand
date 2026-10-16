@@ -236,3 +236,34 @@ test("the run as the meeting ends reads more carefully and has longer", async ()
   assert.equal(calls[0].body.output_config?.effort, "medium");
   assert.equal(calls[0].opts?.timeout, 240_000);
 });
+
+test("as the meeting ends, to-dos and open questions also carry the words they were said in, so their pill shows when", async () => {
+  const reply = {
+    stop_reason: "end_turn",
+    usage,
+    parsed_output: {
+      summary: "",
+      answered_questions: [],
+      discussions: [
+        {
+          topic: "Conflict page",
+          turns: "1-40",
+          positions: [],
+          outcome: "action",
+          continues: null,
+          picks_up: null,
+          decisions: [],
+          action_items: [{ text: "Fix the page", owner: "Joe", same_as: null, said: { line: 31, words: "Remark number 31 about" } }],
+          open_questions: [{ text: "Which page?", same_as: null, said: { line: 2, words: "words nobody said here" } }],
+        },
+      ],
+    },
+  };
+  const { agent, calls } = withApi(() => reply);
+  const draft = await agent.notesFor(null, said(40), [], [], {}, { tidy: true });
+  assert.match(JSON.stringify(calls[0].body.system), /each action item and each open question/);
+  const todo = draft.notes.find((n) => n.kind === "action")!;
+  assert.deepEqual(todo.quote, { segmentId: "s30", ts: 30_000, speaker: "Andy", text: "Remark number 31 about" });
+  // Words that aren't in the transcript are dropped, not shown.
+  assert.equal(draft.notes.find((n) => n.kind === "question")!.quote, null);
+});

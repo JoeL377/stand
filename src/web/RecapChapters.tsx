@@ -70,13 +70,15 @@ export function Face({ name, color, title, size = 20 }: { name: string; color: s
   );
 }
 
-/** Where a to-do, decision or open question came from: a small time pill after its text, with the chapter in a pop-up. */
-export function ChapterChip({ c, i, startedAt, crux, onPick }: { c: MeetingChapter; i: number; startedAt: number; crux?: string; onPick?: (i: number) => void }) {
+/** Where a to-do, decision or open question came from: a small time pill after its text, with the chapter in a pop-up.
+ *  The pill shows when it was said (`at`, see saidAt) when that's known, else when its chapter started. */
+export function ChapterChip({ c, i, startedAt, at, crux, onPick }: { c: MeetingChapter; i: number; startedAt: number; at?: number | null; crux?: string; onPick?: (i: number) => void }) {
   const o = OUTCOME[c.outcome];
+  const when = clock((at ?? c.start) - startedAt);
   return (
     <span className="rc-pill-wrap">
-      <a className="rc-pill" href={`#${chapterAnchor(i)}`} onClick={() => onPick?.(i)} aria-label={`From the chapter "${c.title}" at ${clock(c.start - startedAt)}`}>
-        {clock(c.start - startedAt)}
+      <a className="rc-pill" href={`#${chapterAnchor(i)}`} onClick={() => onPick?.(i)} aria-label={at != null ? `Said at ${when}, in the chapter "${c.title}"` : `From the chapter "${c.title}" at ${when}`}>
+        {when}
       </a>
       <span className="rc-pop" role="tooltip">
         <span className="rc-pop-title">{c.title}</span>

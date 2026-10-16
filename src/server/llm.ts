@@ -268,6 +268,8 @@ function notesSchema(quotes: boolean) {
     ? { said: SaidSchema.describe("Where they said it most plainly in their own words, or null if no line of theirs does") }
     : {};
   const decisionSaid = quotes ? { said: SaidSchema.describe("The words it was proposed or agreed in, or null") } : {};
+  const actionSaid = quotes ? { said: SaidSchema.describe("The words someone took it on or asked for it in, or null") } : {};
+  const questionSaid = quotes ? { said: SaidSchema.describe("The words it was raised in, or null") } : {};
   return z.object({
     summary: z.string().describe("One or two sentences on where this item stands after the discussion. Empty if nothing substantive was said."),
     discussions: z.array(
@@ -295,10 +297,15 @@ function notesSchema(quotes: boolean) {
             text: z.string().describe("Phrased as a task, e.g. 'File the annual-plan pricing bug against billing'"),
             owner: z.string().nullable(),
             same_as: z.string().nullable().describe("The key (A1, A2...) of the already-captured action item this is, or null if new"),
+            ...actionSaid,
           }),
         ),
         open_questions: z.array(
-          z.object({ text: z.string(), same_as: z.string().nullable().describe("The key (Q1, Q2...) of the already-captured open question this is, or null if new") }),
+          z.object({
+            text: z.string(),
+            same_as: z.string().nullable().describe("The key (Q1, Q2...) of the already-captured open question this is, or null if new"),
+            ...questionSaid,
+          }),
         ),
       }),
     ),
@@ -609,7 +616,7 @@ Do not invent anything that was not said. Speech-to-text errors are possible; re
         tidy
           ? `
 
-This is the record people will read after the meeting, and a position put in other words can tilt what someone meant. For each position, and each decision, also give the line it comes from and copy the words from it exactly as written: the phrase that carries the point in the speaker's own words. Write the position the way they framed it, qualifiers included: if they offered an analogy, agreed only in part, hedged, or credited someone else's view (\"I could agree with that\", \"think of it as\", \"maybe Joe is onto something\"), the position says so, and the words you copy are the ones that carry that nuance rather than the boldest line.`
+This is the record people will read after the meeting, and a position put in other words can tilt what someone meant. For each position, each decision, each action item and each open question, also give the line it comes from and copy the words from it exactly as written: the phrase that carries the point in the speaker's own words. Write the position the way they framed it, qualifiers included: if they offered an analogy, agreed only in part, hedged, or credited someone else's view (\"I could agree with that\", \"think of it as\", \"maybe Joe is onto something\"), the position says so, and the words you copy are the ones that carry that nuance rather than the boldest line.`
           : ""
       }`,
       tidy ? "medium" : "low",
@@ -637,8 +644,22 @@ This is the record people will read after the meeting, and a position put in oth
           sameAs: t.same_as,
           ...(tidy ? { quote: quote((t as { said?: Said }).said, null, linesOf(d)) } : {}),
         })),
-        ...d.action_items.map((a) => ({ kind: "action" as const, text: a.text, owner: a.owner, discussion: i, sameAs: a.same_as })),
-        ...d.open_questions.map((q) => ({ kind: "question" as const, text: q.text, owner: null, discussion: i, sameAs: q.same_as })),
+        ...d.action_items.map((a) => ({
+          kind: "action" as const,
+          text: a.text,
+          owner: a.owner,
+          discussion: i,
+          sameAs: a.same_as,
+          ...(tidy ? { quote: quote((a as { said?: Said }).said, null, linesOf(d)) } : {}),
+        })),
+        ...d.open_questions.map((q) => ({
+          kind: "question" as const,
+          text: q.text,
+          owner: null,
+          discussion: i,
+          sameAs: q.same_as,
+          ...(tidy ? { quote: quote((q as { said?: Said }).said, null, linesOf(d)) } : {}),
+        })),
       );
     });
     return {
