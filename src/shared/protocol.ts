@@ -477,6 +477,38 @@ export type ClientMessage = (
   | { type: "meeting.end" }
 ) & { cid?: string };
 
+/** One line under a board card's summary. */
+export interface BoardDetail {
+  kind: "position" | "decided" | "todo" | "open" | "ref";
+  /** The person, for a position or a to-do's owner. */
+  who: string | null;
+  text: string;
+}
+/** What the middle shows about a thread: a paragraph, the point being made now, and a few details. */
+export interface BoardCard {
+  summary: string;
+  /** The point being made in the newest talk, "Name: point". */
+  now: string;
+  details: BoardDetail[];
+}
+/** A thread of discussion on the middle board (server/board.ts). Its title is set once. */
+export interface BoardThread {
+  id: string;
+  title: string;
+  itemId: string | null;
+  card: BoardCard;
+  /** Stretches of the meeting it was the thread on screen, for the chapter bar. */
+  spans: Array<[number, number]>;
+}
+export interface Board {
+  threads: BoardThread[];
+  currentId: string | null;
+  /** When the thread on screen last became current (a switch, not an update). */
+  switchedAt: number | null;
+  /** The board pass is reading the latest talk. */
+  busy: boolean;
+}
+
 export type ServerMessage =
   | { type: "state"; state: RoomState }
   | { type: "welcome"; participantId: string; segments: Segment[]; notes: Note[]; discussions: Discussion[] }
@@ -486,6 +518,8 @@ export type ServerMessage =
   | { type: "notes"; meetingId: string; itemId: string | null; notes: Note[]; discussions: Discussion[] }
   /** The agent started or finished rewriting an item's notes. */
   | { type: "notes.busy"; itemId: string | null; busy: boolean }
+  /** The middle board's threads, after every change. */
+  | { type: "board"; board: Board }
   | { type: "meeting.ended"; meetingId: string }
   /** The server has a message the client sent with this cid. */
   | { type: "ack"; cid: string }

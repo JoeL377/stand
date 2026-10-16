@@ -1792,20 +1792,10 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-now-label.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: notes-pulse 1.4s ease-in-out infinite; }
 .topic-mins { font-size: 12px; color: var(--muted); }
 .topic-now-title { margin: 0; font-size: 24px; line-height: 1.25; font-weight: 650; text-wrap: balance; }
-.topic-positions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; }
-.topic-position { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 0 16px; border-left: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
-.topic-position:first-child { padding-left: 0; border-left: 0; }
 .topic-position-who { display: inline-flex; align-items: center; gap: 7px; }
 .topic-position-who strong { font-size: 14px; font-weight: 600; }
-.topic-notes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.4; }
-.topic-notes li { display: flex; gap: 9px; align-items: baseline; }
 .topic-note-mark { flex: none; width: 14px; text-align: center; font-weight: 700; color: var(--muted); }
-.topic-notes .decision .topic-note-mark { color: var(--ok-text); }
-.topic-notes .action .topic-note-mark { color: var(--accent-text); }
-.topic-notes .question .topic-note-mark { color: color-mix(in srgb, var(--warn) 50%, #fff); }
-.topic-notes .done { color: var(--muted); text-decoration: line-through; }
 .topic-owner { color: var(--muted); }
-.topic-more { color: var(--muted); font-size: 12px; padding-left: 23px; }
 /* The latest remark, at the foot of the topic, so it reads as live. */
 .topic-remark { margin: auto 0 0; padding-top: 12px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; color: var(--muted); }
 .topic-remark-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1815,10 +1805,6 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-warmup .topic-remark { margin: 0; padding: 0; border: 0; align-items: flex-start; font-size: 17px; line-height: 1.45; }
 .topic-warmup .topic-remark-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .topic-warmup .topic-hint { margin-top: auto; }
-.topic-outcome { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--hover); color: var(--muted); }
-.topic-outcome.open { background: color-mix(in srgb, var(--warn) 16%, transparent); color: color-mix(in srgb, var(--warn) 50%, #fff); }
-.topic-outcome.action { background: var(--accent-soft); color: var(--accent-text); }
-.topic-outcome.decided { background: color-mix(in srgb, var(--ok) 16%, transparent); color: color-mix(in srgb, var(--ok) 55%, #fff); }
 /* The chapter bar: the meeting so far, a stretch per topic at the time it was talked about. */
 .topic-chapters { flex: none; display: flex; flex-direction: column; gap: 2px; }
 .topic-bar { position: relative; height: 20px; }
@@ -1839,28 +1825,32 @@ a.sh-pill:hover { text-decoration: none; }
 /* Another topic, opened from its stretch of the bar, on your own screen. */
 .topic-peek { position: absolute; z-index: 5; width: min(360px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 12px; background: #2c2c31; border: 1px solid rgb(255 255 255 / 0.12); box-shadow: var(--shadow); font-size: 13px; line-height: 1.4; animation: fade-up 150ms var(--ease-out, ease-out); }
 .topic-peek-title { font-size: 15px; font-weight: 600; line-height: 1.3; }
-.topic-peek-positions { display: flex; flex-direction: column; gap: 6px; }
-.topic-peek-positions div { display: flex; gap: 8px; align-items: flex-start; }
-.topic-peek-positions .topic-dot { margin-top: 1px; }
-.topic-peek .topic-notes { font-size: 13px; }
 .topic-peek-at { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .topic-peek-item { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topic-part-of { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topic-peek-inside { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / 0.1); }
-.topic-peek-inside.group { padding-top: 0; border-top: 0; }
-.topic-peek-sub { display: flex; flex-direction: column; gap: 4px; }
 .topic-peek-sub-title { font-size: 13px; font-weight: 500; }
-.topic-peek-sub .topic-notes { font-size: 12.5px; color: var(--muted); }
-.topic-peek-inside .topic-more { padding-left: 0; }
+.topic-summary { margin: 0; font-size: 17px; line-height: 1.6; max-width: 72ch; color: color-mix(in srgb, var(--text) 92%, transparent); }
+.topic-summary .agent-mark { color: var(--accent-text); }
+/* A sentence the last update added or changed: a soft highlight that fades out. */
+.topic-summary > span { border-radius: 3px; transition: background-color 1.2s ease-out; }
+.topic-summary > .topic-fresh { background: color-mix(in srgb, var(--accent) 22%, transparent); transition: none; }
+.topic-details { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; font-size: 14px; line-height: 1.4; }
+.topic-details li { display: flex; gap: 9px; align-items: baseline; min-width: 0; }
+.topic-details li > .topic-dot { align-self: flex-start; margin-top: -1px; }
+.topic-details li > span:last-child { min-width: 0; }
+.topic-details strong { font-weight: 600; }
+.topic-details .decided .topic-note-mark { color: var(--ok-text); }
+.topic-details .todo .topic-note-mark { color: var(--accent-text); }
+.topic-details .open .topic-note-mark { color: color-mix(in srgb, var(--warn) 50%, #fff); }
+.topic-details.small { grid-template-columns: minmax(0, 1fr); gap: 6px; font-size: 13px; }
+.topic-peek-summary { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+/* Over a share or a deck: the topic as one line. */
+.topic-strip { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 13px; backdrop-filter: blur(6px); }
+.topic-strip .agent-mark { color: var(--accent-text); }
+.topic-strip-title { flex: none; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.topic-strip-now { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
+.topic-strip-now strong { color: var(--text); font-weight: 500; }
+@media (max-width: 900px) { .topic-details { grid-template-columns: minmax(0, 1fr); } }
 .topic-dot { display: inline-grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-weight: 600; line-height: 1; }
-@media (max-width: 900px) {
-  .topic-positions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .topic-position:nth-child(odd) { padding-left: 0; border-left: 0; }
-}
-@media (max-width: 600px) {
-  .topic-positions { grid-template-columns: minmax(0, 1fr); }
-  .topic-position { padding-left: 0; border-left: 0; }
-}
 @keyframes topic-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes topic-updating { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 @keyframes label-in { from { opacity: 0; transform: scale(0.92); } }
@@ -1868,6 +1858,7 @@ a.sh-pill:hover { text-decoration: none; }
 @keyframes topic-flash { from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
   .topic-now.topic-in, .topic-peek, .topic-now-label.arrived, .topic-stretch.current.arrived::before { animation: none; }
+  .topic-summary > span { transition: none; }
   .topic-now-label.live::before { animation: none; }
   .topic-stretch::before, .topic-stretch, .topic-bar-elapsed, .topic-bar-times > .topic-bar-now { transition: none; }
   /* No moving light: the top edge just brightens while the notes update. */

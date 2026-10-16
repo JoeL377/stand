@@ -24,6 +24,9 @@ export const config = {
   /** For the calls that run once per meeting and merge things: the notes' tidy run as
    *  the meeting ends (it feeds the recap) and the suggested agenda. */
   notesTidyModel: env("NOTES_TIDY_MODEL") ?? "claude-sonnet-5-5",
+  /** The middle board's card (board.ts), every 30 s while people talk. Haiku held one card far
+   *  too long on the Conxt replays; Sonnet followed the talk (2026-10-16). */
+  boardModel: env("BOARD_MODEL") ?? "claude-sonnet-5-5",
   /** Live notes experiments, for trying on a recorded meeting with scripts/replay-notes.ts; all
    *  off unless set. NOTES_TURNS=ranges: the model lists a topic's lines as ranges ("3-17, 20")
    *  instead of every number. NOTES_THINKING=off: live notes runs answer without thinking first.

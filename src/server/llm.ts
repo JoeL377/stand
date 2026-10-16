@@ -7,6 +7,7 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { type DraftSlide, outlineToSlides } from "../shared/outline.ts";
 import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind, Position, Quote, Segment } from "../shared/protocol.ts";
+import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, BoardDriftSchema, DRIFT_SYSTEM } from "./board.ts";
 import { config } from "./config.ts";
 import { findQuote, type Said } from "./quotes.ts";
 
@@ -170,6 +171,11 @@ export interface Agent {
    *  the main topic it belongs to or a group title. `final`: the pass as the meeting ends, on the tidy
    *  model. Null without a model. */
   mergeTopics(prompt: string, final: boolean): Promise<Array<{ key: string; into: string }> | null>;
+  /** The middle board's card (board.ts): the thread on screen brought up to date, and a move when
+   *  the talk has gone elsewhere. Null without a model. */
+  boardCard(context: string, talk: string): Promise<BoardAnswer | null>;
+  /** Whether the talk has drifted off the board's title, read without the summary. Null without a model. */
+  boardDrift(context: string, talk: string): Promise<BoardDrift | null>;
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
   settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
@@ -208,6 +214,14 @@ export interface AgendaPolishRow {
   reason: string;
   sameAs: string | null;
 }
+
+/** A board run waits this long before the next one tries. */
+const BOARD_TIMEOUT_MS = 25_000;
+/** The board's context (people, earlier threads) changes rarely, so it's cached ahead of the talk. */
+const boardContent = (context: string, talk: string): Anthropic.Beta.BetaContentBlockParam[] => [
+  { type: "text", text: context, cache_control: { type: "ephemeral" } },
+  { type: "text", text: talk },
+];
 
 /** About 50k tokens of meeting: more than an hour of talk. */
 const SYNTHESIS_MAX_CHARS = 200_000;
@@ -518,7 +532,8 @@ export class ClaudeAgent implements Agent {
       system,
       messages: [{ role: "user", content }],
       output_config: { effort, format: betaZodOutputFormat(schema) },
-      ...(thinking ? {} : { thinking: { type: "disabled" as const } }),
+      // Sonnet and Opus turn thinking off with "between_tools"; Haiku with "disabled".
+      ...(thinking ? {} : { thinking: model.startsWith("claude-haiku") ? { type: "disabled" as const } : ({ type: "between_tools" } as unknown as { type: "disabled" }) }),
       ...fallback,
     }, timeout ? { timeout, maxRetries: 1 } : undefined);
     const u = res.usage;
@@ -814,6 +829,14 @@ Answer for every smaller topic exactly once.`,
       { timeout: MERGE_TIMEOUT_MS, maxTokens: 6000 },
     );
     return out?.merges ?? null;
+  }
+
+  async boardCard(context: string, talk: string): Promise<BoardAnswer | null> {
+    return this.parse(BoardAnswerSchema, boardContent(context, talk), BOARD_SYSTEM, "low", config.boardModel, { timeout: BOARD_TIMEOUT_MS, maxTokens: 3000, thinking: false });
+  }
+
+  async boardDrift(context: string, talk: string): Promise<BoardDrift | null> {
+    return this.parse(BoardDriftSchema, boardContent(context, talk), DRIFT_SYSTEM, "low", config.boardModel, { timeout: BOARD_TIMEOUT_MS, maxTokens: 300, thinking: false });
   }
 
   async settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null> {
@@ -1158,6 +1181,15 @@ export class HeuristicAgent implements Agent {
     return null;
   }
   async mergeTopics(): Promise<Array<{ key: string; into: string }> | null> {
+    return null;
+  }
+
+  /** Without a model the board shows the talk so far instead of a card. */
+  async boardCard(): Promise<BoardAnswer | null> {
+    return null;
+  }
+
+  async boardDrift(): Promise<BoardDrift | null> {
     return null;
   }
 

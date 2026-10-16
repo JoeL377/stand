@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientMessage, Discussion, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
+import type { Board, ClientMessage, Discussion, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
 
 export interface Interim {
   speakerId: string;
@@ -101,6 +101,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [discussions, setDiscussions] = useState<Discussion[]>([]);
+  const [board, setBoard] = useState<Board | null>(null);
   /** Items whose notes the agent is rewriting right now ("" = off-agenda). */
   const [notesBusy, setNotesBusy] = useState<string[]>([]);
   const [interims, setInterims] = useState<Record<string, Interim>>({});
@@ -198,6 +199,9 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
           case "notes":
             setNotes((all) => reapply([...all.filter((n) => n.itemId !== msg.itemId), ...msg.notes], patchNotes));
             setDiscussions((all) => [...all.filter((d) => d.itemId !== msg.itemId), ...(msg.discussions ?? [])]);
+            break;
+          case "board":
+            setBoard(msg.board);
             break;
           case "notes.busy": {
             const key = msg.itemId ?? "";
@@ -345,6 +349,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     segments,
     notes,
     discussions,
+    board,
     notesBusy,
     interims,
     endedMeetingId,

@@ -18,6 +18,7 @@ import type {
   ServerMessage,
   Suggestion,
 } from "../shared/protocol.ts";
+import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
 import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
@@ -51,6 +52,10 @@ const RECAP_MAX_LINES = 2500;
 const RECAP_MAX_BYTES = 18 * 1024 * 1024;
 /** Notes for the item in focus refresh this long after the last new remark. */
 const NOTES_DEBOUNCE_MS = 3_000;
+/** The first board pass waits for a little talk; later ones come every BOARD_EVERY_MS. */
+const BOARD_FIRST_MS = 8_000;
+/** After the host moves to another agenda item, the board starts a thread there this soon. */
+const BOARD_AFTER_FOCUS_MS = 10_000;
 /** What people are told when notes stop, by why. */
 const NOTES_TROUBLE = {
   busy: "Notes are behind: the model's rate limit was hit. They catch up by themselves, and everything said is kept.",
@@ -187,6 +192,12 @@ export class RoomSession implements SpeechSink {
   /** The creator handed hosting to someone on purpose, so rejoining doesn't take it back. */
   private creatorHandedOver = false;
   private demoRunning = false;
+  /** The middle board (board.ts): one pass at a time, every BOARD_EVERY_MS while people talk. */
+  private board: BoardKeeper | null = null;
+  private boardTimer: NodeJS.Timeout | null = null;
+  private boardRun: Promise<void> | null = null;
+  private boardRanAt = 0;
+  private boardDueAt = 0;
   ended = false;
   /** When End meeting started the write-up. */
   endingSince = 0;
@@ -226,6 +237,7 @@ export class RoomSession implements SpeechSink {
       this.meetingStartedAt = m.startedAt;
       this.setFocusInternal(items[0]?.id ?? null, "system", "start");
     }
+    this.board = new BoardKeeper(agent, this.meetingStartedAt, resume ? db.meetingBoard(resume.id) : null);
     // Tidy the suggested agenda now, before anyone has started talking.
     polisher?.schedule(room.id, 0);
   }
@@ -557,6 +569,7 @@ export class RoomSession implements SpeechSink {
         notes: this.db.meetingNotes(this.meetingId),
         discussions: this.db.meetingDiscussions(this.meetingId),
       });
+      if (this.board) this.send(ws, { type: "board", board: this.board.board() });
       this.broadcastState();
       return;
     }
@@ -867,6 +880,10 @@ export class RoomSession implements SpeechSink {
     this.focusLog.sort((a, b) => a.ts - b.ts);
     this.db.logFocus(this.meetingId, itemId, actor, reason);
     if (this.suggestion?.itemId === itemId) this.suggestion = null;
+    if (prev !== itemId && this.board) {
+      this.board.focused(itemId, at);
+      this.scheduleBoard(true);
+    }
     return prev;
   }
 
@@ -1037,6 +1054,7 @@ export class RoomSession implements SpeechSink {
     if (kind === "chat") this.lastSpeech = null;
     this.broadcast({ type: "segment", segment });
     this.scheduleNotes(itemId, NOTES_DEBOUNCE_MS);
+    this.scheduleBoard();
     this.checkDrift(segment);
     this.checkConxtTerms(text, ts);
     return segment;
@@ -1098,6 +1116,52 @@ export class RoomSession implements SpeechSink {
     const label = best.item.externalId ?? best.item.title;
     this.suggestion = { itemId: best.item.id, reason: `The talk keeps coming back to ${label}`, confidence: 0.7, since: this.drift.since, source: "talk" };
     this.broadcastState();
+  }
+
+  // ---- board --------------------------------------------------------------
+
+  /** The next board pass: BOARD_EVERY_MS after the last one, or soon after an agenda move. */
+  private scheduleBoard(agendaMoved = false) {
+    if (this.ended || !this.board || this.boardRun) return;
+    const wait = agendaMoved ? BOARD_AFTER_FOCUS_MS : Math.max(BOARD_FIRST_MS, this.boardRanAt + BOARD_EVERY_MS - Date.now());
+    if (this.boardTimer) {
+      // A pass already waiting keeps its time unless this one is due sooner.
+      if (this.boardDueAt <= Date.now() + wait) return;
+      clearTimeout(this.boardTimer);
+    }
+    this.boardDueAt = Date.now() + wait;
+    this.boardTimer = setTimeout(() => {
+      this.boardTimer = null;
+      void this.runBoard();
+    }, wait);
+  }
+
+  private runBoard(): Promise<void> {
+    const board = this.board;
+    if (this.ended || !board || this.boardRun) return this.boardRun ?? Promise.resolve();
+    const segments = this.db.meetingSegments(this.meetingId);
+    if (!board.due(segments)) return Promise.resolve();
+    this.boardRanAt = Date.now();
+    board.busy = true;
+    this.broadcast({ type: "board", board: board.board() });
+    const people = [...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName)])];
+    this.boardRun = board
+      .run(segments, this.items(), people, this.focusItemId, Date.now())
+      .catch((e) => {
+        console.error(`[board] ${this.meetingId}: ${(e as Error).message}`);
+        return false;
+      })
+      .then((changed) => {
+        board.busy = false;
+        if (changed && !this.ended) this.db.saveBoard(this.meetingId, board.board());
+        this.broadcast({ type: "board", board: board.board() });
+      })
+      .finally(() => {
+        this.boardRun = null;
+        // Talk that came in during the pass gets the next one.
+        if (!this.ended && board.due(this.db.meetingSegments(this.meetingId))) this.scheduleBoard(board.waitingOnItem);
+      });
+    return this.boardRun;
   }
 
   // ---- notes --------------------------------------------------------------
@@ -1393,6 +1457,7 @@ export class RoomSession implements SpeechSink {
     if (this.emptyTimer) clearTimeout(this.emptyTimer);
     if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
     for (const t of this.noteTimers.values()) clearTimeout(t);
+    if (this.boardTimer) clearTimeout(this.boardTimer);
     this.noteTimers.clear();
     if (this.mergeTimer) clearTimeout(this.mergeTimer);
     this.mergeTimer = null;

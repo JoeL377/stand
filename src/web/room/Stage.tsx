@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import type { ClientMessage, ConxtLive, Discussion, Item, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { Board, ClientMessage, ConxtLive, Discussion, Item, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -8,7 +8,7 @@ import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
-import { TopicBoard } from "./TopicBoard.tsx";
+import { BoardStrip, TopicBoard } from "./TopicBoard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
@@ -31,6 +31,8 @@ export function Stage(props: {
   segments: Segment[];
   /** Live notes: the topics the talk is grouped into, and what came of them. */
   discussions: Discussion[];
+  /** The middle board's threads (server/board.ts). */
+  board: Board | null;
   notes: Note[];
   /** Items whose live notes are being redrawn right now (keyed "" for off the agenda). */
   notesBusy: string[];
@@ -115,6 +117,7 @@ export function Stage(props: {
   // the gallery so nobody is pulled out of the talk.
   const screenRef = useRef<HTMLDivElement>(null);
   const showingScreen = Boolean(localScreen || remoteScreen);
+  const deckUp = Boolean(focusItem?.deckId && (focusItem.slideNo || focusItem.slide));
   const [flash, setFlash] = useState(0);
   const [cropId, setCropId] = useState<string | null>(null);
   // Snaps you've expanded, each a tab on the main screen beside the screen itself, and the
@@ -312,6 +315,8 @@ export function Stage(props: {
           </div>
         )}
         {!props.ending && <ConxtNudges cards={state.conxt ?? []} me={props.participantId} offline={props.offline} send={send} />}
+        {/* A share or a deck has the middle: the topic stays in view as one line over it. */}
+        {(showingScreen || sharer || deckUp) && <BoardStrip board={props.board} focusItemId={state.focusItemId} />}
         </div>
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
         {cropSnap && (
@@ -377,8 +382,7 @@ export function Stage(props: {
           </div>
         ) : (
           <TopicBoard
-            discussions={props.discussions}
-            notes={props.notes}
+            board={props.board}
             segments={props.segments}
             interims={interims}
             participants={state.participants}
@@ -386,7 +390,6 @@ export function Stage(props: {
             focusItem={focusItem}
             focusItemId={state.focusItemId}
             meetingStartedAt={state.meetingStartedAt}
-            updating={props.notesBusy.includes(state.focusItemId ?? "")}
           />
         )}
       </div>

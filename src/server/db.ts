@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import type {
+  Board,
   ChapterRecap,
   AgentToken,
   Deck,
@@ -481,6 +482,8 @@ export function openDb(file?: string) {
   const meetingCols = (db.prepare("PRAGMA table_info(meetings)").all() as Row[]).map((c) => c.name);
   if (!meetingCols.includes("synthesis")) db.exec("ALTER TABLE meetings ADD COLUMN synthesis TEXT");
   if (!meetingCols.includes("chapters_json")) db.exec("ALTER TABLE meetings ADD COLUMN chapters_json TEXT");
+  // The middle board's threads (board.ts), so a restarted server carries on with the same board.
+  if (!meetingCols.includes("board_json")) db.exec("ALTER TABLE meetings ADD COLUMN board_json TEXT");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
@@ -965,6 +968,13 @@ export function openDb(file?: string) {
         st.run(toItem, r.id as string);
         return { ...toSegment(r), itemId: toItem };
       });
+    },
+    saveBoard(meetingId: string, board: Board) {
+      db.prepare("UPDATE meetings SET board_json = ? WHERE id = ?").run(JSON.stringify({ ...board, busy: false }), meetingId);
+    },
+    meetingBoard(meetingId: string): Board | null {
+      const r = db.prepare("SELECT board_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
+      return r?.board_json ? (JSON.parse(r.board_json as string) as Board) : null;
     },
     meetingSegments(meetingId: string): Segment[] {
       return (db.prepare("SELECT * FROM segments WHERE meeting_id = ? ORDER BY ts").all(meetingId) as Row[]).map(toSegment);

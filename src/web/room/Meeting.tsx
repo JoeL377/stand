@@ -460,6 +460,7 @@ export function Meeting(props: {
           interims={room.interims}
           segments={room.segments}
           discussions={room.discussions}
+          board={room.board}
           notes={room.notes}
           notesBusy={room.notesBusy}
           offline={!room.connected}
