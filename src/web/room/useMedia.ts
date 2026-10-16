@@ -65,10 +65,12 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
     const audioEls = new Map<string, HTMLMediaElement>();
     let cancelled = false;
 
-    const refreshScreen = () => {
+    // `gone` is a track LiveKit is letting go of: it fires TrackUnsubscribed before it
+    // clears the publication, so without this a stopped share stays on the board, black.
+    const refreshScreen = (gone?: Track) => {
       for (const p of room.remoteParticipants.values()) {
         const pub = p.getTrackPublication(Track.Source.ScreenShare);
-        if (pub?.track && pub.isSubscribed) {
+        if (pub?.track && pub.isSubscribed && pub.track !== gone && pub.track.mediaStreamTrack?.readyState !== "ended") {
           setRemoteScreen({ participantId: p.identity, track: pub.track as RemoteTrack });
           return;
         }
@@ -88,9 +90,10 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
       })
       .on(RoomEvent.TrackUnsubscribed, (track) => {
         track.detach().forEach((el) => el.remove());
-        refreshScreen();
+        refreshScreen(track);
       })
-      .on(RoomEvent.ParticipantDisconnected, refreshScreen)
+      .on(RoomEvent.TrackUnpublished, () => refreshScreen())
+      .on(RoomEvent.ParticipantDisconnected, () => refreshScreen())
       .on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
         setSpeaking(new Set(speakers.map((s) => s.identity)));
       })
