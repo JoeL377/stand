@@ -274,3 +274,34 @@ test("what is said under an agenda line raised from Conxt goes back as discussin
   assert.deepEqual(payload.addresses, [{ open_item_id: "c1", kind: "confirmation", turn_ids: [a.id, b.id] }]);
   db.raw.close();
 });
+
+test("a note from a long discussion cites the turns that support it, at most 32", () => {
+  const { db, owner, room } = setup();
+  connect(db, room.id, owner.id);
+  const meeting = db.startMeeting(room.id);
+  const segs = Array.from({ length: 150 }, (_, i) => db.addSegment({
+    meetingId: meeting.id, itemId: null, speakerId: i % 2 ? "a" : "b", speakerName: i % 2 ? "Alice" : "Bob",
+    kind: "speech", text: i === 90 ? "Let's freeze deploys on Fridays from now on." : i % 10 === 0 ? `Deploys came up again, take ${i}.` : `Other talk ${i}.`,
+    ts: meeting.startedAt + i * 1000,
+  }));
+  const [discussion] = db.replaceDiscussions(meeting.id, null, [{ topic: "Deploys", outcome: "decided", positions: [],
+    segmentIds: segs.map(s => s.id), continuesId: null }]);
+  db.replaceNotes(meeting.id, null, [
+    { kind: "decision", text: "Freeze deploys on Fridays.", owner: null, discussionId: discussion.id,
+      quote: { segmentId: segs[90].id, ts: segs[90].ts, speaker: "Alice", text: segs[90].text } },
+    { kind: "action", text: "Book the dentist.", owner: "Bob", discussionId: discussion.id },
+  ]);
+  db.endMeeting(meeting.id, "Deploys freeze on Fridays.");
+  const payload = JSON.parse(db.raw.prepare("SELECT payload FROM conxt_deliveries WHERE meeting_id=?").get(meeting.id)!.payload as string);
+  const decision = payload.synthesis.items.find((i: { content: string }) => i.content === "Freeze deploys on Fridays.");
+  const cited = decision.evidence.map((e: { turn_id: string }) => e.turn_id);
+  assert.ok(cited.length > 0 && cited.length <= 32);
+  assert.ok(cited.includes(segs[90].id), "the quoted turn is cited");
+  assert.deepEqual(cited, [...cited].sort((x: string, y: string) => segs.findIndex(s => s.id === x) - segs.findIndex(s => s.id === y)));
+  assert.equal(decision.disposition, "settled");
+  // Nothing in the discussion supports this one: held, not cited at random.
+  const unrelated = payload.synthesis.items.find((i: { content: string }) => i.content === "Book the dentist.");
+  assert.deepEqual(unrelated.evidence, []);
+  assert.equal(unrelated.disposition, "unresolved");
+  db.raw.close();
+});
