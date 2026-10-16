@@ -68,6 +68,29 @@ export function initConxt(sql: DatabaseSync) {
 }
 
 /** Called inside the same transaction that ends a meeting. No network or model call. */
+/** Citations Conxt takes per item. */
+const CITE_LIMIT = 32;
+type Turn = { id: string; text: string; at: string };
+
+const words = (text: string) => new Set(text.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []);
+
+/** The turns of a long discussion that support a note, at most CITE_LIMIT, in
+ *  transcript order: the turn the note quotes first, then those sharing its
+ *  words, nearer the note's time first. None when nothing supports it, so the
+ *  note is held as before rather than cited at random. */
+export function supporting(turns: Turn[], note: string, quote: { segmentId?: string; ts?: number } | null, ts: number): Turn[] {
+  const mine = words(note);
+  const when = quote?.ts ?? ts;
+  const scored = turns.map((t, order) => {
+    let score = 0;
+    if (quote?.segmentId && t.id === quote.segmentId) score += 1000;
+    for (const w of words(t.text)) if (mine.has(w)) score += 1;
+    return { t, order, score, distance: Math.abs((Date.parse(t.at) || 0) - when) };
+  }).filter(s => s.score > 0);
+  scored.sort((a, b) => b.score - a.score || a.distance - b.distance);
+  return scored.slice(0, CITE_LIMIT).sort((a, b) => a.order - b.order).map(s => s.t);
+}
+
 export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
   if (sql.prepare("SELECT 1 FROM conxt_deliveries WHERE meeting_id=?").get(meetingId)) return;
   const row = sql.prepare(`SELECT m.id,m.room_id,m.started_at,m.summary,m.synthesis,r.name,c.id AS connection_id
@@ -99,9 +122,16 @@ export function enqueueConxtMeeting(sql: DatabaseSync, meetingId: string) {
     WHERE n.meeting_id=? AND n.kind!='summary' ORDER BY n.ts,n.rowid`).all(meetingId) as Row[];
   const items = notes.map(n => {
     const ids: string[] = n.segment_ids_json ? JSON.parse(n.segment_ids_json as string) : [];
-    // Missing/stale/oversized citations are held, never manufactured or truncated.
-    const linked = ids.map(id => byId.get(id));
-    const grounded = linked.length > 0 && linked.length <= 32 && linked.every(t => t && t.text.trim() && t.text.length <= 12000);
+    // Missing/stale citations are held, never manufactured or rewritten.
+    const all = ids.map(id => byId.get(id));
+    const quote = n.quote_json ? (JSON.parse(n.quote_json as string) as { segmentId?: string; ts?: number }) : null;
+    // A long discussion cites the turns that support this note, not all of it:
+    // Conxt takes 32 per item, and a capture from a 150-turn discussion used to
+    // arrive with none and be held for that alone.
+    const linked = all.length > CITE_LIMIT && all.every(Boolean)
+      ? supporting(all as Turn[], String(n.text), quote, Number(n.ts))
+      : all;
+    const grounded = linked.length > 0 && linked.length <= CITE_LIMIT && linked.every(t => t && t.text.trim() && t.text.length <= 12000);
     return {
       id: n.id, content: n.text,
       primitive: n.kind === "action" ? "task" : n.kind,
