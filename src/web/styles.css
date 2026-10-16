@@ -1811,6 +1811,10 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-remark-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topic-remark strong { color: var(--text); font-weight: 500; }
 .topic-remark.now .topic-remark-text { color: var(--text); }
+.topic-warmup-talk { display: flex; flex-direction: column; gap: 10px; }
+.topic-warmup .topic-remark { margin: 0; padding: 0; border: 0; align-items: flex-start; font-size: 17px; line-height: 1.45; }
+.topic-warmup .topic-remark-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.topic-warmup .topic-hint { margin-top: auto; }
 .topic-outcome { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--hover); color: var(--muted); }
 .topic-outcome.open { background: color-mix(in srgb, var(--warn) 16%, transparent); color: color-mix(in srgb, var(--warn) 50%, #fff); }
 .topic-outcome.action { background: var(--accent-soft); color: var(--accent-text); }
