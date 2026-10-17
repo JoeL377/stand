@@ -177,7 +177,7 @@ export function BoardStrip({ board, focusItemId }: { board: Board | null; focusI
   if (!t || t.itemId !== focusItemId) return null;
   const { who, text } = splitNow(t.card.now);
   return (
-    <div className="topic-strip" role="status" title={t.card.summary}>
+    <div className={board?.busy ? "topic-strip updating" : "topic-strip"} role="status" title={t.card.summary}>
       <span className="agent-mark" aria-hidden>
         ✦
       </span>
@@ -236,6 +236,9 @@ function Card(props: {
           {label}
         </span>
         {spent(t) >= 60_000 && <span className="topic-mins">{fmtDuration(spent(t))}</span>}
+        <span className={props.updating ? "topic-updating on" : "topic-updating"} aria-hidden>
+          <span className="agent-mark">✦</span> Updating
+        </span>
       </div>
       <h2 className="topic-now-title" aria-live="polite">
         {t.title}
