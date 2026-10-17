@@ -1781,7 +1781,12 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-board.peeking .topic-now { opacity: 0.55; }
 .topic-now.topic-in { animation: topic-in 240ms var(--ease-out, ease-out), topic-flash 1.6s ease-out; }
 /* While the notes are being redrawn from the latest talk, a light runs left to right along the top edge. */
-.topic-now.updating::before { content: ""; position: absolute; top: 0; left: 0; width: 35%; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: topic-updating 1.6s ease-in-out infinite; }
+.topic-now.updating::before { content: ""; position: absolute; top: 0; left: 0; width: 35%; height: 2px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 45%, #fff), transparent); animation: topic-updating 1.6s ease-in-out infinite; }
+/* …and a quiet "✦ Updating" fades in at the right of the card's top line. */
+.topic-updating { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); opacity: 0; transition: opacity 300ms ease-out; }
+.topic-updating .agent-mark { color: var(--accent-text); }
+.topic-updating.on { opacity: 1; }
+.topic-updating.on .agent-mark, .topic-strip.updating .agent-mark { display: inline-block; animation: notes-pulse 1.2s ease-in-out infinite; }
 .topic-now-head { display: flex; align-items: center; gap: 8px; }
 /* "New topic" or "Back to" for a few seconds after the board switches, then "Now" again. */
 .topic-now-label.arrived, .topic-now-label.live.arrived { padding: 2px 8px; border-radius: 999px; background: var(--accent); color: #fff; animation: label-in 200ms var(--ease-out, ease-out); }
@@ -1863,6 +1868,7 @@ a.sh-pill:hover { text-decoration: none; }
   .topic-stretch::before, .topic-stretch, .topic-bar-elapsed, .topic-bar-times > .topic-bar-now { transition: none; }
   /* No moving light: the top edge just brightens while the notes update. */
   .topic-now.updating::before { animation: none; left: 0; width: 100%; opacity: 0.6; background: var(--accent); }
+  .topic-updating.on .agent-mark, .topic-strip.updating .agent-mark { animation: none; }
 }
 
 /* Recap chapters (RecapChapters.tsx): the chapter bar, chips on notes, the Chapters section. */
