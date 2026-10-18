@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type BoardAnswer, type BoardDrift, BoardKeeper, type BoardModel } from "./board.ts";
-import type { BoardCard, Segment } from "../shared/protocol.ts";
+import { type BoardAnswer, type BoardDrift, type BoardEdits, BoardKeeper, type BoardModel } from "./board.ts";
+import type { Segment } from "../shared/protocol.ts";
 
 const T0 = Date.UTC(2026, 9, 16, 10);
 const S = 1000;
-const card = (summary: string): BoardCard => ({ summary, now: "Joe: a point", details: [] });
+const card = (summary: string) => ({ summary: [summary], positions: [], items: [], now: "Joe: a point" });
+const edits = (e: Partial<BoardEdits> = {}): BoardEdits => ({ sentences: [], dropSentences: [], positions: [], add: [], change: [], remove: [], now: "Joe: a point", ...e });
 const say = (n: number, at: number, itemId: string | null = null): Segment => ({
   id: `s${n}`,
   meetingId: "m",
@@ -25,7 +26,7 @@ function scripted(answers: Array<Partial<BoardAnswer>>, drifts: BoardDrift[] = [
     async boardCard(_context, talk) {
       asked.push(talk);
       const a = answers.shift() ?? {};
-      return { current: card("same thread"), retitle: null, shift: null, ...a };
+      return { current: edits(), retitle: null, shift: null, ...a };
     },
     async boardDrift(_context, talk) {
       driftAsked.push(talk);
@@ -71,7 +72,7 @@ test("the title can be sharpened once while the thread is young, never after", a
 });
 
 test("going back to an earlier thread brings back its card, not a new one", async () => {
-  const back: BoardAnswer["shift"] = { kind: "return", returnTo: "t1", title: "Audio bug", card: card("audio again") };
+  const back: BoardAnswer["shift"] = { kind: "return", returnTo: "t1", title: "Audio bug", card: null };
   const { model } = scripted([{ shift: shift("Audio bug") }, { shift: shift("Pricing") }, { shift: shift("Pricing") }, { shift: back }, { shift: back }]);
   const k = new BoardKeeper(model, T0);
   const talk: Segment[] = [];
@@ -82,7 +83,7 @@ test("going back to an earlier thread brings back its card, not a new one", asyn
   const b = k.board();
   assert.equal(b.threads.length, 2);
   assert.equal(b.currentId, "t1");
-  assert.equal(b.threads[0].card.summary, "audio again");
+  assert.deepEqual(b.threads[0].card.summary, ["about Audio bug"]);
   assert.equal(b.threads[0].spans.length, 2);
 });
 
@@ -96,7 +97,7 @@ test("after the host moves to another agenda item, the next thread there shows w
   talk.push(say(3, 15 * S, "a"));
   await k.run(talk, [], [], "b", T0 + 25 * S);
   assert.equal(k.board().threads.length, 1);
-  assert.equal(k.board().threads[0].card.summary, "about Audio bug");
+  assert.deepEqual(k.board().threads[0].card.summary, ["about Audio bug"]);
   talk.push(say(4, 40 * S, "b"));
   await k.run(talk, [], [], "b", T0 + 45 * S);
   const b = k.board();
@@ -144,4 +145,59 @@ test("a saved board carries on after a restart", async () => {
   const again = new BoardKeeper(scripted([]).model, T0, JSON.parse(JSON.stringify(k.board())));
   assert.equal(again.board().currentId, "t1");
   assert.equal(again.due([say(1, 0), say(2, 5 * S)]), false);
+});
+
+test("an update changes only what it names: lines keep their ids and places", async () => {
+  const first = { kind: "new" as const, returnTo: null, title: "Pricing toggle", card: { summary: ["Sam ships the toggle.", "Jordan worries about copy."], positions: [{ who: "Sam", text: "ship it" }, { who: "Jordan", text: "fix the copy first" }], items: [{ kind: "open" as const, who: null, text: "20 or 17 percent?" }], now: "Sam: it's in review" } };
+  const { model } = scripted([
+    { shift: first },
+    { current: edits({ sentences: [{ n: 2, text: "Jordan found billing gives 17 percent." }], positions: [{ who: "Jordan Lee", text: "copy must say 17 percent" }], add: [{ kind: "todo", who: "Sam", text: "Change the copy" }] }) },
+    { current: edits({ remove: ["d3"], add: [{ kind: "decided", who: null, text: "Copy says 17 percent" }] }) },
+  ]);
+  const k = new BoardKeeper(model, T0);
+  const talk = [say(1, 0), say(2, 5 * S)];
+  await k.run(talk, [], [], null, T0 + 10 * S);
+  const before = k.board().threads[0].card;
+  assert.deepEqual(before.details.map((d) => d.id), ["d1", "d2", "d3"]);
+  talk.push(say(3, 40 * S), say(4, 45 * S));
+  await k.run(talk, [], [], null, T0 + 50 * S);
+  let c = k.board().threads[0].card;
+  assert.deepEqual(c.summary, ["Sam ships the toggle.", "Jordan found billing gives 17 percent."]);
+  assert.deepEqual(c.details.map((d) => [d.id, d.kind, d.text]), [
+    ["d1", "position", "ship it"],
+    ["d2", "position", "copy must say 17 percent"],
+    ["d3", "open", "20 or 17 percent?"],
+    ["d4", "todo", "Change the copy"],
+  ]);
+  // The first line is the same object: nothing about it changed.
+  assert.equal(c.details[0], before.details[0]);
+  talk.push(say(5, 70 * S), say(6, 75 * S));
+  await k.run(talk, [], [], null, T0 + 80 * S);
+  c = k.board().threads[0].card;
+  assert.deepEqual(c.details.map((d) => d.id), ["d1", "d2", "d4", "d5"]);
+});
+
+test("a card saved in the old shape is read as sentences and lines with ids", () => {
+  const old = { threads: [{ id: "t1", title: "Audio", itemId: null, spans: [[T0, T0 + 5 * S]], card: { summary: "One thing. Another thing.", now: "Joe: x", details: [{ kind: "position", who: "Joe", text: "a" }, { kind: "ref", who: null, text: "b" }, { kind: "open", who: null, text: "c" }] } }], currentId: "t1", switchedAt: T0, busy: false };
+  const k = new BoardKeeper(scripted([]).model, T0, old as never);
+  const c = k.board().threads[0].card;
+  assert.deepEqual(c.summary, ["One thing.", "Another thing."]);
+  assert.deepEqual(c.details.map((d) => [d.id, d.kind]), [["d1", "position"], ["d2", "open"]]);
+});
+
+test("a move waiting to be confirmed shows on the board, and accepting it switches at once", async () => {
+  const { model } = scripted([{ shift: shift("Audio bug") }, { shift: shift("Pricing") }]);
+  const k = new BoardKeeper(model, T0);
+  const talk = [say(1, 0), say(2, 5 * S)];
+  await k.run(talk, [], [], null, T0 + 10 * S);
+  assert.equal(k.board().pending, null);
+  talk.push(say(3, 40 * S), say(4, 45 * S));
+  await k.run(talk, [], [], null, T0 + 50 * S);
+  assert.deepEqual(k.board().pending, { kind: "new", title: "Pricing" });
+  assert.equal(k.accept("Something else", T0 + 55 * S), false);
+  assert.equal(k.accept("Pricing", T0 + 55 * S), true);
+  const b = k.board();
+  assert.equal(b.threads.find((t) => t.id === b.currentId)?.title, "Pricing");
+  assert.equal(b.pending, null);
+  assert.equal(b.threads[1].spans[0][0], T0 + 40 * S);
 });

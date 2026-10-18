@@ -1,8 +1,9 @@
 // The topic board: what the middle screen shows while nobody shares or presents. One card for
 // the thread of discussion the group is on (server/board.ts): a title that stays put, a paragraph
-// Stand rewrites every 30 seconds as the talk moves on, a few details under it, and the point being
-// made right now at its foot. Sentences new since the last update glow for a moment, so people
-// can see what changed without rereading. Underneath, a chapter bar runs from the start of the
+// Stand keeps up to date every 30 seconds as the talk moves on, then fixed sections (where each
+// person stands, decided, to do, open), and the point being made right now at its foot. An update
+// changes single sentences and lines and leaves the rest where it is: a new line slides in with a
+// green mark, a reworded one gets a short underline, so people see what changed without rereading. Underneath, a chapter bar runs from the start of the
 // meeting to now, one stretch per thread; hovering or clicking one opens it on your own screen.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
 import type { Board, BoardDetail, BoardThread, Item, Participant, Segment } from "../../shared/protocol.ts";
@@ -14,15 +15,20 @@ import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 const NOW_MS = 120_000;
 /** Remarks the middle shows before the first card. */
 const WARMUP_REMARKS = 4;
-const MAX_DETAILS = 6;
 const PEEK_DETAILS = 3;
 /** How long "New topic" or "Back to" stays up after the board switches. */
 const ARRIVAL_MS = 8_000;
-/** How long a sentence the last update changed keeps its glow. */
-const GLOW_MS = 4_000;
-const MARK: Record<BoardDetail["kind"], string> = { position: "", decided: "✓", todo: "○", open: "?", ref: "↗" };
-const MARK_LABEL: Record<BoardDetail["kind"], string> = { position: "", decided: "Decided", todo: "To do", open: "Open question", ref: "Mentioned" };
-const DETAIL_ORDER: Record<BoardDetail["kind"], number> = { position: 0, decided: 1, todo: 2, open: 3, ref: 4 };
+/** How long a new line keeps its green mark, and a reworded one its underline. */
+const NEW_MS = 10_000;
+const CHANGED_MS = 4_000;
+const MARK: Record<BoardDetail["kind"], string> = { position: "", decided: "✓", todo: "○", open: "?" };
+const MARK_LABEL: Record<BoardDetail["kind"], string> = { position: "", decided: "Decided", todo: "To do", open: "Open question" };
+const DETAIL_ORDER: Record<BoardDetail["kind"], number> = { position: 0, decided: 1, todo: 2, open: 3 };
+const SECTIONS = [
+  { kind: "decided", label: "Decided" },
+  { kind: "todo", label: "To do" },
+  { kind: "open", label: "Open" },
+] as const;
 
 const first = (name: string) => name.split(/\s+/)[0];
 const same = (a: string, b: string) => a === b || first(a).toLowerCase() === first(b).toLowerCase();
@@ -51,6 +57,8 @@ export function TopicBoard(props: {
   focusItem: Item | null;
   focusItemId: string | null;
   meetingStartedAt: number;
+  /** Make the move the board is waiting to confirm, for everyone. */
+  onAcceptMove?: (title: string) => void;
 }) {
   const now = useNow(15_000);
   const board = props.board;
@@ -59,6 +67,7 @@ export function TopicBoard(props: {
   // After the host moves to another agenda item, the old card steps aside until that item has its own.
   const current = onBoard && onBoard.itemId === props.focusItemId ? onBoard : null;
   const arrival = useArrival(current?.id ?? null);
+  const [view, setView] = useBoardView();
   // The color for a person: by their id when they're here, else by name.
   const idOf = (name: string) => props.participants.find((p) => same(p.name, name))?.id ?? name;
   const nameOf = (name: string) => props.participants.find((p) => same(p.name, name))?.name ?? props.segments.find((s) => same(s.speakerName, name))?.speakerName ?? name;
@@ -86,6 +95,12 @@ export function TopicBoard(props: {
           t={current}
           live={live}
           updating={!!board?.busy}
+          pending={board?.pending ?? null}
+          onAcceptMove={props.onAcceptMove}
+          view={view}
+          onView={setView}
+          threads={threads}
+          meetingStart={start}
           arrival={arrival}
           speaking={speaking ? { name: speaking.speakerName, id: speaking.speakerId, text: speaking.text } : null}
           idOf={idOf}
@@ -177,7 +192,7 @@ export function BoardStrip({ board, focusItemId }: { board: Board | null; focusI
   if (!t || t.itemId !== focusItemId) return null;
   const { who, text } = splitNow(t.card.now);
   return (
-    <div className="topic-strip" role="status" title={t.card.summary}>
+    <div className={board?.busy ? "topic-strip updating" : "topic-strip"} role="status" title={t.card.summary.join(" ")}>
       <span className="agent-mark" aria-hidden>
         ✦
       </span>
@@ -211,13 +226,23 @@ function Card(props: {
   updating: boolean;
   /** Just switched to: a thread new to this screen, or one it came back to. */
   arrival: Arrival;
+  /** A move the board waits one more pass to confirm: shown faintly, a click makes it now. */
+  pending: Board["pending"];
+  onAcceptMove?: (title: string) => void;
+  /** How this person likes the board laid out; the same data either way. */
+  view: BoardView;
+  onView: (v: BoardView) => void;
+  /** Every thread so far, for the running feed. */
+  threads: BoardThread[];
+  meetingStart: number;
   speaking: { name: string; id: string; text: string } | null;
   idOf: (name: string) => string;
   nameOf: (name: string) => string;
 }) {
   const { t } = props;
   const label = props.arrival === "new" ? "New topic" : props.arrival === "back" ? "Back to" : props.live ? "Now" : "Last";
-  const details = [...t.card.details].sort((a, b) => DETAIL_ORDER[a.kind] - DETAIL_ORDER[b.kind]).slice(0, MAX_DETAILS);
+  const marks = useChanges(t);
+  const positions = t.card.details.filter((d) => d.kind === "position");
   const said = splitNow(t.card.now);
   const foot = props.speaking
     ? { name: props.speaking.name, id: props.speaking.id, text: props.speaking.text, now: true }
@@ -227,7 +252,7 @@ function Card(props: {
   return (
     <section
       key={t.id}
-      className={["topic-now", props.arrival && "topic-in", props.updating && "updating"].filter(Boolean).join(" ")}
+      className={["topic-now", props.arrival && "topic-in", props.updating && "updating", props.view === "feed" && "feed"].filter(Boolean).join(" ")}
       aria-label="Current topic"
       aria-busy={props.updating}
     >
@@ -236,12 +261,68 @@ function Card(props: {
           {label}
         </span>
         {spent(t) >= 60_000 && <span className="topic-mins">{fmtDuration(spent(t))}</span>}
+        <span className={props.updating ? "topic-updating on" : "topic-updating"} aria-hidden>
+          <span className="agent-mark">✦</span> Updating
+        </span>
+        <ViewSwitch view={props.view} onView={props.onView} />
       </div>
+      {props.view === "feed" ? (
+        <Feed threads={props.threads} current={t} marks={marks} start={props.meetingStart} idOf={props.idOf} nameOf={props.nameOf} />
+      ) : (
+        <>
       <h2 className="topic-now-title" aria-live="polite">
         {t.title}
       </h2>
-      <Summary key={t.id} text={t.card.summary} />
-      {details.length > 0 && <Details details={details} idOf={props.idOf} nameOf={props.nameOf} />}
+      <p className="topic-summary" title="Stand writes this from the talk and keeps it up to date">
+        <span className="agent-mark" aria-hidden>
+          ✦
+        </span>{" "}
+        {t.card.summary.map((x, i) => (
+          <span key={i} className={mark(marks.get(`s${i}`))}>
+            {x}{" "}
+          </span>
+        ))}
+      </p>
+      {props.view === "card" ? (
+        <CardTabs t={t} marks={marks} idOf={props.idOf} nameOf={props.nameOf} />
+      ) : (
+        <div className="topic-sections columns">
+          <div className="topic-section position">
+            <span className="topic-section-label">People</span>
+            {positions.length ? <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
+          </div>
+          {SECTIONS.map((sec) => {
+            const lines = t.card.details.filter((d) => d.kind === sec.kind);
+            return (
+              <div key={sec.kind} className={`topic-section ${sec.kind}`}>
+                <span className="topic-section-label">{sec.label}</span>
+                {lines.length ? <Details details={lines} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+        </>
+      )}
+      {props.pending && (
+        <button
+          key={props.pending.title}
+          type="button"
+          className="topic-moving"
+          disabled={!props.onAcceptMove}
+          onClick={() => props.onAcceptMove?.(props.pending!.title)}
+          title="Switch the board to it now, for everyone"
+        >
+          <span className="agent-mark" aria-hidden>
+            ✦
+          </span>{" "}
+          {props.pending.kind === "return" ? "Looks like you're back on " : "Looks like you've moved to "}
+          <strong>{props.pending.title}</strong>
+          <span className="topic-moving-go" aria-hidden>
+            Switch →
+          </span>
+        </button>
+      )}
       {foot && (
         <p className={foot.now ? "topic-remark now" : "topic-remark"}>
           {foot.name && <Dot id={foot.id} name={foot.name} size={20} />}
@@ -256,40 +337,45 @@ function Card(props: {
   );
 }
 
-/** The paragraph. A sentence that wasn't in the last version glows for a few seconds. */
-function Summary({ text }: { text: string }) {
-  const prev = useRef<string | null>(null);
-  const [fresh, setFresh] = useState<Set<string>>(new Set());
+type Mark = "new" | "changed";
+const mark = (m: Mark | undefined) => (m === "new" ? "topic-new" : m === "changed" ? "topic-changed" : undefined);
+
+/** What the last updates added or reworded on a card, by sentence ("s0") and line id, while each
+ *  keeps its mark. The first version of a card on this screen isn't a change. */
+function useChanges(t: BoardThread): Map<string, Mark> {
+  const prev = useRef<{ id: string; text: Map<string, string> } | null>(null);
+  const [marks, setMarks] = useState<Map<string, { mark: Mark; until: number }>>(new Map());
+  const text = new Map<string, string>([...t.card.summary.map((x, i) => [`s${i}`, x] as const), ...t.card.details.map((d) => [d.id, d.text] as const)]);
+  const sig = [...text].map(([k, v]) => `${k}\u0000${v}`).join("\u0001");
   useEffect(() => {
     const before = prev.current;
-    prev.current = text;
-    // The first version on screen isn't a change.
-    if (before === null || before === text) return;
-    const had = new Set(sentences(before).map((s) => s.trim()));
-    setFresh(new Set(sentences(text).map((s) => s.trim()).filter((s) => !had.has(s))));
-    const timer = setTimeout(() => setFresh(new Set()), GLOW_MS);
+    prev.current = { id: t.id, text };
+    if (!before || before.id !== t.id) return setMarks(new Map());
+    const now = Date.now();
+    setMarks((m) => {
+      const next = new Map([...m].filter(([k, v]) => v.until > now && text.has(k)));
+      for (const [k, v] of text) {
+        if (!before.text.has(k)) next.set(k, { mark: "new", until: now + NEW_MS });
+        else if (before.text.get(k) !== v) next.set(k, { mark: "changed", until: now + CHANGED_MS });
+      }
+      return next;
+    });
+  }, [t.id, sig]);
+  // Clear each mark when its time is up.
+  useEffect(() => {
+    if (!marks.size) return;
+    const soonest = Math.min(...[...marks.values()].map((v) => v.until));
+    const timer = setTimeout(() => setMarks((m) => new Map([...m].filter(([, v]) => v.until > Date.now()))), Math.max(0, soonest - Date.now()) + 50);
     return () => clearTimeout(timer);
-  }, [text]);
-  return (
-    <p className="topic-summary" title="Stand writes this from the talk and keeps it up to date">
-      <span className="agent-mark" aria-hidden>
-        ✦
-      </span>{" "}
-      {sentences(text).map((s, i) => (
-        <span key={`${i}-${s}`} className={fresh.has(s.trim()) ? "topic-fresh" : undefined}>
-          {s}
-        </span>
-      ))}
-    </p>
-  );
+  }, [marks]);
+  return new Map([...marks].map(([k, v]) => [k, v.mark]));
 }
-const sentences = (text: string) => text.match(/[^.!?]+[.!?]*\s*/g) ?? [text];
 
-function Details(props: { details: BoardDetail[]; idOf: (name: string) => string; nameOf: (name: string) => string; small?: boolean }) {
+function Details(props: { details: BoardDetail[]; marks?: Map<string, Mark>; idOf: (name: string) => string; nameOf: (name: string) => string; small?: boolean; feed?: boolean }) {
   return (
-    <ul className={props.small ? "topic-details small" : "topic-details"}>
-      {props.details.map((d, i) => (
-        <li key={`${d.kind}-${i}`} className={d.kind}>
+    <ul className={["topic-details", props.small && "small", props.feed && "feed"].filter(Boolean).join(" ")}>
+      {props.details.map((d) => (
+        <li key={d.id} className={[d.kind, mark(props.marks?.get(d.id))].filter(Boolean).join(" ")}>
           {d.kind === "position" && d.who ? (
             <Dot id={props.idOf(d.who)} name={props.nameOf(d.who)} size={props.small ? 18 : 20} />
           ) : (
@@ -305,6 +391,142 @@ function Details(props: { details: BoardDetail[]; idOf: (name: string) => string
         </li>
       ))}
     </ul>
+  );
+}
+
+const TABS = [{ kind: "position", label: "People" }, ...SECTIONS] as const;
+type Tab = (typeof TABS)[number]["kind"];
+const TAB_KEY = "stand.boardTab";
+
+/** Under the summary: one tab per part of the card, each with its count, so only one list is
+ *  on screen at a time. A tab that got a new line has a green dot until it's opened or the mark
+ *  runs out. The open tab is this person's, remembered in this browser. */
+function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; idOf: (name: string) => string; nameOf: (name: string) => string }) {
+  const [tab, setTab] = useState<Tab>(() => {
+    try {
+      const v = localStorage.getItem(TAB_KEY);
+      return TABS.some((x) => x.kind === v) ? (v as Tab) : "position";
+    } catch {
+      return "position";
+    }
+  });
+  const pick = (k: Tab) => {
+    setTab(k);
+    try {
+      localStorage.setItem(TAB_KEY, k);
+    } catch {
+      // Not remembered; it still switches.
+    }
+  };
+  const lines = (k: Tab) => props.t.card.details.filter((d) => d.kind === k);
+  const shown = lines(tab);
+  return (
+    <div className="topic-tabs-wrap">
+      <div className="topic-tabs" role="tablist" aria-label="Details">
+        {TABS.map((x) => {
+          const n = lines(x.kind).length;
+          const fresh = x.kind !== tab && lines(x.kind).some((d) => props.marks.get(d.id) === "new");
+          return (
+            <button key={x.kind} type="button" role="tab" aria-selected={tab === x.kind} className={[tab === x.kind && "on", !n && "empty"].filter(Boolean).join(" ")} onClick={() => pick(x.kind)}>
+              {x.label}
+              <span className="topic-tab-count">{n}</span>
+              {fresh && <span className="topic-tab-new" aria-label="new" />}
+            </button>
+          );
+        })}
+      </div>
+      <div role="tabpanel" className="topic-tab-panel">
+        {shown.length ? <Details details={shown} marks={props.marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">Nothing yet</span>}
+      </div>
+    </div>
+  );
+}
+
+export type BoardView = "card" | "columns" | "feed";
+const VIEWS: Array<{ id: BoardView; label: string }> = [
+  { id: "card", label: "Card" },
+  { id: "columns", label: "Columns" },
+  { id: "feed", label: "Feed" },
+];
+const VIEW_KEY = "stand.boardView";
+
+/** The layout this person picked, remembered in this browser. */
+function useBoardView(): [BoardView, (v: BoardView) => void] {
+  const [view, setView] = useState<BoardView>(() => {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      return VIEWS.some((x) => x.id === v) ? (v as BoardView) : "card";
+    } catch {
+      return "card";
+    }
+  });
+  return [
+    view,
+    (v) => {
+      setView(v);
+      try {
+        localStorage.setItem(VIEW_KEY, v);
+      } catch {
+        // Not remembered; it still switches.
+      }
+    },
+  ];
+}
+
+function ViewSwitch(props: { view: BoardView; onView: (v: BoardView) => void }) {
+  return (
+    <span className="topic-views" role="group" aria-label="Board layout, on your screen only">
+      {VIEWS.map((v) => (
+        <button key={v.id} type="button" className={props.view === v.id ? "on" : undefined} aria-pressed={props.view === v.id} onClick={() => props.onView(v.id)}>
+          {v.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/** The running feed: every thread so far in order, each line where it came in, newest at the bottom. */
+function Feed(props: { threads: BoardThread[]; current: BoardThread; marks: Map<string, Mark>; start: number; idOf: (name: string) => string; nameOf: (name: string) => string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const order = [...props.threads].sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0));
+  const shown = [...order.filter((t) => t !== props.current), props.current];
+  const count = shown.reduce((n, t) => n + t.card.details.length + t.card.summary.length, 0);
+  // Stay at the newest unless the person has scrolled up to read.
+  const pinned = useRef(true);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  }, [count, props.current.id]);
+  const byArrival = (a: BoardDetail, b: BoardDetail) => (Number(a.id.slice(1)) || 0) - (Number(b.id.slice(1)) || 0);
+  return (
+    <div ref={ref} className="topic-feed" onScroll={(e) => (pinned.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
+      {shown.map((t) => {
+        const isCurrent = t === props.current;
+        return (
+          <section key={t.id} className={isCurrent ? "topic-feed-thread current" : "topic-feed-thread"}>
+            <div className="topic-feed-head">
+              <span className="topic-peek-at">{clock((t.spans[0]?.[0] ?? props.start) - props.start)}</span>
+              <strong>{t.title}</strong>
+            </div>
+            {isCurrent && (
+              <p className="topic-feed-summary">
+                <span className="agent-mark" aria-hidden>
+                  ✦
+                </span>{" "}
+                {t.card.summary.map((x, i) => (
+                  <span key={i} className={mark(props.marks.get(`s${i}`))}>
+                    {x}{" "}
+                  </span>
+                ))}
+              </p>
+            )}
+            {t.card.details.length > 0 && (
+              <Details details={[...t.card.details].sort(byArrival)} marks={isCurrent ? props.marks : undefined} idOf={props.idOf} nameOf={props.nameOf} feed />
+            )}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -388,7 +610,7 @@ function Peek(props: {
         {props.elsewhere && <span className="topic-mins topic-peek-item">· {props.elsewhere}</span>}
       </div>
       <strong className="topic-peek-title">{t.title}</strong>
-      <p className="topic-peek-summary">{t.card.summary}</p>
+      <p className="topic-peek-summary">{t.card.summary.join(" ")}</p>
       {details.length > 0 && <Details details={details} idOf={props.idOf} nameOf={props.nameOf} small />}
     </div>
   );

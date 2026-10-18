@@ -594,6 +594,9 @@ export class RoomSession implements SpeechSink {
         this.pinnedBy = null;
         this.setFocus(msg.itemId, conn.name, "manual");
         break;
+      case "board.accept":
+        if (!this.ended) void this.acceptBoardMove(msg.title);
+        break;
       case "pin":
         if (!isHost || this.ended) return;
         this.setFocus(msg.itemId, conn.name, "pin");
@@ -1162,6 +1165,15 @@ export class RoomSession implements SpeechSink {
         if (!this.ended && board.due(this.db.meetingSegments(this.meetingId))) this.scheduleBoard(board.waitingOnItem);
       });
     return this.boardRun;
+  }
+
+  /** Someone clicked "Looks like you've moved to …": switch the board now, after any pass in flight. */
+  private async acceptBoardMove(title: string) {
+    await this.boardRun;
+    const board = this.board;
+    if (this.ended || !board || !board.accept(title, Date.now())) return;
+    this.db.saveBoard(this.meetingId, board.board());
+    this.broadcast({ type: "board", board: board.board() });
   }
 
   // ---- notes --------------------------------------------------------------

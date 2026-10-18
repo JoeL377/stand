@@ -34,7 +34,7 @@ for (let i = 0; i < ticks.length; i += every) {
     model: "claude-sonnet-5-5",
     max_tokens: 200,
     system: SYSTEM,
-    messages: [{ role: "user", content: `Reference topic: ${g.title}\nGist: ${g.gist}\n\nScreen title: ${t.title}\nSummary: ${t.card.summary}\nNow: ${t.card.now}` }],
+    messages: [{ role: "user", content: `Reference topic: ${g.title}\nGist: ${g.gist}\n\nScreen title: ${t.title}\nSummary: ${[t.card.summary].flat().join(" ")}\nNow: ${t.card.now}` }],
     output_config: { effort: "low", format: betaZodOutputFormat(Grade) },
     thinking: { type: "between_tools" },
   } as any);

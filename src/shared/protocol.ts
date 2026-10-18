@@ -450,6 +450,8 @@ export type ClientMessage = (
   | { type: "conxt.share"; itemId: string }
   | { type: "note.restore"; noteId: string }
   | { type: "suggestion.dismiss" }
+  /** Anyone on the call: make the move the board is waiting to confirm, now. `title`: the one they saw. */
+  | { type: "board.accept"; title: string }
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */
   | { type: "host.give"; participantId: string }
   | { type: "sharing"; on: boolean }
@@ -477,16 +479,20 @@ export type ClientMessage = (
   | { type: "meeting.end" }
 ) & { cid?: string };
 
-/** One line under a board card's summary. */
+/** One line under a board card's summary. Its id stays the same while the card is updated, so
+ *  each line keeps its place and the screen can tell a new line from a reworded one. */
 export interface BoardDetail {
-  kind: "position" | "decided" | "todo" | "open" | "ref";
+  id: string;
+  kind: "position" | "decided" | "todo" | "open";
   /** The person, for a position or a to-do's owner. */
   who: string | null;
   text: string;
 }
-/** What the middle shows about a thread: a paragraph, the point being made now, and a few details. */
+/** What the middle shows about a thread: a short paragraph, the point being made now, and the
+ *  details in fixed sections (each person's position, then decided, to do, open). */
 export interface BoardCard {
-  summary: string;
+  /** The paragraph, one sentence per entry. Updates replace or add single sentences. */
+  summary: string[];
   /** The point being made in the newest talk, "Name: point". */
   now: string;
   details: BoardDetail[];
@@ -507,6 +513,8 @@ export interface Board {
   switchedAt: number | null;
   /** The board pass is reading the latest talk. */
   busy: boolean;
+  /** A move the board thinks the talk has made but waits one more pass to confirm. */
+  pending: { kind: "new" | "return"; title: string } | null;
 }
 
 export type ServerMessage =
