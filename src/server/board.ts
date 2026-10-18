@@ -2,14 +2,15 @@
 // talk itself, not from the live notes' topics, which split and fold back from run to run.
 //
 // Every BOARD_EVERY_MS while people talk, the board model gets the card on screen, the earlier
-// threads and the last few minutes of transcript, and returns the card brought up to date, plus a
-// proposed next thread when the talk has clearly moved on. The title is set once (it may be
-// sharpened one time while the thread is young). A move shows only after it holds for two answers
+// threads and the last few minutes of transcript, and returns only what changed on the card (a
+// sentence, a person's position, a line added or removed), so the rest stays where people are
+// reading it. It may also propose a next thread when the talk has clearly moved on. The title is
+// set once (it may be sharpened one time while the thread is young). A move shows only after it holds for two answers
 // in a row, so a tangent never moves it. Every DRIFT_EVERY runs a second check reads only the
 // title and the latest talk, without the summary, so a slow drift into a new question still moves
 // it. When the host focuses another agenda item, the next answer starts a thread there at once.
 import { z } from "zod";
-import type { Board, BoardCard, BoardThread, Item, Segment } from "../shared/protocol.ts";
+import type { Board, BoardCard, BoardDetail, BoardThread, Item, Segment } from "../shared/protocol.ts";
 
 export const BOARD_EVERY_MS = 30_000;
 /** How much recent talk the card model reads. */
@@ -24,29 +25,55 @@ const CONFIRM = 2;
 const RETITLE_MS = 3 * 60_000;
 /** New talk a run needs, once there is a card. */
 const MIN_NEW_LINES = 2;
+/** Room on a card: summary sentences, positions, and lines of each other kind. */
+const MAX_SENTENCES = 4;
+const MAX_POSITIONS = 6;
+const MAX_LINES = 5;
 /** A thread's stretch on the chapter bar breaks after a pause this long. */
 const SPAN_GAP_MS = 3 * 60_000;
 
-const Detail = z.object({
-  kind: z.enum(["position", "decided", "todo", "open", "ref"]),
-  who: z.string().nullable().describe("First name for a position or a to-do's owner; null otherwise"),
-  text: z.string(),
+const Kind = z.enum(["decided", "todo", "open"]);
+const Position = z.object({ who: z.string().describe("First name"), text: z.string().describe("Their view, at most 15 words") });
+const Line = z.object({
+  kind: Kind,
+  who: z.string().nullable().describe("A to-do's owner (first name); null otherwise"),
+  text: z.string().describe("At most 15 words"),
 });
-const Card = z.object({ summary: z.string(), now: z.string(), details: z.array(Detail) });
+/** A new thread's first card. */
+const NewCard = z.object({
+  summary: z.array(z.string()).describe("2-4 sentences"),
+  positions: z.array(Position),
+  items: z.array(Line),
+  now: z.string(),
+});
+/** What changed on the card on screen. Anything not named stays exactly as it is. */
+const Edits = z.object({
+  sentences: z
+    .array(z.object({ n: z.number().int().nullable().describe("The sentence to replace (1-based); null adds one at the end"), text: z.string() }))
+    .describe("Only sentences the new talk makes wrong or incomplete; usually zero or one"),
+  dropSentences: z.array(z.number().int()).describe("Sentences no longer true; usually empty"),
+  positions: z.array(Position).describe("Only people whose view is new or has changed"),
+  add: z.array(Line).describe("New decided, to-do or open lines"),
+  change: z.array(z.object({ id: z.string(), text: z.string() })).describe("A line whose meaning changed, by id; usually empty"),
+  remove: z.array(z.string()).describe("Ids of lines no longer true, like an open question that got answered"),
+  now: z.string(),
+});
 export const BoardAnswerSchema = z.object({
-  current: Card.describe("The thread on screen, brought up to date"),
+  current: Edits.describe("Changes to the thread on screen"),
   retitle: z.string().nullable().describe("Only while the thread on screen is under 3 minutes old and its title doesn't name the problem being worked out: a better title. Otherwise null"),
   shift: z
     .object({
       kind: z.enum(["new", "return"]),
       returnTo: z.string().nullable().describe("For return: the id of the earlier thread"),
       title: z.string(),
-      card: Card,
+      card: NewCard.nullable().describe("For new: its first card. For return: null"),
     })
     .nullable()
     .describe("Only when the newest talk has clearly moved off the thread on screen"),
 });
 export type BoardAnswer = z.infer<typeof BoardAnswerSchema>;
+export type BoardEdits = z.infer<typeof Edits>;
+type NewCard = z.infer<typeof NewCard>;
 export const BoardDriftSchema = z.object({
   verdict: z.enum(["same", "moved"]),
   title: z.string().nullable().describe("For moved: the thread the talk is on now, at most 8 words"),
@@ -59,15 +86,19 @@ A thread is ONE question or problem the group is working through, named the way 
 
 Typical threads last 2 to 15 minutes; a big debate can last much longer.
 
-Each time you get: the people in the meeting, the thread on screen (title, summary, details), earlier threads, and the last few minutes of transcript with the lines since your last look marked NEW. Transcription is rough: guess through misheard words, and match misheard names to the people in the meeting.
+Each time you get: the people in the meeting, the thread on screen (title, numbered summary sentences, and its lines with ids), earlier threads, and the last few minutes of transcript with the lines since your last look marked NEW. Transcription is rough: guess through misheard words, and match misheard names to the people in the meeting.
+
+People are reading the card while you update it, so it must not jump around. You never rewrite the card: you send only the changes the NEW lines call for, and everything you don't name stays exactly where it is. Most updates change one or two things; an update that changes nothing but "now" is normal.
+
+The card has fixed parts:
+- summary: at most 4 sentences, present tense. The first says what is being worked out; the middle ones the main views by first name; the last says where it stands right now, including which sub-question the group is on. Say the substance, don't narrate ("they discuss"). Replace a sentence only when the new talk makes it wrong or incomplete; add one only when it says something new. When there are 4, replace rather than add. As a debate moves through sub-questions, keep the last sentence current: that is how the card follows it without a new thread.
+- positions: one line per person, their current view in at most 15 words. Send a person only when their view is new or has changed.
+- decided, todo (who = owner), open (a question not yet answered): add a line when the talk produces one. When an open question gets answered, remove it and add what was decided. Use change only when the meaning of a line changed, never to polish wording.
 
 Return:
-- current: the on-screen thread brought up to date.
-  - summary: one paragraph, 2-4 sentences, at most 70 words, present tense: what is being worked out, the main views by first name, and where it stands. Keep the previous wording where it is still right; change only what the new talk changes. Don't narrate ("they discuss"); say the substance. The summary is about this thread only: if you would need to write "now they..." about a different problem, that is a shift, not a summary edit.
-  - now: at most 14 words, the point being made in the NEW lines, starting with the first name of who is making it ("Andy: building ingestion in Stand means merging in practice"). If the NEW lines are off this thread, say what they are about anyway.
-  - details: at most 6, the most useful first: position (who + their view, one per person), decided, todo (who = owner), open (an unanswered question), ref (a name, link, number or thing mentioned that people may want to look up). Keep earlier details unless the talk replaced them.
+- current: the changes to the thread on screen. now is always set: at most 14 words, the point being made in the NEW lines, starting with the first name of who is making it ("Andy: building ingestion in Stand means merging in practice"). If the NEW lines are off this thread, say what they are about anyway.
 - retitle: usually null. While the thread on screen is under 3 minutes old, if its title names the first remark rather than the problem being worked out, give a better title once.
-- shift: null while the NEW lines still belong to the thread on screen. Ask: would the title on screen still be the right name for what the NEW lines are about? A tangent of a line or two, a joke, or the next sub-question of the same debate keeps the thread. A different problem, bug, feature, or decision is a new thread, even when it is about the same product (a bug report, then a question about how notes should look, are two threads). A mic check or small talk at the start is not a thread: move off it as soon as real work starts. Then give kind "new" with a short title (at most 8 words, the question or problem being worked out in plain words, not the first remark) and its own card from the lines that belong to it, or kind "return" with returnTo when talk went back to an earlier thread. When a move is already pending, say it again if it still holds, with the same title.`;
+- shift: null while the NEW lines still belong to the thread on screen. Ask: would the title on screen still be the right name for what the NEW lines are about? A tangent of a line or two, a joke, or the next sub-question of the same debate keeps the thread. A different problem, bug, feature, or decision is a new thread, even when it is about the same product (a bug report, then a question about how notes should look, are two threads). A mic check or small talk at the start is not a thread: move off it as soon as real work starts. Then give kind "new" with a short title (at most 8 words, the question or problem being worked out in plain words, not the first remark) and its first card from the lines that belong to it, or kind "return" with returnTo (and card null) when talk went back to an earlier thread. While a shift is given, current still carries any changes for the thread on screen. When a move is already pending, say it again if it still holds, with the same title.`;
 
 export const DRIFT_SYSTEM = `You check one thing about a live meeting screen. Its title names the thread of discussion the group is on. Read the last few minutes of transcript and answer: would a person who just walked in, reading only this talk, still name it with this title?
 - same: yes, or the talk is a sub-question of the same debate, or a short tangent.
@@ -84,7 +115,7 @@ interface Pending {
   kind: "new" | "return";
   returnTo: string | null;
   title: string;
-  card: BoardCard;
+  card: NewCard | null;
   count: number;
   /** The first line it covers. */
   since: number;
@@ -95,8 +126,16 @@ const at = (ms: number, start: number) => {
   const s = Math.max(0, Math.floor((ms - start) / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
-const cardText = (c: BoardCard) =>
-  `Summary: ${c.summary}\nNow: ${c.now}\nDetails:\n${c.details.map((d) => `- ${d.kind}${d.who ? ` (${d.who})` : ""}: ${d.text}`).join("\n") || "(none)"}`;
+const SECTION: Record<Exclude<BoardDetail["kind"], "position">, string> = { decided: "Decided", todo: "To do", open: "Open" };
+const cardText = (c: BoardCard) => {
+  const lines = (kind: BoardDetail["kind"]) => c.details.filter((d) => d.kind === kind).map((d) => `- [${d.id}]${d.who ? ` ${d.who}:` : ""} ${d.text}`);
+  return [
+    `Summary:\n${c.summary.map((x, i) => `${i + 1}. ${x}`).join("\n") || "(none)"}`,
+    `Positions:\n${lines("position").join("\n") || "(none)"}`,
+    ...(["decided", "todo", "open"] as const).map((k) => `${SECTION[k]}:\n${lines(k).join("\n") || "(none)"}`),
+    `Now: ${c.now}`,
+  ].join("\n");
+};
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
 
 /** Keeps one meeting's board. Not thread-safe: the room runs one pass at a time. */
@@ -112,6 +151,8 @@ export class BoardKeeper {
   /** The host focused this item since the last run: start a thread there without waiting. */
   private forcedItem: { itemId: string | null; at: number } | null = null;
   busy = false;
+  /** Lines given an id so far, across the board. */
+  private lines_ = 0;
 
   constructor(
     private model: BoardModel,
@@ -123,6 +164,8 @@ export class BoardKeeper {
       this.current = saved.threads.find((t) => t.id === saved.currentId) ?? null;
       this.switchedAt = saved.switchedAt;
       this.lastLook = Math.max(0, ...saved.threads.flatMap((t) => t.spans.map((s) => s[1])));
+      for (const t of this.threads) t.card = upgrade(t.card, () => this.nextId());
+      this.lines_ = Math.max(0, ...this.threads.flatMap((t) => t.card.details.map((d) => Number(d.id.slice(1)) || 0)));
     }
   }
 
@@ -167,7 +210,7 @@ export class BoardKeeper {
     const itemTitle = (id: string | null) => (id ? (items.find((i) => i.id === id)?.title ?? "an agenda item") : "none (general talk)");
     const context = [
       `People: ${people.join(", ")}`,
-      `Earlier threads:\n${this.threads.filter((t) => t !== this.current).map((t) => `- ${t.id} "${t.title}": ${t.card.summary}`).join("\n") || "(none)"}`,
+      `Earlier threads:\n${this.threads.filter((t) => t !== this.current).map((t) => `- ${t.id} "${t.title}": ${t.card.summary.join(" ")}`).join("\n") || "(none)"}`,
     ].join("\n\n");
     const recent = talk.filter((s) => s.ts > now - WINDOW_MS);
     const live = [
@@ -187,7 +230,7 @@ export class BoardKeeper {
     if (!a) return false;
     const latest = fresh.at(-1)!.ts;
     if (this.current && !onOtherItem) {
-      this.current.card = tidy(a.current);
+      this.current.card = this.edit(this.current.card, a.current);
       const age = now - (this.current.spans[0]?.[0] ?? now);
       if (a.retitle?.trim() && !a.shift && age < RETITLE_MS && !this.retitled.has(this.current.id)) {
         this.current.title = clip(a.retitle.trim(), 80);
@@ -203,8 +246,8 @@ export class BoardKeeper {
     const s = a.shift;
     const same = this.pending && this.pending.kind === s.kind && (s.kind === "new" || this.pending.returnTo === s.returnTo);
     this.pending = same
-      ? { ...this.pending!, card: tidy(s.card), count: this.pending!.count + 1 }
-      : { kind: s.kind, returnTo: s.returnTo, title: clip(s.title.trim(), 80), card: tidy(s.card), count: 1, since: fresh[0].ts };
+      ? { ...this.pending!, card: s.card ?? this.pending!.card, count: this.pending!.count + 1 }
+      : { kind: s.kind, returnTo: s.returnTo, title: clip(s.title.trim(), 80), card: s.card, count: 1, since: fresh[0].ts };
     // Nothing on screen yet, or the agenda moved: no waiting. Otherwise the move has to hold.
     if (this.current && !onOtherItem && this.pending.count < CONFIRM) {
       this.extend(this.current, latest);
@@ -213,11 +256,11 @@ export class BoardKeeper {
     const back = this.pending.kind === "return" ? this.threads.find((t) => t.id === this.pending!.returnTo && t !== this.current) : undefined;
     const from = onOtherItem ? Math.max(forced!.at, this.pending.since) : this.pending.since;
     if (back) {
-      back.card = this.pending.card;
+      // Its card comes back as it was; the next pass brings it up to date.
       back.spans.push([from, latest]);
       this.current = back;
     } else {
-      const t: BoardThread = { id: `t${this.threads.length + 1}`, title: this.pending.title, itemId: onOtherItem ? forced!.itemId : focusItemId, card: this.pending.card, spans: [[from, latest]] };
+      const t: BoardThread = { id: `t${this.threads.length + 1}`, title: this.pending.title, itemId: onOtherItem ? forced!.itemId : focusItemId, card: this.fresh(this.pending.card), spans: [[from, latest]] };
       this.threads.push(t);
       this.current = t;
     }
@@ -228,7 +271,60 @@ export class BoardKeeper {
     return true;
   }
 
-  private extend(t: BoardThread, ts: number) {
+  private nextId() {
+    return `d${++this.lines_}`;
+  }
+
+  /** A new thread's first card. */
+  private fresh(c: NewCard | null): BoardCard {
+    const card: BoardCard = { summary: [], now: "", details: [] };
+    if (!c) return card;
+    return this.edit(card, { sentences: c.summary.map((text) => ({ n: null, text })), dropSentences: [], positions: c.positions, add: c.items, change: [], remove: [], now: c.now });
+  }
+
+  /** The card with the model's changes made, everything else left as it was. Lines keep their
+   *  ids and their places; a new line goes at the end of its section. */
+  private edit(card: BoardCard, e: BoardEdits): BoardCard {
+    const summary = [...card.summary];
+    for (const { n, text } of e.sentences) {
+      const t = clip(text.trim(), 240);
+      if (!t) continue;
+      if (n !== null && n >= 1 && n <= card.summary.length) summary[n - 1] = t;
+      else if (summary.length < MAX_SENTENCES && !summary.includes(t)) summary.push(t);
+    }
+    const drop = new Set(e.dropSentences.filter((n) => n >= 1 && n <= card.summary.length));
+    let details = card.details.filter((d) => !e.remove.includes(d.id));
+    for (const c of e.change) {
+      const text = clip(c.text.trim(), 200);
+      if (text) details = details.map((d) => (d.id === c.id ? { ...d, text } : d));
+    }
+    for (const p of e.positions) {
+      const who = p.who.trim().split(/\s+/)[0];
+      const text = clip(p.text.trim(), 200);
+      if (!who || !text) continue;
+      const had = details.find((d) => d.kind === "position" && d.who?.toLowerCase() === who.toLowerCase());
+      if (had) details = details.map((d) => (d === had ? { ...d, text } : d));
+      else details.push({ id: this.nextId(), kind: "position", who, text });
+    }
+    for (const l of e.add) {
+      const text = clip(l.text.trim(), 200);
+      if (!text || details.some((d) => d.kind === l.kind && d.text.toLowerCase() === text.toLowerCase())) continue;
+      details.push({ id: this.nextId(), kind: l.kind, who: l.who?.trim() || null, text });
+    }
+    // Over the room a section has: its oldest lines go.
+    for (const kind of ["position", "decided", "todo", "open"] as const) {
+      const of = details.filter((d) => d.kind === kind);
+      const over = of.length - (kind === "position" ? MAX_POSITIONS : MAX_LINES);
+      if (over > 0) details = details.filter((d) => !of.slice(0, over).includes(d));
+    }
+    return {
+      summary: summary.filter((_, i) => !drop.has(i + 1)),
+      now: clip(e.now.trim(), 160) || card.now,
+      details,
+    };
+  }
+
+    private extend(t: BoardThread, ts: number) {
     const last = t.spans.at(-1);
     if (last && ts - last[1] <= SPAN_GAP_MS) last[1] = Math.max(last[1], ts);
     else t.spans.push([ts, ts]);
@@ -241,11 +337,11 @@ export class BoardKeeper {
   }
 }
 
-/** Keeps what the model wrote to the sizes the card has room for. */
-function tidy(c: BoardCard): BoardCard {
-  return {
-    summary: clip(c.summary.trim(), 600),
-    now: clip(c.now.trim(), 160),
-    details: c.details.slice(0, 6).map((d) => ({ kind: d.kind, who: d.who?.trim() || null, text: clip(d.text.trim(), 200) })),
-  };
+/** A card saved before cards were kept as sentences and lines with ids. */
+function upgrade(c: BoardCard | { summary: string; now: string; details: Array<{ id?: string; kind: string; who: string | null; text: string }> }, nextId: () => string): BoardCard {
+  const summary = typeof c.summary === "string" ? (c.summary.match(/[^.!?]+[.!?]*/g) ?? [c.summary]).map((x) => x.trim()).filter(Boolean) : c.summary;
+  const details = (c.details as Array<{ id?: string; kind: string; who: string | null; text: string }>)
+    .filter((d): d is typeof d & { kind: BoardDetail["kind"] } => ["position", "decided", "todo", "open"].includes(d.kind))
+    .map((d) => ({ id: d.id ?? nextId(), kind: d.kind, who: d.who, text: d.text }));
+  return { summary, now: c.now, details };
 }

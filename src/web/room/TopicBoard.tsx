@@ -1,8 +1,9 @@
 // The topic board: what the middle screen shows while nobody shares or presents. One card for
 // the thread of discussion the group is on (server/board.ts): a title that stays put, a paragraph
-// Stand rewrites every 30 seconds as the talk moves on, a few details under it, and the point being
-// made right now at its foot. Sentences new since the last update glow for a moment, so people
-// can see what changed without rereading. Underneath, a chapter bar runs from the start of the
+// Stand keeps up to date every 30 seconds as the talk moves on, then fixed sections (where each
+// person stands, decided, to do, open), and the point being made right now at its foot. An update
+// changes single sentences and lines and leaves the rest where it is: a new line slides in with a
+// green mark, a reworded one gets a short underline, so people see what changed without rereading. Underneath, a chapter bar runs from the start of the
 // meeting to now, one stretch per thread; hovering or clicking one opens it on your own screen.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
 import type { Board, BoardDetail, BoardThread, Item, Participant, Segment } from "../../shared/protocol.ts";
@@ -14,15 +15,20 @@ import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 const NOW_MS = 120_000;
 /** Remarks the middle shows before the first card. */
 const WARMUP_REMARKS = 4;
-const MAX_DETAILS = 6;
 const PEEK_DETAILS = 3;
 /** How long "New topic" or "Back to" stays up after the board switches. */
 const ARRIVAL_MS = 8_000;
-/** How long a sentence the last update changed keeps its glow. */
-const GLOW_MS = 4_000;
-const MARK: Record<BoardDetail["kind"], string> = { position: "", decided: "✓", todo: "○", open: "?", ref: "↗" };
-const MARK_LABEL: Record<BoardDetail["kind"], string> = { position: "", decided: "Decided", todo: "To do", open: "Open question", ref: "Mentioned" };
-const DETAIL_ORDER: Record<BoardDetail["kind"], number> = { position: 0, decided: 1, todo: 2, open: 3, ref: 4 };
+/** How long a new line keeps its green mark, and a reworded one its underline. */
+const NEW_MS = 10_000;
+const CHANGED_MS = 4_000;
+const MARK: Record<BoardDetail["kind"], string> = { position: "", decided: "✓", todo: "○", open: "?" };
+const MARK_LABEL: Record<BoardDetail["kind"], string> = { position: "", decided: "Decided", todo: "To do", open: "Open question" };
+const DETAIL_ORDER: Record<BoardDetail["kind"], number> = { position: 0, decided: 1, todo: 2, open: 3 };
+const SECTIONS = [
+  { kind: "decided", label: "Decided" },
+  { kind: "todo", label: "To do" },
+  { kind: "open", label: "Open" },
+] as const;
 
 const first = (name: string) => name.split(/\s+/)[0];
 const same = (a: string, b: string) => a === b || first(a).toLowerCase() === first(b).toLowerCase();
@@ -177,7 +183,7 @@ export function BoardStrip({ board, focusItemId }: { board: Board | null; focusI
   if (!t || t.itemId !== focusItemId) return null;
   const { who, text } = splitNow(t.card.now);
   return (
-    <div className={board?.busy ? "topic-strip updating" : "topic-strip"} role="status" title={t.card.summary}>
+    <div className={board?.busy ? "topic-strip updating" : "topic-strip"} role="status" title={t.card.summary.join(" ")}>
       <span className="agent-mark" aria-hidden>
         ✦
       </span>
@@ -217,7 +223,8 @@ function Card(props: {
 }) {
   const { t } = props;
   const label = props.arrival === "new" ? "New topic" : props.arrival === "back" ? "Back to" : props.live ? "Now" : "Last";
-  const details = [...t.card.details].sort((a, b) => DETAIL_ORDER[a.kind] - DETAIL_ORDER[b.kind]).slice(0, MAX_DETAILS);
+  const marks = useChanges(t);
+  const positions = t.card.details.filter((d) => d.kind === "position");
   const said = splitNow(t.card.now);
   const foot = props.speaking
     ? { name: props.speaking.name, id: props.speaking.id, text: props.speaking.text, now: true }
@@ -243,8 +250,28 @@ function Card(props: {
       <h2 className="topic-now-title" aria-live="polite">
         {t.title}
       </h2>
-      <Summary key={t.id} text={t.card.summary} />
-      {details.length > 0 && <Details details={details} idOf={props.idOf} nameOf={props.nameOf} />}
+      <p className="topic-summary" title="Stand writes this from the talk and keeps it up to date">
+        <span className="agent-mark" aria-hidden>
+          ✦
+        </span>{" "}
+        {t.card.summary.map((x, i) => (
+          <span key={i} className={mark(marks.get(`s${i}`))}>
+            {x}{" "}
+          </span>
+        ))}
+      </p>
+      {positions.length > 0 && <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} />}
+      <div className="topic-sections">
+        {SECTIONS.map((sec) => {
+          const lines = t.card.details.filter((d) => d.kind === sec.kind);
+          return (
+            <div key={sec.kind} className={`topic-section ${sec.kind}`}>
+              <span className="topic-section-label">{sec.label}</span>
+              {lines.length ? <Details details={lines} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
+            </div>
+          );
+        })}
+      </div>
       {foot && (
         <p className={foot.now ? "topic-remark now" : "topic-remark"}>
           {foot.name && <Dot id={foot.id} name={foot.name} size={20} />}
@@ -259,40 +286,45 @@ function Card(props: {
   );
 }
 
-/** The paragraph. A sentence that wasn't in the last version glows for a few seconds. */
-function Summary({ text }: { text: string }) {
-  const prev = useRef<string | null>(null);
-  const [fresh, setFresh] = useState<Set<string>>(new Set());
+type Mark = "new" | "changed";
+const mark = (m: Mark | undefined) => (m === "new" ? "topic-new" : m === "changed" ? "topic-changed" : undefined);
+
+/** What the last updates added or reworded on a card, by sentence ("s0") and line id, while each
+ *  keeps its mark. The first version of a card on this screen isn't a change. */
+function useChanges(t: BoardThread): Map<string, Mark> {
+  const prev = useRef<{ id: string; text: Map<string, string> } | null>(null);
+  const [marks, setMarks] = useState<Map<string, { mark: Mark; until: number }>>(new Map());
+  const text = new Map<string, string>([...t.card.summary.map((x, i) => [`s${i}`, x] as const), ...t.card.details.map((d) => [d.id, d.text] as const)]);
+  const sig = [...text].map(([k, v]) => `${k}\u0000${v}`).join("\u0001");
   useEffect(() => {
     const before = prev.current;
-    prev.current = text;
-    // The first version on screen isn't a change.
-    if (before === null || before === text) return;
-    const had = new Set(sentences(before).map((s) => s.trim()));
-    setFresh(new Set(sentences(text).map((s) => s.trim()).filter((s) => !had.has(s))));
-    const timer = setTimeout(() => setFresh(new Set()), GLOW_MS);
+    prev.current = { id: t.id, text };
+    if (!before || before.id !== t.id) return setMarks(new Map());
+    const now = Date.now();
+    setMarks((m) => {
+      const next = new Map([...m].filter(([k, v]) => v.until > now && text.has(k)));
+      for (const [k, v] of text) {
+        if (!before.text.has(k)) next.set(k, { mark: "new", until: now + NEW_MS });
+        else if (before.text.get(k) !== v) next.set(k, { mark: "changed", until: now + CHANGED_MS });
+      }
+      return next;
+    });
+  }, [t.id, sig]);
+  // Clear each mark when its time is up.
+  useEffect(() => {
+    if (!marks.size) return;
+    const soonest = Math.min(...[...marks.values()].map((v) => v.until));
+    const timer = setTimeout(() => setMarks((m) => new Map([...m].filter(([, v]) => v.until > Date.now()))), Math.max(0, soonest - Date.now()) + 50);
     return () => clearTimeout(timer);
-  }, [text]);
-  return (
-    <p className="topic-summary" title="Stand writes this from the talk and keeps it up to date">
-      <span className="agent-mark" aria-hidden>
-        ✦
-      </span>{" "}
-      {sentences(text).map((s, i) => (
-        <span key={`${i}-${s}`} className={fresh.has(s.trim()) ? "topic-fresh" : undefined}>
-          {s}
-        </span>
-      ))}
-    </p>
-  );
+  }, [marks]);
+  return new Map([...marks].map(([k, v]) => [k, v.mark]));
 }
-const sentences = (text: string) => text.match(/[^.!?]+[.!?]*\s*/g) ?? [text];
 
-function Details(props: { details: BoardDetail[]; idOf: (name: string) => string; nameOf: (name: string) => string; small?: boolean }) {
+function Details(props: { details: BoardDetail[]; marks?: Map<string, Mark>; idOf: (name: string) => string; nameOf: (name: string) => string; small?: boolean }) {
   return (
     <ul className={props.small ? "topic-details small" : "topic-details"}>
-      {props.details.map((d, i) => (
-        <li key={`${d.kind}-${i}`} className={d.kind}>
+      {props.details.map((d) => (
+        <li key={d.id} className={[d.kind, mark(props.marks?.get(d.id))].filter(Boolean).join(" ")}>
           {d.kind === "position" && d.who ? (
             <Dot id={props.idOf(d.who)} name={props.nameOf(d.who)} size={props.small ? 18 : 20} />
           ) : (
@@ -391,7 +423,7 @@ function Peek(props: {
         {props.elsewhere && <span className="topic-mins topic-peek-item">· {props.elsewhere}</span>}
       </div>
       <strong className="topic-peek-title">{t.title}</strong>
-      <p className="topic-peek-summary">{t.card.summary}</p>
+      <p className="topic-peek-summary">{t.card.summary.join(" ")}</p>
       {details.length > 0 && <Details details={details} idOf={props.idOf} nameOf={props.nameOf} small />}
     </div>
   );

@@ -1835,9 +1835,23 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-peek-sub-title { font-size: 13px; font-weight: 500; }
 .topic-summary { margin: 0; font-size: 17px; line-height: 1.6; max-width: 72ch; color: color-mix(in srgb, var(--text) 92%, transparent); }
 .topic-summary .agent-mark { color: var(--accent-text); }
-/* A sentence the last update added or changed: a soft highlight that fades out. */
-.topic-summary > span { border-radius: 3px; transition: background-color 1.2s ease-out; }
-.topic-summary > .topic-fresh { background: color-mix(in srgb, var(--accent) 22%, transparent); transition: none; }
+/* What the last update changed. A new sentence or line gets a green mark for about 10 seconds;
+   a reworded one a short underline. Both fade out; nothing else on the card moves. */
+.topic-summary > span { border-radius: 3px; text-decoration: underline 2px transparent; text-underline-offset: 5px; transition: background-color 1.2s ease-out, text-decoration-color 1.2s ease-out; }
+.topic-summary > .topic-new { background: color-mix(in srgb, var(--ok) 20%, transparent); transition: none; }
+.topic-summary > .topic-changed, .topic-details li.topic-changed > span:last-child { text-decoration-color: var(--accent-text); transition: none; }
+.topic-details li > span:last-child { text-decoration: underline 2px transparent; text-underline-offset: 4px; transition: text-decoration-color 1.2s ease-out; }
+.topic-details li { position: relative; }
+.topic-details li::before { content: ""; position: absolute; left: -10px; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--ok); opacity: 0; transition: opacity 1.2s ease-out; }
+.topic-details li.topic-new::before { opacity: 1; transition: none; }
+.topic-details li.topic-new { animation: line-in 320ms var(--ease-out, ease-out); }
+@keyframes line-in { from { opacity: 0; transform: translateX(-8px); } }
+/* Fixed sections under the positions, always in this order, so the layout never moves. */
+.topic-sections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 24px; }
+.topic-section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.topic-section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.topic-section .topic-details { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.topic-section-empty { color: color-mix(in srgb, var(--muted) 60%, transparent); font-size: 14px; }
 .topic-details { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; font-size: 14px; line-height: 1.4; }
 .topic-details li { display: flex; gap: 9px; align-items: baseline; min-width: 0; }
 .topic-details li > .topic-dot { align-self: flex-start; margin-top: -1px; }
@@ -1854,7 +1868,7 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-strip-title { flex: none; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
 .topic-strip-now { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
 .topic-strip-now strong { color: var(--text); font-weight: 500; }
-@media (max-width: 900px) { .topic-details { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) { .topic-details, .topic-sections { grid-template-columns: minmax(0, 1fr); } }
 .topic-dot { display: inline-grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-weight: 600; line-height: 1; }
 @keyframes topic-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes topic-updating { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
@@ -1863,7 +1877,8 @@ a.sh-pill:hover { text-decoration: none; }
 @keyframes topic-flash { from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
   .topic-now.topic-in, .topic-peek, .topic-now-label.arrived, .topic-stretch.current.arrived::before { animation: none; }
-  .topic-summary > span { transition: none; }
+  .topic-summary > span, .topic-details li::before, .topic-details li > span:last-child { transition: none; }
+  .topic-details li.topic-new { animation: none; }
   .topic-now-label.live::before { animation: none; }
   .topic-stretch::before, .topic-stretch, .topic-bar-elapsed, .topic-bar-times > .topic-bar-now { transition: none; }
   /* No moving light: the top edge just brightens while the notes update. */
