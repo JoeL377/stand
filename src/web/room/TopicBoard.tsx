@@ -57,6 +57,8 @@ export function TopicBoard(props: {
   focusItem: Item | null;
   focusItemId: string | null;
   meetingStartedAt: number;
+  /** Make the move the board is waiting to confirm, for everyone. */
+  onAcceptMove?: (title: string) => void;
 }) {
   const now = useNow(15_000);
   const board = props.board;
@@ -65,6 +67,7 @@ export function TopicBoard(props: {
   // After the host moves to another agenda item, the old card steps aside until that item has its own.
   const current = onBoard && onBoard.itemId === props.focusItemId ? onBoard : null;
   const arrival = useArrival(current?.id ?? null);
+  const [view, setView] = useBoardView();
   // The color for a person: by their id when they're here, else by name.
   const idOf = (name: string) => props.participants.find((p) => same(p.name, name))?.id ?? name;
   const nameOf = (name: string) => props.participants.find((p) => same(p.name, name))?.name ?? props.segments.find((s) => same(s.speakerName, name))?.speakerName ?? name;
@@ -92,6 +95,12 @@ export function TopicBoard(props: {
           t={current}
           live={live}
           updating={!!board?.busy}
+          pending={board?.pending ?? null}
+          onAcceptMove={props.onAcceptMove}
+          view={view}
+          onView={setView}
+          threads={threads}
+          meetingStart={start}
           arrival={arrival}
           speaking={speaking ? { name: speaking.speakerName, id: speaking.speakerId, text: speaking.text } : null}
           idOf={idOf}
@@ -217,6 +226,15 @@ function Card(props: {
   updating: boolean;
   /** Just switched to: a thread new to this screen, or one it came back to. */
   arrival: Arrival;
+  /** A move the board waits one more pass to confirm: shown faintly, a click makes it now. */
+  pending: Board["pending"];
+  onAcceptMove?: (title: string) => void;
+  /** How this person likes the board laid out; the same data either way. */
+  view: BoardView;
+  onView: (v: BoardView) => void;
+  /** Every thread so far, for the running feed. */
+  threads: BoardThread[];
+  meetingStart: number;
   speaking: { name: string; id: string; text: string } | null;
   idOf: (name: string) => string;
   nameOf: (name: string) => string;
@@ -234,7 +252,7 @@ function Card(props: {
   return (
     <section
       key={t.id}
-      className={["topic-now", props.arrival && "topic-in", props.updating && "updating"].filter(Boolean).join(" ")}
+      className={["topic-now", props.arrival && "topic-in", props.updating && "updating", props.view === "feed" && "feed"].filter(Boolean).join(" ")}
       aria-label="Current topic"
       aria-busy={props.updating}
     >
@@ -246,7 +264,12 @@ function Card(props: {
         <span className={props.updating ? "topic-updating on" : "topic-updating"} aria-hidden>
           <span className="agent-mark">✦</span> Updating
         </span>
+        <ViewSwitch view={props.view} onView={props.onView} />
       </div>
+      {props.view === "feed" ? (
+        <Feed threads={props.threads} current={t} marks={marks} start={props.meetingStart} idOf={props.idOf} nameOf={props.nameOf} />
+      ) : (
+        <>
       <h2 className="topic-now-title" aria-live="polite">
         {t.title}
       </h2>
@@ -260,8 +283,14 @@ function Card(props: {
           </span>
         ))}
       </p>
-      {positions.length > 0 && <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} />}
-      <div className="topic-sections">
+      {props.view === "card" && positions.length > 0 && <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} />}
+      <div className={props.view === "columns" ? "topic-sections columns" : "topic-sections"}>
+        {props.view === "columns" && (
+          <div className="topic-section position">
+            <span className="topic-section-label">People</span>
+            {positions.length ? <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
+          </div>
+        )}
         {SECTIONS.map((sec) => {
           const lines = t.card.details.filter((d) => d.kind === sec.kind);
           return (
@@ -272,6 +301,27 @@ function Card(props: {
           );
         })}
       </div>
+        </>
+      )}
+      {props.pending && (
+        <button
+          key={props.pending.title}
+          type="button"
+          className="topic-moving"
+          disabled={!props.onAcceptMove}
+          onClick={() => props.onAcceptMove?.(props.pending!.title)}
+          title="Switch the board to it now, for everyone"
+        >
+          <span className="agent-mark" aria-hidden>
+            ✦
+          </span>{" "}
+          {props.pending.kind === "return" ? "Looks like you're back on " : "Looks like you've moved to "}
+          <strong>{props.pending.title}</strong>
+          <span className="topic-moving-go" aria-hidden>
+            Switch →
+          </span>
+        </button>
+      )}
       {foot && (
         <p className={foot.now ? "topic-remark now" : "topic-remark"}>
           {foot.name && <Dot id={foot.id} name={foot.name} size={20} />}
@@ -320,9 +370,9 @@ function useChanges(t: BoardThread): Map<string, Mark> {
   return new Map([...marks].map(([k, v]) => [k, v.mark]));
 }
 
-function Details(props: { details: BoardDetail[]; marks?: Map<string, Mark>; idOf: (name: string) => string; nameOf: (name: string) => string; small?: boolean }) {
+function Details(props: { details: BoardDetail[]; marks?: Map<string, Mark>; idOf: (name: string) => string; nameOf: (name: string) => string; small?: boolean; feed?: boolean }) {
   return (
-    <ul className={props.small ? "topic-details small" : "topic-details"}>
+    <ul className={["topic-details", props.small && "small", props.feed && "feed"].filter(Boolean).join(" ")}>
       {props.details.map((d) => (
         <li key={d.id} className={[d.kind, mark(props.marks?.get(d.id))].filter(Boolean).join(" ")}>
           {d.kind === "position" && d.who ? (
@@ -340,6 +390,94 @@ function Details(props: { details: BoardDetail[]; marks?: Map<string, Mark>; idO
         </li>
       ))}
     </ul>
+  );
+}
+
+export type BoardView = "card" | "columns" | "feed";
+const VIEWS: Array<{ id: BoardView; label: string }> = [
+  { id: "card", label: "Card" },
+  { id: "columns", label: "Columns" },
+  { id: "feed", label: "Feed" },
+];
+const VIEW_KEY = "stand.boardView";
+
+/** The layout this person picked, remembered in this browser. */
+function useBoardView(): [BoardView, (v: BoardView) => void] {
+  const [view, setView] = useState<BoardView>(() => {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      return VIEWS.some((x) => x.id === v) ? (v as BoardView) : "card";
+    } catch {
+      return "card";
+    }
+  });
+  return [
+    view,
+    (v) => {
+      setView(v);
+      try {
+        localStorage.setItem(VIEW_KEY, v);
+      } catch {
+        // Not remembered; it still switches.
+      }
+    },
+  ];
+}
+
+function ViewSwitch(props: { view: BoardView; onView: (v: BoardView) => void }) {
+  return (
+    <span className="topic-views" role="group" aria-label="Board layout, on your screen only">
+      {VIEWS.map((v) => (
+        <button key={v.id} type="button" className={props.view === v.id ? "on" : undefined} aria-pressed={props.view === v.id} onClick={() => props.onView(v.id)}>
+          {v.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/** The running feed: every thread so far in order, each line where it came in, newest at the bottom. */
+function Feed(props: { threads: BoardThread[]; current: BoardThread; marks: Map<string, Mark>; start: number; idOf: (name: string) => string; nameOf: (name: string) => string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const order = [...props.threads].sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0));
+  const shown = [...order.filter((t) => t !== props.current), props.current];
+  const count = shown.reduce((n, t) => n + t.card.details.length + t.card.summary.length, 0);
+  // Stay at the newest unless the person has scrolled up to read.
+  const pinned = useRef(true);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  }, [count, props.current.id]);
+  const byArrival = (a: BoardDetail, b: BoardDetail) => (Number(a.id.slice(1)) || 0) - (Number(b.id.slice(1)) || 0);
+  return (
+    <div ref={ref} className="topic-feed" onScroll={(e) => (pinned.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
+      {shown.map((t) => {
+        const isCurrent = t === props.current;
+        return (
+          <section key={t.id} className={isCurrent ? "topic-feed-thread current" : "topic-feed-thread"}>
+            <div className="topic-feed-head">
+              <span className="topic-peek-at">{clock((t.spans[0]?.[0] ?? props.start) - props.start)}</span>
+              <strong>{t.title}</strong>
+            </div>
+            {isCurrent && (
+              <p className="topic-feed-summary">
+                <span className="agent-mark" aria-hidden>
+                  ✦
+                </span>{" "}
+                {t.card.summary.map((x, i) => (
+                  <span key={i} className={mark(props.marks.get(`s${i}`))}>
+                    {x}{" "}
+                  </span>
+                ))}
+              </p>
+            )}
+            {t.card.details.length > 0 && (
+              <Details details={[...t.card.details].sort(byArrival)} marks={isCurrent ? props.marks : undefined} idOf={props.idOf} nameOf={props.nameOf} feed />
+            )}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 

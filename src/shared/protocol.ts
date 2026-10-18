@@ -450,6 +450,8 @@ export type ClientMessage = (
   | { type: "conxt.share"; itemId: string }
   | { type: "note.restore"; noteId: string }
   | { type: "suggestion.dismiss" }
+  /** Anyone on the call: make the move the board is waiting to confirm, now. `title`: the one they saw. */
+  | { type: "board.accept"; title: string }
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */
   | { type: "host.give"; participantId: string }
   | { type: "sharing"; on: boolean }
@@ -511,6 +513,8 @@ export interface Board {
   switchedAt: number | null;
   /** The board pass is reading the latest talk. */
   busy: boolean;
+  /** A move the board thinks the talk has made but waits one more pass to confirm. */
+  pending: { kind: "new" | "return"; title: string } | null;
 }
 
 export type ServerMessage =

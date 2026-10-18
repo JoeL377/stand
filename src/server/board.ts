@@ -119,6 +119,9 @@ interface Pending {
   count: number;
   /** The first line it covers. */
   since: number;
+  /** The latest line it covers. */
+  latest: number;
+  itemId: string | null;
 }
 
 /** A time into the meeting, for the model: 4:05. */
@@ -170,7 +173,14 @@ export class BoardKeeper {
   }
 
   board(): Board {
-    return { threads: this.threads, currentId: this.current?.id ?? null, switchedAt: this.switchedAt, busy: this.busy };
+    const p = this.current && this.pending;
+    return {
+      threads: this.threads,
+      currentId: this.current?.id ?? null,
+      switchedAt: this.switchedAt,
+      busy: this.busy,
+      pending: p ? { kind: p.kind, title: p.kind === "return" ? (this.threads.find((t) => t.id === p.returnTo)?.title ?? p.title) : p.title } : null,
+    };
   }
 
   /** The host moved the meeting to another agenda item. */
@@ -246,21 +256,36 @@ export class BoardKeeper {
     const s = a.shift;
     const same = this.pending && this.pending.kind === s.kind && (s.kind === "new" || this.pending.returnTo === s.returnTo);
     this.pending = same
-      ? { ...this.pending!, card: s.card ?? this.pending!.card, count: this.pending!.count + 1 }
-      : { kind: s.kind, returnTo: s.returnTo, title: clip(s.title.trim(), 80), card: s.card, count: 1, since: fresh[0].ts };
+      ? { ...this.pending!, card: s.card ?? this.pending!.card, count: this.pending!.count + 1, latest }
+      : { kind: s.kind, returnTo: s.returnTo, title: clip(s.title.trim(), 80), card: s.card, count: 1, since: fresh[0].ts, latest, itemId: onOtherItem ? forced!.itemId : focusItemId };
     // Nothing on screen yet, or the agenda moved: no waiting. Otherwise the move has to hold.
     if (this.current && !onOtherItem && this.pending.count < CONFIRM) {
       this.extend(this.current, latest);
       return true;
     }
-    const back = this.pending.kind === "return" ? this.threads.find((t) => t.id === this.pending!.returnTo && t !== this.current) : undefined;
-    const from = onOtherItem ? Math.max(forced!.at, this.pending.since) : this.pending.since;
+    this.commit(onOtherItem ? forced!.at : null, now);
+    return true;
+  }
+
+  /** Someone on the call clicked the move the board was waiting to confirm: make it now.
+   *  `title` is the one they saw, so a newer proposal isn't taken by mistake. */
+  accept(title: string, now: number): boolean {
+    if (!this.current || !this.pending || this.board().pending?.title !== title) return false;
+    this.commit(null, now);
+    return true;
+  }
+
+  /** The pending move becomes the thread on screen. `agendaAt`: when the host moved to the item it's on. */
+  private commit(agendaAt: number | null, now: number) {
+    const p = this.pending!;
+    const back = p.kind === "return" ? this.threads.find((t) => t.id === p.returnTo && t !== this.current) : undefined;
+    const from = agendaAt !== null ? Math.max(agendaAt, p.since) : p.since;
     if (back) {
       // Its card comes back as it was; the next pass brings it up to date.
-      back.spans.push([from, latest]);
+      back.spans.push([from, p.latest]);
       this.current = back;
     } else {
-      const t: BoardThread = { id: `t${this.threads.length + 1}`, title: this.pending.title, itemId: onOtherItem ? forced!.itemId : focusItemId, card: this.fresh(this.pending.card), spans: [[from, latest]] };
+      const t: BoardThread = { id: `t${this.threads.length + 1}`, title: p.title, itemId: p.itemId, card: this.fresh(p.card), spans: [[from, p.latest]] };
       this.threads.push(t);
       this.current = t;
     }
@@ -268,7 +293,6 @@ export class BoardKeeper {
     this.pending = null;
     this.sinceDrift = 0;
     this.forcedItem = null;
-    return true;
   }
 
   private nextId() {

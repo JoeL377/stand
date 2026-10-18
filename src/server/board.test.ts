@@ -184,3 +184,20 @@ test("a card saved in the old shape is read as sentences and lines with ids", ()
   assert.deepEqual(c.summary, ["One thing.", "Another thing."]);
   assert.deepEqual(c.details.map((d) => [d.id, d.kind]), [["d1", "position"], ["d2", "open"]]);
 });
+
+test("a move waiting to be confirmed shows on the board, and accepting it switches at once", async () => {
+  const { model } = scripted([{ shift: shift("Audio bug") }, { shift: shift("Pricing") }]);
+  const k = new BoardKeeper(model, T0);
+  const talk = [say(1, 0), say(2, 5 * S)];
+  await k.run(talk, [], [], null, T0 + 10 * S);
+  assert.equal(k.board().pending, null);
+  talk.push(say(3, 40 * S), say(4, 45 * S));
+  await k.run(talk, [], [], null, T0 + 50 * S);
+  assert.deepEqual(k.board().pending, { kind: "new", title: "Pricing" });
+  assert.equal(k.accept("Something else", T0 + 55 * S), false);
+  assert.equal(k.accept("Pricing", T0 + 55 * S), true);
+  const b = k.board();
+  assert.equal(b.threads.find((t) => t.id === b.currentId)?.title, "Pricing");
+  assert.equal(b.pending, null);
+  assert.equal(b.threads[1].spans[0][0], T0 + 40 * S);
+});

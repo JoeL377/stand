@@ -1846,6 +1846,34 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-details li.topic-new::before { opacity: 1; transition: none; }
 .topic-details li.topic-new { animation: line-in 320ms var(--ease-out, ease-out); }
 @keyframes line-in { from { opacity: 0; transform: translateX(-8px); } }
+/* The move the board waits to confirm: faint, at the card's foot; a click makes it now. */
+.topic-moving { margin-top: auto; align-self: flex-start; display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; padding: 4px 10px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; opacity: 0.8; animation: label-in 300ms var(--ease-out, ease-out); }
+.topic-moving strong { color: var(--text); font-weight: 500; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.topic-moving .agent-mark { color: var(--accent-text); }
+.topic-moving-go { margin-left: 6px; color: var(--accent-text); font-size: 12px; opacity: 0; transition: opacity 150ms; }
+.topic-moving:hover, .topic-moving:focus-visible { opacity: 1; border-style: solid; }
+.topic-moving:hover .topic-moving-go, .topic-moving:focus-visible .topic-moving-go { opacity: 1; }
+.topic-moving:disabled { cursor: default; }
+.topic-moving + .topic-remark { margin-top: 0; }
+/* Card, Columns or Feed: each person picks how the board is laid out on their own screen. */
+.topic-views { display: inline-flex; gap: 2px; margin-left: 10px; padding: 2px; border-radius: 999px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.topic-views button { padding: 2px 9px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.topic-views button:hover { color: var(--text); }
+.topic-views button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
+.topic-sections.columns { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* The running feed: every thread so far, lines in the order they came in, newest at the bottom. */
+.topic-now.feed { flex: 1 1 0; min-height: 0; }
+.topic-feed { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding-left: 12px; margin-left: -12px; }
+.topic-feed-thread { display: flex; flex-direction: column; gap: 8px; }
+.topic-feed-thread:not(.current) { opacity: 0.6; }
+.topic-feed-head { display: flex; align-items: baseline; gap: 8px; font-size: 15px; }
+.topic-feed-thread.current .topic-feed-head { font-size: 18px; }
+.topic-feed-summary { margin: 0; font-size: 15px; line-height: 1.55; color: color-mix(in srgb, var(--text) 92%, transparent); }
+.topic-feed-summary .agent-mark { color: var(--accent-text); }
+.topic-feed-summary > span { border-radius: 3px; text-decoration: underline 2px transparent; text-underline-offset: 5px; transition: background-color 1.2s ease-out, text-decoration-color 1.2s ease-out; }
+.topic-feed-summary > .topic-new { background: color-mix(in srgb, var(--ok) 20%, transparent); transition: none; }
+.topic-feed-summary > .topic-changed { text-decoration-color: var(--accent-text); transition: none; }
+.topic-details.feed { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 /* Fixed sections under the positions, always in this order, so the layout never moves. */
 .topic-sections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 24px; }
 .topic-section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -1868,7 +1896,7 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-strip-title { flex: none; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
 .topic-strip-now { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
 .topic-strip-now strong { color: var(--text); font-weight: 500; }
-@media (max-width: 900px) { .topic-details, .topic-sections { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) { .topic-details, .topic-sections, .topic-sections.columns { grid-template-columns: minmax(0, 1fr); } }
 .topic-dot { display: inline-grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-weight: 600; line-height: 1; }
 @keyframes topic-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes topic-updating { from { transform: translateX(-100%); } to { transform: translateX(290%); } }

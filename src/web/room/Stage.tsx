@@ -390,6 +390,7 @@ export function Stage(props: {
             focusItem={focusItem}
             focusItemId={state.focusItemId}
             meetingStartedAt={state.meetingStartedAt}
+            onAcceptMove={props.offline ? undefined : (title) => send({ type: "board.accept", title })}
           />
         )}
       </div>
