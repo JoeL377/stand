@@ -294,6 +294,9 @@ export function Meeting(props: {
       return false;
     }
   });
+  // On a phone the three columns don't fit: one shows at a time, picked from a strip under the top bar.
+  const phone = usePhone();
+  const [phoneView, setPhoneView] = useState<"agenda" | "board" | "chat">("board");
   const foldAgenda = () =>
     setAgendaFolded((f) => {
       try {
@@ -373,7 +376,7 @@ export function Meeting(props: {
           <ConnectionPill room={room} />
           {state.ending && (
             <span className="badge" title={writingTitle}>
-              Writing notes · usually under a minute · you can leave
+              Writing notes<span className="wide-only"> · usually under a minute · you can leave</span>
             </span>
           )}
           {media.audioAway ? (
@@ -419,8 +422,8 @@ export function Meeting(props: {
           >
             ?
           </button>
-          <button className="ghost invite" onClick={copyInvite}>
-            <LinkIcon /> {copied ? "Copied ✓" : "Copy invite link"}
+          <button className="ghost invite" onClick={copyInvite} aria-label="Copy invite link">
+            <LinkIcon /> <span className="invite-label">{copied ? "Copied ✓" : "Copy invite link"}</span>
           </button>
         </div>
       </header>
@@ -432,9 +435,23 @@ export function Meeting(props: {
         </div>
       )}
 
-      <div className={agendaFolded ? "meeting-grid agenda-folded" : "meeting-grid"}>
+      {phone && (
+        <div className="phone-views" role="tablist" aria-label="Meeting views">
+          {(["agenda", "board", "chat"] as const).map((v) => (
+            <button key={v} role="tab" aria-selected={phoneView === v} className={phoneView === v ? "on" : undefined} onClick={() => setPhoneView(v)}>
+              {v === "agenda" ? "Agenda" : v === "board" ? "Board" : "Chat"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div
+        className={`meeting-grid${agendaFolded && !phone ? " agenda-folded" : ""}${phone ? ` phone-${phoneView}` : ""}`}
+        // Picking an item from the agenda on a phone goes back to the board to show it.
+        onClick={(e) => phone && phoneView === "agenda" && (e.target as HTMLElement).closest(".item-main") && setPhoneView("board")}
+      >
         <AgendaPanel
-          folded={agendaFolded}
+          folded={agendaFolded && !phone}
           onFold={foldAgenda}
           foldKeys={`${MOD.cmd} + \\`}
           roomId={roomId}
@@ -510,7 +527,8 @@ export function Meeting(props: {
                         : "Unmute"}
             </span>
           </button>
-          {sharing ? (
+          {/* Phone browsers can't share a screen. */}
+          {!canShare ? null : sharing ? (
             <button className="control sharing" onClick={() => void media.stopShare()}>
               <StopShareIcon />
               <span>Stop sharing</span>
@@ -528,7 +546,7 @@ export function Meeting(props: {
           )}
           {offerPopOut && (
             <button
-              className={popOut.win ? "control on" : "control"}
+              className={popOut.win ? "control popout on" : "control popout"}
               onClick={openPopOut}
               title="A small bar that stays over your other apps, with your mic, Snap and the space's to-dos"
             >
@@ -585,6 +603,20 @@ export function Meeting(props: {
       )}
     </div>
   );
+}
+
+const canShare = typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getDisplayMedia);
+
+const PHONE = "(max-width: 820px)";
+function usePhone() {
+  const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(PHONE);
+    const on = () => setPhone(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return phone;
 }
 
 const PopOutIcon = () => (
