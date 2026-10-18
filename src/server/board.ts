@@ -26,22 +26,22 @@ const RETITLE_MS = 3 * 60_000;
 /** New talk a run needs, once there is a card. */
 const MIN_NEW_LINES = 2;
 /** Room on a card: summary sentences, positions, and lines of each other kind. */
-const MAX_SENTENCES = 4;
+const MAX_SENTENCES = 2;
 const MAX_POSITIONS = 6;
 const MAX_LINES = 5;
 /** A thread's stretch on the chapter bar breaks after a pause this long. */
 const SPAN_GAP_MS = 3 * 60_000;
 
 const Kind = z.enum(["decided", "todo", "open"]);
-const Position = z.object({ who: z.string().describe("First name"), text: z.string().describe("Their view, at most 15 words") });
+const Position = z.object({ who: z.string().describe("First name"), text: z.string().describe("Their view, at most 10 words") });
 const Line = z.object({
   kind: Kind,
   who: z.string().nullable().describe("A to-do's owner (first name); null otherwise"),
-  text: z.string().describe("At most 15 words"),
+  text: z.string().describe("At most 10 words"),
 });
 /** A new thread's first card. */
 const NewCard = z.object({
-  summary: z.array(z.string()).describe("2-4 sentences"),
+  summary: z.array(z.string()).describe("2 short sentences"),
   positions: z.array(Position),
   items: z.array(Line),
   now: z.string(),
@@ -91,9 +91,9 @@ Each time you get: the people in the meeting, the thread on screen (title, numbe
 People are reading the card while you update it, so it must not jump around. You never rewrite the card: you send only the changes the NEW lines call for, and everything you don't name stays exactly where it is. Most updates change one or two things; an update that changes nothing but "now" is normal.
 
 The card has fixed parts:
-- summary: at most 4 sentences, present tense. The first says what is being worked out; the middle ones the main views by first name; the last says where it stands right now, including which sub-question the group is on. Say the substance, don't narrate ("they discuss"). Replace a sentence only when the new talk makes it wrong or incomplete; add one only when it says something new. When there are 4, replace rather than add. As a debate moves through sub-questions, keep the last sentence current: that is how the card follows it without a new thread.
-- positions: one line per person, their current view in at most 15 words. Send a person only when their view is new or has changed.
-- decided, todo (who = owner), open (a question not yet answered): add a line when the talk produces one. When an open question gets answered, remove it and add what was decided. Use change only when the meaning of a line changed, never to polish wording.
+- summary: exactly 2 short sentences, each at most 18 words, present tense, plain words. Sentence 1 says what is being worked out and the main views by first name; sentence 2 says where it stands right now, including which sub-question the group is on. Say the substance, don't narrate ("they discuss"). Replace a sentence only when the new talk makes it wrong or incomplete. As a debate moves through sub-questions, keep sentence 2 current: that is how the card follows it without a new thread. People see the details below it, so don't repeat them here.
+- positions: one line per person, their current view in at most 10 words. Send a person only when their view is new or has changed.
+- decided, todo (who = owner), open (a question not yet answered): at most 10 words each; add a line when the talk produces one. When an open question gets answered, remove it and add what was decided. Use change only when the meaning of a line changed, never to polish wording.
 
 Return:
 - current: the changes to the thread on screen. now is always set: at most 14 words, the point being made in the NEW lines, starting with the first name of who is making it ("Andy: building ingestion in Stand means merging in practice"). If the NEW lines are off this thread, say what they are about anyway.

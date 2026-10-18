@@ -1855,6 +1855,16 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-moving:hover .topic-moving-go, .topic-moving:focus-visible .topic-moving-go { opacity: 1; }
 .topic-moving:disabled { cursor: default; }
 .topic-moving + .topic-remark { margin-top: 0; }
+/* Card view: one list at a time under the summary, picked by tab. */
+.topic-tabs-wrap { display: flex; flex-direction: column; gap: 12px; }
+.topic-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.topic-tabs button { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 8px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.topic-tabs button:hover { color: var(--text); }
+.topic-tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.topic-tab-count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: color-mix(in srgb, var(--text) 8%, transparent); font-size: 11px; text-align: center; }
+.topic-tabs button.empty .topic-tab-count { opacity: 0.5; }
+.topic-tab-new { position: absolute; top: 5px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.topic-tab-panel .topic-details { grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: 15px; }
 /* Card, Columns or Feed: each person picks how the board is laid out on their own screen. */
 .topic-views { display: inline-flex; gap: 2px; margin-left: 10px; padding: 2px; border-radius: 999px; background: color-mix(in srgb, var(--text) 5%, transparent); }
 .topic-views button { padding: 2px 9px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }

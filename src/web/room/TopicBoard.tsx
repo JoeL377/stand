@@ -283,24 +283,25 @@ function Card(props: {
           </span>
         ))}
       </p>
-      {props.view === "card" && positions.length > 0 && <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} />}
-      <div className={props.view === "columns" ? "topic-sections columns" : "topic-sections"}>
-        {props.view === "columns" && (
+      {props.view === "card" ? (
+        <CardTabs t={t} marks={marks} idOf={props.idOf} nameOf={props.nameOf} />
+      ) : (
+        <div className="topic-sections columns">
           <div className="topic-section position">
             <span className="topic-section-label">People</span>
             {positions.length ? <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
           </div>
-        )}
-        {SECTIONS.map((sec) => {
-          const lines = t.card.details.filter((d) => d.kind === sec.kind);
-          return (
-            <div key={sec.kind} className={`topic-section ${sec.kind}`}>
-              <span className="topic-section-label">{sec.label}</span>
-              {lines.length ? <Details details={lines} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
-            </div>
-          );
-        })}
-      </div>
+          {SECTIONS.map((sec) => {
+            const lines = t.card.details.filter((d) => d.kind === sec.kind);
+            return (
+              <div key={sec.kind} className={`topic-section ${sec.kind}`}>
+                <span className="topic-section-label">{sec.label}</span>
+                {lines.length ? <Details details={lines} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
         </>
       )}
       {props.pending && (
@@ -390,6 +391,54 @@ function Details(props: { details: BoardDetail[]; marks?: Map<string, Mark>; idO
         </li>
       ))}
     </ul>
+  );
+}
+
+const TABS = [{ kind: "position", label: "People" }, ...SECTIONS] as const;
+type Tab = (typeof TABS)[number]["kind"];
+const TAB_KEY = "stand.boardTab";
+
+/** Under the summary: one tab per part of the card, each with its count, so only one list is
+ *  on screen at a time. A tab that got a new line has a green dot until it's opened or the mark
+ *  runs out. The open tab is this person's, remembered in this browser. */
+function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; idOf: (name: string) => string; nameOf: (name: string) => string }) {
+  const [tab, setTab] = useState<Tab>(() => {
+    try {
+      const v = localStorage.getItem(TAB_KEY);
+      return TABS.some((x) => x.kind === v) ? (v as Tab) : "position";
+    } catch {
+      return "position";
+    }
+  });
+  const pick = (k: Tab) => {
+    setTab(k);
+    try {
+      localStorage.setItem(TAB_KEY, k);
+    } catch {
+      // Not remembered; it still switches.
+    }
+  };
+  const lines = (k: Tab) => props.t.card.details.filter((d) => d.kind === k);
+  const shown = lines(tab);
+  return (
+    <div className="topic-tabs-wrap">
+      <div className="topic-tabs" role="tablist" aria-label="Details">
+        {TABS.map((x) => {
+          const n = lines(x.kind).length;
+          const fresh = x.kind !== tab && lines(x.kind).some((d) => props.marks.get(d.id) === "new");
+          return (
+            <button key={x.kind} type="button" role="tab" aria-selected={tab === x.kind} className={[tab === x.kind && "on", !n && "empty"].filter(Boolean).join(" ")} onClick={() => pick(x.kind)}>
+              {x.label}
+              <span className="topic-tab-count">{n}</span>
+              {fresh && <span className="topic-tab-new" aria-label="new" />}
+            </button>
+          );
+        })}
+      </div>
+      <div role="tabpanel" className="topic-tab-panel">
+        {shown.length ? <Details details={shown} marks={props.marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">Nothing yet</span>}
+      </div>
+    </div>
   );
 }
 
