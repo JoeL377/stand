@@ -2222,4 +2222,9 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .topic-now { gap: 10px; padding: 14px 16px 12px; }
   .topic-now-title { font-size: 20px; }
   .topic-summary, .topic-warmup .topic-remark { font-size: 15px; line-height: 1.5; }
+  /* People, Decided, To do and Open share the card's width, each on one line. */
+  .topic-tabs { gap: 0; }
+  .topic-tabs button { flex: 1 1 auto; justify-content: center; gap: 4px; padding: 6px 4px 8px; white-space: nowrap; }
 }
+/* A tap leaves no hover box on the card's tabs. */
+@media (hover: none) { .topic-tabs button:hover:not(:disabled) { background: transparent; } }
