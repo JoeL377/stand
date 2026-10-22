@@ -49,6 +49,12 @@ export function Stage(props: {
     ? props.segments.filter((s) => s.itemId === state.focusItemId && s.ts >= state.suggestion!.since).map((s) => s.id)
     : [];
   const moving = movingIds.length;
+  // The host takes a line off the board that Stand got wrong; Undo puts it back.
+  const removeNote = (note: Note) => {
+    if (!send({ type: "note.remove", noteId: note.id })) return;
+    const what = note.kind === "action" ? "to-do" : note.kind;
+    toast({ text: `Removed the ${what}`, action: { label: "Undo", run: undoing(() => send({ type: "note.restore", noteId: note.id })) } });
+  };
   const accept = () => {
     const n = moving;
     const to = suggested;
@@ -391,6 +397,10 @@ export function Stage(props: {
             focusItemId={state.focusItemId}
             meetingStartedAt={state.meetingStartedAt}
             onAcceptMove={props.offline ? undefined : (title) => send({ type: "board.accept", title })}
+            notes={props.notes}
+            followUps={state.followUps}
+            onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
+            onRemove={canSteer && !props.ending ? removeNote : undefined}
           />
         )}
       </div>

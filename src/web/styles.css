@@ -1865,6 +1865,26 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-tabs button.empty .topic-tab-count { opacity: 0.5; }
 .topic-tab-new { position: absolute; top: 5px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .topic-tab-panel .topic-details { grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: 15px; }
+/* The meeting's to-dos, decisions and questions: the topic on screen first, the rest dimmer below. */
+.topic-tasks li.topic-task { align-items: baseline; }
+.topic-tasks.has-here li.topic-task:not(.here) { opacity: 0.7; }
+.topic-task-text { flex: 1 1 auto; min-width: 0; }
+.topic-task.done .topic-task-text { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); color: var(--muted); }
+.topic-task-at { flex: none; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.topic-check { flex: none; position: relative; top: 2px; width: 15px; height: 15px; padding: 0; border: 1.5px solid color-mix(in srgb, var(--text) 45%, transparent); border-radius: 4px; background: transparent; cursor: pointer; }
+.topic-check:hover:not(:disabled) { border-color: var(--accent-text); }
+.topic-check[aria-pressed="true"] { border-color: var(--ok); background: var(--ok); }
+.topic-check[aria-pressed="true"]::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.topic-check:disabled { cursor: default; }
+.topic-task-remove { flex: none; padding: 0 4px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 120ms; }
+.topic-task:hover .topic-task-remove, .topic-task-remove:focus-visible { opacity: 1; }
+.topic-task-remove:hover { color: var(--text); }
+@media (hover: none) { .topic-task-remove { opacity: 1; } }
+.topic-tasks-label { margin-top: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.topic-tasks-more button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.topic-tasks-more button:hover { color: var(--text); }
+.topic-tasks.compact .topic-task-at { display: none; }
+.topic-section-label .topic-tab-count { margin-left: 4px; letter-spacing: 0; }
 /* Card, Columns or Feed: each person picks how the board is laid out on their own screen. */
 .topic-views { display: inline-flex; gap: 2px; margin-left: 10px; padding: 2px; border-radius: 999px; background: color-mix(in srgb, var(--text) 5%, transparent); }
 .topic-views button { padding: 2px 9px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
