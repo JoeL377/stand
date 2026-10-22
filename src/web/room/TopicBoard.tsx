@@ -5,8 +5,11 @@
 // changes single sentences and lines and leaves the rest where it is: a new line slides in with a
 // green mark, a reworded one gets a short underline, so people see what changed without rereading. Underneath, a chapter bar runs from the start of the
 // meeting to now, one stretch per thread; hovering or clicking one opens it on your own screen.
+// The Decided, To do and Open tabs keep the whole meeting: they list what live notes caught, which
+// comes in within seconds of being said, with the current topic's lines on top. A topic change no
+// longer empties them, and anyone can check a to-do off right there.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
-import type { Board, BoardDetail, BoardThread, Item, Participant, Segment } from "../../shared/protocol.ts";
+import type { Board, BoardDetail, BoardThread, FollowUp, Item, Note, Participant, Segment } from "../../shared/protocol.ts";
 import { barSpan } from "../../shared/chapters.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
@@ -21,6 +24,10 @@ const ARRIVAL_MS = 8_000;
 /** How long a new line keeps its green mark, and a reworded one its underline. */
 const NEW_MS = 10_000;
 const CHANGED_MS = 4_000;
+/** Live notes write a line down a little after it's said; this much past a stretch still counts as its topic. */
+const TOPIC_SLACK_MS = 45_000;
+/** Lines from earlier topics shown before "Show more". */
+const EARLIER_SHOWN = 4;
 const MARK: Record<BoardDetail["kind"], string> = { position: "", decided: "✓", todo: "○", open: "?" };
 const MARK_LABEL: Record<BoardDetail["kind"], string> = { position: "", decided: "Decided", todo: "To do", open: "Open question" };
 const DETAIL_ORDER: Record<BoardDetail["kind"], number> = { position: 0, decided: 1, todo: 2, open: 3 };
@@ -59,6 +66,14 @@ export function TopicBoard(props: {
   meetingStartedAt: number;
   /** Make the move the board is waiting to confirm, for everyone. */
   onAcceptMove?: (title: string) => void;
+  /** This meeting's to-dos, decisions and questions so far, as live notes caught them. */
+  notes?: Note[];
+  /** Open to-dos from earlier meetings in this space. */
+  followUps?: FollowUp[];
+  /** Check a to-do off, or back on. Anyone on the call. */
+  onDone?: (noteId: string, done: boolean) => void;
+  /** Host only: take a line off that Stand got wrong (with Undo). */
+  onRemove?: (note: Note) => void;
 }) {
   const now = useNow(15_000);
   const board = props.board;
@@ -87,6 +102,8 @@ export function TopicBoard(props: {
   // Before the first card for the item in focus, the middle shows the talk so far.
   const talkSoFar = current ? [] : props.segments.filter((s) => s.itemId === props.focusItemId).slice(-WARMUP_REMARKS);
   const item = props.focusItem;
+  const tasks = useTasks(props.notes ?? [], props.followUps ?? [], current, live ? now : 0, start);
+  const acts: TaskActs = { onDone: props.onDone, onRemove: props.onRemove, start };
 
   return (
     <div ref={boardRef} className={shown ? "topic-board peeking" : "topic-board"}>
@@ -102,6 +119,8 @@ export function TopicBoard(props: {
           threads={threads}
           meetingStart={start}
           arrival={arrival}
+          tasks={tasks}
+          acts={acts}
           speaking={speaking ? { name: speaking.speakerName, id: speaking.speakerId, text: speaking.text } : null}
           idOf={idOf}
           nameOf={nameOf}
@@ -235,6 +254,9 @@ function Card(props: {
   /** Every thread so far, for the running feed. */
   threads: BoardThread[];
   meetingStart: number;
+  /** The meeting's to-dos, decisions and questions for the tabs and columns. */
+  tasks: Tasks;
+  acts: TaskActs;
   speaking: { name: string; id: string; text: string } | null;
   idOf: (name: string) => string;
   nameOf: (name: string) => string;
@@ -284,22 +306,21 @@ function Card(props: {
         ))}
       </p>
       {props.view === "card" ? (
-        <CardTabs t={t} marks={marks} idOf={props.idOf} nameOf={props.nameOf} />
+        <CardTabs t={t} marks={marks} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} />
       ) : (
         <div className="topic-sections columns">
           <div className="topic-section position">
             <span className="topic-section-label">People</span>
             {positions.length ? <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
           </div>
-          {SECTIONS.map((sec) => {
-            const lines = t.card.details.filter((d) => d.kind === sec.kind);
-            return (
-              <div key={sec.kind} className={`topic-section ${sec.kind}`}>
-                <span className="topic-section-label">{sec.label}</span>
-                {lines.length ? <Details details={lines} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
-              </div>
-            );
-          })}
+          {SECTIONS.map((sec) => (
+            <div key={sec.kind} className={`topic-section ${sec.kind}`}>
+              <span className="topic-section-label">
+                {sec.label} {props.tasks.count[sec.kind] > 0 && <span className="topic-tab-count">{props.tasks.count[sec.kind]}</span>}
+              </span>
+              <TaskList kind={sec.kind} tasks={props.tasks} acts={props.acts} nameOf={props.nameOf} compact />
+            </div>
+          ))}
         </div>
       )}
         </>
@@ -401,7 +422,7 @@ const TAB_KEY = "stand.boardTab";
 /** Under the summary: one tab per part of the card, each with its count, so only one list is
  *  on screen at a time. A tab that got a new line has a green dot until it's opened or the mark
  *  runs out. The open tab is this person's, remembered in this browser. */
-function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; idOf: (name: string) => string; nameOf: (name: string) => string }) {
+function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; tasks: Tasks; acts: TaskActs; idOf: (name: string) => string; nameOf: (name: string) => string }) {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const v = localStorage.getItem(TAB_KEY);
@@ -418,14 +439,15 @@ function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; idOf: (name
       // Not remembered; it still switches.
     }
   };
-  const lines = (k: Tab) => props.t.card.details.filter((d) => d.kind === k);
-  const shown = lines(tab);
+  const people = props.t.card.details.filter((d) => d.kind === "position");
   return (
     <div className="topic-tabs-wrap">
       <div className="topic-tabs" role="tablist" aria-label="Details">
         {TABS.map((x) => {
-          const n = lines(x.kind).length;
-          const fresh = x.kind !== tab && lines(x.kind).some((d) => props.marks.get(d.id) === "new");
+          const n = x.kind === "position" ? people.length : props.tasks.count[x.kind];
+          const fresh =
+            x.kind !== tab &&
+            (x.kind === "position" ? people.some((d) => props.marks.get(d.id) === "new") : props.tasks.rows[x.kind].some((r) => props.tasks.fresh.has(r.note.id)));
           return (
             <button key={x.kind} type="button" role="tab" aria-selected={tab === x.kind} className={[tab === x.kind && "on", !n && "empty"].filter(Boolean).join(" ")} onClick={() => pick(x.kind)}>
               {x.label}
@@ -436,9 +458,156 @@ function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; idOf: (name
         })}
       </div>
       <div role="tabpanel" className="topic-tab-panel">
-        {shown.length ? <Details details={shown} marks={props.marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">Nothing yet</span>}
+        {tab === "position" ? (
+          people.length ? <Details details={people} marks={props.marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">Nothing yet</span>
+        ) : (
+          <TaskList kind={tab} tasks={props.tasks} acts={props.acts} nameOf={props.nameOf} />
+        )}
       </div>
     </div>
+  );
+}
+
+type TaskKind = Exclude<BoardDetail["kind"], "position">;
+const TASK_KIND: Partial<Record<Note["kind"], TaskKind>> = { decision: "decided", action: "todo", question: "open" };
+interface TaskRow {
+  note: Note;
+  kind: TaskKind;
+  /** When it was said, as near as Stand knows: the quote's time, else when live notes caught it. */
+  at: number;
+  /** Said while the group was on the topic on screen. */
+  here: boolean;
+}
+interface Tasks {
+  rows: Record<TaskKind, TaskRow[]>;
+  /** What each tab's count says: open to-dos, every decision and question. */
+  count: Record<TaskKind, number>;
+  /** Lines that came in since this screen first showed the meeting, while each keeps its mark. */
+  fresh: Set<string>;
+  /** To-dos from earlier meetings still open, and any checked off during this one. */
+  earlier: FollowUp[];
+}
+interface TaskActs {
+  onDone?: (noteId: string, done: boolean) => void;
+  onRemove?: (note: Note) => void;
+  start: number;
+}
+
+/** The meeting's to-dos, decisions and questions, sorted for the board: the topic on screen
+ *  first, then the rest of the meeting, open before done, newest first. */
+function useTasks(notes: Note[], followUps: FollowUp[], current: BoardThread | null, liveNow: number, start: number): Tasks {
+  const fresh = useFresh(notes.filter((n) => TASK_KIND[n.kind]).map((n) => n.id));
+  const spans = (current?.spans ?? []).map(([a, b], i, all) => [a, i === all.length - 1 && liveNow ? Math.max(b, liveNow) : b] as const);
+  const here = (n: Note, at: number) => n.itemId === current?.itemId && spans.some(([a, b]) => at >= a && at <= b + TOPIC_SLACK_MS);
+  const rows: Tasks["rows"] = { decided: [], todo: [], open: [] };
+  for (const note of notes) {
+    const kind = TASK_KIND[note.kind];
+    if (!kind) continue;
+    const at = note.quote?.ts ?? note.ts;
+    rows[kind].push({ note, kind, at: Math.max(at, start), here: here(note, at) });
+  }
+  const order = (a: TaskRow, b: TaskRow) => Number(b.here) - Number(a.here) || Number(!!a.note.doneAt) - Number(!!b.note.doneAt) || b.at - a.at;
+  for (const k of Object.keys(rows) as TaskKind[]) rows[k].sort(order);
+  return {
+    rows,
+    count: { decided: rows.decided.length, todo: rows.todo.filter((r) => !r.note.doneAt).length, open: rows.open.length },
+    fresh,
+    earlier: followUps,
+  };
+}
+
+/** Ids that weren't there when this screen first had the list, for NEW_MS after they arrive. */
+function useFresh(ids: string[]): Set<string> {
+  const seen = useRef<Set<string> | null>(null);
+  const [fresh, setFresh] = useState<Map<string, number>>(new Map());
+  const sig = ids.join(" ");
+  useEffect(() => {
+    if (!seen.current) {
+      seen.current = new Set(ids);
+      return;
+    }
+    const added = ids.filter((id) => !seen.current!.has(id));
+    if (!added.length) return;
+    for (const id of added) seen.current.add(id);
+    const until = Date.now() + NEW_MS;
+    setFresh((m) => new Map([...m, ...added.map((id) => [id, until] as const)]));
+  }, [sig]);
+  useEffect(() => {
+    if (!fresh.size) return;
+    const soonest = Math.min(...fresh.values());
+    const timer = setTimeout(() => setFresh((m) => new Map([...m].filter(([, until]) => until > Date.now()))), Math.max(0, soonest - Date.now()) + 50);
+    return () => clearTimeout(timer);
+  }, [fresh]);
+  return new Set(fresh.keys());
+}
+
+const shortDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+/** One tab's or column's lines: the topic on screen first, then the rest of the meeting. To-dos
+ *  get a box anyone can tick; the host can take off a line Stand got wrong. */
+function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; nameOf: (name: string) => string; compact?: boolean }) {
+  const [more, setMore] = useState(false);
+  const [past, setPast] = useState(false);
+  const rows = props.tasks.rows[props.kind];
+  const here = rows.filter((r) => r.here);
+  const rest = rows.filter((r) => !r.here);
+  // Columns are narrow, so they keep fewer earlier lines before "Show more".
+  const room = props.compact ? 2 : EARLIER_SHOWN - Math.min(here.length, 2);
+  const shownRest = more ? rest : rest.slice(0, room);
+  const earlier = props.kind === "todo" ? props.tasks.earlier : [];
+  const openEarlier = earlier.filter((f) => !f.doneAt).length;
+  if (!rows.length && !earlier.length) return <span className="topic-section-empty">{props.compact ? "–" : "Nothing yet"}</span>;
+  const row = (note: Note, opts: { at: string; here?: boolean; fresh?: boolean; removable?: boolean }) => (
+    <li key={note.id} className={[props.kind, "topic-task", opts.here && "here", note.doneAt && "done", opts.fresh && "topic-new"].filter(Boolean).join(" ")}>
+      {props.kind === "todo" ? (
+        <button
+          type="button"
+          className="topic-check"
+          aria-pressed={!!note.doneAt}
+          aria-label={note.doneAt ? `Done${note.doneBy ? ` (${note.doneBy})` : ""}. Mark not done` : "Mark done"}
+          title={note.doneAt ? `Done${note.doneBy ? ` by ${note.doneBy}` : ""}` : "Mark done"}
+          disabled={!props.acts.onDone}
+          onClick={() => props.acts.onDone?.(note.id, !note.doneAt)}
+        />
+      ) : (
+        <span className="topic-note-mark" aria-label={MARK_LABEL[props.kind]}>
+          {MARK[props.kind]}
+        </span>
+      )}
+      <span className="topic-task-text">
+        {note.text}
+        {note.owner && <span className="topic-owner"> · {first(props.nameOf(note.owner))}</span>}
+      </span>
+      <span className="topic-task-at">{opts.at}</span>
+      {opts.removable && props.acts.onRemove && (
+        <button type="button" className="topic-task-remove" aria-label="Remove" title="Remove: Stand got this wrong" onClick={() => props.acts.onRemove?.(note)}>
+          ×
+        </button>
+      )}
+    </li>
+  );
+  const atOf = (r: TaskRow) => clock(r.at - props.acts.start);
+  return (
+    <ul className={["topic-details", "topic-tasks", props.compact && "compact", here.length > 0 && rest.length > 0 && "has-here"].filter(Boolean).join(" ")}>
+      {here.map((r) => row(r.note, { at: atOf(r), here: true, fresh: props.tasks.fresh.has(r.note.id), removable: true }))}
+      {here.length > 0 && rest.length > 0 && <li className="topic-tasks-label">Earlier in this meeting</li>}
+      {shownRest.map((r) => row(r.note, { at: atOf(r), fresh: props.tasks.fresh.has(r.note.id), removable: true }))}
+      {rest.length > shownRest.length && (
+        <li className="topic-tasks-more">
+          <button type="button" onClick={() => setMore(true)}>
+            Show {rest.length - shownRest.length} more
+          </button>
+        </li>
+      )}
+      {earlier.length > 0 && (
+        <li className="topic-tasks-more">
+          <button type="button" aria-expanded={past} onClick={() => setPast((p) => !p)}>
+            From earlier meetings · {openEarlier} open <span aria-hidden>{past ? "▴" : "▾"}</span>
+          </button>
+        </li>
+      )}
+      {past && earlier.map((f) => row(f, { at: shortDate(f.meetingStartedAt) }))}
+    </ul>
   );
 }
 
