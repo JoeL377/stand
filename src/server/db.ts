@@ -29,6 +29,7 @@ import { newId } from "./ids.ts";
 import type { SnapRow } from "./snaps.ts";
 import type { Polish, UpNextInput } from "./upNext.ts";
 import type { Settled } from "./spaceSettle.ts";
+import type { ListItem } from "./liveList.ts";
 import { initGithub } from "./github.ts";
 import { initConxt, enqueueConxtMeeting } from "./conxt.ts";
 
@@ -484,6 +485,7 @@ export function openDb(file?: string) {
   if (!meetingCols.includes("chapters_json")) db.exec("ALTER TABLE meetings ADD COLUMN chapters_json TEXT");
   // The middle board's threads (board.ts), so a restarted server carries on with the same board.
   if (!meetingCols.includes("board_json")) db.exec("ALTER TABLE meetings ADD COLUMN board_json TEXT");
+  if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
@@ -538,6 +540,10 @@ export function openDb(file?: string) {
 
     /** Finds the user by Google subject (or email, for accounts created by the
      *  stand-in sign-in) and refreshes their profile. */
+    /** The names of the people in a space, for speech-to-text to listen for. */
+    memberNames(roomId: string): string[] {
+      return (db.prepare("SELECT u.name FROM room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ?").all(roomId) as Row[]).map((r) => r.name as string).filter(Boolean);
+    },
     userName(id: string): string | null {
       return ((db.prepare("SELECT name FROM users WHERE id = ?").get(id) as Row | undefined)?.name as string | undefined) ?? null;
     },
@@ -968,6 +974,13 @@ export function openDb(file?: string) {
         st.run(toItem, r.id as string);
         return { ...toSegment(r), itemId: toItem };
       });
+    },
+    saveList(meetingId: string, items: ListItem[]) {
+      db.prepare("UPDATE meetings SET list_json = ? WHERE id = ?").run(JSON.stringify(items), meetingId);
+    },
+    meetingList(meetingId: string): ListItem[] | null {
+      const r = db.prepare("SELECT list_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
+      return r?.list_json ? (JSON.parse(r.list_json as string) as ListItem[]) : null;
     },
     saveBoard(meetingId: string, board: Board) {
       db.prepare("UPDATE meetings SET board_json = ? WHERE id = ?").run(JSON.stringify({ ...board, busy: false }), meetingId);

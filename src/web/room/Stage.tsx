@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import type { Board, ClientMessage, ConxtLive, Discussion, Item, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { Board, ClientMessage, ConxtLive, Discussion, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -33,6 +33,8 @@ export function Stage(props: {
   discussions: Discussion[];
   /** The middle board's threads (server/board.ts). */
   board: Board | null;
+  /** The board's running list (server/liveList.ts); null when the server keeps none. */
+  list: ListNote[] | null;
   notes: Note[];
   /** Items whose live notes are being redrawn right now (keyed "" for off the agenda). */
   notesBusy: string[];
@@ -397,7 +399,7 @@ export function Stage(props: {
             focusItemId={state.focusItemId}
             meetingStartedAt={state.meetingStartedAt}
             onAcceptMove={props.offline ? undefined : (title) => send({ type: "board.accept", title })}
-            notes={props.notes}
+            notes={props.list ?? props.notes}
             followUps={state.followUps}
             onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
             onRemove={canSteer && !props.ending ? removeNote : undefined}

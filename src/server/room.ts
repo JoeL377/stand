@@ -19,6 +19,7 @@ import type {
   Suggestion,
 } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
+import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
 import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
@@ -198,6 +199,10 @@ export class RoomSession implements SpeechSink {
   private boardRun: Promise<void> | null = null;
   private boardRanAt = 0;
   private boardDueAt = 0;
+  /** The board's running list (liveList.ts): one pass at a time, after each pause in the talk. Null without a model. */
+  private list: ListKeeper | null = null;
+  private listTimer: NodeJS.Timeout | null = null;
+  private listRun: Promise<void> | null = null;
   ended = false;
   /** When End meeting started the write-up. */
   endingSince = 0;
@@ -238,6 +243,7 @@ export class RoomSession implements SpeechSink {
       this.setFocusInternal(items[0]?.id ?? null, "system", "start");
     }
     this.board = new BoardKeeper(agent, this.meetingStartedAt, resume ? db.meetingBoard(resume.id) : null);
+    if (agent.liveList) this.list = new ListKeeper({ liveList: agent.liveList.bind(agent) }, this.meetingStartedAt, resume ? db.meetingList(resume.id) : null);
     // Tidy the suggested agenda now, before anyone has started talking.
     polisher?.schedule(room.id, 0);
   }
@@ -570,6 +576,7 @@ export class RoomSession implements SpeechSink {
         discussions: this.db.meetingDiscussions(this.meetingId),
       });
       if (this.board) this.send(ws, { type: "board", board: this.board.board() });
+      this.send(ws, { type: "list", items: this.list?.notes(this.meetingId) ?? null });
       this.broadcastState();
       return;
     }
@@ -698,6 +705,14 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "followup.done": {
+        if (this.list?.has(msg.noteId)) {
+          const it = this.list.setDone(msg.noteId, msg.done ? conn.name : null);
+          if (!it) break;
+          this.listChanged();
+          // The same to-do in the live notes, so the recap and the space page have it too.
+          this.mirrorDone(it.text, it.doneBy);
+          break;
+        }
         const note = this.db.setActionDone(this.roomId, msg.noteId, msg.done ? conn.name : null);
         if (!note) break;
         // An action from this meeting: resend its item's notes so every card updates.
@@ -717,6 +732,11 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "note.remove": {
+        if (this.list?.has(msg.noteId)) {
+          if (!isHost) return this.refuse(ws, "take that line off", undefined);
+          if (this.list.remove(msg.noteId)) this.listChanged();
+          break;
+        }
         const before = this.db.meetingNotes(this.meetingId).find((n) => n.id === msg.noteId);
         if (!isHost) return this.refuse(ws, "delete that note", before?.itemId);
         if (!before) return;
@@ -727,6 +747,11 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "note.restore": {
+        if (this.list?.has(msg.noteId)) {
+          if (!isHost) return this.refuse(ws, "put that line back", undefined);
+          if (this.list.restore(msg.noteId)) this.listChanged();
+          break;
+        }
         const note = this.removedNotes.get(msg.noteId);
         if (!isHost) return this.refuse(ws, "bring that note back", note?.itemId);
         if (!note || note.meetingId !== this.meetingId) return;
@@ -1005,6 +1030,7 @@ export class RoomSession implements SpeechSink {
         this.lastSpeech = { ...last, endedAt: Math.max(last.endedAt, endedAt), length: seg.text.length };
         this.broadcast({ type: "segment.updated", segment: seg });
         this.scheduleNotes(seg.itemId, NOTES_DEBOUNCE_MS);
+        this.scheduleList();
         // Only the words just added count, so a long turn isn't scored twice.
         this.checkDrift({ ...seg, text: t });
         return;
@@ -1058,6 +1084,7 @@ export class RoomSession implements SpeechSink {
     this.broadcast({ type: "segment", segment });
     this.scheduleNotes(itemId, NOTES_DEBOUNCE_MS);
     this.scheduleBoard();
+    this.scheduleList();
     this.checkDrift(segment);
     this.checkConxtTerms(text, ts);
     return segment;
@@ -1118,6 +1145,60 @@ export class RoomSession implements SpeechSink {
     if ((quiet && Date.now() - quiet < DISMISS_QUIET_MS) || this.suggestion?.itemId === best.item.id) return;
     const label = best.item.externalId ?? best.item.title;
     this.suggestion = { itemId: best.item.id, reason: `The talk keeps coming back to ${label}`, confidence: 0.7, since: this.drift.since, source: "talk" };
+    this.broadcastState();
+  }
+
+  // ---- running list ---------------------------------------------------------
+
+  /** The next list pass: LIST_DEBOUNCE_MS after the latest talk, never more than LIST_MAX_WAIT_MS after
+   *  the oldest line no pass has read. One pass at a time; talk during a pass gets the next one. */
+  private scheduleList() {
+    const list = this.list;
+    if (this.ended || !list || this.listRun) return;
+    const since = list.unreadSince(this.db.meetingSegments(this.meetingId));
+    if (since === null) return;
+    const wait = Math.max(0, Math.min(LIST_DEBOUNCE_MS, since + LIST_MAX_WAIT_MS - Date.now()));
+    if (this.listTimer) clearTimeout(this.listTimer);
+    this.listTimer = setTimeout(() => {
+      this.listTimer = null;
+      void this.runList();
+    }, wait);
+  }
+
+  private runList(): Promise<void> {
+    const list = this.list;
+    if (this.ended || !list || this.listRun) return this.listRun ?? Promise.resolve();
+    const segments = this.db.meetingSegments(this.meetingId);
+    if (!list.due(segments)) return Promise.resolve();
+    const people = [...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName)])];
+    this.listRun = list
+      .run(segments, people, (ts) => this.focusAt(ts), Date.now())
+      .catch((e) => {
+        console.error(`[list] ${this.meetingId}: ${(e as Error).message}`);
+        return false;
+      })
+      .then((changed) => {
+        if (changed && !this.ended) this.listChanged();
+      })
+      .finally(() => {
+        this.listRun = null;
+        this.scheduleList();
+      });
+    return this.listRun;
+  }
+
+  private listChanged() {
+    if (!this.list) return;
+    this.db.saveList(this.meetingId, this.list.saved());
+    this.broadcast({ type: "list", items: this.list.notes(this.meetingId) });
+  }
+
+  /** A to-do checked off on the board's list: the same to-do in the live notes too, so the recap,
+   *  the space page and the next meeting see it. */
+  private mirrorDone(text: string, by: string | null) {
+    const note = this.db.meetingNotes(this.meetingId).find((n) => n.kind === "action" && !n.doneAt === !!by && similar(n.text, text));
+    if (!note) return;
+    if (this.db.setActionDone(this.roomId, note.id, by)) this.sendItemNotes(note.itemId);
     this.broadcastState();
   }
 
@@ -1470,6 +1551,7 @@ export class RoomSession implements SpeechSink {
     if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
     for (const t of this.noteTimers.values()) clearTimeout(t);
     if (this.boardTimer) clearTimeout(this.boardTimer);
+    if (this.listTimer) clearTimeout(this.listTimer);
     this.noteTimers.clear();
     if (this.mergeTimer) clearTimeout(this.mergeTimer);
     this.mergeTimer = null;
@@ -1488,6 +1570,12 @@ export class RoomSession implements SpeechSink {
       const perItem: Array<{ item: Item | null; notes: Note[] }> = [];
       for (const id of itemIds) {
         perItem.push({ item: id ? this.db.getItem(id) : null, notes: await this.refreshNotes(id) });
+      }
+      // To-dos checked off on the board's list: the tidy run may have written them in other words.
+      const doneOnList = (this.list?.notes(this.meetingId) ?? []).filter((n) => n.kind === "action" && n.doneAt);
+      if (doneOnList.length) {
+        for (const n of doneOnList) this.mirrorDone(n.text, n.doneBy ?? "Stand");
+        for (const p of perItem) p.notes = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === (p.item?.id ?? null));
       }
       // The tidy runs rewrote the topics: place the smaller ones again, then write the recap on those chapters.
       placing = this.mergeTopics(true);

@@ -319,6 +319,7 @@ interface Snapshot {
   at: number;
   itemId: string | null;
   topics: Array<{ id: string; topic: string; outcome: string; lines: number[]; mergedInto: string | null; group: string | null }>;
+  notes?: Array<{ id: string; kind: string; text: string; owner: string | null }>;
 }
 const snapshots: Snapshot[] = [];
 const snapTopics = (discussions: ReturnType<typeof db.meetingDiscussions>) =>
@@ -330,6 +331,9 @@ const snapTopics = (discussions: ReturnType<typeof db.meetingDiscussions>) =>
     mergedInto: d.mergedInto ?? null,
     group: d.group ?? null,
   }));
+/** The to-dos, decisions and open questions on screen now, for scripts/live-eval. */
+const snapNotes = () =>
+  db.meetingNotes(meetingId).filter((x) => x.kind === "action" || x.kind === "decision" || x.kind === "question").map((x) => ({ id: x.id, kind: x.kind, text: x.text, owner: x.owner ?? null }));
 const originalItem = (itemId: string | null) => [...itemIdOf].find(([, mine]) => mine === itemId)?.[0] ?? null;
 interface MergeRecord {
   at: number;
@@ -430,7 +434,7 @@ while (i < lines.length || pending.size || mergeDue !== null) {
     say(i++);
   }
   sim = Math.max(sim, end);
-  snapshots.push({ at: sim, itemId: originalItem(itemId), topics: snapTopics(discussions) });
+  snapshots.push({ at: sim, itemId: originalItem(itemId), topics: snapTopics(discussions), notes: snapNotes() });
   if (n % 25 === 0 && call) {
     const mins = ((at - meeting.meeting.startedAt) / 60_000).toFixed(1);
     console.log(`[replay] run ${n} at ${mins} min: ${runWindow.length}/${itemLines} lines, ${discussions.length} topics, ${Math.round(ms)} ms`);

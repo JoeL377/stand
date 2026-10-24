@@ -89,6 +89,15 @@ export interface Note {
   quote?: Quote | null;
 }
 
+/** A line on the board's running list (server/liveList.ts), in the shape of a note so the board's
+ *  tabs read either. Lines are only added, changed by id or closed, never regrouped. */
+export interface ListNote extends Note {
+  /** An open question that got answered, or a line that was dropped: it leaves the board. */
+  closed: { how: "answered" | "dropped" | "wrong"; at: number } | null;
+  /** A decision that settled an open question: that question's id. */
+  answers: string | null;
+}
+
 /** Someone's own words behind a line the agent wrote, copied from the transcript and checked
  *  against it, so a reader can see what was actually said and not only how the agent put it. */
 export interface Quote {
@@ -528,6 +537,8 @@ export type ServerMessage =
   | { type: "notes.busy"; itemId: string | null; busy: boolean }
   /** The middle board's threads, after every change. */
   | { type: "board"; board: Board }
+  /** The board's running list, after every change. Null when there's no model to keep one: the tabs read the live notes. */
+  | { type: "list"; items: ListNote[] | null }
   | { type: "meeting.ended"; meetingId: string }
   /** The server has a message the client sent with this cid. */
   | { type: "ack"; cid: string }
