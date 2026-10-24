@@ -1884,6 +1884,18 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-tasks-more button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
 .topic-tasks-more button:hover { color: var(--text); }
 .topic-tasks.compact .topic-task-at { display: none; }
+.topic-tasks li.topic-task { gap: 6px; }
+.topic-tasks li.topic-task .topic-dot { flex: none; align-self: center; }
+.topic-tasks.compact li.topic-task .topic-dot { display: none; }
+/* A decision that settled an open question; the question shows on hover. */
+.topic-task-answers { flex: none; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); font-size: 11px; cursor: default; }
+/* Answered or dropped: a moment in place, then it goes. */
+.topic-tasks li.leaving { animation: line-out 600ms ease-in 3.4s forwards; }
+.topic-tasks li.leaving .topic-task-text { color: var(--muted); }
+@keyframes line-out { to { opacity: 0; } }
+/* New lines held back while the pointer is on the list. */
+.topic-tasks-waiting button { padding: 1px 8px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); font: inherit; font-size: 12px; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .topic-tasks li.leaving { animation: none; } }
 .topic-section-label .topic-tab-count { margin-left: 4px; letter-spacing: 0; }
 /* Card, Columns or Feed: each person picks how the board is laid out on their own screen. */
 .topic-views { display: inline-flex; gap: 2px; margin-left: 10px; padding: 2px; border-radius: 999px; background: color-mix(in srgb, var(--text) 5%, transparent); }

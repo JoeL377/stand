@@ -86,7 +86,7 @@ function session(roomId: string): RoomSession | null {
     (closed) => {
       if (sessions.get(roomId) === closed) sessions.delete(roomId);
     },
-    capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r, () => roomVocabulary(roomId).keyterms) : undefined,
+    capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r, () => keytermsFor(roomId, room.name)) : undefined,
     polisher,
     resume,
   );
@@ -99,6 +99,13 @@ function session(roomId: string): RoomSession | null {
   // It was being written up when the server stopped: finish that, with everyone watching.
   if (resume?.endRequestedAt) void s.end();
   return s;
+}
+
+/** What speech-to-text listens for in a room: the space's name, "Stand" and the first names of its
+ *  members, which it otherwise mishears ("Duke" for Huy, "Stan" for Stand), then Conxt's word list. */
+function keytermsFor(roomId: string, spaceName: string): string[] {
+  const names = db.memberNames(roomId).map((n) => n.trim().split(/\s+/)[0]).filter((n) => n.length > 1);
+  return [...new Set([spaceName.trim(), "Stand", ...names, ...roomVocabulary(roomId).keyterms].filter(Boolean))].slice(0, 100);
 }
 
 /** Meetings being written up after the fact, one at a time. */

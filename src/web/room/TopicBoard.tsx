@@ -5,11 +5,14 @@
 // changes single sentences and lines and leaves the rest where it is: a new line slides in with a
 // green mark, a reworded one gets a short underline, so people see what changed without rereading. Underneath, a chapter bar runs from the start of the
 // meeting to now, one stretch per thread; hovering or clicking one opens it on your own screen.
-// The Decided, To do and Open tabs keep the whole meeting: they list what live notes caught, which
-// comes in within seconds of being said, with the current topic's lines on top. A topic change no
-// longer empties them, and anyone can check a to-do off right there.
+// The Decided, To do and Open tabs keep the whole meeting: they read the running list
+// (server/liveList.ts), which has a line up about 5 s after it's said and never rewords or regroups
+// it (the live notes when there's no list). The current topic's lines come first, oldest at the top,
+// so a new one joins at the foot of the list with a short glow and nothing moves; the rest fold into
+// "Earlier". While someone's pointer is on a list, new lines wait behind a "2 new" pill. An answered
+// question folds into its decision and a checked to-do into "Done", each after a moment in place.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
-import type { Board, BoardDetail, BoardThread, FollowUp, Item, Note, Participant, Segment } from "../../shared/protocol.ts";
+import type { Board, BoardDetail, BoardThread, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import { barSpan } from "../../shared/chapters.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
@@ -26,8 +29,13 @@ const NEW_MS = 10_000;
 const CHANGED_MS = 4_000;
 /** Live notes write a line down a little after it's said; this much past a stretch still counts as its topic. */
 const TOPIC_SLACK_MS = 45_000;
-/** Lines from earlier topics shown before "Show more". */
-const EARLIER_SHOWN = 4;
+/** Lines of the topic on screen shown before the older ones join "Earlier". */
+const HERE_SHOWN = 5;
+/** How long a new to-do, decision or question glows. */
+const TASK_NEW_MS = 3_000;
+/** How long an answered question or a checked to-do stays in place before it leaves: the
+ *  question for its decision, the to-do for the Done fold. */
+const LEAVE_MS = 4_000;
 const MARK: Record<BoardDetail["kind"], string> = { position: "", decided: "✓", todo: "○", open: "?" };
 const MARK_LABEL: Record<BoardDetail["kind"], string> = { position: "", decided: "Decided", todo: "To do", open: "Open question" };
 const DETAIL_ORDER: Record<BoardDetail["kind"], number> = { position: 0, decided: 1, todo: 2, open: 3 };
@@ -318,7 +326,7 @@ function Card(props: {
               <span className="topic-section-label">
                 {sec.label} {props.tasks.count[sec.kind] > 0 && <span className="topic-tab-count">{props.tasks.count[sec.kind]}</span>}
               </span>
-              <TaskList kind={sec.kind} tasks={props.tasks} acts={props.acts} nameOf={props.nameOf} compact />
+              <TaskList kind={sec.kind} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} compact />
             </div>
           ))}
         </div>
@@ -461,7 +469,7 @@ function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; tasks: Task
         {tab === "position" ? (
           people.length ? <Details details={people} marks={props.marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">Nothing yet</span>
         ) : (
-          <TaskList kind={tab} tasks={props.tasks} acts={props.acts} nameOf={props.nameOf} />
+          <TaskList kind={tab} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} />
         )}
       </div>
     </div>
@@ -477,6 +485,12 @@ interface TaskRow {
   at: number;
   /** Said while the group was on the topic on screen. */
   here: boolean;
+  /** Answered or dropped a moment ago: on its way off. */
+  leaving: boolean;
+  /** A to-do checked off a while ago: in the Done fold. */
+  done: boolean;
+  /** A decision that settled an open question: the question. */
+  answers: string | null;
 }
 interface Tasks {
   rows: Record<TaskKind, TaskRow[]>;
@@ -494,30 +508,56 @@ interface TaskActs {
 }
 
 /** The meeting's to-dos, decisions and questions, sorted for the board: the topic on screen
- *  first, then the rest of the meeting, open before done, newest first. */
+ *  first, oldest at the top, then the rest of the meeting, newest first. An answered or dropped
+ *  line stays LEAVE_MS before it goes; a checked to-do LEAVE_MS before it folds into Done. */
 function useTasks(notes: Note[], followUps: FollowUp[], current: BoardThread | null, liveNow: number, start: number): Tasks {
-  const fresh = useFresh(notes.filter((n) => TASK_KIND[n.kind]).map((n) => n.id));
+  const fresh = useFresh(notes.filter((n) => TASK_KIND[n.kind]).map((n) => n.id), TASK_NEW_MS);
+  const now = useUntil([...notes.map((n) => (n as Partial<ListNote>).closed?.at ?? 0), ...notes.map((n) => n.doneAt ?? 0)].map((t) => t + LEAVE_MS));
   const spans = (current?.spans ?? []).map(([a, b], i, all) => [a, i === all.length - 1 && liveNow ? Math.max(b, liveNow) : b] as const);
   const here = (n: Note, at: number) => n.itemId === current?.itemId && spans.some(([a, b]) => at >= a && at <= b + TOPIC_SLACK_MS);
   const rows: Tasks["rows"] = { decided: [], todo: [], open: [] };
+  const questions = new Map(notes.filter((n) => n.kind === "question").map((n) => [n.id, n.text]));
   for (const note of notes) {
     const kind = TASK_KIND[note.kind];
     if (!kind) continue;
+    const closed = (note as Partial<ListNote>).closed;
+    const leaving = !!closed && now - closed.at < LEAVE_MS;
+    if (closed && !leaving) continue;
+    const answers = (note as Partial<ListNote>).answers;
     const at = note.quote?.ts ?? note.ts;
-    rows[kind].push({ note, kind, at: Math.max(at, start), here: here(note, at) });
+    rows[kind].push({
+      note,
+      kind,
+      at: Math.max(at, start),
+      here: here(note, at),
+      leaving,
+      done: !!note.doneAt && now - note.doneAt >= LEAVE_MS,
+      answers: answers ? (questions.get(answers) ?? null) : null,
+    });
   }
-  const order = (a: TaskRow, b: TaskRow) => Number(b.here) - Number(a.here) || Number(!!a.note.doneAt) - Number(!!b.note.doneAt) || b.at - a.at;
-  for (const k of Object.keys(rows) as TaskKind[]) rows[k].sort(order);
+  for (const k of Object.keys(rows) as TaskKind[]) rows[k].sort((a, b) => a.at - b.at);
   return {
     rows,
-    count: { decided: rows.decided.length, todo: rows.todo.filter((r) => !r.note.doneAt).length, open: rows.open.length },
+    count: { decided: rows.decided.length, todo: rows.todo.filter((r) => !r.note.doneAt).length, open: rows.open.filter((r) => !r.leaving).length },
     fresh,
     earlier: followUps,
   };
 }
 
+/** The time now, brought up to date again at each of these moments as it passes. */
+function useUntil(moments: number[]): number {
+  const [now, setNow] = useState(() => Date.now());
+  const next = Math.min(...moments.filter((t) => t > now));
+  useEffect(() => {
+    if (!Number.isFinite(next)) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, next - Date.now()) + 30);
+    return () => clearTimeout(timer);
+  }, [next]);
+  return now;
+}
+
 /** Ids that weren't there when this screen first had the list, for NEW_MS after they arrive. */
-function useFresh(ids: string[]): Set<string> {
+function useFresh(ids: string[], ms = NEW_MS): Set<string> {
   const seen = useRef<Set<string> | null>(null);
   const [fresh, setFresh] = useState<Map<string, number>>(new Map());
   const sig = ids.join(" ");
@@ -529,7 +569,7 @@ function useFresh(ids: string[]): Set<string> {
     const added = ids.filter((id) => !seen.current!.has(id));
     if (!added.length) return;
     for (const id of added) seen.current.add(id);
-    const until = Date.now() + NEW_MS;
+    const until = Date.now() + ms;
     setFresh((m) => new Map([...m, ...added.map((id) => [id, until] as const)]));
   }, [sig]);
   useEffect(() => {
@@ -543,22 +583,35 @@ function useFresh(ids: string[]): Set<string> {
 
 const shortDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
-/** One tab's or column's lines: the topic on screen first, then the rest of the meeting. To-dos
- *  get a box anyone can tick; the host can take off a line Stand got wrong. */
-function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; nameOf: (name: string) => string; compact?: boolean }) {
-  const [more, setMore] = useState(false);
+/** One tab's or column's lines: the topic on screen first, oldest at the top so a new line joins
+ *  at the foot, then "Earlier" (folded) and "Done" (folded). To-dos get a box anyone can tick; the
+ *  host can take off a line Stand got wrong. While the pointer is on the list, new lines wait behind
+ *  a pill so nothing moves under it. */
+function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (name: string) => string; nameOf: (name: string) => string; compact?: boolean }) {
+  const [openEarlier, setOpenEarlier] = useState(false);
+  const [openDone, setOpenDone] = useState(false);
   const [past, setPast] = useState(false);
-  const rows = props.tasks.rows[props.kind];
-  const here = rows.filter((r) => r.here);
-  const rest = rows.filter((r) => !r.here);
-  // Columns are narrow, so they keep fewer earlier lines before "Show more".
-  const room = props.compact ? 2 : EARLIER_SHOWN - Math.min(here.length, 2);
-  const shownRest = more ? rest : rest.slice(0, room);
+  // Lines on screen when the pointer came onto the list; null while it's elsewhere.
+  const [held, setHeld] = useState<Set<string> | null>(null);
+  const all = props.tasks.rows[props.kind];
+  const rows = held ? all.filter((r) => held.has(r.note.id)) : all;
+  const waiting = held ? all.filter((r) => !held.has(r.note.id) && !r.leaving).length : 0;
+  const live = rows.filter((r) => !r.done);
+  const done = rows.filter((r) => r.done);
+  const hereAll = live.filter((r) => r.here);
+  const here = hereAll.slice(-HERE_SHOWN);
+  // Older lines of this topic past HERE_SHOWN join the rest of the meeting, newest first.
+  const rest = [...hereAll.slice(0, -HERE_SHOWN || hereAll.length), ...live.filter((r) => !r.here)].sort((a, b) => b.at - a.at);
+  // Nothing from this topic yet: the rest of the meeting shows, without a fold to open first.
+  const restOpen = openEarlier || !here.length;
   const earlier = props.kind === "todo" ? props.tasks.earlier : [];
-  const openEarlier = earlier.filter((f) => !f.doneAt).length;
-  if (!rows.length && !earlier.length) return <span className="topic-section-empty">{props.compact ? "–" : "Nothing yet"}</span>;
-  const row = (note: Note, opts: { at: string; here?: boolean; fresh?: boolean; removable?: boolean }) => (
-    <li key={note.id} className={[props.kind, "topic-task", opts.here && "here", note.doneAt && "done", opts.fresh && "topic-new"].filter(Boolean).join(" ")}>
+  const earlierOpen = earlier.filter((f) => !f.doneAt).length;
+  if (!all.length && !earlier.length) return <span className="topic-section-empty">{props.compact ? "–" : "Nothing yet"}</span>;
+  const row = (note: Note, opts: { at: string; r?: TaskRow; removable?: boolean }) => (
+    <li
+      key={note.id}
+      className={[props.kind, "topic-task", opts.r?.here && "here", note.doneAt && "done", opts.r?.leaving && "leaving", props.tasks.fresh.has(note.id) && "topic-new"].filter(Boolean).join(" ")}
+    >
       {props.kind === "todo" ? (
         <button
           type="button"
@@ -570,16 +623,19 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; nameOf:
           onClick={() => props.acts.onDone?.(note.id, !note.doneAt)}
         />
       ) : (
-        <span className="topic-note-mark" aria-label={MARK_LABEL[props.kind]}>
-          {MARK[props.kind]}
+        <span className="topic-note-mark" aria-label={opts.r?.leaving ? "Answered" : MARK_LABEL[props.kind]}>
+          {opts.r?.leaving ? "✓" : MARK[props.kind]}
         </span>
       )}
-      <span className="topic-task-text">
-        {note.text}
-        {note.owner && <span className="topic-owner"> · {first(props.nameOf(note.owner))}</span>}
-      </span>
+      <span className="topic-task-text">{note.text}</span>
+      {opts.r?.answers && (
+        <span className="topic-task-answers" title={`Answers: ${opts.r.answers}`}>
+          Answered
+        </span>
+      )}
+      {note.owner && <Dot id={props.idOf(note.owner)} name={props.nameOf(note.owner)} size={18} />}
       <span className="topic-task-at">{opts.at}</span>
-      {opts.removable && props.acts.onRemove && (
+      {opts.removable && props.acts.onRemove && !opts.r?.leaving && (
         <button type="button" className="topic-task-remove" aria-label="Remove" title="Remove: Stand got this wrong" onClick={() => props.acts.onRemove?.(note)}>
           ×
         </button>
@@ -587,25 +643,32 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; nameOf:
     </li>
   );
   const atOf = (r: TaskRow) => clock(r.at - props.acts.start);
+  const fold = (label: string, n: number, open: boolean, toggle: () => void) => (
+    <li className="topic-tasks-more">
+      <button type="button" aria-expanded={open} onClick={toggle}>
+        {label} · {n} <span aria-hidden>{open ? "▴" : "▾"}</span>
+      </button>
+    </li>
+  );
   return (
-    <ul className={["topic-details", "topic-tasks", props.compact && "compact", here.length > 0 && rest.length > 0 && "has-here"].filter(Boolean).join(" ")}>
-      {here.map((r) => row(r.note, { at: atOf(r), here: true, fresh: props.tasks.fresh.has(r.note.id), removable: true }))}
-      {here.length > 0 && rest.length > 0 && <li className="topic-tasks-label">Earlier in this meeting</li>}
-      {shownRest.map((r) => row(r.note, { at: atOf(r), fresh: props.tasks.fresh.has(r.note.id), removable: true }))}
-      {rest.length > shownRest.length && (
-        <li className="topic-tasks-more">
-          <button type="button" onClick={() => setMore(true)}>
-            Show {rest.length - shownRest.length} more
+    <ul
+      className={["topic-details", "topic-tasks", props.compact && "compact", here.length > 0 && "has-here"].filter(Boolean).join(" ")}
+      onPointerEnter={(e) => e.pointerType === "mouse" && setHeld(new Set(all.map((r) => r.note.id)))}
+      onPointerLeave={() => setHeld(null)}
+    >
+      {here.map((r) => row(r.note, { at: atOf(r), r, removable: true }))}
+      {waiting > 0 && (
+        <li className="topic-tasks-waiting">
+          <button type="button" onClick={() => setHeld(null)}>
+            {waiting} new
           </button>
         </li>
       )}
-      {earlier.length > 0 && (
-        <li className="topic-tasks-more">
-          <button type="button" aria-expanded={past} onClick={() => setPast((p) => !p)}>
-            From earlier meetings · {openEarlier} open <span aria-hidden>{past ? "▴" : "▾"}</span>
-          </button>
-        </li>
-      )}
+      {rest.length > 0 && here.length > 0 && fold("Earlier", rest.length, openEarlier, () => setOpenEarlier((o) => !o))}
+      {restOpen && rest.map((r) => row(r.note, { at: atOf(r), r, removable: true }))}
+      {done.length > 0 && fold("Done", done.length, openDone, () => setOpenDone((o) => !o))}
+      {openDone && done.map((r) => row(r.note, { at: atOf(r), r }))}
+      {earlier.length > 0 && fold("From earlier meetings", earlierOpen, past, () => setPast((p) => !p))}
       {past && earlier.map((f) => row(f, { at: shortDate(f.meetingStartedAt) }))}
     </ul>
   );

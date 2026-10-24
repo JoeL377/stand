@@ -9,6 +9,7 @@ import { type DraftSlide, outlineToSlides } from "../shared/outline.ts";
 import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind, Position, Quote, Segment } from "../shared/protocol.ts";
 import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, BoardDriftSchema, DRIFT_SYSTEM } from "./board.ts";
 import { config } from "./config.ts";
+import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
 import { findQuote, type Said } from "./quotes.ts";
 
 export type DraftNote = Pick<Note, "kind" | "text" | "owner"> & { quote?: Quote | null };
@@ -176,6 +177,9 @@ export interface Agent {
   boardCard(context: string, talk: string): Promise<BoardAnswer | null>;
   /** Whether the talk has drifted off the board's title, read without the summary. Null without a model. */
   boardDrift(context: string, talk: string): Promise<BoardDrift | null>;
+  /** The board's running list (liveList.ts): what the newest talk adds, changes or closes. Left out
+   *  without a model; the board's tabs then read the live notes. */
+  liveList?(context: string, talk: string): Promise<ListAnswer | null>;
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
   settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
@@ -217,6 +221,8 @@ export interface AgendaPolishRow {
 
 /** A board run waits this long before the next one tries. */
 const BOARD_TIMEOUT_MS = 25_000;
+/** The running list answers in about 2 s; past this the next pause tries again. */
+const LIST_TIMEOUT_MS = 15_000;
 /** The board's context (people, earlier threads) changes rarely, so it's cached ahead of the talk. */
 const boardContent = (context: string, talk: string): Anthropic.Beta.BetaContentBlockParam[] => [
   { type: "text", text: context, cache_control: { type: "ephemeral" } },
@@ -833,6 +839,10 @@ Answer for every smaller topic exactly once.`,
 
   async boardCard(context: string, talk: string): Promise<BoardAnswer | null> {
     return this.parse(BoardAnswerSchema, boardContent(context, talk), BOARD_SYSTEM, "low", config.boardModel, { timeout: BOARD_TIMEOUT_MS, maxTokens: 3000, thinking: false });
+  }
+
+  async liveList(context: string, talk: string): Promise<ListAnswer | null> {
+    return this.parse(ListAnswerSchema, boardContent(context, talk), LIST_SYSTEM, "low", config.listModel, { timeout: LIST_TIMEOUT_MS, maxTokens: 2000, thinking: false });
   }
 
   async boardDrift(context: string, talk: string): Promise<BoardDrift | null> {

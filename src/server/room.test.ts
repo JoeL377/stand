@@ -1007,3 +1007,44 @@ test("only the person exploring can share their explore work from the meeting", 
     setConxtOpenItems(null);
   }
 });
+
+test("the board's running list: lines come in, anyone ticks a to-do (and its live note), only the host takes one off", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const [item] = db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "One", url: null, description: null }]);
+  const agent = Object.assign(new HeuristicAgent(), {
+    async liveList() {
+      return { add: [{ kind: "todo" as const, who: "Huy", text: "Send Joe the repo link", line: 1 }], change: [], close: [] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const host = await join(session, { id: "u1", name: "Joe" });
+  const guest = await join(session, { id: "u2", name: "Huy" });
+  assert.deepEqual(host.got.find((m) => m.type === "list"), { type: "list", items: [] });
+  session.addSpeech("u2", "Huy", "I'll send Joe the repo link", Date.now());
+  await (session as unknown as { runList(): Promise<void> }).runList();
+  const lastList = (ws: FakeSocket) => ws.got.filter((m) => m.type === "list").at(-1) as Extract<ServerMessage, { type: "list" }>;
+  const [line] = lastList(guest).items!;
+  assert.deepEqual([line.kind, line.owner, line.itemId], ["action", "Huy", item.id]);
+  assert.equal(db.meetingList(session.meetingId)?.length, 1);
+
+  // The live notes caught the same to-do in their own words: ticking the board's line ticks it too.
+  db.addNote(session.meetingId, item.id, { kind: "action", text: "Send Joe the link to the repo", owner: "Huy" }, null);
+  await say(guest, { type: "followup.done", noteId: line.id, done: true });
+  assert.equal(lastList(guest).items![0].doneBy, "Huy");
+  assert.equal(db.meetingNotes(session.meetingId).find((n) => n.kind === "action")?.doneBy, "Huy");
+
+  // Taking a line off is the host's; Undo puts it back.
+  await say(guest, { type: "note.remove", noteId: line.id });
+  assert.equal(lastList(guest).items!.length, 1);
+  await say(host, { type: "note.remove", noteId: line.id });
+  assert.equal(lastList(guest).items!.length, 0);
+  await say(host, { type: "note.restore", noteId: line.id });
+  assert.equal(lastList(guest).items!.length, 1);
+});
+
+test("without a model there's no running list: the board's tabs read the live notes", async () => {
+  const { session } = setup();
+  const ws = await join(session, { id: "u1", name: "Joe" });
+  assert.deepEqual(ws.got.find((m) => m.type === "list"), { type: "list", items: null });
+});

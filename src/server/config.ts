@@ -27,6 +27,9 @@ export const config = {
   /** The middle board's card (board.ts), every 30 s while people talk. Haiku held one card far
    *  too long on the Conxt replays; Sonnet followed the talk (2026-10-16). */
   boardModel: env("BOARD_MODEL") ?? "claude-sonnet-5-5",
+  /** For the board's running list (liveList.ts), after every pause. Haiku missed late items on the
+   *  Oct 17 and Oct 22 replays; Sonnet caught every core one in about 5 s (2026-10-23). */
+  listModel: env("LIST_MODEL") ?? "claude-sonnet-5-5",
   /** Live notes experiments, for trying on a recorded meeting with scripts/replay-notes.ts; all
    *  off unless set. NOTES_TURNS=ranges: the model lists a topic's lines as ranges ("3-17, 20")
    *  instead of every number. NOTES_THINKING=off: live notes runs answer without thinking first.

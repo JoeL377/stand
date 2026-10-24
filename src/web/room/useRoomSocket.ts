@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Board, ClientMessage, Discussion, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
+import type { Board, ClientMessage, Discussion, ListNote, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
 
 export interface Interim {
   speakerId: string;
@@ -84,6 +84,11 @@ function patchNotes(notes: Note[], { cid, msg }: Outgoing): Note[] {
       return notes;
   }
 }
+/** The same for the board's running list: a to-do checked off, a line the host took off. */
+function patchList(list: ListNote[], o: Outgoing): ListNote[] {
+  if (o.msg.type !== "followup.done" && o.msg.type !== "note.remove") return list;
+  return patchNotes(list, o) as ListNote[];
+}
 function patchState(state: RoomState, { msg }: Outgoing): RoomState {
   if (msg.type !== "followup.done") return state;
   return {
@@ -102,6 +107,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [discussions, setDiscussions] = useState<Discussion[]>([]);
   const [board, setBoard] = useState<Board | null>(null);
+  /** The board's running list; null when the server keeps none (no model): the tabs read the notes. */
+  const [list, setList] = useState<ListNote[] | null>(null);
   /** Items whose notes the agent is rewriting right now ("" = off-agenda). */
   const [notesBusy, setNotesBusy] = useState<string[]>([]);
   const [interims, setInterims] = useState<Record<string, Interim>>({});
@@ -202,6 +209,9 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
             break;
           case "board":
             setBoard(msg.board);
+            break;
+          case "list":
+            setList(msg.items && reapply(msg.items, patchList));
             break;
           case "notes.busy": {
             const key = msg.itemId ?? "";
@@ -339,6 +349,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     } else setWaiting(outbox.current.length);
     // Show it done now; the server's copy replaces this when it arrives.
     setNotes((ns) => patchNotes(ns, o));
+    setList((l) => l && patchList(l, o));
     setState((s) => s && patchState(s, o));
     setSegments((ss) => patchSegments(ss, o));
     return true;
@@ -350,6 +361,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     notes,
     discussions,
     board,
+    list,
     notesBusy,
     interims,
     endedMeetingId,
