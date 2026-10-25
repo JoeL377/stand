@@ -2368,3 +2368,50 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .topic-moving.opener-next { margin: 0 0 0 auto; align-self: center; align-items: center; opacity: 1; max-width: 62%; min-width: 0; white-space: nowrap; }
 .topic-moving.opener-next .topic-moving-go { flex: none; }
 .topic-moving.opener-next .topic-moving-go { opacity: 1; }
+/* ---- Done since on a phone: a deck you swipe through, steps on top, Next at the thumb ---- */
+.opener-steps, .opener-page-title, .opener-pager { display: none; }
+@media (max-width: 640px) {
+  .opener { gap: 10px; }
+  .opener .topic-now-title { font-size: 18px; }
+  /* The opening line is the first page's; later pages give the room to what got done. */
+  .opener.later .topic-summary { display: none; }
+  .opener .opener-tabs { display: none; }
+  .opener-steps { display: flex; gap: 4px; }
+  .opener-steps span { flex: 1; height: 3px; border-radius: 2px; background: var(--line); transition: background-color 160ms ease-out; }
+  .opener-steps span.on { background: var(--accent); }
+  .opener-page-title { display: block; margin: 0; font-size: 15px; font-weight: 600; }
+  .opener .done-point { font-size: 15px; padding: 9px 0; }
+  .opener .done-shot img { max-height: 180px; }
+  /* The card keeps to the screen: its page scrolls, the steps above and the pager below stay put. */
+  .topic-board > .opener, .done-pop .opener { flex: 1 1 0; min-height: 0; }
+  .opener > * { flex: none; }
+  .opener > .topic-tabs-wrap { flex: 1 1 auto; min-height: 0; gap: 10px; }
+  .opener .topic-tabs-wrap > * { flex: none; }
+  .opener .topic-tabs-wrap > .topic-tab-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* In a meeting the board's room is short: the label carries the date, the opening line two lines until tapped. */
+  .topic-board > .opener .topic-now-title { display: none; }
+  .opener .topic-summary.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .opener-pager { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 -16px -12px; padding: 10px 16px 10px; border-top: 1px solid var(--line); background: var(--panel-2); }
+  .done-pop .opener-pager { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .opener-pager button { min-height: 44px; margin: 0; border-radius: 10px; font-size: 14px; }
+  .opener-back { flex: none; width: 44px; padding: 0; font-size: 20px; }
+  .opener-back:disabled { opacity: 0.35; }
+  .opener-fwd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button.opener-fwd { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .opener-fwd-next { opacity: 0.75; }
+  .opener-fwd.last { text-align: center; font-size: 13px; color: var(--muted); }
+  /* From the Tasks tab: a full-screen sheet, the close and the pager always in reach. */
+  .dialog-backdrop:has(> .done-pop) { padding: 0; place-items: stretch; }
+  .done-pop { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; padding: 0; overflow: hidden; }
+  .done-pop .topic-now { border-radius: 0; padding-top: calc(14px + env(safe-area-inset-top)); }
+  .done-pop .topic-now-head { min-height: 32px; padding-right: 40px; }
+  .done-pop-close { top: calc(10px + env(safe-area-inset-top)); right: 8px; width: 40px; height: 40px; }
+}
+/* The Kickoff label's date shows only where the title gives way (a meeting on a phone). */
+.opener-since { display: none; }
+@media (max-width: 640px) {
+  .topic-board > .opener .opener-since { display: inline; }
+  /* One line: the label, its date, Move on; the count is on the pages. */
+  .topic-board > .opener .opener-count { display: none; }
+  .opener .topic-now-head > * { white-space: nowrap; }
+}
