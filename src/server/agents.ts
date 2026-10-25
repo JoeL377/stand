@@ -5,7 +5,8 @@
 // pinned to them (stand:note/<id>).
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
-import type { AgentToken, Discussion, Item, ItemUpdate, Jot, Note, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
+import type { AgentToken, Discussion, Item, ItemUpdate, Jot, Note, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
+import { stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
 
@@ -101,9 +102,59 @@ export function agentApi(deps: AgentDeps) {
     ref: refOf("action", n.id),
     text: n.text,
     owner: n.owner ?? undefined,
-    status: n.doneAt ? "done" : "open",
+    status: stateOf(n),
     done_by: n.doneBy ?? undefined,
+    why_dropped: n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
   });
+
+  /** "joe via Claude Code", or just the name from the web app. */
+  const byOf = (caller: Caller) => (caller.token ? `${caller.user.name} via ${caller.token.label}` : caller.user.name);
+  /** "me" is the caller; "unassigned", "none" or nothing leaves it open to anyone. */
+  const ownerFor = (caller: Caller, owner: string): string | null => {
+    const o = oneLine(owner, 80);
+    if (!o || /^(unassigned|none|nobody)$/i.test(o)) return null;
+    return /^(me|myself)$/i.test(o) ? caller.user.name : o;
+  };
+
+  /** Moves a to-do to a new state and puts the summary (and links) in its log, as people see it in Stand. */
+  function applyChange(caller: Caller, roomId: string, note: Note, change: TaskChange) {
+    const by = byOf(caller);
+    const links = cleanLinks(change.links);
+    const pr = links.find((l) => prOf(l));
+    const summary = (change.summary ?? "").trim().slice(0, 4000);
+    const state = change.status ? TASK_STATES.find((s) => s === change.status) : undefined;
+    if (change.status && !state) throw new AgentError(`Status is one of ${TASK_STATES.join(", ")}.`);
+    let now = note;
+    const moved = !!state && state !== stateOf(note);
+    if (state && moved) {
+      now =
+        db.setTaskState(roomId, note.id, {
+          state,
+          by,
+          closedBy: state === "done" ? (pr ? `pr:${pr}` : caller.token ? "agent" : "confirmed") : null,
+          reason: state === "dropped" ? oneLine(change.reason || summary, 200) || null : null,
+        }) ?? note;
+    }
+    let update: ItemUpdate | null = null;
+    if (summary || links.length) {
+      update = db.addUpdate({
+        roomId,
+        itemId: note.itemId,
+        noteId: note.id,
+        noteText: now.text,
+        userId: caller.user.id,
+        userName: caller.user.name,
+        client: caller.token?.label ?? null,
+        // Only done and doing read as reports on the work; the rest is more about the to-do, and
+        // mustn't show it as being worked on (workLog.ts).
+        status: stateOf(now) === "done" ? "done" : stateOf(now) === "doing" ? "progress" : change.adding ? "added" : "note",
+        text: summary || (stateOf(now) === "done" ? `Done: ${clip(now.text, 200)}` : "Added links"),
+        links,
+      });
+      db.claimWorkShots(note.id, caller.user.id, update.id);
+    }
+    return { now, update, unchanged: !moved && !update };
+  }
 
   /** Short quotes from the turns a topic covers. */
   const quotes = (d: Discussion | null, max = 8) =>
@@ -181,7 +232,7 @@ export function agentApi(deps: AgentDeps) {
 
   /** Finds what a reference points to, checking the caller is in its space. */
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
-  function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number }>, baseUrl: string) {
+  function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number; addedByHand?: boolean }>, baseUrl: string) {
     const items = new Map<string, Item | null>();
     return rows.map((n) => {
       if (n.itemId && !items.has(n.itemId)) items.set(n.itemId, db.getItem(n.itemId));
@@ -194,7 +245,8 @@ export function agentApi(deps: AgentDeps) {
         space: n.roomName as string | undefined,
         item: item ? { id: item.id, title: item.title, key: item.externalId ?? undefined } : undefined,
         decided: decision?.text,
-        from_meeting: day(n.meetingStartedAt),
+        from_meeting: n.addedByHand ? undefined : day(n.meetingStartedAt),
+        added: n.addedByHand ? { by: n.editedBy ?? undefined, on: day(n.meetingStartedAt) } : undefined,
         url: refUrl(baseUrl, "action", n.id),
       };
     });
@@ -240,7 +292,9 @@ export function agentApi(deps: AgentDeps) {
       const where = {
         space: { id: r.room.id, name: r.room.name, purpose: r.room.purpose || undefined },
         item: itemInfo(item, baseUrl),
-        meeting: { id: r.meeting.id, on: day(r.meeting.startedAt), live: r.meeting.endedAt === null || undefined },
+        meeting: r.meeting.added ? undefined : { id: r.meeting.id, on: day(r.meeting.startedAt), live: r.meeting.endedAt === null || undefined },
+        // A to-do someone added by hand (create_action) rather than one a meeting caught.
+        added: r.meeting.added ? { by: r.note?.editedBy ?? undefined, on: day(r.meeting.startedAt) } : undefined,
       };
       const topic = r.topic
         ? {
@@ -277,8 +331,9 @@ export function agentApi(deps: AgentDeps) {
         text: n.text,
         in_their_words: n.quote ? `${n.quote.speaker}: "${n.quote.text}"` : undefined,
         owner: n.owner ?? undefined,
-        status: n.kind === "action" ? (n.doneAt ? "done" : "open") : undefined,
+        status: n.kind === "action" ? stateOf(n) : undefined,
         done_by: n.doneBy ?? undefined,
+        why_dropped: n.kind === "action" && n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
         ...where,
         topic,
         decided_with_it: sameTopic.filter((x) => x.kind === "decision").map((x) => x.text),
@@ -343,7 +398,7 @@ export function agentApi(deps: AgentDeps) {
     /** Where a reference lives, for the web app's /ref/... links. */
     locate(caller: Caller, kind: string, id: string) {
       const r = resolve(caller, `stand:${kind}/${id}`);
-      return { meetingId: r.meeting.id, roomId: r.room.id, itemId: r.itemId };
+      return { meetingId: r.meeting.id, roomId: r.room.id, itemId: r.itemId, added: r.meeting.added || undefined };
     },
 
     listActions(caller: Caller, opts: { space: string; status?: "open" | "done" | "all"; owner?: string }, baseUrl: string) {
@@ -604,6 +659,50 @@ export function agentApi(deps: AgentDeps) {
       };
     },
 
+    /** A to-do nobody said in a meeting: added to a space by hand, with its state and a summary if given. */
+    createAction(caller: Caller, args: TaskChange & { space: string; text: string; itemId?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const room = findSpace(caller, args.space);
+      const text = oneLine(args.text, 500);
+      if (!text) throw new AgentError("A to-do needs its text: what needs doing, in a line.");
+      let itemId: string | null = null;
+      if (args.itemId) {
+        const item = db.getItem(args.itemId);
+        if (!item || item.roomId !== room.id) throw new AgentError("That item isn't in this space. list_spaces shows each space's items.");
+        itemId = item.id;
+      }
+      const note = db.addTask(room.id, { text, owner: ownerFor(caller, args.owner ?? "me"), itemId }, byOf(caller));
+      const { now, update } = applyChange(caller, room.id, note, { ...args, adding: true });
+      deps.notify(room.id, "followups");
+      return {
+        created: { ...actionInfo(now), space: room.name, item: itemId ? db.getItem(itemId)?.title : undefined, url: refUrl(baseUrl, "action", now.id) },
+        log: update ? updateInfo(update, baseUrl) : undefined,
+        shows_on: `The space's Tasks tab in Stand, and the next meeting's check-in while it's open.`,
+      };
+    },
+
+    /** Changes a to-do: its wording, owner or state, and adds a summary to its log. */
+    updateAction(caller: Caller, args: TaskChange & { ref: string; text?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`);
+      if (!r.note || r.note.kind !== "action") throw new AgentError("Only to-dos (stand:action/...) can be updated here. For anything else, post_update.");
+      let note: Note = r.note;
+      const text = args.text === undefined ? note.text : oneLine(args.text, 500);
+      if (!text) throw new AgentError("A to-do can't have empty text. To close it, set status done or dropped.");
+      const owner = args.owner === undefined ? note.owner : ownerFor(caller, args.owner);
+      if (text !== note.text || owner !== note.owner)
+        // Who added a to-do by hand is what its pill shows, so an edit keeps that name.
+        note = db.editNote(note.id, { text, owner }, r.meeting.added ? (note.editedBy ?? byOf(caller)) : byOf(caller)) ?? note;
+      const { now, update, unchanged } = applyChange(caller, r.room.id, note, args);
+      if (unchanged && text === r.note.text && owner === r.note.owner)
+        throw new AgentError("Nothing to change: give text, owner, status or a summary.");
+      deps.notify(r.room.id, "followups");
+      return {
+        updated: { ...actionInfo(now), url: refUrl(baseUrl, "action", now.id) },
+        log: update ? updateInfo(update, baseUrl) : undefined,
+      };
+    },
+
     /** A link the agent uploads screenshots to (with curl); they join its next report on the to-do. */
     screenshotUploadUrl(caller: Caller, args: { ref: string }, baseUrl: string) {
       requireWrite(caller);
@@ -625,6 +724,24 @@ export function agentApi(deps: AgentDeps) {
     },
   };
 }
+
+const TASK_STATES: TaskState[] = ["open", "doing", "done", "dropped"];
+
+/** What create_action and update_action can set besides the text. */
+interface TaskChange {
+  /** A name, "me", or "unassigned". */
+  owner?: string;
+  status?: string;
+  /** Goes in the to-do's log in Stand, like a report. */
+  summary?: string;
+  /** Why it was dropped. */
+  reason?: string;
+  links?: string[];
+  /** The to-do is being added now: its summary is what it's about, not news on it. */
+  adding?: boolean;
+}
+
+const oneLine = (s: string | undefined, n: number) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 
 function requireWrite(caller: Caller) {
   if (caller.token && caller.token.scope !== "write")

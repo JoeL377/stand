@@ -202,7 +202,8 @@ export interface Snap {
  *  progress, a blocker, a question for the next meeting, or a to-do checked off. */
 /** "working": an agent says it has started on a to-do; it shows as working until it reports again or goes quiet.
  *  "ready": the work is finished and waits to ship, usually as a PR; Stand checks the to-do off when the PR merges. */
-export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done";
+/** "added": the details someone gave with a to-do they added by hand; "note": more about a to-do, not progress (MCP update_action). */
+export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done" | "added" | "note";
 export interface ItemUpdate {
   id: string;
   roomId: string;
@@ -308,6 +309,8 @@ export interface NoteFrom {
     /** The recap's ✦ line about it, when it has one. */
     crux: string | null;
   } | null;
+  /** Not from a meeting: someone added it by hand (an agent, through the MCP), and who. startedAt is when. */
+  addedBy?: string;
 }
 
 /** One thing the agent proposes for the agenda, with why. Nothing joins the

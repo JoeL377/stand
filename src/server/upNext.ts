@@ -10,7 +10,7 @@ import { type ConxtOpenItem, linkAgendaLine, roomOpenItems } from "./conxtOpenIt
 export interface UpNextInput {
   now: number;
   /** The space's meetings, in any order. */
-  meetings: Array<{ id: string; startedAt: number; endedAt: number | null }>;
+  meetings: Array<{ id: string; startedAt: number; endedAt: number | null; added?: boolean }>;
   /** When the live meeting started, if one is running; it doesn't count as "earlier". */
   currentStart: number | null;
   /** The space's to-do and question notes. */
@@ -68,20 +68,26 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
   const { notes, items, updates, dismissed } = input;
   const boundary = input.currentStart ?? Infinity;
   const started = new Map(input.meetings.map((m) => [m.id, m.startedAt]));
-  const earlier = input.meetings.filter((m) => m.endedAt !== null && m.startedAt < boundary).sort((a, b) => a.startedAt - b.startedAt);
+  // To-dos added by hand sit in holders of their own (db.addTask): they place a note in time, but aren't meetings that passed.
+  const meetings = input.meetings.filter((m) => !m.added);
+  const before = (m: { endedAt: number | null; startedAt: number }) => m.endedAt !== null && m.startedAt < boundary;
+  const earlier = meetings.filter(before).sort((a, b) => a.startedAt - b.startedAt);
+  const settled = new Set(input.meetings.filter(before).map((m) => m.id));
+  const byHand = new Set(input.meetings.filter((m) => m.added).map((m) => m.id));
   const last = earlier.at(-1) ?? null;
   const since = last?.startedAt ?? null;
 
   // Meetings after a note's own meeting, the live one included.
-  const carriedOf = (n: Note) => input.meetings.filter((m) => m.startedAt > (started.get(n.meetingId) ?? Infinity)).length;
+  const carriedOf = (n: Note) => meetings.filter((m) => m.startedAt > (started.get(n.meetingId) ?? Infinity)).length;
   const endedAfter = (n: Note) => earlier.filter((m) => m.startedAt > (started.get(n.meetingId) ?? Infinity)).length;
-  const fromEarlier = (n: Note) => (started.get(n.meetingId) ?? Infinity) < boundary && earlier.some((m) => m.id === n.meetingId);
+  const fromEarlier = (n: Note) => (started.get(n.meetingId) ?? Infinity) < boundary && settled.has(n.meetingId);
   // A note on a task or ticket that's on the agenda already has a home there.
   const homed = (n: Note) => {
     const it = n.itemId ? items.get(n.itemId) : undefined;
     return !!it && !it.archived && !it.deck;
   };
-  const noteActivity = (n: Note) => updates.filter((u) => u.noteId === n.id && u.ts > (started.get(n.meetingId) ?? 0));
+  // What someone wrote when adding a to-do by hand isn't news on it.
+  const noteActivity = (n: Note) => updates.filter((u) => u.noteId === n.id && u.status !== "added" && u.ts > (started.get(n.meetingId) ?? 0));
   const ago = (carried: number) => (carried <= 1 ? "last meeting" : `${carried} meetings ago`);
   const by = (u: ItemUpdate) => (u.client ? `${u.userName.split(" ")[0]}'s agent` : u.userName);
   const urgent = (u: ItemUpdate) => u.status === "blocked" || u.status === "needs_decision";
@@ -148,8 +154,8 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
       reason: lastAct
         ? urgent(lastAct)
           ? urgentReason(lastAct)
-          : `${lastAct.status === "done" ? "Reported done" : "Progress"} · ${by(lastAct)}`
-        : `To-do from ${ago(carried)}${n.owner ? ` · ${n.owner}` : ""}`,
+          : `${lastAct.status === "done" ? "Reported done" : lastAct.status === "note" ? "Update" : "Progress"} · ${by(lastAct)}`
+        : `${byHand.has(n.meetingId) && !carried ? "To-do added since last meeting" : `To-do from ${ago(carried)}`}${n.owner ? ` · ${n.owner}` : ""}`,
       noteId: n.id,
       itemId: n.itemId,
       owner: n.owner,

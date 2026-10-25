@@ -16,7 +16,8 @@ Between meetings people also save notes to a space from the Stand bar on their M
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
 "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
-Working on a to-do: post_update with its ref and status working when you start, so people see it's being worked on. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.`;
+Working on a to-do: post_update with its ref and status working when you start, so people see it's being worked on. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
+A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
 const fail = (err: unknown) => {
@@ -187,6 +188,59 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: WRITE,
     },
     ({ ref, note, links }) => run(() => api.completeAction(caller, { ref, note, links }, baseUrl)),
+  );
+
+  const taskFields = {
+    owner: z.string().optional().describe('Who does it: a name, "me" (the person this token belongs to) or "unassigned"'),
+    status: z
+      .enum(["open", "doing", "done", "dropped"])
+      .optional()
+      .describe("open: not started. doing: someone is on it. done: finished. dropped: not doing it (say why in reason)"),
+    summary: z
+      .string()
+      .optional()
+      .describe("More about it for the people who'll read it: the details, or what was done. Goes in the to-do's log in Stand"),
+    reason: z.string().optional().describe("Dropped only: why, in a line"),
+    links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5). A merged PR link on done shows the PR closed it"),
+  };
+
+  server.registerTool(
+    "create_action",
+    {
+      title: "Add a to-do to Stand",
+      description:
+        "Adds a to-do to a Stand space by hand, for work that never came up in a meeting. It shows in the space's Tasks tab like the to-dos meetings catch (marked as added by this person), comes up in the next meeting's check-in while open, and counts toward what got done since the last meeting once closed. Give a status to add one that's already underway, done or dropped, and a summary for the details or what was done. Returns its ref for update_action, post_update and complete_action.",
+      inputSchema: {
+        space: z.string().describe("The space's id or name (from list_spaces)"),
+        text: z.string().describe("What needs doing, in a line, like a meeting's to-do: \"Add a mic picker to the meeting room\""),
+        item_id: z.string().optional().describe("The agenda item it belongs to, if any (ids from list_spaces)"),
+        ...taskFields,
+        owner: taskFields.owner.describe('Who does it: a name, "me" (the default: the person this token belongs to) or "unassigned"'),
+        status: taskFields.status.describe(
+          "Default open. doing: someone is on it. done: already finished. dropped: not doing it (say why in reason)",
+        ),
+      },
+      annotations: WRITE,
+    },
+    ({ space, text, item_id, owner, status, summary, reason, links }) =>
+      run(() => api.createAction(caller, { space, text, itemId: item_id, owner, status, summary, reason, links }, baseUrl)),
+  );
+
+  server.registerTool(
+    "update_action",
+    {
+      title: "Change a Stand to-do",
+      description:
+        "Changes one to-do, whether a meeting caught it or someone added it: reword it, give it to someone, or move it to open, doing, done or dropped, and add a summary to its log in Stand. Only what you pass changes. Done here is the same as complete_action; reopening a done or dropped to-do sets status open.",
+      inputSchema: {
+        ref: z.string().describe("The to-do's reference, stand:action/<id>"),
+        text: z.string().optional().describe("New wording, in a line"),
+        ...taskFields,
+      },
+      annotations: WRITE,
+    },
+    ({ ref, text, owner, status, summary, reason, links }) =>
+      run(() => api.updateAction(caller, { ref, text, owner, status, summary, reason, links }, baseUrl)),
   );
 
   server.registerTool(
