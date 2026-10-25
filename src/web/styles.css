@@ -1807,6 +1807,16 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-now-label.live { color: var(--accent-text); }
 .topic-now-label.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: notes-pulse 1.4s ease-in-out infinite; }
 .topic-mins { font-size: 12px; color: var(--muted); }
+/* Who moved the board here: ✦ Stand by itself, or a person's dot. */
+.topic-moved-by { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topic-moved-by .agent-mark { font-size: 11px; }
+.topic-moved-by .topic-dot { flex: none; }
+.seg.board-move { display: flex; align-items: baseline; gap: 6px; padding: 3px 6px; font-size: 12px; color: var(--muted); }
+.seg.board-move:hover { background: none; }
+.board-move-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-move-text strong { font-weight: 600; color: var(--text); }
+.seg.board-move .seg-time { flex: none; }
+.topic-peek .topic-moved-by { display: flex; margin: 2px 0 4px; }
 .topic-now-title { margin: 0; font-size: 24px; line-height: 1.25; font-weight: 650; text-wrap: balance; }
 .topic-position-who { display: inline-flex; align-items: center; gap: 7px; }
 .topic-position-who strong { font-size: 14px; font-weight: 600; }
@@ -2425,6 +2435,12 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 @media (max-width: 640px) {
   .topic-kick-date { display: none; }
   .topic-kick-back { padding: 3px 8px; }
+  .topic-now-head .topic-moved-by { display: none; }
   .topic-now-head .topic-updating { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
   .topic-now-head .topic-views { flex: none; margin-left: 6px; }
 }
+
+/* What the meeting's Claude calls have cost: a quiet pill on the call, a word on the recap; hover lists each pass. */
+.cost-pill { font-size: 12px; color: var(--muted); padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; cursor: default; font-variant-numeric: tabular-nums; }
+.rc-cost { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
+@media (max-width: 640px) { .cost-pill { display: none; } }

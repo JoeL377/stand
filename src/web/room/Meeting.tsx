@@ -7,7 +7,7 @@ import { useFrameSampler } from "./useFrameSampler.ts";
 import { AgendaPanel } from "./AgendaPanel.tsx";
 import { Stage } from "./Stage.tsx";
 import { SidePanel } from "./SidePanel.tsx";
-import { fmtDuration, keyOf } from "../util.ts";
+import { costLines, fmtCost, fmtDuration, keyOf } from "../util.ts";
 import { macApp } from "../macApp.ts";
 import { useMicLevel } from "./micLevel.ts";
 import { PopOutBar, canPopOut, usePopOut } from "./PopOutBar.tsx";
@@ -411,6 +411,11 @@ export function Meeting(props: {
         </div>
         <div className="topbar-right">
           {offParts.length > 0 && <DemoMode parts={offParts} />}
+          {room.cost && (
+            <span className="cost-pill" title={`What this meeting's Claude calls have cost so far:\n${costLines(room.cost).join("\n")}`}>
+              {fmtCost(room.cost.usd)}
+            </span>
+          )}
           <button
             className="ghost icon-btn keys-btn"
             title="How Stand works and keyboard shortcuts (?)"
@@ -493,6 +498,7 @@ export function Meeting(props: {
           interims={room.interims}
           send={send}
           participantId={participantId}
+          board={room.board}
         />
       </div>
 

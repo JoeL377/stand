@@ -11,6 +11,7 @@ import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, Boa
 import { config } from "./config.ts";
 import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
 import { findQuote, type Said } from "./quotes.ts";
+import { recordUsage } from "./usage.ts";
 
 export type DraftNote = Pick<Note, "kind" | "text" | "owner"> & { quote?: Quote | null };
 
@@ -572,6 +573,7 @@ export class ClaudeAgent implements Agent {
       ...fallback,
     }, timeout ? { timeout, maxRetries: 1 } : undefined);
     const u = res.usage;
+    recordUsage(res.model ?? model, u);
     console.log(
       `[agent] ${model} in=${u.input_tokens} cached=${u.cache_read_input_tokens ?? 0} wrote=${u.cache_creation_input_tokens ?? 0} out=${u.output_tokens} stop=${res.stop_reason}`,
     );
@@ -1091,6 +1093,7 @@ Caption: one line saying what the image shows and why it mattered to the convers
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
     });
+    recordUsage(res.model ?? config.anthropicModel, res.usage);
     if (res.stop_reason === "refusal") return "";
     return res.content
       .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
@@ -1142,6 +1145,7 @@ ${meeting}`,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
     });
+    recordUsage(res.model ?? config.anthropicModel, res.usage);
     if (res.stop_reason === "refusal") return null;
     const text = res.content
       .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")

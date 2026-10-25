@@ -587,6 +587,19 @@ export interface Board {
   busy: boolean;
   /** A move the board thinks the talk has made but waits one more pass to confirm. */
   pending: { kind: "new" | "return"; title: string } | null;
+  /** Who moved the board onto each stretch, oldest first. Boards saved before this have none. */
+  moves?: BoardMove[];
+}
+/** One switch of the board to a thread: `from` is the start of the stretch it opened (spans[i][0]). */
+export interface BoardMove {
+  threadId: string;
+  from: number;
+  at: number;
+  /** stand: the board saw the talk move and moved by itself. click: someone took the "Looks like
+   *  you've moved to …" offer. agenda: the host moved to another agenda item. first: the first thread. */
+  via: "stand" | "click" | "agenda" | "first";
+  /** The person, for a click or an agenda move; null when it was Stand. */
+  by: string | null;
 }
 
 export type ServerMessage =
@@ -600,6 +613,8 @@ export type ServerMessage =
   | { type: "notes.busy"; itemId: string | null; busy: boolean }
   /** The middle board's threads, after every change. */
   | { type: "board"; board: Board }
+  /** What the meeting's Claude calls have cost so far, after each one. */
+  | { type: "cost"; cost: MeetingCost }
   /** The board's running list, after every change. Null when there's no model to keep one: the tabs read the live notes. */
   | { type: "list"; items: ListNote[] | null }
   | { type: "meeting.ended"; meetingId: string }
@@ -640,6 +655,15 @@ export interface MeetingRecap {
   items: Array<{ item: Item | null; segments: Segment[]; notes: Note[]; discussions: Discussion[]; snaps: Snap[] }>;
   /** What the recap wrote about each chapter (shared/chapters.ts), by chapter key; empty for meetings recapped before chapters. */
   chapters: ChapterRecap[];
+  /** What its Claude calls cost; null for meetings from before Stand kept count. */
+  cost?: MeetingCost | null;
+}
+
+/** What a meeting's Claude calls cost, in dollars, most expensive task first (server/usage.ts). */
+export interface MeetingCost {
+  usd: number;
+  calls: number;
+  tasks: Array<{ task: string; usd: number; calls: number }>;
 }
 
 /** The recap's words on one chapter: where it landed, and for a long one, the moments that moved it. */

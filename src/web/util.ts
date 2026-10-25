@@ -1,4 +1,4 @@
-import type { Item } from "../shared/protocol.ts";
+import type { Item, MeetingCost } from "../shared/protocol.ts";
 
 export const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 export const fmtDate = (ts: number) =>
@@ -7,6 +7,28 @@ export const fmtDuration = (ms: number) => {
   const m = Math.max(0, Math.round(ms / 60000));
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 };
+
+/** "$4.52", or "$0.04" for small amounts. */
+export const fmtCost = (usd: number) => `$${usd < 10 ? usd.toFixed(2) : usd.toFixed(1)}`;
+
+/** What each Claude pass is called on screen (agent methods, server/llm.ts). */
+const TASK_NAMES: Record<string, string> = {
+  boardCard: "Topic card",
+  boardDrift: "Topic check",
+  liveList: "Running list",
+  notesFor: "Live notes",
+  mergeTopics: "Topic merge",
+  recapMeeting: "Recap",
+  summarizeMeeting: "Summary",
+  synthesizeMeeting: "Synthesis",
+  describeSnap: "Snaps",
+  frameBacks: "Screen notes",
+  matchScreen: "Screen reading",
+};
+
+/** One line per pass, most expensive first: "Topic card $1.10 (98 calls)". */
+export const costLines = (c: MeetingCost) =>
+  c.tasks.map((t) => `${TASK_NAMES[t.task] ?? t.task} ${fmtCost(t.usd)} (${t.calls} ${t.calls === 1 ? "call" : "calls"})`);
 
 export const itemLabel = (it: Item | null | undefined) => (it ? it.title : "General discussion");
 
