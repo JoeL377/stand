@@ -4,7 +4,9 @@
 // person stands, decided, to do, open), and the point being made right now at its foot. An update
 // changes single sentences and lines and leaves the rest where it is: a new line slides in with a
 // green mark, a reworded one gets a short underline, so people see what changed without rereading. Underneath, a chapter bar runs from the start of the
-// meeting to now, one stretch per thread; hovering or clicking one opens it on your own screen.
+// meeting to now, one stretch per thread: hovering one peeks at it, clicking one rewinds the whole
+// board (card and tabs) to how it stood at that stretch's end, on your own screen only, until "Back to
+// live" (which says so when a new topic starts meanwhile), Escape, or a click on the current stretch.
 // The Decided, To do and Open tabs keep the whole meeting: they read the running list
 // (server/liveList.ts), which has a line up about 5 s after it's said and never rewords or regroups
 // it (the live notes when there's no list). The current topic's lines come first, oldest at the top,
@@ -100,6 +102,9 @@ export function TopicBoard(props: {
   const idOf = (name: string) => props.participants.find((p) => same(p.name, name))?.id ?? name;
   const nameOf = (name: string) => props.participants.find((p) => same(p.name, name))?.name ?? props.segments.find((s) => same(s.speakerName, name))?.speakerName ?? name;
   const [peek, setPeek] = useState<{ id: string; key: string; pinned: boolean } | null>(null);
+  // A chapter clicked on the bar: the board as it stood at that stretch's end, on this screen only.
+  // live: the thread that was on screen when it was opened, so a move since can be pointed out.
+  const [rewind, setRewind] = useState<{ id: string; key: string; at: number; live: string | null } | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const latest = props.segments.at(-1);
   const live = !!latest && now - latest.ts < NOW_MS;
@@ -115,8 +120,19 @@ export function TopicBoard(props: {
   // Before the first card for the item in focus, the middle shows the talk so far.
   const talkSoFar = current ? [] : props.segments.filter((s) => s.itemId === props.focusItemId).slice(-WARMUP_REMARKS);
   const item = props.focusItem;
-  const tasks = useTasks(props.notes ?? [], props.followUps ?? [], current, live ? now : 0, start);
-  const acts: TaskActs = {
+  const rewound = rewind ? (threads.find((t) => t.id === rewind.id) ?? null) : null;
+  // The topic moved on while this screen looks back: say so, and where.
+  const movedOn = !!rewound && (current?.id ?? null) !== rewind!.live && current && current.id !== rewound.id ? current : null;
+  useEffect(() => {
+    if (!rewind) return;
+    const key = (e: KeyboardEvent) => e.key === "Escape" && setRewind(null);
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [rewind]);
+  const liveTasks = useTasks(props.notes ?? [], props.followUps ?? [], current, live ? now : 0, start);
+  const pastTasks = useTasks(asOf(props.notes ?? [], rewind?.at ?? 0), props.followUps ?? [], rewound, 0, start);
+  const tasks = rewound ? pastTasks : liveTasks;
+  const acts: TaskActs = rewound ? { start } : {
     onDone: props.onDone,
     onRemove: props.onRemove,
     start,
@@ -128,8 +144,40 @@ export function TopicBoard(props: {
   const checkingIn = showCheckIn({ followUps: props.followUps ?? [], meetingStartedAt: props.meetingStartedAt, checkIn: props.checkIn, cardSince, now });
 
   return (
-    <div ref={boardRef} className={shown ? "topic-board peeking" : "topic-board"}>
-      {checkingIn ? (
+    <div ref={boardRef} className={["topic-board", shown && "peeking", rewound && "rewinding"].filter(Boolean).join(" ")}>
+      {rewound ? (
+        <>
+          <button type="button" className={movedOn ? "topic-live-back moved" : "topic-live-back"} onClick={() => setRewind(null)} title="Escape">
+            {movedOn ? (
+              <>
+                <span className="agent-mark" aria-hidden>
+                  ✦
+                </span>{" "}
+                New topic: <strong>{movedOn.title}</strong> · Back to live →
+              </>
+            ) : (
+              <>Back to live →</>
+            )}
+          </button>
+          <Card
+            t={rewound}
+            live={false}
+            rewoundAt={clock(rewind!.at - start)}
+            updating={false}
+            pending={null}
+            view={view}
+            onView={setView}
+            threads={threads}
+            meetingStart={start}
+            arrival={null}
+            tasks={tasks}
+            acts={acts}
+            speaking={null}
+            idOf={idOf}
+            nameOf={nameOf}
+          />
+        </>
+      ) : checkingIn ? (
         <CheckIn followUps={props.followUps ?? []} meetingStartedAt={props.meetingStartedAt} acts={props.checkInActs ?? null} />
       ) : current ? (
         <Card
@@ -183,21 +231,26 @@ export function TopicBoard(props: {
               const isCurrent = t === current;
               const key = `${s.id}-${s.from}`;
               const open = (pinned: boolean) => setPeek((p) => (p?.pinned && !pinned ? p : { id: s.id, key, pinned }));
+              const isRewound = rewind?.key === key;
               return (
                 <button
                   key={key}
                   data-key={key}
                   type="button"
-                  className={["topic-stretch", isCurrent && "current", isCurrent && arrival && "arrived", !isCurrent && "peekable", peek?.id === s.id && "on"].filter(Boolean).join(" ")}
+                  className={["topic-stretch", isCurrent && "current", isCurrent && (arrival || movedOn) && "arrived", !isCurrent && "peekable", (peek?.id === s.id || isRewound) && "on"].filter(Boolean).join(" ")}
                   style={{ left: `${pct(s.from - start, span)}%`, width: `${pct(s.to - s.from, span)}%` }}
                   aria-label={`${clock(s.from - start)}, ${t.title}${isCurrent ? ", now" : ""}`}
-                  aria-expanded={isCurrent ? undefined : peek?.id === s.id}
+                  aria-pressed={isCurrent ? !rewind : isRewound}
                   title={isCurrent ? t.title : undefined}
-                  onMouseEnter={() => !isCurrent && open(false)}
+                  onMouseEnter={() => !isCurrent && !isRewound && open(false)}
                   onMouseLeave={() => setPeek((p) => (p?.pinned ? p : null))}
-                  onFocus={() => !isCurrent && open(false)}
+                  onFocus={() => !isCurrent && !isRewound && open(false)}
                   onBlur={() => setPeek((p) => (p?.pinned ? p : null))}
-                  onClick={() => !isCurrent && (peek?.key === key && peek.pinned ? setPeek(null) : open(true))}
+                  onClick={() => {
+                    // A click rewinds the whole board to that chapter, here only; the current one, or the same again, comes back to live.
+                    setPeek(null);
+                    setRewind(isCurrent || isRewound ? null : { id: s.id, key, at: s.to, live: current?.id ?? null });
+                  }}
                 />
               );
             })}
@@ -265,6 +318,8 @@ function useNow(every: number) {
 function Card(props: {
   t: BoardThread;
   live: boolean;
+  /** Opened from the chapter bar: the meeting time it shows the board as of. */
+  rewoundAt?: string;
   /** The board is reading the latest talk: a light runs along the top edge. */
   updating: boolean;
   /** Just switched to: a thread new to this screen, or one it came back to. */
@@ -286,7 +341,7 @@ function Card(props: {
   nameOf: (name: string) => string;
 }) {
   const { t } = props;
-  const label = props.arrival === "new" ? "New topic" : props.arrival === "back" ? "Back to" : props.live ? "Now" : "Last";
+  const label = props.rewoundAt ? `At ${props.rewoundAt}` : props.arrival === "new" ? "New topic" : props.arrival === "back" ? "Back to" : props.live ? "Now" : "Last";
   const marks = useChanges(t);
   const positions = t.card.details.filter((d) => d.kind === "position");
   const said = splitNow(t.card.now);
@@ -298,8 +353,8 @@ function Card(props: {
   return (
     <section
       key={t.id}
-      className={["topic-now", props.arrival && "topic-in", props.updating && "updating", props.view === "feed" && "feed"].filter(Boolean).join(" ")}
-      aria-label="Current topic"
+      className={["topic-now", props.rewoundAt && "rewound", props.arrival && "topic-in", props.updating && "updating", props.view === "feed" && "feed"].filter(Boolean).join(" ")}
+      aria-label={props.rewoundAt ? `Topic at ${props.rewoundAt}` : "Current topic"}
       aria-busy={props.updating}
     >
       <div className="topic-now-head">
@@ -561,6 +616,21 @@ function useTasks(notes: Note[], followUps: FollowUp[], current: BoardThread | n
     fresh,
     earlier: followUps,
   };
+}
+
+/** The meeting's lines as they stood at a moment: only what was said by then, and nothing closed after it. */
+function asOf(notes: Note[], at: number): Note[] {
+  if (!at) return [];
+  return notes
+    .filter((n) => (n.quote?.ts ?? n.ts) <= at)
+    .map((n) => {
+      const closed = (n as Partial<ListNote>).closed;
+      return {
+        ...n,
+        doneAt: n.doneAt && n.doneAt <= at ? n.doneAt : null,
+        ...(closed !== undefined ? { closed: closed && closed.at <= at ? closed : null } : {}),
+      };
+    });
 }
 
 /** The time now, brought up to date again at each of these moments as it passes. */
