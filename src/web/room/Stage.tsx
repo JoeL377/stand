@@ -129,9 +129,17 @@ export function Stage(props: {
   const [flash, setFlash] = useState(0);
   const [cropId, setCropId] = useState<string | null>(null);
   // Snaps you've expanded, each a tab on the main screen beside the screen itself, and the
-  // one you're on (null: the main screen). Yours alone: nobody else's screen changes.
+  // one you're on (null: the main screen, "board": the board over a share or deck). Yours
+  // alone: nobody else's screen changes.
   const [tabs, setTabs] = useState<string[]>([]);
   const [tab, setTab] = useState<string | null>(null);
+  // A share or a deck has the middle, so the board waits behind a tab of its own.
+  const middleTaken = showingScreen || Boolean(sharer) || deckUp;
+  const boardOpen = middleTaken && tab === "board";
+  // Once the middle is free the board is the main screen again; the next share opens on itself.
+  useEffect(() => {
+    if (!middleTaken) setTab((t) => (t === "board" ? null : t));
+  }, [middleTaken]);
   const crop = (id: string) => ({ label: "Crop", run: () => setCropId(id) });
   const itemsRef = useRef(state.items);
   itemsRef.current = state.items;
@@ -212,7 +220,7 @@ export function Stage(props: {
     setTabs((t) => t.filter((x) => x !== id));
     setTab((t) => (t === id ? null : t));
   };
-  const mainLabel = localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : "Main screen";
+  const mainLabel = localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : deckUp ? "Slides" : "Main screen";
   // The latest snap, small in the corner of everyone's middle screen. Each person can expand
   // it for themselves; the host or whoever took it can take it down for everyone.
   const stageSnap = state.stageSnapId ? state.snaps.find((s) => s.id === state.stageSnapId) : undefined;
@@ -223,6 +231,36 @@ export function Stage(props: {
     onOpen: () => openTab(stageSnap.id),
     onClose: () => send({ type: "stage.snap.close" }),
   };
+
+  // The board: the middle screen, or a tab of its own while a share or a deck has it.
+  const board = (
+    <TopicBoard
+      board={props.board}
+      segments={props.segments}
+      interims={interims}
+      participants={state.participants}
+      items={state.items}
+      focusItem={focusItem}
+      focusItemId={state.focusItemId}
+      meetingStartedAt={state.meetingStartedAt}
+      onAcceptMove={props.offline ? undefined : (title) => send({ type: "board.accept", title })}
+      notes={props.list ?? props.notes}
+      followUps={state.followUps}
+      onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
+      onRemove={canSteer && !props.ending ? removeNote : undefined}
+      checkIn={state.checkIn}
+      checkInActs={
+        props.ending || props.offline
+          ? null
+          : {
+              onState: (noteId, st, still) => send({ type: "task.state", noteId, state: st, still }),
+              onUndoSaid: (noteId) => send({ type: "task.saidDone.undo", noteId }),
+              onClose: () => send({ type: "checkin", open: false }),
+              onOpen: () => send({ type: "checkin", open: true }),
+            }
+      }
+    />
+  );
 
   // Demo speakers and remote talkers who aren't connected still show while talking.
   const talkingIds = new Set([...speaking, ...Object.keys(interims)]);
@@ -246,11 +284,27 @@ export function Stage(props: {
             )}
           </span>
         )}
-        {tabSnaps.length > 0 && (
-          <span className="stage-tabs" role="tablist" aria-label="Main screen and the snaps you opened">
-            <button role="tab" aria-selected={!openSnap} className={openSnap ? "stage-tab" : "stage-tab on"} onClick={() => setTab(null)}>
+        {(tabSnaps.length > 0 || middleTaken) && (
+          <span className="stage-tabs" role="tablist" aria-label="Main screen, the board and the snaps you opened">
+            <button
+              role="tab"
+              aria-selected={!openSnap && !boardOpen}
+              className={openSnap || boardOpen ? "stage-tab" : "stage-tab on"}
+              onClick={() => setTab(null)}
+            >
               {mainLabel}
             </button>
+            {middleTaken && (
+              <button
+                role="tab"
+                aria-selected={boardOpen}
+                className={boardOpen ? "stage-tab on" : "stage-tab"}
+                onClick={() => setTab("board")}
+                title="The board, just for you; the share keeps going"
+              >
+                Board
+              </button>
+            )}
             {tabSnaps.map((s) => (
               <span key={s.id} className={s === openSnap ? "stage-tab snap on" : "stage-tab snap"} title={s.caption ?? undefined}>
                 <button role="tab" aria-selected={s === openSnap} onClick={() => setTab(s.id)}>
@@ -324,7 +378,9 @@ export function Stage(props: {
         )}
         {!props.ending && <ConxtNudges cards={state.conxt ?? []} me={props.participantId} offline={props.offline} send={send} />}
         {/* A share or a deck has the middle: the topic stays in view as one line over it. */}
-        {(showingScreen || sharer || deckUp) && <BoardStrip board={props.board} focusItemId={state.focusItemId} />}
+        {middleTaken && !boardOpen && !openSnap && (
+          <BoardStrip board={props.board} focusItemId={state.focusItemId} onOpen={() => setTab("board")} />
+        )}
         </div>
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
         {cropSnap && (
@@ -334,6 +390,12 @@ export function Stage(props: {
         {onStage && onStage.snap !== openSnap && <StageSnap key={onStage.snap.id} {...onStage} />}
         {/* A snap's tab covers the main screen, which keeps running underneath (a share stays live). */}
         {openSnap && <SnapTab snap={openSnap} me={props.participantId} />}
+        {/* So does the board's, over a share or a deck. */}
+        {boardOpen && !openSnap && (
+          <div className="board-tab" role="tabpanel">
+            {board}
+          </div>
+        )}
         {localScreen ? (
           <Video
             stream={localScreen}
@@ -389,32 +451,7 @@ export function Stage(props: {
             </div>
           </div>
         ) : (
-          <TopicBoard
-            board={props.board}
-            segments={props.segments}
-            interims={interims}
-            participants={state.participants}
-            items={state.items}
-            focusItem={focusItem}
-            focusItemId={state.focusItemId}
-            meetingStartedAt={state.meetingStartedAt}
-            onAcceptMove={props.offline ? undefined : (title) => send({ type: "board.accept", title })}
-            notes={props.list ?? props.notes}
-            followUps={state.followUps}
-            onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
-            onRemove={canSteer && !props.ending ? removeNote : undefined}
-            checkIn={state.checkIn}
-            checkInActs={
-              props.ending || props.offline
-                ? null
-                : {
-                    onState: (noteId, st, still) => send({ type: "task.state", noteId, state: st, still }),
-                    onUndoSaid: (noteId) => send({ type: "task.saidDone.undo", noteId }),
-                    onClose: () => send({ type: "checkin", open: false }),
-                    onOpen: () => send({ type: "checkin", open: true }),
-                  }
-            }
-          />
+          board
         )}
       </div>
 

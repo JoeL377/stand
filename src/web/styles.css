@@ -1541,6 +1541,10 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 .stage-tab .stage-tab-x { width: 18px; height: 18px; margin-right: 3px; padding: 0; justify-content: center; font-size: 9px; opacity: 0.6; }
 .stage-tab .stage-tab-x:hover { opacity: 1; background: var(--hover); }
 .snap-tab { position: absolute; inset: 0; z-index: 3; margin: 0; display: flex; flex-direction: column; background: var(--stage); }
+/* The board over a share or a deck, for whoever opened its tab. */
+.board-tab { position: absolute; inset: 0; z-index: 3; display: flex; background: var(--bg); }
+.topic-strip.opens { pointer-events: auto; cursor: pointer; }
+.topic-strip.opens:hover { border-color: var(--accent); }
 .snap-tab img { flex: 1; min-height: 0; width: 100%; padding: 12px 12px 0; object-fit: contain; }
 .snap-tab figcaption { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 10px 8px; color: #a5a5b3; font-size: 12px; }
 .snap-tab figcaption svg { flex: none; width: 14px; height: 14px; }
@@ -1778,7 +1782,7 @@ a.sh-pill:hover { text-decoration: none; }
 .conxt-delivery > span { margin-left: 12px; font-size: 13px; }
 
 /* ---- Topic board: the middle screen while nobody shares ---- */
-.screen > .topic-board { position: relative; flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg); color: var(--text); text-align: left; }
+.screen > .topic-board, .board-tab > .topic-board { position: relative; flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg); color: var(--text); text-align: left; }
 .topic-waiting { flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 18px; text-align: center; }
 .topic-hint { margin: 0; font-size: 13px; color: var(--muted); }
 /* Before the first topic: the ✦ pulses while the first notes are being written. */
@@ -2257,7 +2261,7 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .person { width: 108px; height: 72px; }
   .person .avatar { width: 30px !important; height: 30px !important; font-size: 12px !important; margin-bottom: 20px; }
   .control span { white-space: nowrap; }
-  .screen > .topic-board { padding: 10px; }
+  .screen > .topic-board, .board-tab > .topic-board { padding: 10px; }
   .topic-now { gap: 10px; padding: 14px 16px 12px; }
   .topic-now-title { font-size: 20px; }
   .topic-summary, .topic-warmup .topic-remark { font-size: 15px; line-height: 1.5; }
