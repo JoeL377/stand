@@ -104,6 +104,20 @@ export function ChapterChip({ c, i, startedAt, at, crux, onPick }: { c: MeetingC
 export function FromChip({ from }: { from: NoteFrom }) {
   const c = from.chapter;
   const day = new Date(from.startedAt).toLocaleDateString([], { month: "short", day: "numeric" });
+  // Added by hand: no meeting to open, so the pill only says who added it and when.
+  if (from.addedBy)
+    return (
+      <span className="rc-pill-wrap">
+        <span className="rc-pill" tabIndex={0} aria-label={`Added by ${from.addedBy} on ${day}`}>
+          {day}
+        </span>
+        <span className="rc-pop" role="tooltip">
+          <span className="rc-pop-meta">
+            Added by {from.addedBy} · {fmtDate(from.startedAt)}
+          </span>
+        </span>
+      </span>
+    );
   const o = c && OUTCOME[c.outcome];
   return (
     <span className="rc-pill-wrap">

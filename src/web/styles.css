@@ -2300,6 +2300,7 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .task-said-undo:hover { color: var(--text); background: none; }
 .task-closed { color: var(--ok-text); }
 .task-closed.dropped { color: var(--muted); }
+.task-doing { margin-left: 8px; vertical-align: 1px; color: var(--accent-text); background: var(--accent-soft); }
 .task-ready { background: var(--accent-soft); color: var(--accent-text); }
 .task-state { flex: none; font-size: 11.5px; line-height: 18px; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); }
 @media (max-width: 640px) {

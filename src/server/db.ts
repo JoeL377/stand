@@ -496,6 +496,9 @@ export function openDb(file?: string) {
   if (!meetingCols.includes("chapters_json")) db.exec("ALTER TABLE meetings ADD COLUMN chapters_json TEXT");
   // The middle board's threads (board.ts), so a restarted server carries on with the same board.
   if (!meetingCols.includes("board_json")) db.exec("ALTER TABLE meetings ADD COLUMN board_json TEXT");
+  // "added": not a meeting but where a to-do someone added by hand (MCP create_action) lives, since
+  // every note sits in a meeting. Lists of meetings leave these out (see addTask).
+  if (!meetingCols.includes("kind")) db.exec("ALTER TABLE meetings ADD COLUMN kind TEXT");
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
@@ -945,6 +948,8 @@ export function openDb(file?: string) {
         synthesis: (r.synthesis as string) ?? null,
         /** What the recap wrote about each chapter. */
         chapters: (r.chapters_json ? JSON.parse(r.chapters_json as string) : []) as ChapterRecap[],
+        /** Not a meeting: the holder of a to-do someone added by hand (see addTask). */
+        added: r.kind === "added",
       };
     },
     listMeetings(roomId: string) {
@@ -952,7 +957,7 @@ export function openDb(file?: string) {
         db
           .prepare(
             `SELECT m.*, (SELECT COUNT(*) FROM segments s WHERE s.meeting_id = m.id) AS n
-             FROM meetings m WHERE room_id = ? ORDER BY started_at DESC LIMIT 50`,
+             FROM meetings m WHERE room_id = ? AND kind IS NULL ORDER BY started_at DESC LIMIT 50`,
           )
           .all(roomId) as Row[]
       ).map((r) => ({
@@ -1174,6 +1179,23 @@ export function openDb(file?: string) {
         "DELETE FROM dismissed_notes WHERE rowid IN (SELECT rowid FROM dismissed_notes WHERE meeting_id = ? AND item_id IS ? AND kind = ? AND text = ? LIMIT 1)",
       ).run(n.meetingId, n.itemId, n.kind, n.text);
     },
+    /** A to-do someone added by hand, outside any meeting. Every note belongs to a meeting, so it
+     *  gets a holder of its own (meetings.kind "added", started and ended now) that lists of meetings
+     *  leave out; everything that lists a space's to-dos then finds it like any other. */
+    addTask(roomId: string, t: { text: string; owner: string | null; itemId: string | null }, by: string): Note {
+      const at = Date.now();
+      const meetingId = newId();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare("INSERT INTO meetings (id, room_id, started_at, ended_at, kind) VALUES (?, ?, ?, ?, 'added')").run(meetingId, roomId, at, at);
+        const note = this.addNote(meetingId, t.itemId, { kind: "action", text: t.text, owner: t.owner }, by);
+        db.exec("COMMIT");
+        return note;
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    },
     /** by: who wrote it, which also keeps the agent's redrafts from rewording it; null for notes carried in as they were. */
     addNote(meetingId: string, itemId: string | null, n: { kind: NoteKind; text: string; owner: string | null }, by: string | null): Note {
       const note: Note = {
@@ -1359,10 +1381,11 @@ export function openDb(file?: string) {
     },
     /** What the agent drafts the next agenda from (see upNext.ts). */
     upNextInput(roomId: string, currentStart: number | null): UpNextInput {
-      const meetings = (db.prepare("SELECT id, started_at, ended_at FROM meetings WHERE room_id = ?").all(roomId) as Row[]).map((m) => ({
+      const meetings = (db.prepare("SELECT id, started_at, ended_at, kind FROM meetings WHERE room_id = ?").all(roomId) as Row[]).map((m) => ({
         id: m.id as string,
         startedAt: m.started_at as number,
         endedAt: (m.ended_at as number) ?? null,
+        added: m.kind === "added" || undefined,
       }));
       const notes = (
         db
@@ -1810,11 +1833,11 @@ export function openDb(file?: string) {
       ).map((r) => ({ ...toNote(r), meetingStartedAt: r.m_started as number }));
     },
     /** Open action items in the spaces this user is in, newest meeting first. */
-    memberActions(userId: string): Array<Note & { roomId: string; roomName: string; meetingStartedAt: number }> {
+    memberActions(userId: string): Array<Note & { roomId: string; roomName: string; meetingStartedAt: number; addedByHand: boolean }> {
       return (
         db
           .prepare(
-            `SELECT n.*, m.room_id, r.name AS room_name, m.started_at AS m_started FROM notes n
+            `SELECT n.*, m.room_id, r.name AS room_name, m.started_at AS m_started, m.kind AS m_kind FROM notes n
              JOIN meetings m ON m.id = n.meeting_id JOIN rooms r ON r.id = m.room_id
              WHERE n.kind = 'action' AND m.room_id IN (SELECT room_id FROM room_members WHERE user_id = ?)
              ORDER BY m.started_at DESC, n.rowid LIMIT 2000`,
@@ -1825,6 +1848,7 @@ export function openDb(file?: string) {
         roomId: r.room_id as string,
         roomName: r.room_name as string,
         meetingStartedAt: r.m_started as number,
+        addedByHand: r.m_kind === "added",
       }));
     },
     getSegments(ids: string[]): Segment[] {
@@ -1836,7 +1860,7 @@ export function openDb(file?: string) {
         .map(toSegment);
     },
     latestMeeting(roomId: string) {
-      const r = db.prepare("SELECT id FROM meetings WHERE room_id = ? ORDER BY started_at DESC LIMIT 1").get(roomId) as Row | undefined;
+      const r = db.prepare("SELECT id FROM meetings WHERE room_id = ? AND kind IS NULL ORDER BY started_at DESC LIMIT 1").get(roomId) as Row | undefined;
       return r ? (r.id as string) : null;
     },
 
@@ -1927,14 +1951,14 @@ export function openDb(file?: string) {
     },
     /** When the meeting before this one ended: what closed after that is news at this one's check-in. */
     previousMeetingEnd(roomId: string, before: number): number | null {
-      const r = db.prepare("SELECT MAX(ended_at) AS t FROM meetings WHERE room_id = ? AND started_at < ? AND ended_at IS NOT NULL").get(roomId, before) as
+      const r = db.prepare("SELECT MAX(ended_at) AS t FROM meetings WHERE room_id = ? AND started_at < ? AND ended_at IS NOT NULL AND kind IS NULL").get(roomId, before) as
         | Row
         | undefined;
       return (r?.t as number) ?? null;
     },
     /** When the meeting before this one started: "since last time" starts there. */
     previousMeetingStart(roomId: string, before: number): number | null {
-      const r = db.prepare("SELECT MAX(started_at) AS t FROM meetings WHERE room_id = ? AND started_at < ?").get(roomId, before) as
+      const r = db.prepare("SELECT MAX(started_at) AS t FROM meetings WHERE room_id = ? AND started_at < ? AND kind IS NULL").get(roomId, before) as
         | Row
         | undefined;
       return (r?.t as number) ?? null;
@@ -1947,7 +1971,7 @@ export function openDb(file?: string) {
            JOIN segments s ON s.meeting_id = m.id WHERE s.item_id = ?
            UNION
            SELECT DISTINCT m.id, m.started_at, m.ended_at FROM meetings m
-           JOIN notes n ON n.meeting_id = m.id WHERE n.item_id = ?
+           JOIN notes n ON n.meeting_id = m.id WHERE n.item_id = ? AND m.kind IS NULL
            ORDER BY started_at DESC`,
         )
         .all(itemId, itemId) as Row[];

@@ -8,7 +8,7 @@ import type { DB } from "./db.ts";
 
 /** A finished meeting's chapters barely change, and the space page asks every 20 seconds. */
 const KEEP_MS = 5 * 60_000;
-const cache = new Map<string, { at: number; startedAt: number; byTopic: Map<string, NonNullable<NoteFrom["chapter"]>> }>();
+const cache = new Map<string, { at: number; startedAt: number; byTopic: Map<string, NonNullable<NoteFrom["chapter"]>>; added: boolean }>();
 
 function chaptersOf(db: DB, meetingId: string) {
   const hit = cache.get(meetingId);
@@ -23,7 +23,7 @@ function chaptersOf(db: DB, meetingId: string) {
     const chapter = { i, title: c.title, at: c.start, minutes: Math.max(1, Math.round(c.minutes)), outcome: c.outcome, crux: written.get(c.key)?.crux || null };
     for (const id of c.topicIds) byTopic.set(id, chapter);
   });
-  const entry = { at: Date.now(), startedAt: m.startedAt, byTopic };
+  const entry = { at: Date.now(), startedAt: m.startedAt, byTopic, added: m.added };
   // Only finished meetings keep: a live one's chapters move with every remark.
   if (m.endedAt) cache.set(meetingId, entry);
   return entry;
@@ -34,6 +34,7 @@ export function withFrom<N extends Note>(db: DB, notes: N[]): Array<N & { from?:
   return notes.map((n) => {
     const m = chaptersOf(db, n.meetingId);
     if (!m) return n;
+    if (m.added) return { ...n, from: { meetingId: n.meetingId, startedAt: m.startedAt, chapter: null, addedBy: n.editedBy ?? "someone" } };
     return { ...n, from: { meetingId: n.meetingId, startedAt: m.startedAt, chapter: (n.discussionId && m.byTopic.get(n.discussionId)) || null } };
   });
 }

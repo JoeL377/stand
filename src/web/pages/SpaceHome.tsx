@@ -634,6 +634,7 @@ function TasksTab(props: { roomId: string; me: string; open: TaskNote[]; closed:
         <>
           {n.kind === "question" && <span className="task-verb">Answer</span>}
           {n.saidDone && !n.doneAt && <SaidDonePill quote={n.saidDone} onUndo={() => notSaid(n)} />}
+          {!closed && n.state === "doing" && !work[n.id]?.working && <span className="rc-pill task-doing">Doing</span>}
           {closed && <ClosedPill note={n} />}
           {closed && n.answeredBy && (
             <span className="rc-pill-wrap">

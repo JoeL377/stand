@@ -16,7 +16,8 @@ export function ownedBy(owner: string | null, userName: string): boolean {
 }
 
 export function toSpaceSummary(row: Row, user: { id: string; name: string }, live: Live, waiting = 0): SpaceSummary {
-  const latestMeeting = row.notes[0]?.meetingId;
+  // To-dos can be added by hand between meetings; questions only come from meetings.
+  const latestMeeting = row.notes.find((n) => n.kind !== "action")?.meetingId;
   const open = row.notes.filter((n) => n.kind === "action" && !n.done);
   const last = row.notes.find((n) => n.kind !== "action") ?? row.notes[0] ?? null;
   return {

@@ -247,6 +247,115 @@ test("list_actions returns everyone's to-dos in a space, filtered by owner or st
   assert.throws(() => api.listActions(caller, { space: "nowhere" }, "x"), /not in a space/);
 });
 
+test("create_action adds a to-do no meeting caught: it lists like the others, with its status and summary in its log", () => {
+  const { db, api, joe, room, item, notified } = setup();
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const caller = { user: joe, token: info };
+  const meetingsBefore = db.listMeetings(room.id).length;
+  const res = api.createAction(
+    caller,
+    { space: "checkout", text: "  Renew the   Apple developer cert ", itemId: item.id, summary: "It runs out on Nov 2; the .dmg won't sign after." },
+    "http://stand.test",
+  );
+  assert.equal(res.created.text, "Renew the Apple developer cert");
+  assert.equal(res.created.owner, "Joe Liang", "owner defaults to the person the token belongs to");
+  assert.equal(res.created.status, "open");
+  assert.equal(res.log?.text, "It runs out on Nov 2; the .dmg won't sign after.");
+  assert.equal(res.log?.status, "added", "the details aren't a report, so it doesn't show as being worked on");
+  assert.deepEqual(notified, [`${room.id}:followups`]);
+
+  // It's a to-do of the space like any other, but no meeting shows up for it.
+  const id = parseRef(res.created.ref)!.id;
+  assert.ok(db.roomFollowUps(room.id).some((f) => f.id === id));
+  assert.ok(db.openActions(room.id).some((f) => f.id === id));
+  assert.equal(db.listMeetings(room.id).length, meetingsBefore);
+  assert.equal(db.previousMeetingEnd(room.id, Date.now() + 1), db.getMeeting(db.latestMeeting(room.id)!)!.endedAt);
+  const listed = api.listActions(caller, { space: "checkout" }, "x").actions.find((a) => a.ref === res.created.ref)!;
+  assert.equal(listed.from_meeting, undefined);
+  assert.equal(listed.added?.by, "Joe Liang via Claude Code");
+  const got = api.get(caller, res.created.ref, "x") as Record<string, any>;
+  assert.equal(got.meeting, undefined);
+  assert.equal(got.added.by, "Joe Liang via Claude Code");
+  assert.equal(got.item.title, "Transcript lag");
+  assert.equal(got.updates[0].text, "It runs out on Nov 2; the .dmg won't sign after.");
+  assert.equal(api.locate(caller, "action", id).added, true);
+});
+
+test("create_action takes a status: already done or dropped closes it, with who and why", () => {
+  const { db, api, joe, room } = setup();
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const caller = { user: joe, token: info };
+  const done = api.createAction(caller, {
+    space: room.id,
+    text: "Fix the black board after a share",
+    owner: "Andy",
+    status: "done",
+    summary: "useMedia skips ending tracks now.",
+    links: ["https://github.com/JoeL377/stand/pull/32"],
+  });
+  assert.equal(done.created.status, "done");
+  assert.equal(done.created.owner, "Andy");
+  const note = db.getNote(parseRef(done.created.ref)!.id)!;
+  assert.equal(note.closedBy, "pr:https://github.com/JoeL377/stand/pull/32");
+  assert.equal(note.doneBy, "Joe Liang via Claude Code");
+  assert.equal(done.log?.status, "done");
+
+  const dropped = api.createAction(caller, { space: room.id, text: "Try Kanban", owner: "unassigned", status: "dropped", reason: "One card instead" });
+  assert.equal(dropped.created.status, "dropped");
+  assert.equal(dropped.created.owner, undefined);
+  assert.equal(dropped.created.why_dropped, "One card instead");
+  assert.equal(api.listActions(caller, { space: room.id, status: "open" }, "x").actions.some((a) => a.ref === dropped.created.ref), false);
+
+  const doing = api.createAction(caller, { space: room.id, text: "Mic picker", status: "doing" });
+  assert.equal(doing.created.status, "doing");
+  assert.throws(() => api.createAction(caller, { space: room.id, text: "x", status: "shipped" }), /Status is one of/);
+  assert.throws(() => api.createAction(caller, { space: room.id, text: "   " }), /needs its text/);
+});
+
+test("update_action rewords, reassigns and moves any to-do, and logs the summary", () => {
+  const { db, api, joe, action } = setup();
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const caller = { user: joe, token: info };
+  const ref = `stand:action/${action.id}`;
+  const res = api.updateAction(caller, { ref, text: "Move transcript capture to the server (LiveKit agent)", owner: "Andy Li", status: "doing" });
+  assert.equal(res.updated.text, "Move transcript capture to the server (LiveKit agent)");
+  assert.equal(res.updated.owner, "Andy Li");
+  assert.equal(res.updated.status, "doing");
+  assert.equal(res.log, undefined);
+
+  const closed = api.updateAction(caller, { ref, status: "done", summary: "Runs on the server since Tuesday." });
+  assert.equal(closed.updated.status, "done");
+  assert.equal(db.getNote(action.id)!.closedBy, "agent");
+  assert.equal(closed.log?.text, "Runs on the server since Tuesday.");
+
+  const reopened = api.updateAction(caller, { ref, status: "open" });
+  assert.equal(reopened.updated.status, "open");
+  assert.equal(db.getNote(action.id)!.doneAt, null);
+  assert.throws(() => api.updateAction(caller, { ref }), /Nothing to change/);
+
+  // An added to-do keeps who added it when someone else rewords it.
+  const added = api.createAction(caller, { space: "checkout", text: "Renew the cert" });
+  api.updateAction({ user: joe, token: null }, { ref: added.created.ref, text: "Renew the Apple cert" });
+  assert.equal(db.getNote(parseRef(added.created.ref)!.id)!.editedBy, "Joe Liang via Claude Code");
+
+  const ro = db.createToken(joe.id, "Reader", "read").info;
+  assert.throws(() => api.updateAction({ user: joe, token: ro }, { ref, status: "done" }), /read only/);
+  assert.throws(() => api.createAction({ user: joe, token: ro }, { space: "checkout", text: "x" }), /read only/);
+});
+
+test("a to-do added by hand comes up on the next agenda as added, and doesn't count as a meeting passing", () => {
+  const { db, api, joe, room } = setup();
+  const m = db.startMeeting(room.id);
+  const [loose] = db.replaceNotes(m.id, null, [{ kind: "action", text: "Book the offsite", owner: null, discussionId: null }]);
+  db.endMeeting(m.id, null);
+  api.createAction({ user: joe, token: null }, { space: room.id, text: "Renew the cert" });
+  const { upNext } = upNextView(db, room.id, null);
+  const added = upNext.suggestions.find((s) => s.title === "Renew the cert")!;
+  assert.match(added.reason, /^To-do added since last meeting/);
+  assert.equal(added.carried, 0);
+  assert.match(upNext.suggestions.find((s) => s.noteId === loose.id)!.reason, /^To-do from last meeting/);
+});
+
 test("a new space offers the open to-dos of a space everyone in it shares, and carrying them moves them over", () => {
   const { db, api, joe, andy, room } = setup();
   const launch = db.createRoom("Launch", joe.id, "");
