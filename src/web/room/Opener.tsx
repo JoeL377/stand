@@ -5,8 +5,9 @@
 // own the card offers it the way the board offers a move ("Looks like you've moved to …"); a click, Move
 // on, or that topic being up a while with nobody on the card hands the middle to it. It stays on the
 // chapter bar as the Kickoff chapter, so anyone can look back at it on their own screen.
-import { useEffect } from "react";
-import type { DoneDeck, DoneSlide, FollowUp } from "../../shared/protocol.ts";
+import { useEffect, useState } from "react";
+import type { DoneDeck, DoneSlide, FollowUp, Snap } from "../../shared/protocol.ts";
+import { SnapGallery } from "../Snaps.tsx";
 import { CHECKIN_IDLE_MS, CheckIn, type CheckInActs, checkInRows, unanswered } from "./CheckIn.tsx";
 import { colorFor } from "../util.ts";
 import { Face } from "../RecapChapters.tsx";
@@ -82,6 +83,8 @@ export function Opener(props: {
     const key = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || t?.closest("input, textarea, select, [contenteditable]")) return;
+      // A screenshot open in the pop-up has the arrow keys.
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       if (e.key === "ArrowRight" && page < total - 1) acts.onPage(page + 1);
       else if (e.key === "ArrowLeft" && page > 0) acts.onPage(page - 1);
       else return;
@@ -144,7 +147,7 @@ export function Opener(props: {
         )}
         <div role="tabpanel" className="topic-tab-panel">
           {slide ? (
-            <Slide key={page} s={slide} />
+            <Slide key={page} s={slide} at={deck!.at} />
           ) : (
             <CheckIn followUps={props.followUps} meetingStartedAt={props.meetingStartedAt} acts={props.rewound ? null : acts} embedded />
           )}
@@ -154,8 +157,33 @@ export function Opener(props: {
   );
 }
 
+/** A page's screenshot as the snap pop-up shows one. */
+const asSnap = (shot: NonNullable<DoneSlide["shot"]>, at: number): Snap => ({
+  id: shot.url,
+  meetingId: null,
+  itemId: null,
+  itemSuggested: false,
+  // Pages written before screenshots carried who and when: when the pages were written.
+  ts: shot.ts ?? at,
+  url: shot.url,
+  width: 0,
+  height: 0,
+  source: "person",
+  takenById: null,
+  takenBy: shot.by ?? "Attached to a task",
+  sharerId: null,
+  sharerName: null,
+  caption: shot.caption,
+  line: null,
+  screenText: null,
+  noteId: null,
+  discussionId: null,
+  segmentIds: [],
+});
+
 /** One page of what got done: its lead, its lines, and the screenshot it picked. */
-export function Slide({ s }: { s: DoneSlide }) {
+export function Slide({ s, at }: { s: DoneSlide; at: number }) {
+  const [viewing, setViewing] = useState(false);
   return (
     <div className="done-slide">
       {s.lead && <p className="done-lead">{s.lead}</p>}
@@ -181,10 +209,23 @@ export function Slide({ s }: { s: DoneSlide }) {
         })}
       </ul>
       {s.shot && (
-        <a className="done-shot" href={s.shot.url} target="_blank" rel="noreferrer" title={s.shot.caption ?? undefined}>
+        // Opens in the snap pop-up, like a work log's screenshots; a middle-click still opens a tab.
+        <a
+          className="done-shot"
+          href={s.shot.url}
+          target="_blank"
+          rel="noreferrer"
+          title={s.shot.caption ?? undefined}
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            setViewing(true);
+          }}
+        >
           <img src={s.shot.url} alt={s.shot.caption ?? "Screenshot"} />
         </a>
       )}
+      {viewing && s.shot && <SnapGallery snaps={[asSnap(s.shot, at)]} me="" isHost={false} onClose={() => setViewing(false)} />}
     </div>
   );
 }

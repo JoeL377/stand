@@ -419,7 +419,7 @@ export interface DoneSlide {
   lead: string | null;
   points: Array<{ text: string; who: string | null; pr: string | null; dropped: boolean }>;
   /** A screenshot an agent attached to one of its tasks. */
-  shot: { url: string; caption: string | null } | null;
+  shot: { url: string; caption: string | null; by?: string; ts?: number } | null;
 }
 
 export interface RoomState {
