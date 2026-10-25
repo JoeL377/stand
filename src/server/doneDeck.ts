@@ -132,14 +132,15 @@ ${JSON.stringify(prev.map((s) => ({ title: s.title, lead: s.lead, points: s.poin
 }`;
 }
 
-export const DONE_SYSTEM = `You prepare the opening of a team's next meeting: a few pages, shown one at a time on everyone's screen, of what got done since the last meeting. Someone talks the team through them in a minute or two, then the meeting moves on to what's still open.
+export const DONE_SYSTEM = `You prepare the opening of a team's next meeting: the first card on the meeting's board, with a short opening and a few pages (tabs on the card) of what got done since the last meeting. Someone talks the team through it in a minute or two, then the meeting moves on to what's still open and the topics of the day.
 
 You have a free hand in how you shape it. Group by theme, by person, by what matters most, whatever makes the opening clearest for this team. Lead with what the team most needs to know: something they asked for that now works, a thing that unblocks someone, a direction that changed. One page is fine when there's little. Things that were dropped count as progress; say so plainly.
 
 Rules:
 - Account for every closed task (T keys), folded into a line with others if it's small. Open tasks (O keys) are optional: use them only for a page like "In flight" when it helps.
 - Never invent anything. Every line must come from the tasks and their logs. Use the logs for what actually changed, in plain words people would say out loud, not the to-do's wording or code names.
-- A title is a few words. A lead is one short sentence, or null. A line is under 14 words; name who did it in "who" (a first name, or null), and list the task keys it covers.
+- The opening is one or two short sentences, the headline someone would start the meeting with.
+- A page title is a few words (it's also the tab's label). A lead is one short sentence, or null. A line is under 14 words; name who did it in "who" (a first name, or null), and list the task keys it covers.
 - At most ${MAX_SLIDES} pages and ${MAX_POINTS} lines a page.
 - Put a screenshot (S key) on a page only when it shows what that page is about; null otherwise.`;
 
@@ -201,6 +202,16 @@ export function plainSlides(input: DoneInput, notes: Note[], title = "Done"): Do
   return out;
 }
 
+/** The pages as they stand for a meeting starting at `before` (or now): only when they count from the
+ *  last meeting before it, and have something on them. */
+export function currentDoneDeck(db: DB, roomId: string, before?: number): DoneDeck | null {
+  const last = db.lastRealMeeting(roomId, before);
+  const deck = db.getDoneDeck(roomId);
+  if (!deck || !last || deck.since !== last.endedAt || !deck.slides.length) return null;
+  const { basis: _basis, ...rest } = deck;
+  return rest;
+}
+
 export class DoneDecks {
   private timers = new Map<string, NodeJS.Timeout>();
   private running = new Set<string>();
@@ -251,7 +262,7 @@ export class DoneDecks {
     const basis = doneBasis(input);
     const prev = this.db.getDoneDeck(roomId);
     if (prev?.basis === basis && prev.since === input.last.endedAt) return;
-    const base: Omit<DoneDeck, "by" | "slides"> = {
+    const base: Omit<DoneDeck, "by" | "slides" | "summary"> = {
       sinceMeetingId: input.last.id,
       sinceStartedAt: input.last.startedAt,
       since: input.last.endedAt,
@@ -260,7 +271,7 @@ export class DoneDecks {
       dropped: input.closed.filter((n) => n.state === "dropped").length,
     };
     if (!input.closed.length) {
-      this.db.saveDoneDeck(roomId, { ...base, by: "plain", slides: [] }, basis);
+      this.db.saveDoneDeck(roomId, { ...base, by: "plain", summary: null, slides: [] }, basis);
       return this.changed(roomId);
     }
     this.running.add(roomId);
@@ -273,7 +284,9 @@ export class DoneDecks {
       // A meeting started while Claude was writing: keep the pages it opened on.
       if (this.inMeeting(roomId)) return;
       const slides = draft?.slides.length ? slidesFrom(input, draft) : [];
-      const deck: DoneDeck = slides.length ? { ...base, by: "claude", slides } : { ...base, by: "plain", slides: plainSlides(input, input.closed) };
+      const deck: DoneDeck = slides.length
+        ? { ...base, by: "claude", summary: draft?.opening?.trim() ? clip(draft.opening.trim(), 280) : null, slides }
+        : { ...base, by: "plain", summary: null, slides: plainSlides(input, input.closed) };
       this.db.saveDoneDeck(roomId, deck, basis);
       console.log(
         `[agent] done since ${day(input.last.startedAt)} in ${roomId}: ${input.closed.length} closed, ${deck.slides.length} pages (${deck.by}) in ${((Date.now() - started) / 1000).toFixed(1)}s`,

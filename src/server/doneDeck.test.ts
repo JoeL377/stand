@@ -64,7 +64,7 @@ test("the done pages count from the last meeting more than one person talked in,
     doneDeck: async (): Promise<DoneDeckDraft> => {
       calls++;
       // It leaves out T2 and points at a key that doesn't exist.
-      return { slides: [{ title: "Calls", lead: "The mic is yours to pick.", points: [{ text: "Pick your mic beside Mute", who: "Joe", tasks: ["T1", "T9"] }], shot: "S4" }] };
+      return { opening: "The mic is yours to pick now.", slides: [{ title: "Calls", lead: "The mic is yours to pick.", points: [{ text: "Pick your mic beside Mute", who: "Joe", tasks: ["T1", "T9"] }], shot: "S4" }] };
     },
   });
   let live = false;
@@ -72,6 +72,7 @@ test("the done pages count from the last meeting more than one person talked in,
   await decks.run(room.id);
   const deck = db.getDoneDeck(room.id)!;
   assert.equal(deck.by, "claude");
+  assert.equal(deck.summary, "The mic is yours to pick now.");
   assert.equal(deck.sinceMeetingId, real.id);
   assert.deepEqual([deck.closed, deck.dropped], [2, 1]);
   assert.deepEqual(deck.slides[0], {

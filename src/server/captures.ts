@@ -11,6 +11,7 @@ import { newId } from "./ids.ts";
 import { archivedRows } from "./archive.ts";
 import { withFrom } from "./noteFrom.ts";
 import { settledView } from "./spaceSettle.ts";
+import { currentDoneDeck } from "./doneDeck.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import { linkSnaps, saveSnapFile } from "./snaps.ts";
 
@@ -155,6 +156,8 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
   const { decided, open, answered } = settledView(db, roomId);
   return {
     archived,
+    // Between meetings: what the next one will open on. During one: what it opened on.
+    doneDeck: currentDoneDeck(db, roomId),
     captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES).filter(keep("snap")), [], [], baseUrl),
     jots: db
       .spaceJots(roomId, 0, FEED_CAPTURES)

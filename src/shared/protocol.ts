@@ -403,6 +403,8 @@ export interface DoneDeck {
   /** "claude" when Claude laid it out, "plain" when it's the tasks as they are (no model). */
   by: "claude" | "plain";
   at: number;
+  /** One or two sentences on what changed since, for the top of the card; null on the plain one. */
+  summary: string | null;
   /** Tasks it covers that closed, and how many of them were dropped. */
   closed: number;
   dropped: number;
@@ -452,7 +454,7 @@ export interface RoomState {
   followUps: FollowUp[];
   /** The opening board ("Done since" pages, then the "Since last time" check-in): whether someone moved on
    *  from it, when anyone last answered or turned a page on it, and the page everyone is on. */
-  checkIn?: { closed: boolean; answeredAt: number | null; page?: number };
+  checkIn?: { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null };
   /** What the space finished since its last meeting, laid out ahead of time as pages to open this one with. */
   doneDeck?: DoneDeck | null;
   /** Updates agents and people reported on this space's items since the last meeting started. */
@@ -683,6 +685,8 @@ export interface ArchivedRow {
 export interface SpaceFeed {
   /** Rows archived off the space page, newest first. The page hides them and lists them under Archived. */
   archived: ArchivedRow[];
+  /** What the space got done since its last meeting, as the next meeting will open on it. */
+  doneDeck?: DoneDeck | null;
   /** Snaps saved straight to the space, newest first. */
   captures: Snap[];
   /** Notes saved straight to the space, newest first. */

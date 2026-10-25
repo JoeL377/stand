@@ -1,7 +1,10 @@
-// The opening board: what the space got done since its last meeting, as pages Claude laid out ahead of
-// time (server/doneDeck.ts), then the "Since last time" check-in on what's still open as the last page.
-// Anyone on the call turns the pages, for everyone (arrow keys too). Move on, or the topic card being up
-// a while with nobody turning or answering, gives the middle back; going through the check-in does too.
+// The Kickoff card: the meeting's first card on the board. It's built like a topic card: what the space
+// got done since its last meeting, with Claude's opening line and its pages as the card's tabs (written
+// ahead of time, server/doneDeck.ts), and the "Since last time" check-in on what's still open as the last
+// tab. Anyone on the call switches tabs, for everyone (arrow keys too). When the talk has a topic of its
+// own the card offers it the way the board offers a move ("Looks like you've moved to …"); a click, Move
+// on, or that topic being up a while with nobody on the card hands the middle to it. It stays on the
+// chapter bar as the Kickoff chapter, so anyone can look back at it on their own screen.
 import { useEffect } from "react";
 import type { DoneDeck, DoneSlide, FollowUp } from "../../shared/protocol.ts";
 import { CHECKIN_IDLE_MS, CheckIn, type CheckInActs, checkInRows, unanswered } from "./CheckIn.tsx";
@@ -12,17 +15,21 @@ export interface OpenerActs extends CheckInActs {
   onPage: (page: number) => void;
 }
 
-type CheckInState = { closed: boolean; answeredAt: number | null; page?: number };
+type CheckInState = { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null };
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
-/** How many pages the opening board has: the done pages, and the check-in when anything carried over. */
+/** The Kickoff card's tabs: the done pages, and the check-in when anything carried over. */
 export function openerPages(deck: DoneDeck | null | undefined, followUps: FollowUp[], meetingStartedAt: number) {
   const done = deck?.slides.length ?? 0;
   return { done, checkIn: checkInRows(followUps, meetingStartedAt).length > 0 };
 }
 
-/** Whether the middle shows the opening board now. */
+/** Whether the meeting has a Kickoff card at all. */
+export const hasKickoff = (deck: DoneDeck | null | undefined, followUps: FollowUp[], meetingStartedAt: number) =>
+  !!deck?.slides.length || unanswered(followUps, meetingStartedAt).length > 0 || checkInRows(followUps, meetingStartedAt).length > 0;
+
+/** Whether the middle shows the Kickoff card now. */
 export function showOpener(p: {
   deck: DoneDeck | null | undefined;
   followUps: FollowUp[];
@@ -41,12 +48,26 @@ export function showOpener(p: {
   return p.now - Math.max(p.cardSince, p.checkIn?.answeredAt ?? 0) < CHECKIN_IDLE_MS;
 }
 
+/** Where the Kickoff chapter ends on the bar: null while it's on screen. */
+export function kickoffEnd(p: Parameters<typeof showOpener>[0]): number | null {
+  if (showOpener(p)) return null;
+  if (p.checkIn?.closedAt) return p.checkIn.closedAt;
+  const answered = p.checkIn?.answeredAt ?? 0;
+  // Through the check-in: when the last answer came. Left alone: when the idle rule gave the middle back.
+  if (!unanswered(p.followUps, p.meetingStartedAt).length && answered) return answered;
+  return Math.min(p.now, Math.max(p.cardSince ?? p.meetingStartedAt, answered) + CHECKIN_IDLE_MS);
+}
+
 export function Opener(props: {
   deck: DoneDeck | null | undefined;
   followUps: FollowUp[];
   meetingStartedAt: number;
   page: number;
   acts: OpenerActs | null;
+  /** The topic the talk has moved to, once there is one: offered at the card's foot. */
+  next?: string | null;
+  /** Opened from the chapter bar: tabs switch on this screen only, nothing can be answered. */
+  rewound?: boolean;
 }) {
   const { deck, acts } = props;
   const { done, checkIn } = openerPages(deck, props.followUps, props.meetingStartedAt);
@@ -54,7 +75,7 @@ export function Opener(props: {
   const page = Math.max(0, Math.min(props.page, total - 1));
   const onCheckIn = page >= done;
   const left = unanswered(props.followUps, props.meetingStartedAt).length;
-  const last = page === total - 1;
+  const slide = onCheckIn ? null : deck!.slides[page];
 
   useEffect(() => {
     if (!acts || total < 2) return;
@@ -70,80 +91,73 @@ export function Opener(props: {
     return () => window.removeEventListener("keydown", key);
   }, [acts, page, total]);
 
+  const closed = deck ? `${deck.closed} closed${deck.dropped ? ` · ${deck.dropped} dropped` : ""}` : null;
   return (
-    <section className="checkin opener" aria-label={onCheckIn ? "Since last time" : "Done since last time"}>
-      <header className="checkin-head">
-        {onCheckIn ? (
-          <>
-            <h2>Still open</h2>
-            <span className="checkin-count">{left} to check</span>
-          </>
-        ) : (
-          <>
-            <h2>
-              {deck!.by === "claude" && (
-                <span className="agent-mark small" aria-hidden>
-                  ✦{" "}
-                </span>
-              )}
-              Done since {day(deck!.sinceStartedAt)}
-            </h2>
-            <span className="checkin-count">
-              {deck!.closed} closed{deck!.dropped ? ` · ${deck!.dropped} dropped` : ""}
-            </span>
-          </>
-        )}
+    <section className={props.rewound ? "topic-now opener rewound" : "topic-now opener"} aria-label="Kickoff">
+      <div className="topic-now-head">
+        <span className={props.rewound ? "topic-now-label" : "topic-now-label live"}>Kickoff</span>
+        {closed && <span className="topic-mins">{closed}</span>}
+        {acts && !props.rewound &&
+          // Once the talk has a topic of its own, Move on becomes the board's offer to switch to it.
+          (props.next ? (
+            <button type="button" className="topic-moving opener-next" onClick={acts.onClose} title="Switch the board to it now, for everyone">
+              <span className="agent-mark" aria-hidden>
+                ✦
+              </span>{" "}
+              Looks like you've moved to <strong>{props.next}</strong>
+              <span className="topic-moving-go" aria-hidden>
+                Switch →
+              </span>
+            </button>
+          ) : (
+            <button type="button" className="opener-close" onClick={acts.onClose}>
+              Move on
+            </button>
+          ))}
+      </div>
+      <h2 className="topic-now-title">{deck ? `Since ${day(deck.sinceStartedAt)}` : "Since last time"}</h2>
+      {deck && (
+        <p className="topic-summary">
+          {deck.by === "claude" && (
+            <>
+              <span className="agent-mark" aria-hidden>
+                ✦
+              </span>{" "}
+            </>
+          )}
+          {deck.summary ?? `${deck.closed} ${deck.closed === 1 ? "task" : "tasks"} closed since the last meeting.`}
+        </p>
+      )}
+      <div className="topic-tabs-wrap">
         {total > 1 && (
-          <nav className="opener-pager" aria-label="Pages">
-            <button type="button" className="opener-arrow" disabled={!acts || page === 0} onClick={() => acts?.onPage(page - 1)} aria-label="Previous page">
-              ‹
-            </button>
-            {Array.from({ length: total }, (_, i) => (
-              <button
-                key={i}
-                type="button"
-                className={["opener-dot", i === page && "on", i >= done && "open"].filter(Boolean).join(" ")}
-                disabled={!acts}
-                onClick={() => acts?.onPage(i)}
-                aria-label={i >= done ? "Still open" : `Page ${i + 1}: ${deck!.slides[i].title}`}
-                aria-current={i === page ? "page" : undefined}
-                title={i >= done ? "Still open" : deck!.slides[i].title}
-              />
-            ))}
-            <button type="button" className="opener-arrow" disabled={!acts || last} onClick={() => acts?.onPage(page + 1)} aria-label="Next page">
-              ›
-            </button>
-          </nav>
+          <div className="topic-tabs opener-tabs" role="tablist" aria-label="Kickoff pages">
+            {Array.from({ length: total }, (_, i) => {
+              const s = i < done ? deck!.slides[i] : null;
+              return (
+                <button key={i} type="button" role="tab" aria-selected={i === page} className={i === page ? "on" : undefined} disabled={!acts} onClick={() => acts?.onPage(i)}>
+                  {s ? s.title : "Still open"}
+                  <span className="topic-tab-count">{s ? s.points.length : left}</span>
+                </button>
+              );
+            })}
+          </div>
         )}
-        {acts && (
-          <button type="button" className="checkin-close" onClick={acts.onClose}>
-            Move on
-          </button>
-        )}
-      </header>
-      {onCheckIn ? (
-        <CheckIn followUps={props.followUps} meetingStartedAt={props.meetingStartedAt} acts={acts} embedded />
-      ) : (
-        <Slide key={page} s={deck!.slides[page]} />
-      )}
-      {!onCheckIn && acts && last && (
-        <button type="button" className="opener-next" onClick={acts.onClose}>
-          Move on →
-        </button>
-      )}
-      {!onCheckIn && acts && !last && (
-        <button type="button" className="opener-next" onClick={() => acts.onPage(page + 1)}>
-          {page + 1 === done ? `Still open · ${left} →` : `${deck!.slides[page + 1].title} →`}
-        </button>
-      )}
+        <div role="tabpanel" className="topic-tab-panel">
+          {slide ? (
+            <Slide key={page} s={slide} />
+          ) : (
+            <CheckIn followUps={props.followUps} meetingStartedAt={props.meetingStartedAt} acts={props.rewound ? null : acts} embedded />
+          )}
+        </div>
+      </div>
     </section>
   );
 }
 
-function Slide({ s }: { s: DoneSlide }) {
+/** One page of what got done: its lead, its lines, and the screenshot it picked. */
+export function Slide({ s }: { s: DoneSlide }) {
   return (
     <div className="done-slide">
-      <h3 className="done-title">{s.title}</h3>
       {s.lead && <p className="done-lead">{s.lead}</p>}
       <ul className="done-points">
         {s.points.map((p, i) => {

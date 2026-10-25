@@ -188,6 +188,7 @@ export interface Agent {
 }
 
 export interface DoneDeckDraft {
+  opening: string | null;
   slides: Array<{ title: string; lead: string | null; points: Array<{ text: string; who: string | null; tasks: string[] }>; shot: string | null }>;
 }
 
@@ -415,6 +416,7 @@ const RecapSchema = z.object({
 });
 
 const DoneDeckSchema = z.object({
+  opening: z.string().nullable().describe("One or two short sentences: the headline of what changed since the last meeting"),
   slides: z
     .array(
       z.object({

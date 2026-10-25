@@ -2317,38 +2317,35 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 @keyframes live-back-glow { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .topic-live-back.moved { animation: none; } }
 .topic-board.rewinding .topic-stretch.current { cursor: pointer; }
-/* The opening board: "Done since" pages Claude laid out ahead of time, then the check-in as the last page. */
-.opener { gap: 12px; }
-.opener .checkin-head { align-items: center; flex-wrap: wrap; row-gap: 6px; }
-.opener .checkin-close { margin-left: 0; }
-.opener-pager { margin-left: auto; display: flex; align-items: center; gap: 2px; }
-.opener-arrow { border: 0; background: none; box-shadow: none; min-height: 0; height: 24px; width: 24px; padding: 0; font-size: 18px; line-height: 1; color: var(--muted); }
-.opener-arrow:hover:not(:disabled) { color: var(--text); background: var(--panel); }
-.opener-arrow:disabled { opacity: 0.35; }
-.opener-dot { border: 0; box-shadow: none; min-height: 0; width: 8px; height: 8px; padding: 0; margin: 0 2px; border-radius: 999px; background: var(--line); }
-.opener-dot.open { width: 16px; }
-.opener-dot.on { background: var(--accent); }
-.opener-dot:disabled { cursor: default; }
+/* The Kickoff card: the meeting's first card, built like a topic card ("Done since" pages as its tabs, then the check-in). */
+.opener-close { margin-left: auto; font-size: 12.5px; padding: 3px 10px; min-height: 0; }
+.opener-tabs { overflow-x: auto; scrollbar-width: none; }
+.opener-tabs::-webkit-scrollbar { display: none; }
+.opener-tabs button { flex: none; white-space: nowrap; }
+.opener-tabs button:disabled { cursor: default; }
 .checkin.embedded { padding: 0; border: 0; background: none; border-radius: 0; flex: none; }
 .done-slide { display: flex; flex-direction: column; gap: 8px; animation: done-in 0.18s ease-out; }
 @keyframes done-in { from { opacity: 0; transform: translateX(8px); } }
 @media (prefers-reduced-motion: reduce) { .done-slide { animation: none; } }
-.done-title { margin: 4px 0 0; font-size: 22px; font-weight: 600; line-height: 1.25; }
 .done-lead { margin: 0; font-size: 15px; color: var(--muted); line-height: 1.45; }
-.done-points { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; }
-.done-point { display: flex; align-items: baseline; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 16px; line-height: 1.4; }
+.done-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.done-point { display: flex; align-items: baseline; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 15px; line-height: 1.4; }
 .done-point:first-child { border-top: 0; }
 .done-point .rc-face { align-self: center; flex: none; }
 .done-point .rc-pill { flex: none; }
 .done-text { flex: 1 1 auto; min-width: 0; }
-.done-point.dropped .done-text { color: var(--muted); }
-.done-point.dropped .checkin-tick { color: var(--muted); }
+.done-point.dropped .done-text, .done-point.dropped .checkin-tick { color: var(--muted); }
 .done-shot { display: block; align-self: flex-start; max-width: 100%; margin-top: 4px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.done-shot img { display: block; max-width: 100%; max-height: 300px; object-fit: contain; }
-.opener-next { align-self: flex-end; margin-top: auto; font-size: 12.5px; padding: 3px 12px; min-height: 0; border-radius: 999px; background: var(--panel); color: var(--muted); }
-.opener-next:hover { color: var(--text); }
+.done-shot img { display: block; max-width: 100%; max-height: 200px; object-fit: contain; }
+/* On the chapter bar: the Kickoff chapter, a softer accent than a topic. */
+.topic-stretch.kickoff::before { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.topic-stretch.kickoff.current::before { background: var(--accent); }
 @media (max-width: 640px) {
-  .done-title { font-size: 19px; }
-  .done-point { font-size: 15px; gap: 6px; }
-  .opener-pager { margin-left: 0; }
+  .done-point { gap: 6px; }
 }
+/* The space page's Done since tab: the opening line, then each page under its title. */
+.sh-done-since { display: flex; flex-direction: column; gap: 14px; }
+.sh-done-since .topic-summary { font-size: 15px; }
+.topic-moving.opener-next { margin: 0 0 0 auto; align-self: center; align-items: center; opacity: 1; max-width: 62%; min-width: 0; white-space: nowrap; }
+.topic-moving.opener-next .topic-moving-go { flex: none; }
+.topic-moving.opener-next .topic-moving-go { opacity: 1; }
