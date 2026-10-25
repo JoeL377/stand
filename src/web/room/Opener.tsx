@@ -81,6 +81,29 @@ export function Opener(props: {
   const left = unanswered(props.followUps, props.meetingStartedAt).length;
   const slide = onCheckIn ? null : deck!.slides[page];
   const card = useRef<HTMLElement>(null);
+  const [full, setFull] = useState(false);
+  const turn = acts ? (to: number) => to >= 0 && to < total && to !== page && acts.onPage(to) : null;
+  const titleOf = (i: number) => (i < done ? deck!.slides[i].title : "Still open");
+  // On a phone the pages turn with a swipe, like a deck; the tabs' own sideways scroll is left alone.
+  const swipe = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    swipe.current = e.touches.length === 1 && !(e.target as HTMLElement).closest(".opener-tabs, .done-shot") ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const from = swipe.current;
+    swipe.current = null;
+    const t = e.changedTouches[0];
+    if (!from || !turn || !t) return;
+    const dx = t.clientX - from.x;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(t.clientY - from.y)) turn(dx < 0 ? page + 1 : page - 1);
+  };
+  // The tab on screen stays in view when the strip is wider than the card.
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const on = strip.current?.querySelector<HTMLElement>(".on");
+    if (on && strip.current) strip.current.scrollTo({ left: on.offsetLeft - (strip.current.clientWidth - on.offsetWidth) / 2, behavior: "smooth" });
+  }, [page]);
 
   useEffect(() => {
     if (!acts || total < 2) return;
@@ -102,10 +125,17 @@ export function Opener(props: {
 
   const closed = deck ? `${deck.closed} closed${deck.dropped ? ` · ${deck.dropped} dropped` : ""}` : null;
   return (
-    <section ref={card} className={props.rewound ? "topic-now opener rewound" : "topic-now opener"} aria-label={props.label ?? "Kickoff"}>
+    <section
+      ref={card}
+      className={`topic-now opener${props.rewound ? " rewound" : ""}${page > 0 ? " later" : ""}`}
+      aria-label={props.label ?? "Kickoff"}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
       <div className="topic-now-head">
         <span className={props.rewound ? "topic-now-label" : "topic-now-label live"}>{props.label ?? "Kickoff"}</span>
-        {closed && <span className="topic-mins">{closed}</span>}
+        {deck && <span className="topic-mins opener-since">since {day(deck.sinceStartedAt)}</span>}
+        {closed && <span className="topic-mins opener-count">{closed}</span>}
         {acts && !props.rewound &&
           // Once the talk has a topic of its own, Move on becomes the board's offer to switch to it.
           (props.next ? (
@@ -126,7 +156,8 @@ export function Opener(props: {
       </div>
       <h2 className="topic-now-title">{deck ? `Since ${day(deck.sinceStartedAt)}` : "Since last time"}</h2>
       {deck && (
-        <p className="topic-summary">
+        // In a meeting on a phone the opening line keeps to two lines until it's tapped.
+        <p className={props.label || full ? "topic-summary" : "topic-summary clamped"} onClick={() => setFull(true)}>
           {deck.by === "claude" && (
             <>
               <span className="agent-mark" aria-hidden>
@@ -139,18 +170,27 @@ export function Opener(props: {
       )}
       <div className="topic-tabs-wrap">
         {total > 1 && (
-          <div className="topic-tabs opener-tabs" role="tablist" aria-label="Kickoff pages">
+          <div ref={strip} className="topic-tabs opener-tabs" role="tablist" aria-label="Kickoff pages">
             {Array.from({ length: total }, (_, i) => {
               const s = i < done ? deck!.slides[i] : null;
               return (
                 <button key={i} type="button" role="tab" aria-selected={i === page} className={i === page ? "on" : undefined} disabled={!acts} onClick={() => acts?.onPage(i)}>
-                  {s ? s.title : "Still open"}
+                  {titleOf(i)}
                   <span className="topic-tab-count">{s ? s.points.length : left}</span>
                 </button>
               );
             })}
           </div>
         )}
+        {total > 1 && (
+          // On a phone the tabs give way to a deck's steps and the page's title.
+          <div className="opener-steps" aria-hidden>
+            {Array.from({ length: total }, (_, i) => (
+              <span key={i} className={i <= page ? "on" : undefined} />
+            ))}
+          </div>
+        )}
+        {total > 1 && <h3 className="opener-page-title">{titleOf(page)}</h3>}
         <div role="tabpanel" className="topic-tab-panel">
           {slide ? (
             <Slide key={page} s={slide} at={deck!.at} />
@@ -158,6 +198,22 @@ export function Opener(props: {
             <CheckIn followUps={props.followUps} meetingStartedAt={props.meetingStartedAt} acts={props.rewound ? null : acts} embedded />
           )}
         </div>
+        {total > 1 && turn && (
+          <div className="opener-pager">
+            <button type="button" className="opener-back" aria-label="Previous page" disabled={page === 0} onClick={() => turn(page - 1)}>
+              ‹
+            </button>
+            {page < total - 1 ? (
+              <button type="button" className="opener-fwd" onClick={() => turn(page + 1)}>
+                <span className="opener-fwd-next">Next</span> {titleOf(page + 1)} ›
+              </button>
+            ) : (
+              <span className="opener-fwd last">
+                {page + 1} of {total}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
