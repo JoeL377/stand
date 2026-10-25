@@ -5,7 +5,8 @@
 // own the card offers it the way the board offers a move ("Looks like you've moved to …"); a click, Move
 // on, or that topic being up a while with nobody on the card hands the middle to it. It stays on the
 // chapter bar as the Kickoff chapter, so anyone can look back at it on their own screen.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { DoneDeck, DoneSlide, FollowUp, Snap } from "../../shared/protocol.ts";
 import { SnapGallery } from "../Snaps.tsx";
 import { CHECKIN_IDLE_MS, CheckIn, type CheckInActs, checkInRows, unanswered } from "./CheckIn.tsx";
@@ -69,6 +70,8 @@ export function Opener(props: {
   next?: string | null;
   /** Opened from the chapter bar: tabs switch on this screen only, nothing can be answered. */
   rewound?: boolean;
+  /** The card's label; the space page's pop-up calls it "Done since". */
+  label?: string;
 }) {
   const { deck, acts } = props;
   const { done, checkIn } = openerPages(deck, props.followUps, props.meetingStartedAt);
@@ -77,14 +80,17 @@ export function Opener(props: {
   const onCheckIn = page >= done;
   const left = unanswered(props.followUps, props.meetingStartedAt).length;
   const slide = onCheckIn ? null : deck!.slides[page];
+  const card = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!acts || total < 2) return;
     const key = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || t?.closest("input, textarea, select, [contenteditable]")) return;
-      // A screenshot open in the pop-up has the arrow keys.
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      // A screenshot open in the pop-up has the arrow keys (the card can sit in a pop-up of its own).
+      const pops = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      const top = pops[pops.length - 1];
+      if (top && !top.contains(card.current)) return;
       if (e.key === "ArrowRight" && page < total - 1) acts.onPage(page + 1);
       else if (e.key === "ArrowLeft" && page > 0) acts.onPage(page - 1);
       else return;
@@ -96,9 +102,9 @@ export function Opener(props: {
 
   const closed = deck ? `${deck.closed} closed${deck.dropped ? ` · ${deck.dropped} dropped` : ""}` : null;
   return (
-    <section className={props.rewound ? "topic-now opener rewound" : "topic-now opener"} aria-label="Kickoff">
+    <section ref={card} className={props.rewound ? "topic-now opener rewound" : "topic-now opener"} aria-label={props.label ?? "Kickoff"}>
       <div className="topic-now-head">
-        <span className={props.rewound ? "topic-now-label" : "topic-now-label live"}>Kickoff</span>
+        <span className={props.rewound ? "topic-now-label" : "topic-now-label live"}>{props.label ?? "Kickoff"}</span>
         {closed && <span className="topic-mins">{closed}</span>}
         {acts && !props.rewound &&
           // Once the talk has a topic of its own, Move on becomes the board's offer to switch to it.
@@ -225,7 +231,8 @@ export function Slide({ s, at }: { s: DoneSlide; at: number }) {
           <img src={s.shot.url} alt={s.shot.caption ?? "Screenshot"} />
         </a>
       )}
-      {viewing && s.shot && <SnapGallery snaps={[asSnap(s.shot, at)]} me="" isHost={false} onClose={() => setViewing(false)} />}
+      {/* On the page's body, so it sits over a pop-up the page is in too. */}
+      {viewing && s.shot && createPortal(<SnapGallery snaps={[asSnap(s.shot, at)]} me="" isHost={false} onClose={() => setViewing(false)} />, document.body)}
     </div>
   );
 }

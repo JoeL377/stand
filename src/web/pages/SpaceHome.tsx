@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, FollowUp, Jot, Note, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { stateOf } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
@@ -23,7 +23,7 @@ import { colorFor, fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
-import { Slide } from "../room/Opener.tsx";
+import { Opener } from "../room/Opener.tsx";
 
 type Entry =
   | { kind: "snap"; at: number; snap: Snap }
@@ -41,15 +41,15 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  // The tab someone last looked at in this space; a new space opens on Meetings.
+  // The tab someone last looked at in this space; a new space opens on Tasks.
   const [tab, setTab] = useState<TabKey>(() => {
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
-      // To do and Questions became one Tasks tab.
-      if (saved === "todo" || saved === "questions") return "tasks";
+      // To do and Questions became one Tasks tab, and Done since moved into it.
+      if (saved === "todo" || saved === "questions" || saved === "done") return "tasks";
       if (saved && TABS.some((t) => t.key === saved)) return saved as TabKey;
     } catch {}
-    return "meetings";
+    return "tasks";
   });
   const pickTab = (key: TabKey) => {
     setTab(key);
@@ -188,7 +188,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     tasks: todos.length + questions.length,
     decisions: decisions.filter((n) => !n.replacedBy).length,
     next: agenda.length + suggested.length,
-    done: feed?.doneDeck?.closed ?? 0,
   };
   const deck = feed?.doneDeck ?? null;
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
@@ -246,16 +245,16 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         <ModeNote caps={caps} />
 
         <div className="sh-tabs" role="tablist" aria-label="The space">
-          {TABS.filter((t) => t.key !== "done" || deck).map((t) => (
+          {TABS.map((t) => (
             <button
               key={t.key}
               role="tab"
               aria-selected={tab === t.key}
-              className={tab === t.key ? "sh-tab on" : "sh-tab"}
+              className={tab === t.key ? `sh-tab ${t.key} on` : `sh-tab ${t.key}`}
               onClick={() => pickTab(t.key)}
             >
               {t.icon}
-              {t.key === "done" && deck ? `Done since ${new Date(deck.sinceStartedAt).toLocaleDateString([], { month: "short", day: "numeric" })}` : t.label}
+              {t.label}
               {counts[t.key] > 0 && <span className="count">{counts[t.key]}</span>}
             </button>
           ))}
@@ -321,35 +320,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             <TasksTab
               roomId={room.id}
               me={user.name}
+              deck={deck}
               open={[...todos, ...questions]}
               closed={[...done, ...closedQuestions]}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
               reload={load}
             />
           )}
-          {tab === "done" &&
-            (deck ? (
-              <div className="sh-done-since">
-                <p className="topic-summary">
-                  {deck.by === "claude" && (
-                    <>
-                      <span className="agent-mark" aria-hidden>
-                        ✦
-                      </span>{" "}
-                    </>
-                  )}
-                  {deck.summary ?? `${deck.closed} ${deck.closed === 1 ? "task" : "tasks"} closed since the last meeting.`}
-                </p>
-                {deck.slides.map((s, i) => (
-                  <div key={i} className="sh-day">
-                    <h3>{s.title}</h3>
-                    <Slide s={s} at={deck.at} />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="sh-card-empty">Nothing closed since the last meeting.</p>
-            ))}
           {tab === "decisions" && (
             <PointList kind="decided" notes={decisions} empty="No decisions yet." onArchive={(id) => archive(`decision:${id}`)} />
           )}
@@ -615,7 +592,17 @@ type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
  * waiting on someone's look (a PR reported ready) comes first, then the rest grouped by owner, yours
  * first, then folded Done and Dropped. Anyone can tick a task off, drop it or reopen it, with Undo.
  */
-function TasksTab(props: { roomId: string; me: string; open: TaskNote[]; closed: TaskNote[]; onArchive: (n: Note) => void; reload: () => void }) {
+function TasksTab(props: {
+  roomId: string;
+  me: string;
+  /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
+  deck: DoneDeck | null;
+  open: TaskNote[];
+  closed: TaskNote[];
+  onArchive: (n: Note) => void;
+  reload: () => void;
+}) {
+  const [showDeck, setShowDeck] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
   const work = useWork(props.open.filter((n) => n.kind === "action").map((n) => n.id));
@@ -705,8 +692,21 @@ function TasksTab(props: { roomId: string; me: string; open: TaskNote[]; closed:
       </button>
     );
 
+  const deck = props.deck?.slides.length ? props.deck : null;
   return (
     <>
+      {deck && (
+        <button type="button" className="sh-done-since" onClick={() => setShowDeck(true)} title="See the pages the next meeting opens on">
+          <span className="agent-mark" aria-hidden>
+            ✦
+          </span>
+          <strong>Done since {new Date(deck.sinceStartedAt).toLocaleDateString([], { month: "short", day: "numeric" })}</strong>
+          {deck.summary && <span className="sh-done-since-summary">{deck.summary}</span>}
+          <span className="count">{deck.closed}</span>
+          <ChevronIcon />
+        </button>
+      )}
+      {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
       {!props.open.length && <p className="sh-card-empty">Nothing open. New tasks come from meetings and what people save here.</p>}
       {waiting.length > 0 && (
         <div className="sh-task-group">
@@ -740,6 +740,38 @@ function TasksTab(props: { roomId: string; me: string; open: TaskNote[]; closed:
   );
 }
 
+/** The done pages in a pop-up, paged like the Kickoff card the next meeting opens on. */
+function DonePop({ deck, onClose }: { deck: DoneDeck; onClose: () => void }) {
+  const [page, setPage] = useState(0);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      // A screenshot open over the pages closes first.
+      if (e.key === "Escape" && document.querySelectorAll('[role="dialog"][aria-modal="true"]').length < 2) onClose();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onClose]);
+  const none = () => {};
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog done-pop" role="dialog" aria-modal="true" aria-label="Done since the last meeting">
+        <button className="icon-btn done-pop-close" aria-label="Close" title="Close" onClick={onClose}>
+          <CloseIcon size={16} />
+        </button>
+        <Opener
+          deck={deck}
+          followUps={[]}
+          meetingStartedAt={0}
+          page={page}
+          acts={{ onPage: setPage, onState: none, onUndoSaid: none, onClose, onOpen: none }}
+          rewound
+          label="Done"
+        />
+      </div>
+    </div>
+  );
+}
+
 /** A checked box, as a finished to-do shows. */
 const DoneIcon = () => (
   <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden>
@@ -748,7 +780,7 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "meetings" | "done" | "tasks" | "decisions" | "next";
+type TabKey = "tasks" | "meetings" | "decisions" | "next";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
@@ -770,9 +802,8 @@ function ArchiveButton({ onClick }: { onClick: () => void }) {
 
 /** Which archived rows each tab lists at its bottom. */
 const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
-  meetings: ["meeting", "snap", "jot"],
-  done: [],
   tasks: ["todo", "question"],
+  meetings: ["meeting", "snap", "jot"],
   decisions: ["decision"],
   next: ["item", "deck", "suggestion"],
 };
@@ -808,10 +839,8 @@ function ArchivedList(props: { rows: ArchivedRow[]; open: boolean; onToggle: () 
 }
 
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
-  { key: "meetings", label: "Meetings", icon: <MicIcon /> },
-  // Shown only while there's something done since the last meeting; labeled with its date.
-  { key: "done", label: "Done since", icon: <span className="agent-mark small" aria-hidden>✦</span> },
   { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
+  { key: "meetings", label: "Meetings", icon: <MicIcon /> },
   { key: "decisions", label: "Decisions", icon: <DecidedIcon size={14} /> },
   { key: "next", label: "Up next" },
 ];
