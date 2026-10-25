@@ -421,7 +421,7 @@ const DoneDeckSchema = z.object({
     .array(
       z.object({
         title: z.string().describe("A few words"),
-        lead: z.string().nullable().describe("One short sentence under the title, or null"),
+        lead: z.string().describe("One or two sentences describing what changed on this page and why it matters"),
         points: z
           .array(
             z.object({

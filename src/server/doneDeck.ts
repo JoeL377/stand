@@ -64,10 +64,15 @@ export function doneInput(db: DB, roomId: string): DoneInput | null {
 }
 
 /** What a pass read, so it reruns only when something changed. */
+/** v2: every page has a description. */
+const DONE_SHAPE = "v2";
+
 export function doneBasis(input: DoneInput): string {
   return createHash("sha1")
     .update(
       [
+        // Bumped when the pages' shape changes, so pages written before are written again.
+        DONE_SHAPE,
         input.last.endedAt,
         ...input.closed.map((n) => `${n.id}:${n.state}:${n.closedBy}:${n.text}`),
         ...input.updates.map((u) => u.id),
@@ -140,7 +145,7 @@ Rules:
 - Account for every closed task (T keys), folded into a line with others if it's small. Open tasks (O keys) are optional: use them only for a page like "In flight" when it helps.
 - Never invent anything. Every line must come from the tasks and their logs. Use the logs for what actually changed, in plain words people would say out loud, not the to-do's wording or code names.
 - The opening is one or two short sentences, the headline someone would start the meeting with.
-- A page title is a few words (it's also the tab's label). A lead is one short sentence, or null. A line is under 14 words; name who did it in "who" (a first name, or null), and list the task keys it covers.
+- A page title is a few words (it's also the tab's label). Every page has a lead: one or two plain sentences (under 40 words) that describe what changed on that page and why it matters, so someone who missed the work gets it from the lead alone; the lines below are the details. A line is under 14 words; name who did it in "who" (a first name, or null), and list the task keys it covers.
 - At most ${MAX_SLIDES} pages and ${MAX_POINTS} lines a page.
 - Put a screenshot (S key) on a page only when it shows what that page is about; null otherwise.`;
 
@@ -161,7 +166,7 @@ export function slidesFrom(input: DoneInput, draft: DoneDeckDraft, baseUrl = "")
     const shot = s.shot ? shots.get(s.shot) : undefined;
     slides.push({
       title: clip(s.title.trim() || "Done", 60),
-      lead: s.lead?.trim() ? clip(s.lead.trim(), 160) : null,
+      lead: s.lead?.trim() ? clip(s.lead.trim(), 240) : null,
       points,
       shot: shot ? { url: shotUrl(shot, baseUrl), caption: shot.caption, by: shot.client ? `${shot.userName} via ${shot.client}` : shot.userName, ts: shot.ts } : null,
     });
@@ -194,7 +199,7 @@ export function plainSlides(input: DoneInput, notes: Note[], title = "Done"): Do
     const page = notes.slice(i, i + PLAIN_PER_PAGE);
     out.push({
       title: notes.length > PLAIN_PER_PAGE ? `${title} (${i / PLAIN_PER_PAGE + 1})` : title,
-      lead: null,
+      lead: `${page.length} ${i || title !== "Done" ? "more " : ""}${page.length === 1 ? "task" : "tasks"} closed since ${day(input.last.startedAt)}, as written on the to-dos.`,
       points: page.map((n) => pointOf(input, [n], n.text, null)),
       shot: null,
     });
