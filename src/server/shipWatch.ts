@@ -122,7 +122,7 @@ export class ShipWatch {
       const n = this.db.getNote(id);
       if (!n || n.kind !== "action" || n.doneAt || settled.has(id)) continue;
       const who = { userId: "github", userName: pr.author, client: "GitHub" };
-      if (!this.db.setActionDone(n.roomId, n.id, `${pr.author} via GitHub`)) continue;
+      if (!this.db.setActionDone(n.roomId, n.id, `${pr.author} via GitHub`, `pr:${pr.url}`)) continue;
       this.db.addUpdate({
         roomId: n.roomId,
         itemId: n.itemId,
@@ -150,7 +150,7 @@ export class ShipWatch {
     };
     if (merged) {
       const by = u.client ? `${u.userName} via ${u.client}` : u.userName;
-      if (!this.db.setActionDone(u.roomId, u.noteId, by)) return;
+      if (!this.db.setActionDone(u.roomId, u.noteId, by, `pr:${pr}`)) return;
       this.db.addUpdate({
         ...who,
         status: "done",

@@ -203,6 +203,9 @@ export class RoomSession implements SpeechSink {
   private list: ListKeeper | null = null;
   private listTimer: NodeJS.Timeout | null = null;
   private listRun: Promise<void> | null = null;
+  /** The check-in at the start ("Since last time"): someone moved on from it, and the last answer anyone gave. */
+  private checkInClosed = false;
+  private checkInAnsweredAt: number | null = null;
   ended = false;
   /** When End meeting started the write-up. */
   endingSince = 0;
@@ -351,15 +354,24 @@ export class RoomSession implements SpeechSink {
       suggestion: this.suggestion,
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
-      followUps: this.db
-        .roomFollowUps(this.roomId)
-        .filter((f) => f.meetingId !== this.meetingId && (f.doneAt === null || f.doneAt >= this.meetingStartedAt)),
+      followUps: this.carried(true),
+      checkIn: { closed: this.checkInClosed, answeredAt: this.checkInAnsweredAt },
       updates: this.db.roomUpdates(this.roomId, this.db.previousMeetingStart(this.roomId, this.meetingStartedAt) ?? 0),
       ...this.upNext(),
       capabilities: capabilities(),
       ending: this.ended,
       conxt: this.conxtLive(),
     };
+  }
+
+  /** To-dos from earlier meetings: the open ones, oldest first. withNews: also the ones closed since the
+   *  meeting before this one ended (by a PR, an agent, a click), so the check-in can show what changed. */
+  private carried(withNews = false) {
+    const since = this.db.previousMeetingEnd(this.roomId, this.meetingStartedAt) ?? this.meetingStartedAt;
+    return this.db
+      .roomFollowUps(this.roomId)
+      .filter((f) => f.meetingId !== this.meetingId && (f.doneAt === null || (withNews && f.doneAt >= Math.min(since, this.meetingStartedAt))))
+      .sort((a, b) => a.ts - b.ts);
   }
 
   /** What the connected Conxt project would raise with the people here now. */
@@ -717,6 +729,34 @@ export class RoomSession implements SpeechSink {
         if (!note) break;
         // An action from this meeting: resend its item's notes so every card updates.
         if (note.meetingId === this.meetingId) this.sendItemNotes(note.itemId);
+        this.broadcastState();
+        break;
+      }
+      case "task.state": {
+        // Anyone on the call, from the check-in or the board: Done, Drop, Still on it, or back to open.
+        if (!["done", "dropped", "open"].includes(msg.state)) return;
+        const note = this.db.setTaskState(this.roomId, msg.noteId, {
+          state: msg.state,
+          by: conn.name,
+          reason: msg.state === "dropped" ? clean(msg.reason, 200) || null : null,
+          // Open again without "Still on it" is an Undo: the check-in asks about it again.
+          checked: msg.state === "open" ? !!msg.still : undefined,
+        });
+        if (!note) break;
+        this.checkInAnsweredAt = Date.now();
+        if (note.meetingId === this.meetingId) this.sendItemNotes(note.itemId);
+        this.broadcastState();
+        break;
+      }
+      case "task.saidDone.undo": {
+        if (!this.db.setSaidDone(this.roomId, msg.noteId, null)) break;
+        this.broadcastState();
+        break;
+      }
+      case "checkin": {
+        this.checkInClosed = !msg.open;
+        // Brought back on purpose: it stays up a while even with the topic card waiting.
+        if (msg.open) this.checkInAnsweredAt = Date.now();
         this.broadcastState();
         break;
       }
@@ -1171,14 +1211,20 @@ export class RoomSession implements SpeechSink {
     const segments = this.db.meetingSegments(this.meetingId);
     if (!list.due(segments)) return Promise.resolve();
     const people = [...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName)])];
+    const carried = this.carried().filter((f) => !f.saidDone);
     this.listRun = list
-      .run(segments, people, (ts) => this.focusAt(ts), Date.now())
+      .run(segments, people, (ts) => this.focusAt(ts), Date.now(), carried.map((f) => ({ id: f.id, who: f.owner, text: f.text })))
       .catch((e) => {
         console.error(`[list] ${this.meetingId}: ${(e as Error).message}`);
         return false;
       })
       .then((changed) => {
         if (changed && !this.ended) this.listChanged();
+        if (this.ended || !list.heardDone.length) return;
+        // A carried task someone said is finished: marked Said done, still open until evidence or a click.
+        for (const h of list.heardDone)
+          this.db.setSaidDone(this.roomId, h.id, { segmentId: h.segment.id, ts: h.segment.ts, speaker: h.segment.speakerName, text: h.segment.text.slice(0, 500) });
+        this.broadcastState();
       })
       .finally(() => {
         this.listRun = null;

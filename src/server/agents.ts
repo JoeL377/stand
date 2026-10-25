@@ -578,7 +578,8 @@ export function agentApi(deps: AgentDeps) {
       if (!r.note || r.note.kind !== "action") throw new AgentError("Only to-dos (stand:action/...) can be completed.");
       const by = caller.token ? `${caller.user.name} via ${caller.token.label}` : caller.user.name;
       const already = !!r.note.doneAt;
-      const done = already ? r.note : db.setActionDone(r.room.id, r.note.id, by);
+      const pr = cleanLinks(args.links).find((l) => prOf(l));
+      const done = already ? r.note : db.setActionDone(r.room.id, r.note.id, by, pr ? `pr:${pr}` : "agent");
       if (!done) throw new AgentError("Couldn't check that to-do off.");
       const update = db.addUpdate({
         roomId: r.room.id,

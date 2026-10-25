@@ -5,10 +5,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, Jot, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, FollowUp, Jot, Note, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import { stateOf } from "../../shared/tasks.ts";
+import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
+import { useWork } from "../WorkLog.tsx";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
-import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
+import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
 import { ArchiveIcon, CameraIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
@@ -36,12 +39,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   // The snap open big: one on its own, or a note's pictures with the note.
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [showDone, setShowDone] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   // The tab someone last looked at in this space; a new space opens on Meetings.
   const [tab, setTab] = useState<TabKey>(() => {
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
+      // To do and Questions became one Tasks tab.
+      if (saved === "todo" || saved === "questions") return "tasks";
       if (saved && TABS.some((t) => t.key === saved)) return saved as TabKey;
     } catch {}
     return "meetings";
@@ -180,14 +184,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const meetings = (feed?.meetings ?? []).filter((m) => !gone.has(`meeting:${m.id}`));
   const counts: Record<TabKey, number> = {
     meetings: meetings.length,
-    todo: todos.length,
-    questions: questions.length,
+    tasks: todos.length + questions.length,
     decisions: decisions.filter((n) => !n.replacedBy).length,
     next: agenda.length + suggested.length,
   };
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
   const done = (room.doneFollowUps ?? []).filter((f) => !gone.has(`todo:${f.id}`));
-  const fromOf = new Map([...room.followUps, ...done].flatMap((f) => (f.from ? [[f.id, f.from] as const] : [])));
+  const closedQuestions = (feed?.closedQuestions ?? []).filter((n) => !gone.has(`question:${n.id}`));
 
   const entries: Entry[] = feed
     ? [
@@ -311,29 +314,15 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </>
           )}
 
-          {tab === "todo" && (
-            <>
-              {todos.length ? (
-                <TodoList room={room} notes={todos} fromOf={fromOf} onArchive={(id) => archive(`todo:${id}`)} />
-              ) : (
-                <p className="sh-card-empty">No open to-dos.</p>
-              )}
-              {done.length > 0 && (
-                <div className={showDone ? "sh-done open" : "sh-done"}>
-                  <button className="sh-done-toggle" aria-expanded={showDone} onClick={() => setShowDone((v) => !v)}>
-                    <ChevronIcon />
-                    <DoneIcon />
-                    Done
-                    <span className="count">{done.length}</span>
-                  </button>
-                  {showDone && <TodoList room={room} notes={done} fromOf={fromOf} onArchive={(id) => archive(`todo:${id}`)} />}
-                </div>
-              )}
-            </>
-          )}
-
-          {tab === "questions" && (
-            <PointList kind="question" notes={questions} empty="No open questions." onArchive={(id) => archive(`question:${id}`)} />
+          {tab === "tasks" && (
+            <TasksTab
+              roomId={room.id}
+              me={user.name}
+              open={[...todos, ...questions]}
+              closed={[...done, ...closedQuestions]}
+              onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
+              reload={load}
+            />
           )}
           {tab === "decisions" && (
             <PointList kind="decided" notes={decisions} empty="No decisions yet." onArchive={(id) => archive(`decision:${id}`)} />
@@ -593,28 +582,134 @@ function MeetingRow({ m, onArchive }: { m: SpaceFeed["meetings"][number]; onArch
   );
 }
 
-/** To-dos as the recap lists them: one line, the chapter pill, the owner's face at the end. */
-function TodoList(props: { room: RoomInfo; notes: RoomInfo["followUps"]; fromOf: Map<string, NoteFrom>; onArchive: (id: string) => void }) {
-  const { fromOf } = props;
-  return (
+type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
+
+/**
+ * One list for everything still to do in the space: to-dos (Do) and open questions (Answer). Work
+ * waiting on someone's look (a PR reported ready) comes first, then the rest grouped by owner, yours
+ * first, then folded Done and Dropped. Anyone can tick a task off, drop it or reopen it, with Undo.
+ */
+function TasksTab(props: { roomId: string; me: string; open: TaskNote[]; closed: TaskNote[]; onArchive: (n: Note) => void; reload: () => void }) {
+  const [showDone, setShowDone] = useState(false);
+  const [showDropped, setShowDropped] = useState(false);
+  const work = useWork(props.open.filter((n) => n.kind === "action").map((n) => n.id));
+  const waiting = props.open.filter((n) => work[n.id]?.ready);
+  const groups = new Map<string, TaskNote[]>();
+  for (const n of props.open.filter((x) => !work[x.id]?.ready)) {
+    const k = n.owner ? firstName(n.owner) : "";
+    groups.set(k, [...(groups.get(k) ?? []), n]);
+  }
+  const me = firstName(props.me);
+  const owners = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || groups.get(b)!.length - groups.get(a)!.length || a.localeCompare(b));
+  function rank(k: string) {
+    return k === me ? 0 : k === "" ? 2 : 1;
+  }
+  const done = props.closed.filter((n) => stateOf(n) !== "dropped");
+  const dropped = props.closed.filter((n) => stateOf(n) === "dropped");
+
+  const move = (n: Note, state: "done" | "dropped" | "open") =>
+    api.setTask(props.roomId, n.id, { state }).then(
+      (saved) => {
+        props.reload();
+        if (state !== "open")
+          toast({
+            text: state === "dropped" ? "Dropped" : n.kind === "question" ? "Answered" : "Done",
+            action: { label: "Undo", run: () => void api.setTask(props.roomId, n.id, { state: "open" }).then(props.reload, errorToast("Couldn't undo it")) },
+          });
+        return saved;
+      },
+      (err) => {
+        errorToast(state === "dropped" ? "Couldn't drop it" : "Couldn't save that")(err);
+        return undefined;
+      },
+    );
+  const notSaid = (n: Note) => void api.setTask(props.roomId, n.id, { saidDone: false }).then(props.reload, errorToast("Couldn't change it"));
+
+  const list = (notes: TaskNote[], closed = false) => (
     <FollowUpList
       oneLine
-      notes={props.notes}
-      onToggle={saveFollowUp(props.room.id)}
-      after={(n) => fromOf.get(n.id) && <FromChip from={fromOf.get(n.id)!} />}
-      tail={(n) => (
+      notes={notes}
+      onToggle={(n, d) => move(n, d ? "done" : "open")}
+      after={(n: TaskNote) => (
         <>
-          <ArchiveButton onClick={() => props.onArchive(n.id)} />
+          {n.kind === "question" && <span className="task-verb">Answer</span>}
+          {n.saidDone && !n.doneAt && <SaidDonePill quote={n.saidDone} onUndo={() => notSaid(n)} />}
+          {closed && <ClosedPill note={n} />}
+          {closed && n.answeredBy && (
+            <span className="rc-pill-wrap">
+              <span className="rc-pill task-closed" tabIndex={0}>
+                Answered
+              </span>
+              <span className="rc-pop" role="tooltip">
+                <span className="rc-pop-crux">{n.answeredBy}</span>
+              </span>
+            </span>
+          )}
+          {n.from && <FromChip from={n.from} />}
+        </>
+      )}
+      tail={(n: TaskNote) => (
+        <>
+          {!closed && (
+            <button className="sh-archive sh-drop" aria-label="Drop: no longer wanted" title="Drop: no longer wanted" onClick={() => void move(n, "dropped")}>
+              <CloseIcon />
+            </button>
+          )}
+          <ArchiveButton onClick={() => props.onArchive(n)} />
           {n.owner ? (
-            <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · done by ${n.doneBy}` : ""}`} />
+            <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`} />
           ) : (
-            <span className="rc-face none" title="Unassigned">
+            <span className="rc-face none" title={n.kind === "question" ? "Anyone" : "Unassigned"}>
               ?
             </span>
           )}
         </>
       )}
     />
+  );
+
+  const fold = (label: string, n: number, open: boolean, toggle: () => void, icon: React.ReactNode) =>
+    n > 0 && (
+      <button className="sh-done-toggle" aria-expanded={open} onClick={toggle}>
+        <ChevronIcon />
+        {icon}
+        {label}
+        <span className="count">{n}</span>
+      </button>
+    );
+
+  return (
+    <>
+      {!props.open.length && <p className="sh-card-empty">Nothing open. New tasks come from meetings and what people save here.</p>}
+      {waiting.length > 0 && (
+        <div className="sh-task-group">
+          <p className="sh-group waiting" title="A PR or other work is in and needs someone with a say to look">
+            Waiting on you · {waiting.length}
+          </p>
+          {list(waiting)}
+        </div>
+      )}
+      {owners.map((o) => (
+        <div key={o || "nobody"} className="sh-task-group">
+          <p className="sh-group">
+            {o === me ? "You" : o || "No owner"} · {groups.get(o)!.length}
+          </p>
+          {list(groups.get(o)!)}
+        </div>
+      ))}
+      {done.length > 0 && (
+        <div className={showDone ? "sh-done open" : "sh-done"}>
+          {fold("Done", done.length, showDone, () => setShowDone((v) => !v), <DoneIcon />)}
+          {showDone && list(done, true)}
+        </div>
+      )}
+      {dropped.length > 0 && (
+        <div className={showDropped ? "sh-done open" : "sh-done"}>
+          {fold("Dropped", dropped.length, showDropped, () => setShowDropped((v) => !v), <CloseIcon size={13} />)}
+          {showDropped && list(dropped, true)}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -626,7 +721,7 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "meetings" | "todo" | "questions" | "decisions" | "next";
+type TabKey = "meetings" | "tasks" | "decisions" | "next";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
@@ -649,8 +744,7 @@ function ArchiveButton({ onClick }: { onClick: () => void }) {
 /** Which archived rows each tab lists at its bottom. */
 const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
   meetings: ["meeting", "snap", "jot"],
-  todo: ["todo"],
-  questions: ["question"],
+  tasks: ["todo", "question"],
   decisions: ["decision"],
   next: ["item", "deck", "suggestion"],
 };
@@ -687,8 +781,7 @@ function ArchivedList(props: { rows: ArchivedRow[]; open: boolean; onToggle: () 
 
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
-  { key: "todo", label: "To do", icon: <TodoIcon size={14} /> },
-  { key: "questions", label: "Questions", icon: <QuestionIcon size={14} /> },
+  { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
   { key: "decisions", label: "Decisions", icon: <DecidedIcon size={14} /> },
   { key: "next", label: "Up next" },
 ];

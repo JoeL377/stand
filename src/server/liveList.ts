@@ -19,6 +19,8 @@ export const LIST_MAX_WAIT_MS = 8_000;
 const LIST_WINDOW_MS = 2 * 60_000;
 /** Most lines on a list; past this a run adds nothing more. */
 const MAX_ITEMS = 300;
+/** Most carried tasks a run is shown, oldest first. */
+const MAX_CARRIED = 80;
 
 const Kind = z.enum(["todo", "decided", "open"]);
 export const ListAnswerSchema = z.object({
@@ -42,6 +44,10 @@ export const ListAnswerSchema = z.object({
       }),
     )
     .describe("answered: an open question got settled. done or dropped: a to-do. wrong: you misheard it earlier. Usually empty"),
+  said_done: z
+    .array(z.object({ id: z.string().describe("A carried task's id, t1, t2…"), line: z.number().int().describe("The NEW line that says it's finished") }))
+    .optional()
+    .describe("Carried tasks from earlier meetings that a NEW line says are finished. Usually empty"),
 });
 export type ListAnswer = z.infer<typeof ListAnswerSchema>;
 
@@ -56,7 +62,9 @@ Add a line only when the NEW talk itself does one of these:
 
 Before adding, check the list: if a line there (open or closed) already says the same thing in other words, don't add it; at most use change on that line if the owner or scope changed. One line per thing.
 When an open question gets answered, close it as answered with the decision in a few words; don't also add that decision. Never return commentary about the transcript as a line.
-Transcription is rough: read through misheard words, and match misheard names to the people in the meeting.`;
+Transcription is rough: read through misheard words, and match misheard names to the people in the meeting.
+
+You may also get the open tasks carried over from earlier meetings (ids t1, t2…). When a NEW line says one of them is finished ("I merged the Railway fix", "that one's done"), list it in said_done with that line. Only when the speaker clearly says it's finished, not that it's started, nearly there or should be done. Never add a carried task to the list again.`;
 
 /** What the list needs from the model; null when it couldn't answer. */
 export interface ListModel {
@@ -94,6 +102,8 @@ export class ListKeeper {
   /** The latest line a run has read. */
   private lastLook = 0;
   private n = 0;
+  /** Carried tasks the last run heard called finished: their ids and the remark that said so. */
+  heardDone: Array<{ id: string; segment: Segment }> = [];
 
   constructor(
     private model: ListModel,
@@ -176,7 +186,15 @@ export class ListKeeper {
 
   /** One pass over the talk up to `now`. `itemAt` is the agenda item in focus when a line was said.
    *  Returns whether the list changed. */
-  async run(segments: Segment[], people: string[], itemAt: (ts: number) => string | null, now: number): Promise<boolean> {
+  async run(
+    segments: Segment[],
+    people: string[],
+    itemAt: (ts: number) => string | null,
+    now: number,
+    /** Open tasks from earlier meetings, so the run can hear one called finished (see heardDone). */
+    carried: Array<{ id: string; who: string | null; text: string }> = [],
+  ): Promise<boolean> {
+    this.heardDone = [];
     const talk = segments.filter((s) => s.ts <= now).sort((a, b) => a.ts - b.ts);
     const firstNew = talk.findIndex((s) => s.ts > this.lastLook);
     if (firstNew === -1) return false;
@@ -187,7 +205,9 @@ export class ListKeeper {
     const lines = shown
       .map((s, k) => `${from + k >= firstNew ? "NEW " : ""}[${k + 1}] [${at(s.ts, this.meetingStartedAt)}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
       .join("\n");
-    const a = await this.model.liveList(`People: ${people.join(", ")}`, `Running list:\n${list}\n\nTranscript, meeting time (${at(now, this.meetingStartedAt)} now):\n${lines}`);
+    const tasks = carried.slice(0, MAX_CARRIED);
+    const earlier = tasks.length ? `Open tasks from earlier meetings:\n${tasks.map((t, k) => `- [t${k + 1}]${t.who ? ` (${t.who})` : ""} ${clip(t.text, 140)}`).join("\n")}\n\n` : "";
+    const a = await this.model.liveList(`People: ${people.join(", ")}`, `${earlier}Running list:\n${list}\n\nTranscript, meeting time (${at(now, this.meetingStartedAt)} now):\n${lines}`);
     this.lastLook = talk.at(-1)!.ts;
     if (!a) return false;
     let changed = false;
@@ -201,6 +221,11 @@ export class ListKeeper {
     };
     const saidAt = (line: number) => shown[Math.min(shown.length, Math.max(firstNew - from + 1, line)) - 1].ts;
     for (const x of a.add) add(x.kind, x.kind === "todo" ? x.who : null, x.text, saidAt(x.line));
+    for (const d of a.said_done ?? []) {
+      const t = tasks[Number(d.id.replace(/^t/, "")) - 1];
+      const seg = shown[Math.min(shown.length, Math.max(firstNew - from + 1, d.line)) - 1];
+      if (t && seg && !this.heardDone.some((h) => h.id === t.id)) this.heardDone.push({ id: t.id, segment: seg });
+    }
     for (const c of a.change) {
       const it = this.items.find((i) => i.id === c.id && !i.closed);
       const text = clip(c.text.trim(), 200);

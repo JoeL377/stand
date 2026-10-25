@@ -138,12 +138,12 @@ async function meeting() {
       await page.waitForTimeout(5_000);
     }
     await snap("space-after-meeting");
-    await page.getByRole("tab", { name: /^To do/ }).click();
-    await snap("space-todo-tab");
+    await page.getByRole("tab", { name: /^Tasks/ }).click();
+    await snap("space-tasks-tab");
   });
   const spaceText = await page.locator("body").innerText();
   fs.writeFileSync(path.join(out, "space-after-meeting.txt"), spaceText);
-  check("space page lists open to-dos", !/No open to-dos/.test(spaceText));
+  check("space page lists open tasks", !/Nothing open\./.test(spaceText));
 
   const recap = page.locator('a[href^="/meetings/"]').first();
   if (await recap.count()) {

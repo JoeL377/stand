@@ -82,5 +82,11 @@ export function settledView(db: DB, roomId: string) {
     // Standing decisions first, the replaced ones after them.
     decided: [...decided.filter((n) => !n.replacedBy), ...decided.filter((n) => n.replacedBy)],
     open: notes.filter((n) => n.kind === "question" && !rows.has(n.id)),
+    /** Questions a later decision answered, as Done Answer tasks with that decision as what closed them. */
+    answered: notes.flatMap((n) => {
+      const r = rows.get(n.id);
+      const by = r?.how === "answered" ? byId.get(r.byNoteId) : undefined;
+      return n.kind === "question" && by ? [{ ...n, answeredBy: by.text, doneAt: n.doneAt ?? by.ts }] : [];
+    }),
   };
 }

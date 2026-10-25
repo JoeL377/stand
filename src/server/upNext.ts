@@ -433,7 +433,7 @@ function carrySpace(db: DB, roomId: string, fromId: string, meeting: { id: strin
   if (!itemId) return null;
   for (const n of open) {
     db.addNote(meeting.id, itemId, { kind: "action", text: n.text, owner: n.owner }, null);
-    db.setActionDone(fromId, n.id, `carry-over to “${here.name}”`);
+    db.setActionDone(fromId, n.id, `carry-over to “${here.name}”`, "moved");
   }
   return itemId;
 }

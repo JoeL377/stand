@@ -55,6 +55,7 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
   const [collapsed, toggle] = useCollapsed();
   // Folded, each item says what it is on hover.
   const tip = (label: string) => (collapsed ? label : undefined);
+  const waiting = (props.spaces ?? []).reduce((n, s) => n + (s.waiting ?? 0), 0);
   const quick = [...(props.spaces ?? [])].sort((a, b) => Number(!!b.live) - Number(!!a.live) || b.activeAt - a.activeAt);
   return (
     <NewSpaceContext.Provider value={(name = "") => setCreating(name)}>
@@ -120,6 +121,11 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
           )}
           <div className="sp-side-user">
             <UserMenu />
+            {waiting > 0 && (
+              <span className="sp-side-waiting" title={`${waiting} of your tasks ${waiting === 1 ? "has" : "have"} work in and ${waiting === 1 ? "waits" : "wait"} on your look`}>
+                {waiting} waiting on you
+              </span>
+            )}
           </div>
         </aside>
         <div className="sp-content">{props.children}</div>

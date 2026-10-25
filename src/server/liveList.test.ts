@@ -91,3 +91,17 @@ test("a saved list picks up where it was", async () => {
   await run(again, talk, 25 * S);
   assert.deepEqual(again.notes("m").map((n) => n.id), ["li_1", "li_2"]);
 });
+
+test("a carried task someone calls finished is heard, by its id, and never added to the list", async () => {
+  const { model, asked } = scripted([answer({ said_done: [{ id: "t2", line: 1 }, { id: "t9", line: 1 }] })]);
+  const k = new ListKeeper(model, T0);
+  const talk = [say(1, 5 * S, "The docs are done, I pushed them")];
+  await k.run(talk, ["Joe Liang"], () => "i1", T0 + 10 * S, [
+    { id: "n1", who: "Joe", text: "Fix the deploy" },
+    { id: "n2", who: "Huy", text: "Write the docs" },
+  ]);
+  assert.match(asked[0], /\[t2\] \(Huy\) Write the docs/);
+  // t9 isn't a carried task: ignored.
+  assert.deepEqual(k.heardDone.map((h) => [h.id, h.segment.id]), [["n2", "s1"]]);
+  assert.deepEqual(k.notes("m"), []);
+});

@@ -21,6 +21,7 @@ import type {
   Quote,
   Segment,
   SegmentKind,
+  TaskState,
   UpdateStatus,
   WorkShot,
   User,
@@ -318,6 +319,9 @@ export type DraftDiscussion = Pick<Discussion, "topic" | "positions" | "outcome"
 
 type Row = Record<string, unknown>;
 
+/** The notes columns that hold where a task stands (shared/tasks.ts), in one order. */
+const TASK_COLS = "state, done_when, parent_id, closed_by, drop_reason, said_done_json, checked_at";
+
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
 const toUser = (r: Row): User => ({
@@ -412,6 +416,13 @@ const toNote = (r: Row): Note => ({
   discussionId: (r.discussion_id as string) ?? null,
   editedBy: (r.edited_by as string) ?? null,
   quote: r.quote_json ? (JSON.parse(r.quote_json as string) as Quote) : null,
+  state: (r.state as TaskState) ?? null,
+  doneWhen: (r.done_when as string) ?? null,
+  parentId: (r.parent_id as string) ?? null,
+  closedBy: (r.closed_by as string) ?? null,
+  dropReason: (r.drop_reason as string) ?? null,
+  saidDone: r.said_done_json ? (JSON.parse(r.said_done_json as string) as Quote) : null,
+  checkedAt: (r.checked_at as number) ?? null,
 });
 
 const toUpdate = (r: Row): ItemUpdate => ({
@@ -497,6 +508,14 @@ export function openDb(file?: string) {
   // A decision's words as said (protocol.ts Quote), from the run as the meeting ends.
   if (!noteCols.includes("quote_json")) db.exec("ALTER TABLE notes ADD COLUMN quote_json TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
+  // Task fields (shared/tasks.ts). A dropped task also gets done_at, so every list that shows open
+  // to-dos leaves it out; state tells the two apart.
+  if (!noteCols.includes("state"))
+    db.exec(
+      `ALTER TABLE notes ADD COLUMN state TEXT; ALTER TABLE notes ADD COLUMN done_when TEXT; ALTER TABLE notes ADD COLUMN parent_id TEXT;
+       ALTER TABLE notes ADD COLUMN closed_by TEXT; ALTER TABLE notes ADD COLUMN drop_reason TEXT; ALTER TABLE notes ADD COLUMN said_done_json TEXT;
+       ALTER TABLE notes ADD COLUMN checked_at INTEGER;`,
+    );
   if (!meetingCols.includes("host_id")) db.exec("ALTER TABLE meetings ADD COLUMN host_id TEXT;");
   if (!meetingCols.includes("end_requested_at")) db.exec("ALTER TABLE meetings ADD COLUMN end_requested_at INTEGER;");
   const snapCols = (db.prepare("PRAGMA table_info(snaps)").all() as Row[]).map((c) => c.name);
@@ -1033,6 +1052,17 @@ export function openDb(file?: string) {
             .all(meetingId, itemId) as Row[]
         ).map((r) => [r.text as string, { doneAt: r.done_at as number, doneBy: (r.done_by as string) ?? null }]),
       );
+      // Where a task stands comes back with its wording, like a check does.
+      const task = new Map(
+        (
+          db
+            .prepare(
+              `SELECT kind, text, ${TASK_COLS} FROM notes WHERE meeting_id = ? AND item_id IS ?
+               AND (state IS NOT NULL OR done_when IS NOT NULL OR parent_id IS NOT NULL OR closed_by IS NOT NULL OR said_done_json IS NOT NULL OR checked_at IS NOT NULL)`,
+            )
+            .all(meetingId, itemId) as Row[]
+        ).map((r) => [`${r.kind}:${r.text}`, r]),
+      );
       // A note that comes back with the same wording keeps its id, so references
       // agents hold (stand:question/<id>) survive the agent rewriting the notes.
       const sameText = new Map(
@@ -1091,6 +1121,14 @@ export function openDb(file?: string) {
           note.editedBy ?? null,
           note.quote ? JSON.stringify(note.quote) : null,
         );
+        const t = task.get(`${note.kind}:${note.text}`);
+        if (t) {
+          db.prepare(`UPDATE notes SET ${TASK_COLS.split(", ").map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).run(
+            ...TASK_COLS.split(", ").map((c) => (t[c] as string | number | null) ?? null),
+            note.id,
+          );
+          return [toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(note.id) as Row)];
+        }
         return [note];
       });
     },
@@ -1125,8 +1163,13 @@ export function openDb(file?: string) {
     /** Undoes removeNote: the note comes back as it was, and the agent may write it again. */
     restoreNote(n: Note) {
       db.prepare(
-        "INSERT OR IGNORE INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      ).run(n.id, n.meetingId, n.itemId, n.kind, n.text, n.owner, n.ts, n.doneAt, n.doneBy, n.discussionId, n.editedBy ?? null);
+        `INSERT OR IGNORE INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by, ${TASK_COLS})
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        n.id, n.meetingId, n.itemId, n.kind, n.text, n.owner, n.ts, n.doneAt, n.doneBy, n.discussionId, n.editedBy ?? null,
+        n.state ?? null, n.doneWhen ?? null, n.parentId ?? null, n.closedBy ?? null, n.dropReason ?? null,
+        n.saidDone ? JSON.stringify(n.saidDone) : null, n.checkedAt ?? null,
+      );
       db.prepare(
         "DELETE FROM dismissed_notes WHERE rowid IN (SELECT rowid FROM dismissed_notes WHERE meeting_id = ? AND item_id IS ? AND kind = ? AND text = ? LIMIT 1)",
       ).run(n.meetingId, n.itemId, n.kind, n.text);
@@ -1244,15 +1287,64 @@ export function openDb(file?: string) {
       ).map(toDiscussion);
     },
 
-    /** Checks an action item off (by someone) or reopens it (by: null). */
-    setActionDone(roomId: string, noteId: string, by: string | null): Note | null {
+    /** Checks an action item off (by someone) or reopens it (by: null). closedBy: what closed it
+     *  (shared/tasks.ts), "confirmed" when a person ticked it with nothing to show. */
+    setActionDone(roomId: string, noteId: string, by: string | null, closedBy = "confirmed"): Note | null {
       const res = db
         .prepare(
-          "UPDATE notes SET done_at = ?, done_by = ? WHERE id = ? AND kind = 'action' AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)",
+          `UPDATE notes SET done_at = ?, done_by = ?, state = ?, closed_by = ?, drop_reason = NULL
+           WHERE id = ? AND kind = 'action' AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)`,
         )
-        .run(by ? Date.now() : null, by, noteId, roomId);
+        .run(by ? Date.now() : null, by, by ? "done" : null, by ? closedBy : null, noteId, roomId);
       if (!res.changes) return null;
       return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
+    },
+    /** Moves a to-do or open question to a state by hand: done (with what closed it), dropped (with
+     *  why), doing, or open again. "Still on it" is open with checkedAt, so a check-in counts it answered;
+     *  checked false clears that (Undo), undefined leaves it. */
+    setTaskState(
+      roomId: string,
+      noteId: string,
+      change: { state: TaskState; by: string; closedBy?: string | null; reason?: string | null; checked?: boolean },
+    ): Note | null {
+      const closed = change.state === "done" || change.state === "dropped";
+      const res = db
+        .prepare(
+          `UPDATE notes SET state = ?, done_at = ?, done_by = ?, closed_by = ?, drop_reason = ?, checked_at = CASE WHEN ? = 'keep' THEN checked_at ELSE ? END
+           WHERE id = ? AND kind IN ('action', 'question') AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)`,
+        )
+        .run(
+          change.state === "open" ? null : change.state,
+          closed ? Date.now() : null,
+          closed ? change.by : null,
+          change.state === "done" ? (change.closedBy ?? "confirmed") : null,
+          change.state === "dropped" ? (change.reason ?? null) : null,
+          change.checked === undefined ? "keep" : "set",
+          change.checked ? Date.now() : null,
+          noteId,
+          roomId,
+        );
+      if (!res.changes) return null;
+      return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
+    },
+    /** Someone said a task is finished (quote), or that was undone (null). It stays open until evidence or a click closes it. */
+    setSaidDone(roomId: string, noteId: string, quote: Quote | null): Note | null {
+      const res = db
+        .prepare("UPDATE notes SET said_done_json = ? WHERE id = ? AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)")
+        .run(quote ? JSON.stringify(quote) : null, noteId, roomId);
+      if (!res.changes) return null;
+      return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
+    },
+    /** Open questions from a space's finished meetings, oldest first, for the Tasks tab. */
+    roomQuestions(roomId: string): Array<Note & { meetingStartedAt: number }> {
+      return (
+        db
+          .prepare(
+            `SELECT n.*, m.started_at AS meeting_started_at FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND n.kind = 'question' ORDER BY m.started_at DESC, n.rowid`,
+          )
+          .all(roomId) as Row[]
+      ).map((r) => ({ ...toNote(r), meetingStartedAt: r.meeting_started_at as number }));
     },
     /** Every action item from the room's finished meetings, newest meeting first. */
     roomFollowUps(roomId: string): FollowUp[] {
@@ -1832,6 +1924,13 @@ export function openDb(file?: string) {
     },
     noteUpdates(noteId: string): ItemUpdate[] {
       return (db.prepare("SELECT * FROM updates WHERE note_id = ? ORDER BY ts DESC, rowid DESC LIMIT 50").all(noteId) as Row[]).map(toUpdate);
+    },
+    /** When the meeting before this one ended: what closed after that is news at this one's check-in. */
+    previousMeetingEnd(roomId: string, before: number): number | null {
+      const r = db.prepare("SELECT MAX(ended_at) AS t FROM meetings WHERE room_id = ? AND started_at < ? AND ended_at IS NOT NULL").get(roomId, before) as
+        | Row
+        | undefined;
+      return (r?.t as number) ?? null;
     },
     /** When the meeting before this one started: "since last time" starts there. */
     previousMeetingStart(roomId: string, before: number): number | null {

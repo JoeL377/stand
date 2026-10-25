@@ -403,6 +403,17 @@ export function Stage(props: {
             followUps={state.followUps}
             onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
             onRemove={canSteer && !props.ending ? removeNote : undefined}
+            checkIn={state.checkIn}
+            checkInActs={
+              props.ending || props.offline
+                ? null
+                : {
+                    onState: (noteId, st, still) => send({ type: "task.state", noteId, state: st, still }),
+                    onUndoSaid: (noteId) => send({ type: "task.saidDone.undo", noteId }),
+                    onClose: () => send({ type: "checkin", open: false }),
+                    onOpen: () => send({ type: "checkin", open: true }),
+                  }
+            }
           />
         )}
       </div>

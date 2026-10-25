@@ -1048,3 +1048,78 @@ test("without a model there's no running list: the board's tabs read the live no
   const ws = await join(session, { id: "u1", name: "Joe" });
   assert.deepEqual(ws.got.find((m) => m.type === "list"), { type: "list", items: null });
 });
+
+test("tasks: done needs what closed it, drop keeps why and leaves open lists, and a rewrite keeps both", () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Tasks");
+  const m = db.startMeeting(room.id);
+  const [fix, docs, q] = db.replaceNotes(m.id, null, [
+    { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
+    { kind: "action", text: "Write the docs", owner: "Huy" },
+    { kind: "question", text: "Do we keep SQLite?", owner: null },
+  ]);
+  assert.equal(db.setActionDone(room.id, fix.id, "Joe")?.closedBy, "confirmed");
+  const dropped = db.setTaskState(room.id, docs.id, { state: "dropped", by: "Andy", reason: "Conxt has them" })!;
+  assert.deepEqual([dropped.state, dropped.dropReason, dropped.doneBy, !!dropped.doneAt], ["dropped", "Conxt has them", "Andy", true]);
+  assert.equal(db.setTaskState(room.id, q.id, { state: "done", by: "Joe" })?.state, "done");
+  // The live notes rewrite the item: each task keeps where it stood.
+  const again = db.replaceNotes(m.id, null, [
+    { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
+    { kind: "action", text: "Write the docs", owner: "Huy" },
+    { kind: "question", text: "Do we keep SQLite?", owner: null },
+  ]);
+  assert.deepEqual(again.map((n) => [n.state, n.closedBy ?? n.dropReason]), [["done", "confirmed"], ["dropped", "Conxt has them"], ["done", "confirmed"]]);
+  db.endMeeting(m.id, null);
+  // A dropped to-do isn't open anywhere that lists open to-dos.
+  assert.deepEqual(db.openActions(room.id), []);
+  // Back to open, and Still on it marks when it was checked; Undo clears that.
+  const reopened = db.setTaskState(room.id, docs.id, { state: "open", by: "Huy", checked: true })!;
+  assert.deepEqual([reopened.state, reopened.doneAt, reopened.dropReason, !!reopened.checkedAt], [null, null, null, true]);
+  assert.equal(db.setTaskState(room.id, docs.id, { state: "open", by: "Huy", checked: false })?.checkedAt, null);
+  // A decision is a closed Decide task; it can't be moved, and another space can't move anything.
+  const [dec] = db.replaceNotes(db.startMeeting(room.id).id, null, [{ kind: "decision", text: "Keep SQLite", owner: null }]);
+  assert.equal(db.setTaskState(room.id, dec.id, { state: "dropped", by: "Joe" }), null);
+  assert.equal(db.setTaskState(db.createRoom("Other").id, docs.id, { state: "done", by: "Mallory" }), null);
+});
+
+test("since last time: carried tasks open the meeting, Stand hears one called done, and answers stick", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Check-in");
+  const last = db.startMeeting(room.id);
+  const [railway, docs, pr] = db.replaceNotes(last.id, null, [
+    { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
+    { kind: "action", text: "Write the docs", owner: "Huy" },
+    { kind: "action", text: "Ship the bar fix", owner: "Andy" },
+  ]);
+  db.endMeeting(last.id, null);
+  // Between meetings a PR merged and closed one.
+  db.setActionDone(room.id, pr.id, "Andy via GitHub", "pr:https://github.com/a/b/pull/7");
+  let shown = "";
+  const agent = Object.assign(new HeuristicAgent(), {
+    async liveList(_c: string, talk: string) {
+      shown = talk;
+      return { add: [], change: [], close: [], said_done: [{ id: "t1", line: 1 }] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const state = () => (joe.got.filter((m) => m.type === "state").at(-1) as Extract<ServerMessage, { type: "state" }>).state;
+  // Open ones oldest first, and the one the PR closed since last time.
+  assert.deepEqual(state().followUps.map((f) => [f.text, !!f.doneAt]), [["Fix the Railway deploy", false], ["Write the docs", false], ["Ship the bar fix", true]]);
+  assert.deepEqual(state().checkIn, { closed: false, answeredAt: null });
+
+  session.addSpeech("u1", "Joe", "I fixed the Railway deploy yesterday", Date.now());
+  await (session as unknown as { runList(): Promise<void> }).runList();
+  assert.match(shown, /Open tasks from earlier meetings:\n- \[t1\] \(Joe\) Fix the Railway deploy\n- \[t2\] \(Huy\) Write the docs/);
+  const heard = state().followUps.find((f) => f.id === railway.id)!;
+  assert.deepEqual([heard.saidDone?.speaker, heard.saidDone?.text, heard.doneAt], ["Joe", "I fixed the Railway deploy yesterday", null]);
+
+  await say(joe, { type: "task.state", noteId: railway.id, state: "done" });
+  await say(joe, { type: "task.state", noteId: docs.id, state: "open", still: true });
+  const after = state();
+  assert.equal(after.followUps.find((f) => f.id === railway.id)?.closedBy, "confirmed");
+  assert.ok(after.followUps.find((f) => f.id === docs.id)!.checkedAt! >= session.meetingStartedAt);
+  assert.ok(after.checkIn?.answeredAt);
+  await say(joe, { type: "checkin", open: false });
+  assert.equal(state().checkIn?.closed, true);
+});

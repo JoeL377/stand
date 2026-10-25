@@ -145,5 +145,7 @@ export const api = {
   meeting: (id: string) => call<MeetingRecap>("GET", `/api/meetings/${id}`),
   suggested: (roomId: string) => call<{ upNext: UpNext }>("GET", `/api/rooms/${roomId}/suggested.json`),
   setFollowUp: (roomId: string, noteId: string, done: boolean) => call<Note>("PATCH", `/api/rooms/${roomId}/followups/${noteId}`, { done }),
+  setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>
+    call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
   token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };

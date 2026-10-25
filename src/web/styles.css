@@ -2260,3 +2260,53 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 }
 /* A tap leaves no hover box on the card's tabs. */
 @media (hover: none) { .topic-tabs button:hover:not(:disabled) { background: transparent; } }
+
+/* ---- tasks (shared/tasks.ts): Since last time, marks, the space page's Tasks tab ---- */
+.checkin { flex: 1 0 auto; display: flex; flex-direction: column; gap: 14px; padding: 18px 22px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.checkin-head { display: flex; align-items: baseline; gap: 10px; }
+.checkin-head h2 { font-size: 17px; font-weight: 600; margin: 0; }
+.checkin-count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.checkin-close { margin-left: auto; font-size: 12.5px; padding: 3px 10px; }
+.checkin-group h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.checkin-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.checkin-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 2px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.checkin-rows li:first-child { border-top: 0; }
+.checkin-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkin-row .rc-pill-wrap { margin-left: 0; flex: none; }
+.checkin-at { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.checkin-btns { display: flex; gap: 4px; flex: none; }
+.checkin-btn { font-size: 12px; padding: 2px 9px; min-height: 0; height: 24px; border-radius: 999px; background: var(--panel); }
+.checkin-btn.lit { background: var(--ok-text); border-color: var(--ok-text); color: #fff; }
+.checkin-btn.quiet { border: 0; background: none; color: var(--muted); padding: 2px 4px; }
+.checkin-btn.quiet:hover { color: var(--text); }
+.checkin-row.answered .checkin-text, .checkin-row.closed .checkin-text { color: var(--muted); }
+.checkin-answer { flex: none; font-size: 12px; color: var(--muted); }
+.checkin-tick { flex: none; width: 16px; color: var(--ok-text); font-weight: 600; }
+.checkin-rows.news { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.task-said { display: inline-flex; align-items: center; gap: 2px; }
+.task-said-pill { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok-text); }
+.task-said-undo { border: 0; background: none; padding: 0 3px; min-height: 0; height: 18px; font-size: 13px; line-height: 1; color: var(--muted); box-shadow: none; }
+.task-said-undo:hover { color: var(--text); background: none; }
+.task-closed { color: var(--ok-text); }
+.task-closed.dropped { color: var(--muted); }
+.task-ready { background: var(--accent-soft); color: var(--accent-text); }
+.task-state { flex: none; font-size: 11.5px; line-height: 18px; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); }
+@media (max-width: 640px) {
+  .checkin { padding: 12px; }
+  .checkin-row { flex-wrap: wrap; padding: 6px 0; }
+  .checkin-text { flex-basis: 100%; white-space: normal; }
+}
+.sh-task-group + .sh-task-group { margin-top: 6px; }
+.sh-group.waiting { color: var(--accent-text); }
+.task-verb { margin-left: 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); vertical-align: 1px; }
+.sp-side-waiting { display: inline-block; margin: 6px 0 0 2px; font-size: 11.5px; line-height: 18px; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); white-space: nowrap; }
+.sp-shell.collapsed .sp-side-waiting { display: none; }
+.followups li.done.dropped .check, .sh-done .followups li.done.dropped .check { background: var(--panel-2); border-color: var(--line); color: var(--muted); }
+/* A chapter opened from the bar: the board as it stood then, on this screen only. */
+.topic-now.rewound { border-style: dashed; border-color: var(--line); }
+.topic-now.rewound .topic-now-label { color: var(--muted); }
+.topic-live-back { align-self: center; flex: none; font-size: 12.5px; padding: 4px 12px; min-height: 0; border-radius: 999px; background: var(--panel-2); color: var(--text); }
+.topic-live-back.moved { background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); animation: live-back-glow 1.6s ease-in-out 3; }
+@keyframes live-back-glow { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .topic-live-back.moved { animation: none; } }
+.topic-board.rewinding .topic-stretch.current { cursor: pointer; }
