@@ -87,7 +87,28 @@ export interface Note {
   editedBy?: string | null;
   /** Decisions: the words it was settled in, as said (see Quote). */
   quote?: Quote | null;
+  // Task fields (shared/tasks.ts), named as in Conxt's work loop so the store can move there later.
+  /** Set when someone or something moved it; null means it follows doneAt (open or done). */
+  state?: TaskState | null;
+  /** What finishing it looks like, in a line. */
+  doneWhen?: string | null;
+  /** A spec's id, for a task that is part of one. */
+  parentId?: string | null;
+  /** What closed it: "pr:<url>" for a merged PR, "agent" for an agent's report, "confirmed" for a
+   *  person's click with nothing to show, "moved" for a to-do carried to another space. */
+  closedBy?: string | null;
+  /** Dropped: why, in a line. */
+  dropReason?: string | null;
+  /** Someone said it was finished, with no evidence yet: their words and when. */
+  saidDone?: Quote | null;
+  /** When someone last said "Still on it" for it in a meeting's check-in. */
+  checkedAt?: number | null;
 }
+
+/** Huy's verbs: a to-do is Do, a decision Decide, an open question Answer. */
+export type TaskVerb = "do" | "decide" | "answer";
+/** Four plain states. Everything else (suggested, waiting on you, said done) is a mark on the task. */
+export type TaskState = "open" | "doing" | "done" | "dropped";
 
 /** A line on the board's running list (server/liveList.ts), in the shape of a note so the board's
  *  tabs read either. Lines are only added, changed by id or closed, never regrouped. */
@@ -402,9 +423,11 @@ export interface RoomState {
   suggestion: Suggestion | null;
   items: Item[];
   decks: Deck[];
-  /** Action items from earlier meetings that are still open, plus any checked
-   *  off during this meeting (so they can be unchecked). */
+  /** Action items from earlier meetings that are still open, oldest first, plus any closed since
+   *  the meeting before this one ended (so the check-in shows them and they can be reopened). */
   followUps: FollowUp[];
+  /** The "Since last time" check-in: whether someone moved on from it, and when anyone last answered on it. */
+  checkIn?: { closed: boolean; answeredAt: number | null };
   /** Updates agents and people reported on this space's items since the last meeting started. */
   updates: ItemUpdate[];
   /** The agent's suggested agenda for this space. */
@@ -478,6 +501,12 @@ export type ClientMessage = (
   | { type: "frame"; dataUrl: string }
   | { type: "segment.move"; segmentId: string; itemId: string | null }
   | { type: "followup.done"; noteId: string; done: boolean }
+  /** Anyone: move a task from the check-in or the board. still: "Still on it" (open, and answered for this meeting). */
+  | { type: "task.state"; noteId: string; state: "done" | "dropped" | "open"; still?: boolean; reason?: string }
+  /** Anyone: Stand heard "done" wrong; the task loses its Said done mark. */
+  | { type: "task.saidDone.undo"; noteId: string }
+  /** Anyone: move on from the "Since last time" check-in (open: false), or bring it back. */
+  | { type: "checkin"; open: boolean }
   // Host only: fix what the agent wrote down for the item in focus.
   | { type: "note.edit"; noteId: string; text: string; owner?: string | null }
   | { type: "note.remove"; noteId: string }
@@ -645,6 +674,8 @@ export interface SpaceFeed {
   decided: Array<Note & { from?: NoteFrom; replacedBy?: { text: string; meetingId: string; startedAt: number } }>;
   /** Open questions from all its meetings that no later decision answered, newest first. */
   open: Array<Note & { from?: NoteFrom }>;
+  /** Questions someone answered or dropped by hand, or a later decision answered (answeredBy), newest first. */
+  closedQuestions?: Array<Note & { from?: NoteFrom; answeredBy?: string }>;
 }
 
 export interface SpaceSummary {
@@ -666,6 +697,8 @@ export interface SpaceSummary {
   todos: number;
   /** Open to-dos owned by you. */
   forYou: number;
+  /** Your to-dos with work in (a PR reported ready) that wait on your look. */
+  waiting?: number;
   /** The latest decision or open question, for the card's last line. */
   last: { kind: "decision" | "question" | "action"; text: string; ts: number } | null;
   /** People who have been in it. */

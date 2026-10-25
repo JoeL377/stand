@@ -49,17 +49,19 @@ export function FollowUpList(props: {
       {props.notes.map((orig) => {
         const n = { ...orig, ...saved[orig.id] };
         const done = Boolean(n.doneAt);
+        // A dropped task is closed but not done: its box shows a cross, and clicking it reopens it.
+        const dropped = n.state === "dropped";
         const src = props.source?.(n);
         const w = work[n.id];
         const open = opened === n.id && !!w?.log.length;
         return (
-          <li key={n.id} className={[done && "done", w?.working && "working"].filter(Boolean).join(" ") || undefined}>
+          <li key={n.id} className={[done && "done", dropped && "dropped", w?.working && "working"].filter(Boolean).join(" ") || undefined}>
             <button
               className="check"
               role="checkbox"
               aria-checked={done}
               aria-label={done ? `Reopen: ${n.text}` : `Mark done: ${n.text}`}
-              title={done ? `Done${n.doneBy ? ` by ${n.doneBy}` : ""}. Click to reopen.` : "Mark done"}
+              title={done ? `${dropped ? "Dropped" : "Done"}${n.doneBy ? ` by ${n.doneBy}` : ""}. Click to reopen.` : "Mark done"}
               disabled={busy === n.id}
               onClick={async () => {
                 setBusy(n.id);
@@ -74,7 +76,7 @@ export function FollowUpList(props: {
               }}
             >
               <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden>
-                <path d="M2.5 6.2 5 8.6l4.6-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                <path d={dropped ? "M3.5 3.5l5 5M8.5 3.5l-5 5" : "M2.5 6.2 5 8.6l4.6-5"} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
             <span className="fu-body">
@@ -95,7 +97,7 @@ export function FollowUpList(props: {
               {open && <WorkCard work={w} />}
             </span>
             {props.tail?.(n)}
-            <CopyForAgent kind="action" id={n.id} />
+            <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} />
           </li>
         );
       })}

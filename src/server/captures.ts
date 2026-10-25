@@ -11,6 +11,7 @@ import { newId } from "./ids.ts";
 import { archivedRows } from "./archive.ts";
 import { withFrom } from "./noteFrom.ts";
 import { settledView } from "./spaceSettle.ts";
+import { isClosed, stateOf } from "../shared/tasks.ts";
 import { linkSnaps, saveSnapFile } from "./snaps.ts";
 
 /** What the feed shows of the space's history. */
@@ -151,7 +152,7 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
   // Archived rows leave the page; the Archived list shows them instead.
   const gone = new Set(archived.map((a) => a.ref));
   const keep = (kind: string) => (x: { id: string }) => !gone.has(`${kind}:${x.id}`);
-  const { decided, open } = settledView(db, roomId);
+  const { decided, open, answered } = settledView(db, roomId);
   return {
     archived,
     captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES).filter(keep("snap")), [], [], baseUrl),
@@ -162,6 +163,14 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
     meetings: db.feedMeetings(roomId).filter(keep("meeting")),
     updates: db.roomUpdates(roomId, 0, FEED_UPDATES),
     decided: withFrom(db, decided.filter(keep("decision")).slice(0, FEED_NOTES)),
-    open: withFrom(db, open.filter(keep("question")).slice(0, FEED_NOTES)),
+    // A question someone answered or dropped by hand leaves Open for the Tasks tab's Done and Dropped.
+    open: withFrom(db, open.filter(keep("question")).filter((n) => !isClosed(stateOf(n))).slice(0, FEED_NOTES)),
+    closedQuestions: withFrom(
+      db,
+      [...open.filter((n) => isClosed(stateOf(n))), ...answered]
+        .filter(keep("question"))
+        .sort((a, b) => (b.doneAt ?? b.ts) - (a.doneAt ?? a.ts))
+        .slice(0, FEED_NOTES),
+    ),
   };
 }

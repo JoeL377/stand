@@ -15,7 +15,7 @@ export function ownedBy(owner: string | null, userName: string): boolean {
   return o === full || o === full.split(/\s+/)[0];
 }
 
-export function toSpaceSummary(row: Row, user: { id: string; name: string }, live: Live): SpaceSummary {
+export function toSpaceSummary(row: Row, user: { id: string; name: string }, live: Live, waiting = 0): SpaceSummary {
   const latestMeeting = row.notes[0]?.meetingId;
   const open = row.notes.filter((n) => n.kind === "action" && !n.done);
   const last = row.notes.find((n) => n.kind !== "action") ?? row.notes[0] ?? null;
@@ -31,6 +31,7 @@ export function toSpaceSummary(row: Row, user: { id: string; name: string }, liv
     toDecide: row.notes.filter((n) => n.kind === "question" && n.meetingId === latestMeeting).length,
     todos: open.length,
     forYou: open.filter((n) => ownedBy(n.owner, user.name)).length,
+    waiting,
     last: last && { kind: last.kind, text: last.text, ts: last.ts },
     people: row.people,
     search: [row.name, row.purpose, ...row.people, ...row.notes.map((n) => `${n.text} ${n.owner ?? ""}`)]

@@ -16,6 +16,8 @@ import type { Board, BoardDetail, BoardThread, FollowUp, Item, ListNote, Note, P
 import { barSpan } from "../../shared/chapters.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
+import { CheckIn, type CheckInActs, showCheckIn } from "./CheckIn.tsx";
+import { SaidDonePill } from "../TaskMarks.tsx";
 
 /** Talk older than this isn't "now" any more. */
 const NOW_MS = 120_000;
@@ -82,6 +84,9 @@ export function TopicBoard(props: {
   onDone?: (noteId: string, done: boolean) => void;
   /** Host only: take a line off that Stand got wrong (with Undo). */
   onRemove?: (note: Note) => void;
+  /** The "Since last time" check-in, and what answering on it does (null while it can't be answered). */
+  checkIn?: { closed: boolean; answeredAt: number | null };
+  checkInActs?: CheckInActs | null;
 }) {
   const now = useNow(15_000);
   const board = props.board;
@@ -111,11 +116,22 @@ export function TopicBoard(props: {
   const talkSoFar = current ? [] : props.segments.filter((s) => s.itemId === props.focusItemId).slice(-WARMUP_REMARKS);
   const item = props.focusItem;
   const tasks = useTasks(props.notes ?? [], props.followUps ?? [], current, live ? now : 0, start);
-  const acts: TaskActs = { onDone: props.onDone, onRemove: props.onRemove, start };
+  const acts: TaskActs = {
+    onDone: props.onDone,
+    onRemove: props.onRemove,
+    start,
+    onCheckIn: props.checkInActs?.onOpen,
+    onUndoSaid: props.checkInActs?.onUndoSaid,
+  };
+  // The meeting opens on what's still open from earlier ones, until that's through or people move on.
+  const cardSince = threads.length ? Math.min(...threads.flatMap((t) => t.spans.map(([a]) => a))) : null;
+  const checkingIn = showCheckIn({ followUps: props.followUps ?? [], meetingStartedAt: props.meetingStartedAt, checkIn: props.checkIn, cardSince, now });
 
   return (
     <div ref={boardRef} className={shown ? "topic-board peeking" : "topic-board"}>
-      {current ? (
+      {checkingIn ? (
+        <CheckIn followUps={props.followUps ?? []} meetingStartedAt={props.meetingStartedAt} acts={props.checkInActs ?? null} />
+      ) : current ? (
         <Card
           t={current}
           live={live}
@@ -505,6 +521,9 @@ interface TaskActs {
   onDone?: (noteId: string, done: boolean) => void;
   onRemove?: (note: Note) => void;
   start: number;
+  /** Bring back the "Since last time" check-in. */
+  onCheckIn?: () => void;
+  onUndoSaid?: (noteId: string) => void;
 }
 
 /** The meeting's to-dos, decisions and questions, sorted for the board: the topic on screen
@@ -628,6 +647,7 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
         </span>
       )}
       <span className="topic-task-text">{note.text}</span>
+      {note.saidDone && !note.doneAt && <SaidDonePill quote={note.saidDone} onUndo={props.acts.onUndoSaid && (() => props.acts.onUndoSaid!(note.id))} />}
       {opts.r?.answers && (
         <span className="topic-task-answers" title={`Answers: ${opts.r.answers}`}>
           Answered
@@ -669,6 +689,13 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
       {done.length > 0 && fold("Done", done.length, openDone, () => setOpenDone((o) => !o))}
       {openDone && done.map((r) => row(r.note, { at: atOf(r), r }))}
       {earlier.length > 0 && fold("From earlier meetings", earlierOpen, past, () => setPast((p) => !p))}
+      {past && earlierOpen > 0 && props.acts.onCheckIn && (
+        <li className="topic-tasks-more">
+          <button type="button" onClick={props.acts.onCheckIn}>
+            Check in on these
+          </button>
+        </li>
+      )}
       {past && earlier.map((f) => row(f, { at: shortDate(f.meetingStartedAt) }))}
     </ul>
   );

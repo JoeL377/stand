@@ -35,7 +35,7 @@ import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
-import { toSpaceSummary } from "./spaces.ts";
+import { ownedBy, toSpaceSummary } from "./spaces.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
 import { ConxtLiveDelivery } from "./conxtLive.ts";
 import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
@@ -661,6 +661,12 @@ app.get(
   "/api/spaces",
   route((req, res) => {
     const user = req.user!;
+    // Your to-dos whose work is in (a PR reported ready) and waits on your look, per space.
+    const waiting = new Map<string, number>();
+    for (const u of db.readyToShip()) {
+      const n = u.noteId ? db.getNote(u.noteId) : null;
+      if (n && ownedBy(n.owner, user.name)) waiting.set(n.roomId, (waiting.get(n.roomId) ?? 0) + 1);
+    }
     const spaces = db.spaceRows(user.id).map((row) => {
       const live = sessions.get(row.id);
       const state = live && !live.ended ? live.state() : null;
@@ -677,6 +683,7 @@ app.get(
               you: Boolean(live?.has(user.id)),
             }
           : null,
+        waiting.get(row.id) ?? 0,
       );
     });
     res.json(spaces.sort((a, b) => b.activeAt - a.activeAt));
@@ -1185,6 +1192,29 @@ app.patch(
   "/api/rooms/:id/followups/:noteId",
   route((req, res) => {
     const note = db.setActionDone(req.params.id, req.params.noteId, req.body?.done ? req.user!.name : null);
+    if (!note) return notFound(res);
+    sessions.get(req.params.id)?.followUpsChanged();
+    res.json(note);
+  }),
+);
+
+// Move a to-do or open question (the space page's Tasks tab): { state: "done" | "dropped" | "open", reason? },
+// or { saidDone: false } to take off a Said done mark Stand heard wrong.
+app.patch(
+  "/api/rooms/:id/tasks/:noteId",
+  route((req, res) => {
+    if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
+    const state = String(req.body?.state ?? "");
+    const note =
+      req.body?.saidDone === false
+        ? db.setSaidDone(req.params.id, req.params.noteId, null)
+        : ["done", "dropped", "open"].includes(state)
+          ? db.setTaskState(req.params.id, req.params.noteId, {
+              state: state as "done" | "dropped" | "open",
+              by: req.user!.name,
+              reason: state === "dropped" ? String(req.body?.reason ?? "").trim().slice(0, 200) || null : null,
+            })
+          : null;
     if (!note) return notFound(res);
     sessions.get(req.params.id)?.followUpsChanged();
     res.json(note);
