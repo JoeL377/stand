@@ -84,6 +84,8 @@ test("the done pages count from the last meeting more than one person talked in,
   // What it left out isn't lost.
   assert.deepEqual(deck.slides[1].title, "Also closed");
   assert.deepEqual(deck.slides[1].points, [{ text: "Ask Andy for Railway access", who: "Huy Ngo", pr: null, dropped: true }]);
+  // Every page says what it is about, the leftovers too.
+  assert.match(deck.slides[1].lead!, /^1 more task closed since \w+ \d+, as written on the to-dos\.$/);
 
   // Nothing new: no second pass. Something new: a pass, but never while a meeting is on.
   await decks.run(room.id);
@@ -109,6 +111,7 @@ test("without a model the pages are the closed tasks as they are, and a new meet
     db.getDoneDeck(room.id)!.slides.map((s) => [s.title, s.points.map((p) => p.text)]),
     [["Done", ["Fix the black board"]]],
   );
+  assert.match(db.getDoneDeck(room.id)!.slides[0].lead!, /^1 task closed since /);
   // The next meeting ends: what closed before it is old news.
   await meeting(db, room.id, ["Joe", "Andy"]);
   await decks.run(room.id);
