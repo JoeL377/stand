@@ -183,6 +183,13 @@ export interface Agent {
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
   settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
+  /** "Done since last time" (doneDeck.ts): the pages a space's next meeting opens on. Null without a model. */
+  doneDeck(prompt: string, system: string): Promise<DoneDeckDraft | null>;
+}
+
+export interface DoneDeckDraft {
+  opening: string | null;
+  slides: Array<{ title: string; lead: string | null; points: Array<{ text: string; who: string | null; tasks: string[] }>; shot: string | null }>;
 }
 
 export interface SettleInput {
@@ -406,6 +413,28 @@ const RecapSchema = z.object({
       }),
     )
     .describe("One entry per screenshot given"),
+});
+
+const DoneDeckSchema = z.object({
+  opening: z.string().nullable().describe("One or two short sentences: the headline of what changed since the last meeting"),
+  slides: z
+    .array(
+      z.object({
+        title: z.string().describe("A few words"),
+        lead: z.string().nullable().describe("One short sentence under the title, or null"),
+        points: z
+          .array(
+            z.object({
+              text: z.string().describe("What got done, under 14 words, as someone would say it out loud"),
+              who: z.string().nullable().describe("Who did it: a first name, or null"),
+              tasks: z.array(z.string()).describe("The keys (T1, O2...) of the tasks this line covers"),
+            }),
+          )
+          .describe("The page's lines"),
+        shot: z.string().nullable().describe("The key (S1...) of a screenshot that shows what this page is about, or null"),
+      }),
+    )
+    .describe("The pages, in the order they're shown"),
 });
 
 const SettleSchema = z.object({
@@ -875,6 +904,11 @@ Only point forward in time. Be conservative: list something only when someone re
     return out?.settled ?? null;
   }
 
+  async doneDeck(prompt: string, system: string): Promise<DoneDeckDraft | null> {
+    // Written between meetings, read out at the start of the next one: worth the bigger model.
+    return this.parse(DoneDeckSchema, prompt, system, "medium", config.anthropicModel, { maxTokens: 8000 });
+  }
+
   async polishAgenda(space: { name: string; purpose: string }, suggestions: AgendaDraftRow[]): Promise<AgendaPolishRow[] | null> {
     if (!suggestions.length) return [];
     const list = suggestions
@@ -1188,6 +1222,9 @@ export class HeuristicAgent implements Agent {
     return null;
   }
   async settleSpace(): Promise<SettleRow[] | null> {
+    return null;
+  }
+  async doneDeck(): Promise<DoneDeckDraft | null> {
     return null;
   }
   async mergeTopics(): Promise<Array<{ key: string; into: string }> | null> {

@@ -14,11 +14,11 @@
 // "Earlier". While someone's pointer is on a list, new lines wait behind a "2 new" pill. An answered
 // question folds into its decision and a checked to-do into "Done", each after a moment in place.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
-import type { Board, BoardDetail, BoardThread, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
+import type { Board, BoardDetail, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import { barSpan } from "../../shared/chapters.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
-import { CheckIn, type CheckInActs, showCheckIn } from "./CheckIn.tsx";
+import { Opener, type OpenerActs, hasKickoff, kickoffEnd, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
 
 /** Talk older than this isn't "now" any more. */
@@ -66,6 +66,9 @@ const splitNow = (now: string) => {
   return m ? { who: m[1].trim(), text: m[2] } : { who: null, text: now.trim() };
 };
 
+/** The Kickoff chapter's id on the bar. */
+const KICKOFF = "kickoff";
+
 export function TopicBoard(props: {
   board: Board | null;
   segments: Segment[];
@@ -86,9 +89,11 @@ export function TopicBoard(props: {
   onDone?: (noteId: string, done: boolean) => void;
   /** Host only: take a line off that Stand got wrong (with Undo). */
   onRemove?: (note: Note) => void;
-  /** The "Since last time" check-in, and what answering on it does (null while it can't be answered). */
-  checkIn?: { closed: boolean; answeredAt: number | null };
-  checkInActs?: CheckInActs | null;
+  /** The opening board ("Done since" pages, then the "Since last time" check-in), and what turning and
+   *  answering on it does (null while it can't be answered). */
+  checkIn?: { closed: boolean; answeredAt: number | null; page?: number };
+  checkInActs?: OpenerActs | null;
+  doneDeck?: DoneDeck | null;
 }) {
   const now = useNow(15_000);
   const board = props.board;
@@ -109,8 +114,18 @@ export function TopicBoard(props: {
   const latest = props.segments.at(-1);
   const live = !!latest && now - latest.ts < NOW_MS;
   const speaking = Object.values(props.interims).find((i) => i.text.trim());
+  // The meeting opens on its Kickoff card: what got done since the last one, then what's still open from
+  // earlier ones, until that's through, people move on, or the talk's own topic takes over.
+  const cardSince = threads.length ? Math.min(...threads.flatMap((t) => t.spans.map(([a]) => a))) : null;
+  const opening = { deck: props.doneDeck, followUps: props.followUps ?? [], meetingStartedAt: props.meetingStartedAt, checkIn: props.checkIn, cardSince, now };
+  const checkingIn = showOpener(opening);
+  // On the bar it's the first chapter; topics talked about while it was up start where it ends.
+  const kickoff = hasKickoff(props.doneDeck, props.followUps ?? [], props.meetingStartedAt) ? { from: props.meetingStartedAt, to: kickoffEnd(opening) ?? now } : null;
+  const [kickPage, setKickPage] = useState(0);
   const stretches = threads
     .flatMap((t) => t.spans.map(([from, to]) => ({ id: t.id, from, to: t.id === current?.id && live ? Math.max(to, now) : to })))
+    .map((x) => (kickoff ? { ...x, from: Math.max(x.from, kickoff.to) } : x))
+    .filter((x) => x.to > x.from)
     .sort((a, b) => a.from - b.from);
   const start = Math.min(props.meetingStartedAt, stretches[0]?.from ?? Infinity);
   // The bar spans a set length, longer as the meeting runs on, so talk fills it from the left.
@@ -121,8 +136,9 @@ export function TopicBoard(props: {
   const talkSoFar = current ? [] : props.segments.filter((s) => s.itemId === props.focusItemId).slice(-WARMUP_REMARKS);
   const item = props.focusItem;
   const rewound = rewind ? (threads.find((t) => t.id === rewind.id) ?? null) : null;
+  const rewoundKickoff = rewind?.id === KICKOFF;
   // The topic moved on while this screen looks back: say so, and where.
-  const movedOn = !!rewound && (current?.id ?? null) !== rewind!.live && current && current.id !== rewound.id ? current : null;
+  const movedOn = (!!rewound || rewoundKickoff) && (current?.id ?? null) !== rewind!.live && current && current.id !== rewound?.id ? current : null;
   useEffect(() => {
     if (!rewind) return;
     const key = (e: KeyboardEvent) => e.key === "Escape" && setRewind(null);
@@ -139,13 +155,10 @@ export function TopicBoard(props: {
     onCheckIn: props.checkInActs?.onOpen,
     onUndoSaid: props.checkInActs?.onUndoSaid,
   };
-  // The meeting opens on what's still open from earlier ones, until that's through or people move on.
-  const cardSince = threads.length ? Math.min(...threads.flatMap((t) => t.spans.map(([a]) => a))) : null;
-  const checkingIn = showCheckIn({ followUps: props.followUps ?? [], meetingStartedAt: props.meetingStartedAt, checkIn: props.checkIn, cardSince, now });
 
   return (
-    <div ref={boardRef} className={["topic-board", shown && "peeking", rewound && "rewinding"].filter(Boolean).join(" ")}>
-      {rewound ? (
+    <div ref={boardRef} className={["topic-board", shown && "peeking", (rewound || rewoundKickoff) && "rewinding"].filter(Boolean).join(" ")}>
+      {rewound || rewoundKickoff ? (
         <>
           <button type="button" className={movedOn ? "topic-live-back moved" : "topic-live-back"} onClick={() => setRewind(null)} title="Escape">
             {movedOn ? (
@@ -159,8 +172,18 @@ export function TopicBoard(props: {
               <>Back to live →</>
             )}
           </button>
+          {rewoundKickoff ? (
+            <Opener
+              deck={props.doneDeck}
+              followUps={props.followUps ?? []}
+              meetingStartedAt={props.meetingStartedAt}
+              page={kickPage}
+              acts={{ onPage: setKickPage, onState: () => {}, onUndoSaid: () => {}, onClose: () => setRewind(null), onOpen: () => {} }}
+              rewound
+            />
+          ) : (
           <Card
-            t={rewound}
+            t={rewound!}
             live={false}
             rewoundAt={clock(rewind!.at - start)}
             updating={false}
@@ -176,9 +199,17 @@ export function TopicBoard(props: {
             idOf={idOf}
             nameOf={nameOf}
           />
+          )}
         </>
       ) : checkingIn ? (
-        <CheckIn followUps={props.followUps ?? []} meetingStartedAt={props.meetingStartedAt} acts={props.checkInActs ?? null} />
+        <Opener
+          deck={props.doneDeck}
+          followUps={props.followUps ?? []}
+          meetingStartedAt={props.meetingStartedAt}
+          page={props.checkIn?.page ?? 0}
+          acts={props.checkInActs ?? null}
+          next={current?.title ?? null}
+        />
       ) : current ? (
         <Card
           t={current}
@@ -222,10 +253,25 @@ export function TopicBoard(props: {
           </p>
         </div>
       )}
-      {stretches.length > 0 && (
+      {(stretches.length > 0 || kickoff) && (
         <div className="topic-chapters">
           <div className="topic-bar" role="group" aria-label="Topics so far">
             <div className="topic-bar-elapsed" style={{ width: `${pct(now - start, span)}%` }} />
+            {kickoff && (
+              <button
+                type="button"
+                className={["topic-stretch", "kickoff", checkingIn && "current", rewoundKickoff && "on"].filter(Boolean).join(" ")}
+                style={{ left: `${pct(kickoff.from - start, span)}%`, width: `${pct(kickoff.to - kickoff.from, span)}%` }}
+                aria-label={`0:00, Kickoff${checkingIn ? ", now" : ""}`}
+                aria-pressed={checkingIn ? !rewind : rewoundKickoff}
+                title="Kickoff"
+                onClick={() => {
+                  // Like a chapter: a click shows the Kickoff card as it was, here only; again comes back to live.
+                  setPeek(null);
+                  setRewind(checkingIn || rewoundKickoff ? null : { id: KICKOFF, key: KICKOFF, at: kickoff.to, live: current?.id ?? null });
+                }}
+              />
+            )}
             {stretches.map((s) => {
               const t = threads.find((x) => x.id === s.id)!;
               const isCurrent = t === current;

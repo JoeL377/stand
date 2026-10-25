@@ -396,6 +396,32 @@ export interface User {
   picture: string | null;
 }
 
+/** "Done since last time" (server/doneDeck.ts): what a space closed since its last meeting, as pages
+ *  Claude writes and rewrites each time a task closes, so the next meeting opens on it with no wait. */
+export interface DoneDeck {
+  /** The meeting it counts from: when it started and ended. */
+  sinceMeetingId: string;
+  sinceStartedAt: number;
+  since: number;
+  /** "claude" when Claude laid it out, "plain" when it's the tasks as they are (no model). */
+  by: "claude" | "plain";
+  at: number;
+  /** One or two sentences on what changed since, for the top of the card; null on the plain one. */
+  summary: string | null;
+  /** Tasks it covers that closed, and how many of them were dropped. */
+  closed: number;
+  dropped: number;
+  slides: DoneSlide[];
+}
+export interface DoneSlide {
+  title: string;
+  /** One sentence under the title, when it helps. */
+  lead: string | null;
+  points: Array<{ text: string; who: string | null; pr: string | null; dropped: boolean }>;
+  /** A screenshot an agent attached to one of its tasks. */
+  shot: { url: string; caption: string | null } | null;
+}
+
 export interface RoomState {
   /** This meeting's snaps. */
   snaps: Snap[];
@@ -429,8 +455,11 @@ export interface RoomState {
   /** Action items from earlier meetings that are still open, oldest first, plus any closed since
    *  the meeting before this one ended (so the check-in shows them and they can be reopened). */
   followUps: FollowUp[];
-  /** The "Since last time" check-in: whether someone moved on from it, and when anyone last answered on it. */
-  checkIn?: { closed: boolean; answeredAt: number | null };
+  /** The opening board ("Done since" pages, then the "Since last time" check-in): whether someone moved on
+   *  from it, when anyone last answered or turned a page on it, and the page everyone is on. */
+  checkIn?: { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null };
+  /** What the space finished since its last meeting, laid out ahead of time as pages to open this one with. */
+  doneDeck?: DoneDeck | null;
   /** Updates agents and people reported on this space's items since the last meeting started. */
   updates: ItemUpdate[];
   /** The agent's suggested agenda for this space. */
@@ -510,6 +539,8 @@ export type ClientMessage = (
   | { type: "task.saidDone.undo"; noteId: string }
   /** Anyone: move on from the "Since last time" check-in (open: false), or bring it back. */
   | { type: "checkin"; open: boolean }
+  /** Anyone: turn the opening board to a page, for everyone. */
+  | { type: "checkin.page"; page: number }
   // Host only: fix what the agent wrote down for the item in focus.
   | { type: "note.edit"; noteId: string; text: string; owner?: string | null }
   | { type: "note.remove"; noteId: string }
@@ -657,6 +688,8 @@ export interface ArchivedRow {
 export interface SpaceFeed {
   /** Rows archived off the space page, newest first. The page hides them and lists them under Archived. */
   archived: ArchivedRow[];
+  /** What the space got done since its last meeting, as the next meeting will open on it. */
+  doneDeck?: DoneDeck | null;
   /** Snaps saved straight to the space, newest first. */
   captures: Snap[];
   /** Notes saved straight to the space, newest first. */

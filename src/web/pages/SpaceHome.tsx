@@ -23,6 +23,7 @@ import { colorFor, fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
+import { Slide } from "../room/Opener.tsx";
 
 type Entry =
   | { kind: "snap"; at: number; snap: Snap }
@@ -187,7 +188,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     tasks: todos.length + questions.length,
     decisions: decisions.filter((n) => !n.replacedBy).length,
     next: agenda.length + suggested.length,
+    done: feed?.doneDeck?.closed ?? 0,
   };
+  const deck = feed?.doneDeck ?? null;
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
   const done = (room.doneFollowUps ?? []).filter((f) => !gone.has(`todo:${f.id}`));
   const closedQuestions = (feed?.closedQuestions ?? []).filter((n) => !gone.has(`question:${n.id}`));
@@ -243,7 +246,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         <ModeNote caps={caps} />
 
         <div className="sh-tabs" role="tablist" aria-label="The space">
-          {TABS.map((t) => (
+          {TABS.filter((t) => t.key !== "done" || deck).map((t) => (
             <button
               key={t.key}
               role="tab"
@@ -252,7 +255,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               onClick={() => pickTab(t.key)}
             >
               {t.icon}
-              {t.label}
+              {t.key === "done" && deck ? `Done since ${new Date(deck.sinceStartedAt).toLocaleDateString([], { month: "short", day: "numeric" })}` : t.label}
               {counts[t.key] > 0 && <span className="count">{counts[t.key]}</span>}
             </button>
           ))}
@@ -324,6 +327,29 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               reload={load}
             />
           )}
+          {tab === "done" &&
+            (deck ? (
+              <div className="sh-done-since">
+                <p className="topic-summary">
+                  {deck.by === "claude" && (
+                    <>
+                      <span className="agent-mark" aria-hidden>
+                        ✦
+                      </span>{" "}
+                    </>
+                  )}
+                  {deck.summary ?? `${deck.closed} ${deck.closed === 1 ? "task" : "tasks"} closed since the last meeting.`}
+                </p>
+                {deck.slides.map((s, i) => (
+                  <div key={i} className="sh-day">
+                    <h3>{s.title}</h3>
+                    <Slide s={s} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="sh-card-empty">Nothing closed since the last meeting.</p>
+            ))}
           {tab === "decisions" && (
             <PointList kind="decided" notes={decisions} empty="No decisions yet." onArchive={(id) => archive(`decision:${id}`)} />
           )}
@@ -722,7 +748,7 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "meetings" | "tasks" | "decisions" | "next";
+type TabKey = "meetings" | "done" | "tasks" | "decisions" | "next";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
@@ -745,6 +771,7 @@ function ArchiveButton({ onClick }: { onClick: () => void }) {
 /** Which archived rows each tab lists at its bottom. */
 const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
   meetings: ["meeting", "snap", "jot"],
+  done: [],
   tasks: ["todo", "question"],
   decisions: ["decision"],
   next: ["item", "deck", "suggestion"],
@@ -782,6 +809,8 @@ function ArchivedList(props: { rows: ArchivedRow[]; open: boolean; onToggle: () 
 
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
+  // Shown only while there's something done since the last meeting; labeled with its date.
+  { key: "done", label: "Done since", icon: <span className="agent-mark small" aria-hidden>✦</span> },
   { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
   { key: "decisions", label: "Decisions", icon: <DecidedIcon size={14} /> },
   { key: "next", label: "Up next" },

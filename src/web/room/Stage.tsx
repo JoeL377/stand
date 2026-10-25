@@ -249,6 +249,7 @@ export function Stage(props: {
       onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
       onRemove={canSteer && !props.ending ? removeNote : undefined}
       checkIn={state.checkIn}
+      doneDeck={state.doneDeck}
       checkInActs={
         props.ending || props.offline
           ? null
@@ -257,6 +258,7 @@ export function Stage(props: {
               onUndoSaid: (noteId) => send({ type: "task.saidDone.undo", noteId }),
               onClose: () => send({ type: "checkin", open: false }),
               onOpen: () => send({ type: "checkin", open: true }),
+              onPage: (page) => send({ type: "checkin.page", page }),
             }
       }
     />

@@ -9,6 +9,7 @@ import type {
   User,
   ChapterRecap,
   ClientMessage,
+  DoneDeck,
   Discussion,
   Item,
   Note,
@@ -24,6 +25,7 @@ import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
 import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
 import { meetingChapters } from "../shared/chapters.ts";
+import { currentDoneDeck } from "./doneDeck.ts";
 import { sampleSprint } from "./linear.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
@@ -206,6 +208,12 @@ export class RoomSession implements SpeechSink {
   /** The check-in at the start ("Since last time"): someone moved on from it, and the last answer anyone gave. */
   private checkInClosed = false;
   private checkInAnsweredAt: number | null = null;
+  /** The page of the opening board everyone is on: the "Done since" pages, then the check-in. */
+  private checkInPage = 0;
+  /** When someone moved on from the opening board: where the Kickoff chapter on the bar ends. */
+  private checkInClosedAt: number | null = null;
+  /** "Done since last time" as of when it was last read (undefined: read it again). */
+  private doneDeckCache: DoneDeck | null | undefined;
   ended = false;
   /** When End meeting started the write-up. */
   endingSince = 0;
@@ -355,7 +363,8 @@ export class RoomSession implements SpeechSink {
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
       followUps: this.carried(true),
-      checkIn: { closed: this.checkInClosed, answeredAt: this.checkInAnsweredAt },
+      checkIn: { closed: this.checkInClosed, answeredAt: this.checkInAnsweredAt, page: this.checkInPage, closedAt: this.checkInClosedAt },
+      doneDeck: this.doneDeck(),
       updates: this.db.roomUpdates(this.roomId, this.db.previousMeetingStart(this.roomId, this.meetingStartedAt) ?? 0),
       ...this.upNext(),
       capabilities: capabilities(),
@@ -530,8 +539,18 @@ export class RoomSession implements SpeechSink {
     this.broadcastState();
   }
 
+  /** What the space finished since its last meeting, as the pages Claude laid out for this one (doneDeck.ts):
+   *  only when they count from the last meeting before this one. */
+  private doneDeck(): DoneDeck | null {
+    if (this.doneDeckCache === undefined) {
+      this.doneDeckCache = currentDoneDeck(this.db, this.roomId, this.meetingStartedAt);
+    }
+    return this.doneDeckCache;
+  }
+
   /** Called by the REST API after an action item is checked off elsewhere. */
   followUpsChanged() {
+    this.doneDeckCache = undefined;
     this.broadcastState();
   }
 
@@ -753,10 +772,23 @@ export class RoomSession implements SpeechSink {
         this.broadcastState();
         break;
       }
+      case "checkin.page": {
+        if (!Number.isInteger(msg.page) || msg.page < 0 || msg.page > 50) return;
+        this.checkInPage = msg.page;
+        // Turning pages counts as people still being on it.
+        this.checkInAnsweredAt = Date.now();
+        this.broadcastState();
+        break;
+      }
       case "checkin": {
         this.checkInClosed = !msg.open;
-        // Brought back on purpose: it stays up a while even with the topic card waiting.
-        if (msg.open) this.checkInAnsweredAt = Date.now();
+        if (!msg.open) this.checkInClosedAt ??= Date.now();
+        // Brought back on purpose (from the board's open tasks): it stays up a while even with the topic card
+        // waiting, on the check-in, its last page.
+        if (msg.open) {
+          this.checkInAnsweredAt = Date.now();
+          this.checkInPage = 50;
+        }
         this.broadcastState();
         break;
       }
