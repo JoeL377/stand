@@ -282,13 +282,18 @@ export function TopicBoard(props: {
 }
 
 /** One line over a shared screen or a deck: the topic and the point being made, so the board
- *  isn't lost while something else has the middle. */
-export function BoardStrip({ board, focusItemId }: { board: Board | null; focusItemId: string | null }) {
+ *  isn't lost while something else has the middle. A click opens the whole board. */
+export function BoardStrip({ board, focusItemId, onOpen }: { board: Board | null; focusItemId: string | null; onOpen?: () => void }) {
   const t = board?.threads.find((x) => x.id === board.currentId);
   if (!t || t.itemId !== focusItemId) return null;
   const { who, text } = splitNow(t.card.now);
   return (
-    <div className={board?.busy ? "topic-strip updating" : "topic-strip"} role="status" title={t.card.summary.join(" ")}>
+    <div
+      className={["topic-strip", board?.busy && "updating", onOpen && "opens"].filter(Boolean).join(" ")}
+      role="status"
+      title={onOpen ? "Open the board" : t.card.summary.join(" ")}
+      onClick={onOpen}
+    >
       <span className="agent-mark" aria-hidden>
         ✦
       </span>
