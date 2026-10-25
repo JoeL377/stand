@@ -731,6 +731,13 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .control.off svg { color: var(--danger); }
 .control.share svg { color: #3ecf8e; }
 .control.sharing { color: #3ecf8e; }
+/* The ▴ beside Mute opens the mic list. */
+.control.mic-caret { min-width: 0; padding: 7px 4px; margin-left: -6px; justify-content: center; color: var(--muted); }
+/* Over the toasts while it's open. */
+.controls:has(.mic-menu) { z-index: 61; }
+.add-menu.mic-menu { top: auto; bottom: calc(100% + 6px); left: 0; right: auto; width: 280px; }
+.add-menu.mic-menu button > span { display: flex; gap: 6px; align-items: baseline; }
+.mic-check { width: 12px; flex: none; color: var(--accent); }
 /* The bar is popped out. */
 .control.on { color: #8fb5fa; }
 .control.pill { flex-direction: row; min-width: 0; padding: 9px 18px; border-radius: 10px; font-size: 13px; background: var(--panel-2); }

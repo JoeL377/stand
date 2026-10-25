@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Capabilities, User } from "../../shared/protocol.ts";
 import { useRoomSocket } from "./useRoomSocket.ts";
-import { useMedia } from "./useMedia.ts";
+import { useMedia, type Mic } from "./useMedia.ts";
 import { browserSpeechSupported, useBrowserSpeech } from "./useBrowserSpeech.ts";
 import { useFrameSampler } from "./useFrameSampler.ts";
 import { AgendaPanel } from "./AgendaPanel.tsx";
@@ -528,6 +528,7 @@ export function Meeting(props: {
                         : "Unmute"}
             </span>
           </button>
+          <MicMenu mics={media.mics} micId={media.micId} onPick={(id) => void media.pickMic(id)} onOpen={() => void media.refreshMics()} />
           {/* Phone browsers can't share a screen. */}
           {!canShare ? null : sharing ? (
             <button className="control sharing" onClick={() => void media.stopShare()}>
@@ -692,6 +693,56 @@ function ConnectionPill(props: {
       <button className="link" onClick={retryNow}>
         Retry now
       </button>
+    </span>
+  );
+}
+
+/** The ▴ beside Mute: which mic Stand hears, and the others to switch to. */
+function MicMenu(props: { mics: Mic[]; micId: string | null; onPick: (id: string) => void; onOpen: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
+  // One mic: nothing to pick.
+  if (props.mics.length < 2) return null;
+  const current = props.mics.find((m) => m.id === props.micId);
+  return (
+    <span className="pop-wrap" ref={ref}>
+      <button
+        className="control mic-caret"
+        aria-label="Choose a microphone"
+        aria-expanded={open}
+        title={current ? `Mic: ${current.label}` : "Choose a microphone"}
+        onClick={() => {
+          if (!open) props.onOpen();
+          setOpen((o) => !o);
+        }}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+          <path d="M3 7.5 6 4.5l3 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="add-menu mic-menu" role="menu">
+          <div className="menu-label">Microphone</div>
+          {props.mics.map((m) => (
+            <button
+              key={m.id}
+              role="menuitemradio"
+              aria-checked={m.id === props.micId}
+              onClick={() => {
+                setOpen(false);
+                if (m.id !== props.micId) props.onPick(m.id);
+              }}
+            >
+              <span>
+                <span className="mic-check" aria-hidden>
+                  {m.id === props.micId ? "✓" : ""}
+                </span>
+                {m.label || "Microphone"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </span>
   );
 }

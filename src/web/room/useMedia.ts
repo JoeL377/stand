@@ -31,6 +31,68 @@ function mediaMessage(kind: "mic" | "screen", err: unknown): string {
   return `${mic ? "Microphone" : "Screen share"}: ${e.message}`;
 }
 
+/** A microphone people can pick, by the name the computer gives it. */
+export interface Mic {
+  id: string;
+  label: string;
+}
+
+// The mic you picked last, kept on this computer so every meeting starts with it. The name is
+// kept too: browsers can hand out new ids for the same mic (Safari does on every visit).
+const MIC_KEY = "stand.mic";
+function saved(): Mic | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(MIC_KEY) ?? "null");
+    return v && typeof v.id === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+function saveMic(mic: Mic) {
+  try {
+    localStorage.setItem(MIC_KEY, JSON.stringify(mic));
+  } catch {
+    /* private window: the choice lasts for this meeting only */
+  }
+}
+/** The picked mic among the ones plugged in now, by id or else by name. */
+function savedAmong(mics: Mic[]): string | null {
+  const s = saved();
+  if (!s) return null;
+  return (mics.find((m) => m.id === s.id) ?? (s.label ? mics.find((m) => m.label === s.label) : undefined))?.id ?? null;
+}
+
+/** The iPhone's mic, which macOS (Continuity) picks on its own when the phone is nearby. */
+export const isPhoneMic = (label: string) => /iphone|continuity/i.test(label);
+
+const isAlias = (id: string) => id === "default" || id === "communications";
+
+/** The computer's mics, without the browser's "Default" and "Communications" aliases. */
+async function listMics(): Promise<{ mics: Mic[]; inputs: MediaDeviceInfo[] }> {
+  const all = (await navigator.mediaDevices?.enumerateDevices?.()) ?? [];
+  const inputs = all.filter((d) => d.kind === "audioinput");
+  return {
+    inputs,
+    mics: inputs
+      .filter((d) => d.deviceId && !isAlias(d.deviceId))
+      // "MacBook Pro Microphone (Built-in)" stays; a USB id like "(046d:0825)" goes.
+      .map((d) => ({ id: d.deviceId, label: d.label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, "") })),
+  };
+}
+
+/** The mic as a stream, from the given device when there is one (and it's still plugged in). */
+async function micStream(id: string | null): Promise<MediaStream> {
+  if (id) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: id } } });
+    } catch (err) {
+      const name = (err as Error).name;
+      if (name !== "OverconstrainedError" && name !== "NotFoundError") throw err;
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: true });
+}
+
 export function useMedia(opts: { roomId: string; livekit: boolean; enabled: boolean }) {
   const { roomId, livekit, enabled } = opts;
   const roomRef = useRef<Room | null>(null);
@@ -54,13 +116,18 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   const [joins, setJoins] = useState(0);
   /** Audio worked in this meeting; losing it now is a drop, not a slow start. */
   const [audioWas, setAudioWas] = useState(false);
+  const [mics, setMics] = useState<Mic[]>([]);
+  /** The mic in use (or the one unmuting will use). */
+  const [micId, setMicId] = useState<string | null>(() => saved()?.id ?? null);
 
   // ---- LiveKit connection -------------------------------------------------
   useEffect(() => {
     if (!livekit || !enabled) return;
     // Trying again: it shows as reconnecting until it works or fails.
     setAudioAway(null);
-    const room = new Room({ adaptiveStream: true, dynacast: true });
+    // Start with the mic picked last time if it's plugged in, else the computer's default.
+    const pick = saved();
+    const room = new Room({ adaptiveStream: true, dynacast: true, audioCaptureDefaults: pick ? { deviceId: pick.id } : undefined });
     roomRef.current = room;
     const audioEls = new Map<string, HTMLMediaElement>();
     let cancelled = false;
@@ -145,6 +212,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           await room.localParticipant.setMicrophoneEnabled(true);
           setMicOn(true);
           setMicError(null);
+          void settleMicRef.current();
         } catch (err) {
           const msg = mediaMessage("mic", err);
           setMediaError(msg);
@@ -212,7 +280,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           setMicTrack(null);
         } else {
           // Ask for mic permission up front so speech recognition can use it.
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const stream = await micStream(micIdRef.current);
           if (!alive.current) {
             stream.getTracks().forEach((t) => t.stop());
             return;
@@ -227,6 +295,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
           });
           setMicOn(true);
           setMicTrack(stream.getAudioTracks()[0] ?? null);
+          void settleMicRef.current();
         }
       }
       setMicError(null);
@@ -246,6 +315,112 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   useEffect(() => {
     if (!livekit && enabled) void toggleRef.current();
   }, [livekit, enabled]);
+
+  // ---- which mic ------------------------------------------------------------
+  const micIdRef = useRef(micId);
+  micIdRef.current = micId;
+  const micOnRef = useRef(micOn);
+  micOnRef.current = micOn;
+
+  /** The real id of the mic in use, even when the browser calls it "default". */
+  const activeMicId = useCallback(async (): Promise<string | null> => {
+    const { mics, inputs } = await listMics();
+    const track = livekit
+      ? roomRef.current?.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack
+      : mockMicStream.current?.getAudioTracks()[0];
+    const settings = track?.getSettings();
+    let id = settings?.deviceId ?? null;
+    if (!id || isAlias(id)) {
+      // "default" is one of the real mics: the one sharing its group.
+      const group = settings?.groupId ?? inputs.find((d) => d.deviceId === "default")?.groupId;
+      id = inputs.find((d) => d.groupId === group && !isAlias(d.deviceId))?.deviceId ?? null;
+    }
+    return mics.some((m) => m.id === id) ? id : null;
+  }, [livekit]);
+
+  /** Moves the mic to another device, on or muted as it was. */
+  const switchMic = useCallback(
+    async (id: string) => {
+      setMicId(id);
+      if (livekit) {
+        const room = roomRef.current;
+        if (!room) return;
+        await room.switchActiveDevice("audioinput", id);
+        const t = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack;
+        if (t) setMicTrack(t);
+      } else if (mockMicStream.current) {
+        const stream = await micStream(id);
+        mockMicStream.current.getTracks().forEach((t) => t.stop());
+        mockMicStream.current = stream;
+        setMicTrack(stream.getAudioTracks()[0] ?? null);
+      }
+    },
+    [livekit],
+  );
+
+  /** Someone picked a mic from the menu: use it now and in every meeting after. */
+  const pickMic = useCallback(
+    async (id: string) => {
+      const mic = mics.find((m) => m.id === id);
+      if (mic) saveMic(mic);
+      try {
+        await switchMic(id);
+        setMicError(null);
+      } catch (err) {
+        setMediaError(mediaMessage("mic", err));
+        setMicId(await activeMicId());
+      }
+    },
+    [mics, switchMic, activeMicId],
+  );
+
+  /**
+   * Once the mic is on (only then can its name be read): show which one is in use, and
+   * don't talk through an iPhone in someone's pocket when the Mac has a mic of its own.
+   */
+  const settleMic = useCallback(async () => {
+    const { mics } = await listMics();
+    setMics(mics);
+    const current = await activeMicId();
+    const picked = savedAmong(mics);
+    const onPhone = mics.find((m) => m.id === current && isPhoneMic(m.label));
+    // The one in use went away (unplugged): any other, the iPhone last.
+    const other = mics.find((m) => !isPhoneMic(m.label))?.id ?? mics[0]?.id ?? null;
+    const want = picked ?? (onPhone || !current ? (other ?? current) : current);
+    if (want && want !== current) {
+      try {
+        await switchMic(want);
+        const now = mics.find((m) => m.id === want);
+        if (onPhone && now && !picked) toast({ tone: "info", text: `Using ${now.label} instead of your iPhone's mic.`, ms: 6000 });
+        return;
+      } catch {
+        /* keep the one that works */
+      }
+    }
+    setMicId(current);
+  }, [activeMicId, switchMic]);
+  const settleMicRef = useRef(settleMic);
+  settleMicRef.current = settleMic;
+
+  // Plugging in or unplugging a mic: the menu follows, and while you're talking the mic you
+  // picked takes over when it comes back (or another one, when the one in use goes away).
+  useEffect(() => {
+    const md = navigator.mediaDevices;
+    if (!md?.addEventListener) return;
+    const onChange = () => {
+      if (micOnRef.current) void settleMicRef.current();
+      else void listMics().then(({ mics }) => setMics(mics));
+    };
+    md.addEventListener("devicechange", onChange);
+    return () => md.removeEventListener("devicechange", onChange);
+  }, []);
+
+  /** The menu opened: names may have changed since. */
+  const refreshMics = useCallback(async () => {
+    const { mics } = await listMics();
+    setMics(mics);
+    if (micOnRef.current) setMicId(await activeMicId());
+  }, [activeMicId]);
 
   // ---- screen share ---------------------------------------------------------
   // One screen picker at a time.
@@ -307,6 +482,10 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
     micStarting,
     micError,
     toggleMic,
+    mics,
+    micId,
+    pickMic,
+    refreshMics,
     localScreen,
     remoteScreen,
     startShare,
