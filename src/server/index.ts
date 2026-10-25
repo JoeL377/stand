@@ -43,6 +43,7 @@ import { ConxtGlossary, refreshRoomVocabulary, roomVocabulary, setConxtGlossary 
 import { ConxtOpenItems, refreshRoomOpenItems, setConxtOpenItems } from "./conxtOpenItems.ts";
 import { GithubApp, appReady, readEvent, signedByGithub } from "./github.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
+import { DoneDecks } from "./doneDeck.ts";
 
 const conxtDestinations = parseDestinations(process.env.CONXT_DESTINATIONS);
 const db = openDb(path.join(config.dataDir, "standup.db"));
@@ -58,6 +59,13 @@ const polisher = new UpNextPolisher(
   agent,
   (roomId) => live(roomId)?.meetingStartedAt ?? null,
   (roomId) => live(roomId)?.upNextChanged(),
+);
+// "Done since last time": rewritten each time a task closes between meetings, ready for the next one.
+const doneDecks = new DoneDecks(
+  db,
+  agent,
+  (roomId) => !!live(roomId),
+  (roomId) => live(roomId)?.followUpsChanged(),
 );
 
 /** A meeting left running when the server stopped is picked up again if
@@ -185,8 +193,11 @@ const agents = agentApi({
   notify: (roomId, what) => {
     const s = live(roomId);
     if (s) what === "updates" ? s.updatesChanged() : s.followUpsChanged();
-    // Between meetings, let reports settle, then tidy the next agenda.
-    else polisher.schedule(roomId, 60_000);
+    // Between meetings, let reports settle, then tidy the next agenda and what's been done.
+    else {
+      polisher.schedule(roomId, 60_000);
+      doneDecks.schedule(roomId);
+    }
   },
   suggested: (roomId) => upNextView(db, roomId, live(roomId)?.meetingStartedAt ?? null, polisher.busy(roomId)),
   brief: (meetingId, baseUrl, transcript) => {
@@ -306,11 +317,15 @@ const shipWatch = new ShipWatch(
   (roomId) => {
     const s = live(roomId);
     if (s) s.followUpsChanged();
-    else polisher.schedule(roomId, 60_000);
+    else {
+      polisher.schedule(roomId, 60_000);
+      doneDecks.schedule(roomId);
+    }
   },
   (link) => (githubApp ? githubApp.prState(link, config.githubToken) : githubPrState(link, config.githubToken)),
 );
 shipWatch.start();
+doneDecks.start();
 
 // Connect GitHub, on the Connect an agent page: off to the app's install page, and back.
 app.get("/api/github", (_req, res) => {
@@ -1194,6 +1209,7 @@ app.patch(
     const note = db.setActionDone(req.params.id, req.params.noteId, req.body?.done ? req.user!.name : null);
     if (!note) return notFound(res);
     sessions.get(req.params.id)?.followUpsChanged();
+    doneDecks.schedule(req.params.id);
     res.json(note);
   }),
 );
@@ -1217,6 +1233,7 @@ app.patch(
           : null;
     if (!note) return notFound(res);
     sessions.get(req.params.id)?.followUpsChanged();
+    doneDecks.schedule(req.params.id);
     res.json(note);
   }),
 );

@@ -9,6 +9,7 @@ import type {
   Deck,
   DeckDraft,
   DeckTheme,
+  DoneDeck,
   Discussion,
   DiscussionOutcome,
   FollowUp,
@@ -206,6 +207,14 @@ CREATE TABLE IF NOT EXISTS space_settled (
   at INTEGER NOT NULL,
   basis TEXT NOT NULL,
   rows_json TEXT NOT NULL
+);
+-- "Done since last time" (doneDeck.ts): what the space closed since its last meeting, as pages Claude
+-- laid out for the next one to open on. since: when that meeting ended; basis: what the pass read.
+CREATE TABLE IF NOT EXISTS space_done (
+  room_id TEXT PRIMARY KEY,
+  since INTEGER NOT NULL,
+  basis TEXT NOT NULL,
+  deck_json TEXT NOT NULL
 );
 -- Rows someone archived off the space page (archive.ts): ref is "<kind>:<id>". title and ts are kept so
 -- the Archived list can show it; extra holds what restoring needs (a deck's items, a suggestion's keys).
@@ -1624,6 +1633,53 @@ export function openDb(file?: string) {
     deckItemIds(deckId: string): string[] {
       return (db.prepare("SELECT id FROM items WHERE deck_id = ? AND archived = 0").all(deckId) as Row[]).map((r) => r.id as string);
     },
+    /** The last finished meeting in a space before a time that more than one person talked in, so a
+     *  quick test on your own doesn't count as "last time". */
+    lastRealMeeting(roomId: string, before = Number.MAX_SAFE_INTEGER): { id: string; startedAt: number; endedAt: number } | null {
+      const r = db
+        .prepare(
+          `SELECT m.id, m.started_at, m.ended_at FROM meetings m
+           WHERE m.room_id = ? AND m.started_at < ? AND m.ended_at IS NOT NULL
+             AND (SELECT COUNT(DISTINCT s.speaker_name) FROM segments s WHERE s.meeting_id = m.id AND s.kind != 'chat') >= 2
+           ORDER BY m.started_at DESC LIMIT 1`,
+        )
+        .get(roomId, before) as Row | undefined;
+      return r ? { id: r.id as string, startedAt: r.started_at as number, endedAt: r.ended_at as number } : null;
+    },
+    /** To-dos and open questions in a space done or dropped since a time (not ones moved to another space), oldest first. */
+    closedTasksSince(roomId: string, since: number): Array<Note & { meetingStartedAt: number; itemTitle: string | null }> {
+      return (
+        db
+          .prepare(
+            `SELECT n.*, m.started_at AS meeting_started_at, i.title AS item_title FROM notes n
+             JOIN meetings m ON m.id = n.meeting_id LEFT JOIN items i ON i.id = n.item_id
+             WHERE m.room_id = ? AND n.kind IN ('action', 'question') AND n.done_at >= ?
+               AND (n.closed_by IS NULL OR n.closed_by != 'moved')
+             ORDER BY n.done_at, n.rowid`,
+          )
+          .all(roomId, since) as Row[]
+      ).map((r) => ({ ...toNote(r), meetingStartedAt: r.meeting_started_at as number, itemTitle: (r.item_title as string) ?? null }));
+    },
+    /** Spaces with a task closed since a time, for the "Done since" sweep. */
+    roomsWithClosesSince(since: number): string[] {
+      return (
+        db
+          .prepare(
+            `SELECT DISTINCT m.room_id FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE n.kind IN ('action', 'question') AND n.done_at >= ?`,
+          )
+          .all(since) as Row[]
+      ).map((r) => r.room_id as string);
+    },
+    getDoneDeck(roomId: string): (DoneDeck & { basis: string }) | null {
+      const r = db.prepare("SELECT basis, deck_json FROM space_done WHERE room_id = ?").get(roomId) as Row | undefined;
+      return r ? { ...(JSON.parse(r.deck_json as string) as DoneDeck), basis: r.basis as string } : null;
+    },
+    saveDoneDeck(roomId: string, deck: DoneDeck, basis: string) {
+      db.prepare(
+        "INSERT INTO space_done (room_id, since, basis, deck_json) VALUES (?, ?, ?, ?) ON CONFLICT (room_id) DO UPDATE SET since = excluded.since, basis = excluded.basis, deck_json = excluded.deck_json",
+      ).run(roomId, deck.since, basis, JSON.stringify(deck));
+    },
     getSettled(roomId: string): Settled | null {
       const r = db.prepare("SELECT at, basis, rows_json FROM space_settled WHERE room_id = ?").get(roomId) as Row | undefined;
       return r ? { at: r.at as number, basis: r.basis as string, rows: JSON.parse(r.rows_json as string) } : null;
@@ -1783,6 +1839,10 @@ export function openDb(file?: string) {
       return Boolean(db.prepare("SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?").get(roomId, userId));
     },
     /** A note with the space and meeting it belongs to. */
+    notesByIds(ids: string[]): Note[] {
+      if (!ids.length) return [];
+      return (db.prepare(`SELECT * FROM notes WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids) as Row[]).map(toNote);
+    },
     getNote(id: string): (Note & { roomId: string; meetingStartedAt: number; meetingEndedAt: number | null }) | null {
       const r = db
         .prepare(

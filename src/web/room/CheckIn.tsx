@@ -40,13 +40,17 @@ export function showCheckIn(p: {
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
-export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number; acts: CheckInActs | null }) {
+/** The tasks the check-in lists: still open, or answered on in this meeting. */
+export const checkInRows = (followUps: FollowUp[], meetingStartedAt: number) => followUps.filter((f) => !f.doneAt || f.doneAt >= meetingStartedAt);
+
+/** embedded: a page of the opening board (Opener.tsx), which has the header and shows what closed since. */
+export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number; acts: CheckInActs | null; embedded?: boolean }) {
   const start = props.meetingStartedAt;
   const work = useWork(props.followUps.filter((f) => !f.doneAt).map((f) => f.id));
   // Closed between the last meeting and this one: news to glance at.
-  const news = props.followUps.filter((f) => f.doneAt && f.doneAt < start);
+  const news = props.embedded ? [] : props.followUps.filter((f) => f.doneAt && f.doneAt < start);
   // Everything still to talk about, and what people answered on here (muted, with Undo).
-  const here = props.followUps.filter((f) => !f.doneAt || f.doneAt >= start);
+  const here = checkInRows(props.followUps, start);
   const left = unanswered(props.followUps, start).length;
   const groups = new Map<string, FollowUp[]>();
   for (const f of here) {
@@ -57,16 +61,18 @@ export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number
   const owners = [...groups.keys()].sort((a, b) => (a === "") !== (b === "") ? (a === "" ? 1 : -1) : groups.get(a)![0].ts - groups.get(b)![0].ts);
   const acts = props.acts;
   return (
-    <section className="checkin" aria-label="Since last time">
-      <header className="checkin-head">
-        <h2>Since last time</h2>
-        <span className="checkin-count">{left} to check</span>
-        {acts && (
-          <button type="button" className="checkin-close" onClick={acts.onClose}>
-            Move on
-          </button>
-        )}
-      </header>
+    <section className={props.embedded ? "checkin embedded" : "checkin"} aria-label="Since last time">
+      {!props.embedded && (
+        <header className="checkin-head">
+          <h2>Since last time</h2>
+          <span className="checkin-count">{left} to check</span>
+          {acts && (
+            <button type="button" className="checkin-close" onClick={acts.onClose}>
+              Move on
+            </button>
+          )}
+        </header>
+      )}
       {news.length > 0 && (
         <ul className="checkin-rows news" aria-label="Closed since the last meeting">
           {news.map((f) => (

@@ -1106,7 +1106,10 @@ test("since last time: carried tasks open the meeting, Stand hears one called do
   const state = () => (joe.got.filter((m) => m.type === "state").at(-1) as Extract<ServerMessage, { type: "state" }>).state;
   // Open ones oldest first, and the one the PR closed since last time.
   assert.deepEqual(state().followUps.map((f) => [f.text, !!f.doneAt]), [["Fix the Railway deploy", false], ["Write the docs", false], ["Ship the bar fix", true]]);
-  assert.deepEqual(state().checkIn, { closed: false, answeredAt: null });
+  assert.deepEqual(state().checkIn, { closed: false, answeredAt: null, page: 0 });
+  // Anyone turns the opening board's page, for everyone.
+  await say(joe, { type: "checkin.page", page: 1 });
+  assert.equal(state().checkIn?.page, 1);
 
   session.addSpeech("u1", "Joe", "I fixed the Railway deploy yesterday", Date.now());
   await (session as unknown as { runList(): Promise<void> }).runList();

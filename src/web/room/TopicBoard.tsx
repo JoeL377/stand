@@ -14,11 +14,11 @@
 // "Earlier". While someone's pointer is on a list, new lines wait behind a "2 new" pill. An answered
 // question folds into its decision and a checked to-do into "Done", each after a moment in place.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
-import type { Board, BoardDetail, BoardThread, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
+import type { Board, BoardDetail, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import { barSpan } from "../../shared/chapters.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
-import { CheckIn, type CheckInActs, showCheckIn } from "./CheckIn.tsx";
+import { Opener, type OpenerActs, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
 
 /** Talk older than this isn't "now" any more. */
@@ -86,9 +86,11 @@ export function TopicBoard(props: {
   onDone?: (noteId: string, done: boolean) => void;
   /** Host only: take a line off that Stand got wrong (with Undo). */
   onRemove?: (note: Note) => void;
-  /** The "Since last time" check-in, and what answering on it does (null while it can't be answered). */
-  checkIn?: { closed: boolean; answeredAt: number | null };
-  checkInActs?: CheckInActs | null;
+  /** The opening board ("Done since" pages, then the "Since last time" check-in), and what turning and
+   *  answering on it does (null while it can't be answered). */
+  checkIn?: { closed: boolean; answeredAt: number | null; page?: number };
+  checkInActs?: OpenerActs | null;
+  doneDeck?: DoneDeck | null;
 }) {
   const now = useNow(15_000);
   const board = props.board;
@@ -139,9 +141,10 @@ export function TopicBoard(props: {
     onCheckIn: props.checkInActs?.onOpen,
     onUndoSaid: props.checkInActs?.onUndoSaid,
   };
-  // The meeting opens on what's still open from earlier ones, until that's through or people move on.
+  // The meeting opens on what got done since the last one, then what's still open from earlier ones,
+  // until that's through or people move on.
   const cardSince = threads.length ? Math.min(...threads.flatMap((t) => t.spans.map(([a]) => a))) : null;
-  const checkingIn = showCheckIn({ followUps: props.followUps ?? [], meetingStartedAt: props.meetingStartedAt, checkIn: props.checkIn, cardSince, now });
+  const checkingIn = showOpener({ deck: props.doneDeck, followUps: props.followUps ?? [], meetingStartedAt: props.meetingStartedAt, checkIn: props.checkIn, cardSince, now });
 
   return (
     <div ref={boardRef} className={["topic-board", shown && "peeking", rewound && "rewinding"].filter(Boolean).join(" ")}>
@@ -178,7 +181,13 @@ export function TopicBoard(props: {
           />
         </>
       ) : checkingIn ? (
-        <CheckIn followUps={props.followUps ?? []} meetingStartedAt={props.meetingStartedAt} acts={props.checkInActs ?? null} />
+        <Opener
+          deck={props.doneDeck}
+          followUps={props.followUps ?? []}
+          meetingStartedAt={props.meetingStartedAt}
+          page={props.checkIn?.page ?? 0}
+          acts={props.checkInActs ?? null}
+        />
       ) : current ? (
         <Card
           t={current}
