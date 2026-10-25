@@ -2268,6 +2268,9 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   /* People, Decided, To do and Open share the card's width, each on one line. */
   .topic-tabs { gap: 0; }
   .topic-tabs button { flex: 1 1 auto; justify-content: center; gap: 4px; padding: 6px 4px 8px; white-space: nowrap; }
+  /* Beside a share or a deck, the title gives way so the Board tab stays whole. */
+  .stage-tabs { flex: none; max-width: 70%; overflow-x: auto; scrollbar-width: none; }
+  .stage-tabs::-webkit-scrollbar { display: none; }
 }
 /* A tap leaves no hover box on the card's tabs. */
 @media (hover: none) { .topic-tabs button:hover:not(:disabled) { background: transparent; } }
@@ -2347,6 +2350,9 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .topic-stretch.kickoff.current::before { background: var(--accent); }
 @media (max-width: 640px) {
   .done-point { gap: 6px; }
+  /* The space page's tabs drop their icons (not the ✦) so Tasks stays in view. */
+  .sh-tab > svg { display: none; }
+  .sh-tab { padding: 8px 8px 7px; }
 }
 /* The space page's Done since tab: the opening line, then each page under its title. */
 .sh-done-since { display: flex; flex-direction: column; gap: 14px; }
