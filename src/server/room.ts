@@ -210,6 +210,8 @@ export class RoomSession implements SpeechSink {
   private checkInAnsweredAt: number | null = null;
   /** The page of the opening board everyone is on: the "Done since" pages, then the check-in. */
   private checkInPage = 0;
+  /** Brought back on purpose: it stays on the board until someone moves on again. */
+  private checkInHeld = false;
   /** When someone moved on from the opening board: where the Kickoff chapter on the bar ends. */
   private checkInClosedAt: number | null = null;
   /** "Done since last time" as of when it was last read (undefined: read it again). */
@@ -363,7 +365,7 @@ export class RoomSession implements SpeechSink {
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
       followUps: this.carried(true),
-      checkIn: { closed: this.checkInClosed, answeredAt: this.checkInAnsweredAt, page: this.checkInPage, closedAt: this.checkInClosedAt },
+      checkIn: { closed: this.checkInClosed, answeredAt: this.checkInAnsweredAt, page: this.checkInPage, closedAt: this.checkInClosedAt, held: this.checkInHeld },
       doneDeck: this.doneDeck(),
       updates: this.db.roomUpdates(this.roomId, this.db.previousMeetingStart(this.roomId, this.meetingStartedAt) ?? 0),
       ...this.upNext(),
@@ -782,12 +784,13 @@ export class RoomSession implements SpeechSink {
       }
       case "checkin": {
         this.checkInClosed = !msg.open;
+        this.checkInHeld = msg.open;
         if (!msg.open) this.checkInClosedAt ??= Date.now();
-        // Brought back on purpose (from the board's open tasks): it stays up a while even with the topic card
-        // waiting, on the check-in, its last page.
+        // Brought back on purpose: it stays up, with the topic card waiting, until someone moves on again. From
+        // the board's open tasks it opens on the check-in, its last page; from a page someone was looking at, there.
         if (msg.open) {
           this.checkInAnsweredAt = Date.now();
-          this.checkInPage = 50;
+          this.checkInPage = typeof msg.page === "number" ? Math.max(0, Math.min(50, Math.floor(msg.page))) : 50;
         }
         this.broadcastState();
         break;

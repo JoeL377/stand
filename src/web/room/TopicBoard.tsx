@@ -21,6 +21,8 @@ import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 import { Opener, type OpenerActs, hasKickoff, kickoffEnd, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
 
+const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+
 /** Talk older than this isn't "now" any more. */
 const NOW_MS = 120_000;
 /** Remarks the middle shows before the first card. */
@@ -180,6 +182,14 @@ export function TopicBoard(props: {
               page={kickPage}
               acts={{ onPage: setKickPage, onState: () => {}, onUndoSaid: () => {}, onClose: () => setRewind(null), onOpen: () => {} }}
               rewound
+              onShowAll={
+                props.checkInActs
+                  ? (page) => {
+                      props.checkInActs!.onOpen(page);
+                      setRewind(null);
+                    }
+                  : undefined
+              }
             />
           ) : (
           <Card
@@ -217,6 +227,18 @@ export function TopicBoard(props: {
           updating={!!board?.busy}
           pending={board?.pending ?? null}
           onAcceptMove={props.onAcceptMove}
+          kickoff={
+            kickoff
+              ? {
+                  label: props.doneDeck?.slides.length ? "Done since" : "Since last time",
+                  date: props.doneDeck?.slides.length ? day(props.doneDeck.sinceStartedAt) : null,
+                  open: () => {
+                    setPeek(null);
+                    setRewind({ id: KICKOFF, key: KICKOFF, at: kickoff.to, live: current?.id ?? null });
+                  },
+                }
+              : undefined
+          }
           view={view}
           onView={setView}
           threads={threads}
@@ -378,6 +400,8 @@ function Card(props: {
   /** A move the board waits one more pass to confirm: shown faintly, a click makes it now. */
   pending: Board["pending"];
   onAcceptMove?: (title: string) => void;
+  /** The Kickoff card, once the board has moved on from it: a pill in the head opens it again on this screen. */
+  kickoff?: { label: string; date: string | null; open: () => void };
   /** How this person likes the board laid out; the same data either way. */
   view: BoardView;
   onView: (v: BoardView) => void;
@@ -416,6 +440,15 @@ function Card(props: {
         <span className={props.updating ? "topic-updating on" : "topic-updating"} aria-hidden>
           <span className="agent-mark">✦</span> Updating
         </span>
+        {props.kickoff && (
+          <button type="button" className="topic-kick-back" onClick={props.kickoff.open} title="Look at the Kickoff card again, on your screen">
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>{" "}
+            {props.kickoff.label}
+            {props.kickoff.date && <span className="topic-kick-date"> {props.kickoff.date}</span>}
+          </button>
+        )}
         <ViewSwitch view={props.view} onView={props.onView} />
       </div>
       {props.view === "feed" ? (

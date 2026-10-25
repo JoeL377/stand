@@ -457,7 +457,7 @@ export interface RoomState {
   followUps: FollowUp[];
   /** The opening board ("Done since" pages, then the "Since last time" check-in): whether someone moved on
    *  from it, when anyone last answered or turned a page on it, and the page everyone is on. */
-  checkIn?: { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null };
+  checkIn?: { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null; held?: boolean };
   /** What the space finished since its last meeting, laid out ahead of time as pages to open this one with. */
   doneDeck?: DoneDeck | null;
   /** Updates agents and people reported on this space's items since the last meeting started. */
@@ -538,7 +538,7 @@ export type ClientMessage = (
   /** Anyone: Stand heard "done" wrong; the task loses its Said done mark. */
   | { type: "task.saidDone.undo"; noteId: string }
   /** Anyone: move on from the "Since last time" check-in (open: false), or bring it back. */
-  | { type: "checkin"; open: boolean }
+  | { type: "checkin"; open: boolean; page?: number }
   /** Anyone: turn the opening board to a page, for everyone. */
   | { type: "checkin.page"; page: number }
   // Host only: fix what the agent wrote down for the item in focus.

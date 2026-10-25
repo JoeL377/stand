@@ -2416,3 +2416,15 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .topic-board > .opener .opener-count { display: none; }
   .opener .topic-now-head > * { white-space: nowrap; }
 }
+/* On the topic card's head once the board moved on: the Kickoff card, a click away on your own screen. */
+.topic-kick-back { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 0; height: auto; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: none; box-shadow: none; font-size: 12.5px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.topic-kick-back:hover, .topic-kick-back:focus-visible { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: none; }
+.topic-kick-back .agent-mark { font-size: 12px; }
+/* On a phone the head keeps to one line: the pill drops its date, and the Updating word gives way first
+   (the light along the card's top edge still shows it). */
+@media (max-width: 640px) {
+  .topic-kick-date { display: none; }
+  .topic-kick-back { padding: 3px 8px; }
+  .topic-now-head .topic-updating { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+  .topic-now-head .topic-views { flex: none; margin-left: 6px; }
+}
