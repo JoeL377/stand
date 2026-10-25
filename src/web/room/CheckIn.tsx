@@ -17,7 +17,8 @@ export interface CheckInActs {
   onState: (noteId: string, state: "done" | "dropped" | "open", still?: boolean) => void;
   onUndoSaid: (noteId: string) => void;
   onClose: () => void;
-  onOpen: () => void;
+  /** Brings the card back for everyone: on the check-in, or on the page given. */
+  onOpen: (page?: number) => void;
 }
 
 /** Carried tasks nobody has answered on in this meeting. */

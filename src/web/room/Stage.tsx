@@ -257,7 +257,7 @@ export function Stage(props: {
               onState: (noteId, st, still) => send({ type: "task.state", noteId, state: st, still }),
               onUndoSaid: (noteId) => send({ type: "task.saidDone.undo", noteId }),
               onClose: () => send({ type: "checkin", open: false }),
-              onOpen: () => send({ type: "checkin", open: true }),
+              onOpen: (page) => send({ type: "checkin", open: true, page }),
               onPage: (page) => send({ type: "checkin.page", page }),
             }
       }

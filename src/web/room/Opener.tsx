@@ -17,7 +17,7 @@ export interface OpenerActs extends CheckInActs {
   onPage: (page: number) => void;
 }
 
-type CheckInState = { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null };
+type CheckInState = { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null; held?: boolean };
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
@@ -42,6 +42,8 @@ export function showOpener(p: {
   now: number;
 }): boolean {
   if (p.checkIn?.closed) return false;
+  // Brought back on purpose: up until someone moves on again.
+  if (p.checkIn?.held) return hasKickoff(p.deck, p.followUps, p.meetingStartedAt);
   const { done } = openerPages(p.deck, p.followUps, p.meetingStartedAt);
   const left = unanswered(p.followUps, p.meetingStartedAt).length;
   // Nothing to show, or the check-in at the end is through.
@@ -72,6 +74,8 @@ export function Opener(props: {
   rewound?: boolean;
   /** The card's label; the space page's pop-up calls it "Done since". */
   label?: string;
+  /** Opened from the board after it moved on: puts it back on everyone's board, on this page. */
+  onShowAll?: (page: number) => void;
 }) {
   const { deck, acts } = props;
   const { done, checkIn } = openerPages(deck, props.followUps, props.meetingStartedAt);
@@ -153,6 +157,11 @@ export function Opener(props: {
               Move on
             </button>
           ))}
+        {props.rewound && props.onShowAll && (
+          <button type="button" className="opener-close" onClick={() => props.onShowAll!(page)} title="Put it back on everyone's board">
+            Show everyone
+          </button>
+        )}
       </div>
       <h2 className="topic-now-title">{deck ? `Since ${day(deck.sinceStartedAt)}` : "Since last time"}</h2>
       {deck && (

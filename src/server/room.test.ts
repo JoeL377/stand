@@ -1106,7 +1106,7 @@ test("since last time: carried tasks open the meeting, Stand hears one called do
   const state = () => (joe.got.filter((m) => m.type === "state").at(-1) as Extract<ServerMessage, { type: "state" }>).state;
   // Open ones oldest first, and the one the PR closed since last time.
   assert.deepEqual(state().followUps.map((f) => [f.text, !!f.doneAt]), [["Fix the Railway deploy", false], ["Write the docs", false], ["Ship the bar fix", true]]);
-  assert.deepEqual(state().checkIn, { closed: false, answeredAt: null, page: 0, closedAt: null });
+  assert.deepEqual(state().checkIn, { closed: false, answeredAt: null, page: 0, closedAt: null, held: false });
   // Anyone turns the opening board's page, for everyone.
   await say(joe, { type: "checkin.page", page: 1 });
   assert.equal(state().checkIn?.page, 1);
@@ -1125,4 +1125,11 @@ test("since last time: carried tasks open the meeting, Stand hears one called do
   assert.ok(after.checkIn?.answeredAt);
   await say(joe, { type: "checkin", open: false });
   assert.equal(state().checkIn?.closed, true);
+  const closedAt = state().checkIn?.closedAt;
+  // Brought back from the board on the page someone was looking at, it stays until someone moves on again;
+  // the Kickoff chapter still ends where the board first moved on.
+  await say(joe, { type: "checkin", open: true, page: 1 });
+  assert.deepEqual([state().checkIn?.closed, state().checkIn?.held, state().checkIn?.page, state().checkIn?.closedAt], [false, true, 1, closedAt]);
+  await say(joe, { type: "checkin", open: false });
+  assert.deepEqual([state().checkIn?.closed, state().checkIn?.held], [true, false]);
 });
