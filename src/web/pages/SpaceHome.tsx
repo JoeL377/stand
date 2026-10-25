@@ -343,7 +343,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                 {deck.slides.map((s, i) => (
                   <div key={i} className="sh-day">
                     <h3>{s.title}</h3>
-                    <Slide s={s} />
+                    <Slide s={s} at={deck.at} />
                   </div>
                 ))}
               </div>

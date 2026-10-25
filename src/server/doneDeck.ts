@@ -163,7 +163,7 @@ export function slidesFrom(input: DoneInput, draft: DoneDeckDraft, baseUrl = "")
       title: clip(s.title.trim() || "Done", 60),
       lead: s.lead?.trim() ? clip(s.lead.trim(), 160) : null,
       points,
-      shot: shot ? { url: shotUrl(shot, baseUrl), caption: shot.caption } : null,
+      shot: shot ? { url: shotUrl(shot, baseUrl), caption: shot.caption, by: shot.client ? `${shot.userName} via ${shot.client}` : shot.userName, ts: shot.ts } : null,
     });
   }
   const left = [...tasks].filter(([k, t]) => !t.open && !used.has(k)).map(([, t]) => t.note);
