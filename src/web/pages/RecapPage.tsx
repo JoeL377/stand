@@ -11,7 +11,7 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { Markdown } from "../Synthesis.tsx";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
-import { colorFor, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
+import { colorFor, costLines, fmtCost, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
 export function RecapPage() {
   const { meetingId = "" } = useParams();
@@ -155,6 +155,14 @@ export function RecapPage() {
         <p className="muted rc-meta">
           {fmtTime(data.startedAt)}
           {data.endedAt ? ` · ${fmtDuration(data.endedAt - data.startedAt)}` : " · in progress"}
+          {data.cost && (
+            <>
+              {" · "}
+              <span className="rc-cost" tabIndex={0} title={`What this meeting's Claude calls cost:\n${costLines(data.cost).join("\n")}`}>
+                {fmtCost(data.cost.usd)}
+              </span>
+            </>
+          )}
           {people.length > 0 && (
             <>
               {" · "}

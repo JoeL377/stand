@@ -34,10 +34,13 @@ import { applyMerges, mergePrompt, planMerge, stickyMerges, type TopicMerge } fr
 import { newId } from "./ids.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
+import { metered } from "./usage.ts";
 import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
 
 /** Below this the agent keeps its guess to itself. */
 const SUGGEST_MIN_CONFIDENCE = 0.55;
+/** The cost shown on the call is sent again at most this often. */
+const COST_EVERY_MS = 5_000;
 /** A dismissed item isn't suggested again for this long. */
 const DISMISS_QUIET_MS = 90_000;
 /** A word Conxt says was used two ways stays raised this long after it is said. */
@@ -255,6 +258,8 @@ export class RoomSession implements SpeechSink {
       this.meetingStartedAt = m.startedAt;
       this.setFocusInternal(items[0]?.id ?? null, "system", "start");
     }
+    // Every Claude call from here on counts against this meeting; the call shows what it has cost so far.
+    agent = this.agent = metered(agent, this.meetingId, () => this.costChanged());
     this.board = new BoardKeeper(agent, this.meetingStartedAt, resume ? db.meetingBoard(resume.id) : null);
     if (agent.liveList) this.list = new ListKeeper({ liveList: agent.liveList.bind(agent) }, this.meetingStartedAt, resume ? db.meetingList(resume.id) : null);
     // Tidy the suggested agenda now, before anyone has started talking.
@@ -331,6 +336,17 @@ export class RoomSession implements SpeechSink {
   private broadcast(msg: ServerMessage) {
     const data = JSON.stringify(msg);
     for (const [ws, conn] of this.conns) if (conn && ws.readyState === ws.OPEN) ws.send(data);
+  }
+
+  /** After each Claude call: tell everyone what the meeting has cost, at most every few seconds. */
+  private costTimer: ReturnType<typeof setTimeout> | null = null;
+  private costChanged() {
+    if (this.costTimer) return;
+    this.costTimer = setTimeout(() => {
+      this.costTimer = null;
+      const cost = this.db.meetingCost(this.meetingId);
+      if (cost) this.broadcast({ type: "cost", cost });
+    }, COST_EVERY_MS);
   }
 
   private broadcastState() {
@@ -609,6 +625,8 @@ export class RoomSession implements SpeechSink {
         discussions: this.db.meetingDiscussions(this.meetingId),
       });
       if (this.board) this.send(ws, { type: "board", board: this.board.board() });
+      const cost = this.db.meetingCost(this.meetingId);
+      if (cost) this.send(ws, { type: "cost", cost });
       this.send(ws, { type: "list", items: this.list?.notes(this.meetingId) ?? null });
       this.broadcastState();
       return;
@@ -635,7 +653,7 @@ export class RoomSession implements SpeechSink {
         this.setFocus(msg.itemId, conn.name, "manual");
         break;
       case "board.accept":
-        if (!this.ended) void this.acceptBoardMove(msg.title);
+        if (!this.ended) void this.acceptBoardMove(msg.title, conn.name);
         break;
       case "pin":
         if (!isHost || this.ended) return;
@@ -984,7 +1002,7 @@ export class RoomSession implements SpeechSink {
     this.db.logFocus(this.meetingId, itemId, actor, reason);
     if (this.suggestion?.itemId === itemId) this.suggestion = null;
     if (prev !== itemId && this.board) {
-      this.board.focused(itemId, at);
+      this.board.focused(itemId, at, actor === "system" ? null : actor);
       this.scheduleBoard(true);
     }
     return prev;
@@ -1330,10 +1348,10 @@ export class RoomSession implements SpeechSink {
   }
 
   /** Someone clicked "Looks like you've moved to …": switch the board now, after any pass in flight. */
-  private async acceptBoardMove(title: string) {
+  private async acceptBoardMove(title: string, by: string) {
     await this.boardRun;
     const board = this.board;
-    if (this.ended || !board || !board.accept(title, Date.now())) return;
+    if (this.ended || !board || !board.accept(title, Date.now(), by)) return;
     this.db.saveBoard(this.meetingId, board.board());
     this.broadcast({ type: "board", board: board.board() });
   }

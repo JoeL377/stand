@@ -10,7 +10,7 @@
 // title and the latest talk, without the summary, so a slow drift into a new question still moves
 // it. When the host focuses another agenda item, the next answer starts a thread there at once.
 import { z } from "zod";
-import type { Board, BoardCard, BoardDetail, BoardThread, Item, Segment } from "../shared/protocol.ts";
+import type { Board, BoardCard, BoardDetail, BoardMove, BoardThread, Item, Segment } from "../shared/protocol.ts";
 
 export const BOARD_EVERY_MS = 30_000;
 /** How much recent talk the card model reads. */
@@ -152,7 +152,8 @@ export class BoardKeeper {
   /** The latest line the model has read. */
   private lastLook = 0;
   /** The host focused this item since the last run: start a thread there without waiting. */
-  private forcedItem: { itemId: string | null; at: number } | null = null;
+  private forcedItem: { itemId: string | null; at: number; by: string | null } | null = null;
+  private moves: BoardMove[] = [];
   busy = false;
   /** Lines given an id so far, across the board. */
   private lines_ = 0;
@@ -166,6 +167,7 @@ export class BoardKeeper {
       this.threads = saved.threads;
       this.current = saved.threads.find((t) => t.id === saved.currentId) ?? null;
       this.switchedAt = saved.switchedAt;
+      this.moves = saved.moves ?? [];
       this.lastLook = Math.max(0, ...saved.threads.flatMap((t) => t.spans.map((s) => s[1])));
       for (const t of this.threads) t.card = upgrade(t.card, () => this.nextId());
       this.lines_ = Math.max(0, ...this.threads.flatMap((t) => t.card.details.map((d) => Number(d.id.slice(1)) || 0)));
@@ -180,13 +182,14 @@ export class BoardKeeper {
       switchedAt: this.switchedAt,
       busy: this.busy,
       pending: p ? { kind: p.kind, title: p.kind === "return" ? (this.threads.find((t) => t.id === p.returnTo)?.title ?? p.title) : p.title } : null,
+      moves: this.moves,
     };
   }
 
-  /** The host moved the meeting to another agenda item. */
-  focused(itemId: string | null, now: number) {
+  /** The host moved the meeting to another agenda item. `by`: who, or null when Stand did. */
+  focused(itemId: string | null, now: number, by: string | null = null) {
     if (this.current?.itemId === itemId) return void (this.forcedItem = null);
-    this.forcedItem = { itemId, at: now };
+    this.forcedItem = { itemId, at: now, by };
     this.pending = null;
   }
 
@@ -263,20 +266,21 @@ export class BoardKeeper {
       this.extend(this.current, latest);
       return true;
     }
-    this.commit(onOtherItem ? forced!.at : null, now);
+    const first = !this.current;
+    this.commit(onOtherItem ? forced!.at : null, now, first ? { via: "first", by: null } : onOtherItem ? { via: "agenda", by: forced!.by } : { via: "stand", by: null });
     return true;
   }
 
   /** Someone on the call clicked the move the board was waiting to confirm: make it now.
    *  `title` is the one they saw, so a newer proposal isn't taken by mistake. */
-  accept(title: string, now: number): boolean {
+  accept(title: string, now: number, by: string | null = null): boolean {
     if (!this.current || !this.pending || this.board().pending?.title !== title) return false;
-    this.commit(null, now);
+    this.commit(null, now, { via: "click", by });
     return true;
   }
 
   /** The pending move becomes the thread on screen. `agendaAt`: when the host moved to the item it's on. */
-  private commit(agendaAt: number | null, now: number) {
+  private commit(agendaAt: number | null, now: number, how: Pick<BoardMove, "via" | "by">) {
     const p = this.pending!;
     const back = p.kind === "return" ? this.threads.find((t) => t.id === p.returnTo && t !== this.current) : undefined;
     const from = agendaAt !== null ? Math.max(agendaAt, p.since) : p.since;
@@ -289,6 +293,7 @@ export class BoardKeeper {
       this.threads.push(t);
       this.current = t;
     }
+    this.moves.push({ threadId: this.current.id, from, at: now, ...how });
     this.switchedAt = now;
     this.pending = null;
     this.sinceDrift = 0;

@@ -17,6 +17,7 @@ import type {
   ItemSource,
   ItemUpdate,
   Jot,
+  MeetingCost,
   Note,
   NoteKind,
   Quote,
@@ -30,6 +31,7 @@ import type {
 import { newId } from "./ids.ts";
 import type { SnapRow } from "./snaps.ts";
 import type { Polish, UpNextInput } from "./upNext.ts";
+import { costOf, type UsageRow } from "./usage.ts";
 import type { Settled } from "./spaceSettle.ts";
 import type { ListItem } from "./liveList.ts";
 import { initGithub } from "./github.ts";
@@ -216,6 +218,18 @@ CREATE TABLE IF NOT EXISTS space_done (
   basis TEXT NOT NULL,
   deck_json TEXT NOT NULL
 );
+-- Token use of every Claude call (usage.ts), with the meeting it was for (null outside a meeting).
+CREATE TABLE IF NOT EXISTS llm_usage (
+  meeting_id TEXT,
+  task TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input INTEGER NOT NULL,
+  cache_read INTEGER NOT NULL,
+  cache_write INTEGER NOT NULL,
+  output INTEGER NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS llm_usage_meeting ON llm_usage (meeting_id);
 -- Rows someone archived off the space page (archive.ts): ref is "<kind>:<id>". title and ts are kept so
 -- the Archived list can show it; extra holds what restoring needs (a deck's items, a suggestion's keys).
 CREATE TABLE IF NOT EXISTS space_archived (
@@ -1702,6 +1716,33 @@ export function openDb(file?: string) {
       db.prepare(
         "INSERT INTO space_done (room_id, since, basis, deck_json) VALUES (?, ?, ?, ?) ON CONFLICT (room_id) DO UPDATE SET since = excluded.since, basis = excluded.basis, deck_json = excluded.deck_json",
       ).run(roomId, deck.since, basis, JSON.stringify(deck));
+    },
+    addUsage(r: UsageRow) {
+      db.prepare("INSERT INTO llm_usage (meeting_id, task, model, input, cache_read, cache_write, output, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+        r.meetingId,
+        r.task,
+        r.model,
+        r.input,
+        r.cacheRead,
+        r.cacheWrite,
+        r.output,
+        r.at,
+      );
+    },
+    /** What a meeting's Claude calls cost, in dollars, in all and by task; null when none were recorded. */
+    meetingCost(meetingId: string): MeetingCost | null {
+      const rows = db
+        .prepare("SELECT task, model, SUM(input) AS input, SUM(cache_read) AS cache_read, SUM(cache_write) AS cache_write, SUM(output) AS output, COUNT(*) AS calls FROM llm_usage WHERE meeting_id = ? GROUP BY task, model")
+        .all(meetingId) as Row[];
+      if (!rows.length) return null;
+      const byTask = new Map<string, { usd: number; calls: number }>();
+      for (const r of rows) {
+        const usd = costOf({ model: r.model as string, input: r.input as number, cacheRead: r.cache_read as number, cacheWrite: r.cache_write as number, output: r.output as number });
+        const t = byTask.get(r.task as string) ?? { usd: 0, calls: 0 };
+        byTask.set(r.task as string, { usd: t.usd + usd, calls: t.calls + (r.calls as number) });
+      }
+      const tasks = [...byTask].map(([task, t]) => ({ task, ...t })).sort((a, b) => b.usd - a.usd);
+      return { usd: tasks.reduce((s, t) => s + t.usd, 0), calls: tasks.reduce((s, t) => s + t.calls, 0), tasks };
     },
     getSettled(roomId: string): Settled | null {
       const r = db.prepare("SELECT at, basis, rows_json FROM space_settled WHERE room_id = ?").get(roomId) as Row | undefined;

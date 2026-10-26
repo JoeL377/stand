@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import type { Board, ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import { moverText } from "./TopicBoard.tsx";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { SnapsPill } from "../Snaps.tsx";
@@ -13,6 +14,7 @@ export function SidePanel(props: {
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => boolean;
   participantId: string;
+  board?: Board | null;
 }) {
   const { state, segments, interims, send } = props;
   // Two tabs: the meeting's chat and the spoken transcript. The topics and their notes sit on the
@@ -20,6 +22,12 @@ export function SidePanel(props: {
   const [tab, setTab] = useState<"chat" | "transcript">("transcript");
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId && s.kind !== "chat");
+  // Each time the board moved to another topic on this item, and who moved it (Stand by itself, or a person).
+  const threads = props.board?.threads ?? [];
+  const moves = (props.board?.moves ?? []).flatMap((m) => {
+    const t = threads.find((x) => x.id === m.threadId);
+    return m.via !== "first" && t && t.itemId === state.focusItemId ? [{ key: `${m.threadId}-${m.at}`, ts: m.at, by: m.by, text: moverText(m), title: t.title }] : [];
+  });
   // Chat is one conversation for the whole meeting, whichever item it landed on.
   const chats = segments.filter((s) => s.kind === "chat");
   const notesUpdating = props.notesBusy.includes(state.focusItemId ?? "");
@@ -91,7 +99,7 @@ export function SidePanel(props: {
         </p>
       )}
       {tab === "transcript" ? (
-        <Transcript segments={shown} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." />
+        <Transcript segments={shown} moves={moves} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." />
       ) : (
         <>
           <Transcript segments={chats} items={state.items} interims={{}} send={send} empty="No messages yet." />
@@ -112,8 +120,12 @@ export function SidePanel(props: {
   );
 }
 
+/** A line in the transcript where the board moved to another topic. */
+type MoveRow = { key: string; ts: number; by: string | null; text: string; title: string };
+
 function Transcript(props: {
   segments: Segment[];
+  moves?: MoveRow[];
   items: Item[];
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => boolean;
@@ -127,7 +139,7 @@ function Transcript(props: {
   useEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [segments.length, interimList.length, interimList.map((i) => i.text).join("")]);
+  }, [segments.length, props.moves?.length, interimList.length, interimList.map((i) => i.text).join("")]);
 
   return (
     <div
@@ -138,12 +150,28 @@ function Transcript(props: {
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {segments.length === 0 && interimList.length === 0 && (
+      {segments.length === 0 && !props.moves?.length && interimList.length === 0 && (
         <p className="muted empty">{props.empty}</p>
       )}
-      {segments.map((s) => (
-        <SegmentRow key={s.id} segment={s} items={items} send={send} />
-      ))}
+      {[...segments.map((s) => ({ ts: s.ts, seg: s, move: null })), ...(props.moves ?? []).map((m) => ({ ts: m.ts, seg: null, move: m }))]
+        .sort((a, b) => a.ts - b.ts)
+        .map((r) =>
+          r.seg ? (
+            <SegmentRow key={r.seg.id} segment={r.seg} items={items} send={send} />
+          ) : (
+            <div key={r.move!.key} className="seg board-move" role="note" title={`${r.move!.text}: ${r.move!.title}`}>
+              <span className="board-move-text">
+                {!r.move!.by && (
+                  <span className="agent-mark" aria-hidden>
+                    ✦{" "}
+                  </span>
+                )}
+                {r.move!.text} · <strong>{r.move!.title}</strong>
+              </span>
+              <span className="seg-time">{fmtTime(r.move!.ts)}</span>
+            </div>
+          ),
+        )}
       {interimList.map((i) => (
         <div key={i.speakerId} className="seg interim">
           <span className="seg-who" style={{ color: colorFor(i.speakerId) }}>

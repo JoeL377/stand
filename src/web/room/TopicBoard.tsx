@@ -14,7 +14,7 @@
 // "Earlier". While someone's pointer is on a list, new lines wait behind a "2 new" pill. An answered
 // question folds into its decision and a checked to-do into "Done", each after a moment in place.
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
-import type { Board, BoardDetail, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
+import type { Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import { barSpan } from "../../shared/chapters.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
@@ -53,6 +53,30 @@ const SECTIONS = [
 
 const first = (name: string) => name.split(/\s+/)[0];
 const same = (a: string, b: string) => a === b || first(a).toLowerCase() === first(b).toLowerCase();
+
+/** The move that opened a thread's stretch starting at `from` (or its latest one), unless it was the first thread. */
+export function moveInto(moves: BoardMove[] | undefined, threadId: string, from?: number): BoardMove | null {
+  const into = (moves ?? []).filter((m) => m.threadId === threadId && (from === undefined || m.from <= from));
+  const m = into.at(-1);
+  return m && m.via !== "first" ? m : null;
+}
+/** "Stand moved on", "Janesh moved on", "Joe changed the agenda item". */
+export function moverText(m: BoardMove): string {
+  const who = m.by ? first(m.by) : "Stand";
+  return m.via === "agenda" ? `${who} changed the agenda item` : `${who} moved on`;
+}
+
+/** Who moved the board onto this thread: ✦ Stand by itself, or a person. */
+function MovedBy({ move, start, nameOf, idOf }: { move: BoardMove | null; start: number; nameOf: (n: string) => string; idOf: (n: string) => string }) {
+  if (!move) return null;
+  const title = `${move.by ? nameOf(move.by) : "Stand"} ${move.via === "agenda" ? "changed the agenda item" : move.via === "click" ? "took the move Stand offered" : "saw the talk had moved and moved the board by itself"} at ${clock(move.at - start)}`;
+  return (
+    <span className="topic-moved-by" title={title}>
+      {move.by ? <Dot id={idOf(move.by)} name={nameOf(move.by)} size={16} /> : <span className="agent-mark" aria-hidden>✦</span>}
+      {moverText(move)}
+    </span>
+  );
+}
 /** A time into the meeting, the way video players write it: 4:05, 1:02:09. */
 const clock = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -196,6 +220,7 @@ export function TopicBoard(props: {
             t={rewound!}
             live={false}
             rewoundAt={clock(rewind!.at - start)}
+            movedBy={moveInto(board?.moves, rewound!.id, rewind!.at)}
             updating={false}
             pending={null}
             view={view}
@@ -224,6 +249,7 @@ export function TopicBoard(props: {
         <Card
           t={current}
           live={live}
+          movedBy={moveInto(board?.moves, current.id)}
           updating={!!board?.busy}
           pending={board?.pending ?? null}
           onAcceptMove={props.onAcceptMove}
@@ -336,6 +362,8 @@ export function TopicBoard(props: {
         <Peek
           t={shown}
           at={clock((stretches.find((s) => `${s.id}-${s.from}` === peek.key)?.from ?? start) - start)}
+          movedBy={moveInto(board?.moves, shown.id, stretches.find((s) => `${s.id}-${s.from}` === peek.key)?.to)}
+          start={start}
           anchor={peek.key}
           elsewhere={shown.itemId !== props.focusItemId ? (props.items.find((i) => i.id === shown.itemId)?.title ?? "General") : null}
           idOf={idOf}
@@ -400,6 +428,8 @@ function Card(props: {
   /** A move the board waits one more pass to confirm: shown faintly, a click makes it now. */
   pending: Board["pending"];
   onAcceptMove?: (title: string) => void;
+  /** Who moved the board onto this stretch of the thread. */
+  movedBy: BoardMove | null;
   /** The Kickoff card, once the board has moved on from it: a pill in the head opens it again on this screen. */
   kickoff?: { label: string; date: string | null; open: () => void };
   /** How this person likes the board laid out; the same data either way. */
@@ -437,6 +467,7 @@ function Card(props: {
           {label}
         </span>
         {spent(t) >= 60_000 && <span className="topic-mins">{fmtDuration(spent(t))}</span>}
+        <MovedBy move={props.movedBy} start={props.meetingStart} nameOf={props.nameOf} idOf={props.idOf} />
         <span className={props.updating ? "topic-updating on" : "topic-updating"} aria-hidden>
           <span className="agent-mark">✦</span> Updating
         </span>
@@ -980,6 +1011,9 @@ function Peek(props: {
   anchor: string;
   /** The agenda item it was under, when that isn't the one in focus. */
   elsewhere: string | null;
+  /** Who moved the board onto that stretch. */
+  movedBy: BoardMove | null;
+  start: number;
   pinned: boolean;
   idOf: (name: string) => string;
   nameOf: (name: string) => string;
@@ -1023,6 +1057,7 @@ function Peek(props: {
         {props.elsewhere && <span className="topic-mins topic-peek-item">· {props.elsewhere}</span>}
       </div>
       <strong className="topic-peek-title">{t.title}</strong>
+      <MovedBy move={props.movedBy} start={props.start} nameOf={props.nameOf} idOf={props.idOf} />
       <p className="topic-peek-summary">{t.card.summary.join(" ")}</p>
       {details.length > 0 && <Details details={details} idOf={props.idOf} nameOf={props.nameOf} small />}
     </div>

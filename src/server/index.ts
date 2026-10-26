@@ -44,9 +44,11 @@ import { ConxtOpenItems, refreshRoomOpenItems, setConxtOpenItems } from "./conxt
 import { GithubApp, appReady, readEvent, signedByGithub } from "./github.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 import { DoneDecks } from "./doneDeck.ts";
+import { setUsageSink } from "./usage.ts";
 
 const conxtDestinations = parseDestinations(process.env.CONXT_DESTINATIONS);
 const db = openDb(path.join(config.dataDir, "standup.db"));
+setUsageSink((row) => db.addUsage(row));
 configureAppDefault(db.raw, conxtDestinations, process.env.CONXT_DEFAULT_DESTINATION, process.env.CONXT_DEFAULT_OPERATOR_EMAIL);
 const agent = createAgent();
 const sessions = new Map<string, RoomSession>();
@@ -1102,6 +1104,7 @@ app.get(
       synthesis: m.synthesis,
       items: meetingGroups(m),
       chapters: m.chapters,
+      cost: db.meetingCost(m.id),
     };
     res.json(body);
   }),

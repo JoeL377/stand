@@ -201,3 +201,34 @@ test("a move waiting to be confirmed shows on the board, and accepting it switch
   assert.equal(b.pending, null);
   assert.equal(b.threads[1].spans[0][0], T0 + 40 * S);
 });
+
+test("each move records who made it: the first thread, Stand by itself, a click, or the host's agenda", async () => {
+  const { model } = scripted([{ shift: shift("Audio bug") }, { shift: shift("Pricing") }, { shift: shift("Pricing") }, { shift: shift("Notes") }, { shift: shift("Hiring") }]);
+  const k = new BoardKeeper(model, T0);
+  const talk = [say(1, 0), say(2, 5 * S)];
+  await k.run(talk, [], [], null, T0 + 10 * S);
+  // Two answers in a row: Stand moves the board itself.
+  talk.push(say(3, 40 * S), say(4, 45 * S));
+  await k.run(talk, [], [], null, T0 + 50 * S);
+  talk.push(say(5, 70 * S), say(6, 75 * S));
+  await k.run(talk, [], [], null, T0 + 80 * S);
+  // Offered once, then someone takes the offer.
+  talk.push(say(7, 100 * S), say(8, 105 * S));
+  await k.run(talk, [], [], null, T0 + 110 * S);
+  assert.equal(k.accept("Notes", T0 + 115 * S, "Janesh Chhabra"), true);
+  // The host moves to another agenda item.
+  k.focused("b", T0 + 120 * S, "Joe Liang");
+  talk.push(say(9, 130 * S, "b"));
+  await k.run(talk, [], [], "b", T0 + 135 * S);
+  const moves = k.board().moves!.map((m) => [m.via, m.by, k.board().threads.find((t) => t.id === m.threadId)?.title]);
+  assert.deepEqual(moves, [
+    ["first", null, "Audio bug"],
+    ["stand", null, "Pricing"],
+    ["click", "Janesh Chhabra", "Notes"],
+    ["agenda", "Joe Liang", "Hiring"],
+  ]);
+  // Each move points at the stretch it opened.
+  for (const m of k.board().moves!) assert.ok(k.board().threads.find((t) => t.id === m.threadId)!.spans.some(([from]) => from === m.from));
+  // And they come back after a restart.
+  assert.equal(new BoardKeeper(model, T0, k.board()).board().moves!.length, 4);
+});
