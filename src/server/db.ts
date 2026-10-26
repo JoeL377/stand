@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import type {
+  AgentCard,
   Board,
   ChapterRecap,
   AgentToken,
@@ -509,6 +510,8 @@ export function openDb(file?: string) {
   // every note sits in a meeting. Lists of meetings leave these out (see addTask).
   if (!meetingCols.includes("kind")) db.exec("ALTER TABLE meetings ADD COLUMN kind TEXT");
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
+  // What ✦ Stand did on the board (meetingAgent.ts): its cards, which are also its log.
+  if (!meetingCols.includes("agent_json")) db.exec("ALTER TABLE meetings ADD COLUMN agent_json TEXT");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
@@ -1014,6 +1017,13 @@ export function openDb(file?: string) {
     meetingList(meetingId: string): ListItem[] | null {
       const r = db.prepare("SELECT list_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
       return r?.list_json ? (JSON.parse(r.list_json as string) as ListItem[]) : null;
+    },
+    saveAgentCards(meetingId: string, cards: AgentCard[]) {
+      db.prepare("UPDATE meetings SET agent_json = ? WHERE id = ?").run(JSON.stringify(cards), meetingId);
+    },
+    meetingAgentCards(meetingId: string): AgentCard[] | null {
+      const r = db.prepare("SELECT agent_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
+      return r?.agent_json ? (JSON.parse(r.agent_json as string) as AgentCard[]) : null;
     },
     saveBoard(meetingId: string, board: Board) {
       db.prepare("UPDATE meetings SET board_json = ? WHERE id = ?").run(JSON.stringify({ ...board, busy: false }), meetingId);

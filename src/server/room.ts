@@ -21,6 +21,7 @@ import type {
 } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
+import { AgentKeeper, costOf, optionsPrompt, type SpaceHistory, toCard } from "./meetingAgent.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
 import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
@@ -203,6 +204,8 @@ export class RoomSession implements SpeechSink {
   private boardDueAt = 0;
   /** The board's running list (liveList.ts): one pass at a time, after each pause in the talk. Null without a model. */
   private list: ListKeeper | null = null;
+  /** What ✦ Stand put on the board (meetingAgent.ts); null without a model to run it. */
+  private agentCards: AgentKeeper | null = null;
   private listTimer: NodeJS.Timeout | null = null;
   private listRun: Promise<void> | null = null;
   /** The check-in at the start ("Since last time"): someone moved on from it, and the last answer anyone gave. */
@@ -257,6 +260,7 @@ export class RoomSession implements SpeechSink {
     }
     this.board = new BoardKeeper(agent, this.meetingStartedAt, resume ? db.meetingBoard(resume.id) : null);
     if (agent.liveList) this.list = new ListKeeper({ liveList: agent.liveList.bind(agent) }, this.meetingStartedAt, resume ? db.meetingList(resume.id) : null);
+    if (agent.findOptions && this.list) this.agentCards = new AgentKeeper(resume ? db.meetingAgentCards(resume.id) : null);
     // Tidy the suggested agenda now, before anyone has started talking.
     polisher?.schedule(room.id, 0);
   }
@@ -610,6 +614,7 @@ export class RoomSession implements SpeechSink {
       });
       if (this.board) this.send(ws, { type: "board", board: this.board.board() });
       this.send(ws, { type: "list", items: this.list?.notes(this.meetingId) ?? null });
+      if (this.agentCards) this.send(ws, { type: "agent", cards: this.agentCards.all() });
       this.broadcastState();
       return;
     }
@@ -846,6 +851,38 @@ export class RoomSession implements SpeechSink {
         this.db.addNote(this.meetingId, itemId, { kind: msg.kind, text, owner }, conn.name);
         this.sendItemNotes(itemId);
         if (msg.kind === "action") this.broadcastState();
+        break;
+      }
+      case "agent.options": {
+        const q = this.list?.get(msg.noteId);
+        if (this.ended || !this.agentCards || !q || q.kind !== "open" || q.closed) return;
+        if (this.agentCards.onQuestion(q.id)) return;
+        if (!this.agentCards.canRun()) return this.send(ws, { type: "error", message: "Stand has found options as many times as it can in one meeting." });
+        const card = this.agentCards.start(q.id, q.text, conn.name);
+        this.agentChanged();
+        void this.runOptions(card.id);
+        break;
+      }
+      case "agent.pick": {
+        if (this.ended || !this.agentCards || !this.list || (msg.as !== "decision" && msg.as !== "task")) return;
+        const card = this.agentCards.pick(msg.cardId, msg.index, msg.as, conn.name);
+        if (!card) return;
+        const option = card.options[msg.index];
+        const q = this.list.get(card.about);
+        const itemId = q?.itemId ?? this.focusItemId;
+        // Into the list on the board and into the meeting's notes, so the recap and the space keep it.
+        // Titles are written to stand on their own ("Move hosting to Fly.io"), as a decision or a to-do.
+        const text = option.title;
+        const kind = msg.as === "decision" ? "decided" : "todo";
+        if (this.list.addByHand(kind, null, text, itemId, msg.as === "decision" ? card.about : null)) this.listChanged();
+        this.db.addNote(this.meetingId, itemId, { kind: msg.as === "decision" ? "decision" : "action", text, owner: null }, conn.name);
+        this.sendItemNotes(itemId);
+        if (msg.as === "task") this.broadcastState();
+        this.agentChanged();
+        break;
+      }
+      case "agent.dismiss": {
+        if (this.agentCards?.dismiss(msg.cardId, conn.name)) this.agentChanged();
         break;
       }
       case "upnext.add":
@@ -1266,6 +1303,48 @@ export class RoomSession implements SpeechSink {
         this.scheduleList();
       });
     return this.listRun;
+  }
+
+  /** ✦ Stand's options for an open question: the space's history and the talk so far, then the card. */
+  private async runOptions(cardId: string) {
+    const cards = this.agentCards;
+    const card = cards?.get(cardId);
+    if (!cards || !card || !this.agent.findOptions) return;
+    const started = Date.now();
+    let out: Parameters<AgentKeeper["finish"]>[1] = { fields: null, model: null, costUsd: null };
+    try {
+      const history = this.spaceHistory();
+      const run = await this.agent.findOptions(optionsPrompt(card.question, this.db.meetingSegments(this.meetingId), Date.now(), history));
+      out = { fields: run.answer && toCard(run.answer, history), model: run.model, costUsd: costOf(run.model, run.usage) };
+    } catch (e) {
+      console.error(`[agent] options ${this.meetingId}: ${(e as Error).message}`);
+    }
+    cards.finish(cardId, out);
+    console.log(`[agent] options for "${card.question}" (${card.by}): ${card.status} in ${((Date.now() - started) / 1000).toFixed(1)}s, $${out.costUsd ?? "?"}`);
+    this.agentChanged();
+  }
+
+  /** What the space already has, for ✦ Stand to read: newest first. */
+  private spaceHistory(): SpaceHistory {
+    const room = this.db.getRoom(this.roomId);
+    return {
+      name: this.roomName,
+      purpose: room?.purpose ?? "",
+      decisions: this.db.spaceNotes(this.roomId, "decision", 40).map((n) => ({ text: n.text, ts: n.ts })),
+      tasks: this.db
+        .openActions(this.roomId)
+        .reverse()
+        .slice(0, 40)
+        .map((n) => ({ text: n.text, owner: n.owner, ts: n.ts })),
+      questions: this.db.spaceNotes(this.roomId, "question", 40).map((n) => ({ text: n.text, ts: n.ts })),
+      notes: this.db.spaceJots(this.roomId, 0, 40).map((j) => ({ text: j.text, by: j.by, ts: j.ts })),
+    };
+  }
+
+  private agentChanged() {
+    if (!this.agentCards) return;
+    this.db.saveAgentCards(this.meetingId, this.agentCards.all());
+    this.broadcast({ type: "agent", cards: this.agentCards.all() });
   }
 
   private listChanged() {

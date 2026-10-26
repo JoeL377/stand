@@ -13,13 +13,14 @@
 // so a new one joins at the foot of the list with a short glow and nothing moves; the rest fold into
 // "Earlier". While someone's pointer is on a list, new lines wait behind a "2 new" pill. An answered
 // question folds into its decision and a checked to-do into "Done", each after a moment in place.
-import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
+import { type CSSProperties, Fragment, type RefObject, useEffect, useRef, useState } from "react";
 import type { Board, BoardDetail, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import { barSpan } from "../../shared/chapters.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 import { Opener, type OpenerActs, hasKickoff, kickoffEnd, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
+import { type AgentActs, cardFor, FindOptions, OptionsCard } from "./AgentCard.tsx";
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
@@ -96,6 +97,8 @@ export function TopicBoard(props: {
   checkIn?: { closed: boolean; answeredAt: number | null; page?: number };
   checkInActs?: OpenerActs | null;
   doneDeck?: DoneDeck | null;
+  /** ✦ Stand's cards on open questions, and asking for them. */
+  agent?: AgentActs;
 }) {
   const now = useNow(15_000);
   const board = props.board;
@@ -150,7 +153,8 @@ export function TopicBoard(props: {
   const liveTasks = useTasks(props.notes ?? [], props.followUps ?? [], current, live ? now : 0, start);
   const pastTasks = useTasks(asOf(props.notes ?? [], rewind?.at ?? 0), props.followUps ?? [], rewound, 0, start);
   const tasks = rewound ? pastTasks : liveTasks;
-  const acts: TaskActs = rewound ? { start } : {
+  const acts: TaskActs = rewound ? { start, agent: props.agent && { cards: props.agent.cards } } : {
+    agent: props.agent,
     onDone: props.onDone,
     onRemove: props.onRemove,
     start,
@@ -663,6 +667,7 @@ interface TaskActs {
   /** Bring back the "Since last time" check-in. */
   onCheckIn?: () => void;
   onUndoSaid?: (noteId: string) => void;
+  agent?: AgentActs;
 }
 
 /** The meeting's to-dos, decisions and questions, sorted for the board: the topic on screen
@@ -780,7 +785,22 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
   const earlier = props.kind === "todo" ? props.tasks.earlier : [];
   const earlierOpen = earlier.filter((f) => !f.doneAt).length;
   if (!all.length && !earlier.length) return <span className="topic-section-empty">{props.compact ? "–" : "Nothing yet"}</span>;
-  const row = (note: Note, opts: { at: string; r?: TaskRow; removable?: boolean }) => (
+  const row = (note: Note, opts: { at: string; r?: TaskRow; removable?: boolean }) => {
+    // A picked card stays under its question while the question leaves, so the pick shows first.
+    const card = props.kind === "open" ? cardFor(props.acts.agent, note.id) : undefined;
+    const line = taskLine(note, opts, card ? null : props.kind === "open" && !opts.r?.leaving && props.acts.agent ? props.acts.agent : null);
+    return card ? (
+      <Fragment key={note.id}>
+        {line}
+        <li className="agent-card-row">
+          <OptionsCard card={card} acts={props.acts.agent!} />
+        </li>
+      </Fragment>
+    ) : (
+      line
+    );
+  };
+  const taskLine = (note: Note, opts: { at: string; r?: TaskRow; removable?: boolean }, find: AgentActs | null) => (
     <li
       key={note.id}
       className={[props.kind, "topic-task", opts.r?.here && "here", note.doneAt && "done", opts.r?.leaving && "leaving", props.tasks.fresh.has(note.id) && "topic-new"].filter(Boolean).join(" ")}
@@ -807,6 +827,7 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
           Answered
         </span>
       )}
+      {find && <FindOptions noteId={note.id} acts={find} />}
       {note.owner && <Dot id={props.idOf(note.owner)} name={props.nameOf(note.owner)} size={18} />}
       <span className="topic-task-at">{opts.at}</span>
       {opts.removable && props.acts.onRemove && !opts.r?.leaving && (
