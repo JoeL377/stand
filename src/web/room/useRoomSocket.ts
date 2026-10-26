@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Board, ClientMessage, Discussion, ListNote, MeetingCost, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
+import type { AgentCard, Board, ClientMessage, Discussion, ListNote, MeetingCost, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
 
 export interface Interim {
   speakerId: string;
@@ -111,6 +111,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [cost, setCost] = useState<MeetingCost | null>(null);
   /** The board's running list; null when the server keeps none (no model): the tabs read the notes. */
   const [list, setList] = useState<ListNote[] | null>(null);
+  /** What ✦ Stand has put on the board; null when the server runs no agent. */
+  const [agentCards, setAgentCards] = useState<AgentCard[] | null>(null);
   /** Items whose notes the agent is rewriting right now ("" = off-agenda). */
   const [notesBusy, setNotesBusy] = useState<string[]>([]);
   const [interims, setInterims] = useState<Record<string, Interim>>({});
@@ -217,6 +219,9 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
             break;
           case "list":
             setList(msg.items && reapply(msg.items, patchList));
+            break;
+          case "agent":
+            setAgentCards(msg.cards);
             break;
           case "notes.busy": {
             const key = msg.itemId ?? "";
@@ -368,6 +373,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     board,
     cost,
     list,
+    agentCards,
     notesBusy,
     interims,
     endedMeetingId,

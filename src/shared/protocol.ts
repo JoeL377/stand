@@ -119,6 +119,41 @@ export interface ListNote extends Note {
   answers: string | null;
 }
 
+/** One way to settle an open question, as ✦ Stand found it. */
+export interface AgentOption {
+  title: string;
+  /** The tradeoff, in a line. */
+  why: string;
+  /** The page it leans on, when it found one. */
+  source: { title: string; url: string } | null;
+}
+
+/** Something ✦ Stand, the meeting's own agent, did on the board because someone asked: for now,
+ *  options for an open question. Kept with the meeting, so it is also the agent's log of what it
+ *  did, for whom, and what it cost. */
+export interface AgentCard {
+  id: string;
+  kind: "options";
+  /** The open question's line on the board's list. */
+  about: string;
+  question: string;
+  status: "working" | "ready" | "failed";
+  /** Who asked for it. */
+  by: string;
+  at: number;
+  readyAt: number | null;
+  options: AgentOption[];
+  /** What the space already had on it: earlier decisions, to-dos and notes, each with when it was said. */
+  fromSpace: Array<{ text: string; when: number }>;
+  /** A line instead of options: why there are none, or the answer when the space already has one. */
+  note: string | null;
+  picked: { index: number; as: "decision" | "task"; by: string; at: number } | null;
+  dismissed: { by: string; at: number } | null;
+  model: string | null;
+  /** What the run cost, in US dollars, when the price of its model is known. */
+  costUsd: number | null;
+}
+
 /** Someone's own words behind a line the agent wrote, copied from the transcript and checked
  *  against it, so a reader can see what was actually said and not only how the agent put it. */
 export interface Quote {
@@ -546,6 +581,12 @@ export type ClientMessage = (
   | { type: "note.remove"; noteId: string }
   | { type: "note.add"; itemId: string | null; kind: "action" | "decision" | "question"; text: string; owner?: string | null }
   | { type: "demo.play" }
+  /** Anyone: ask ✦ Stand for options on an open question on the board's list. */
+  | { type: "agent.options"; noteId: string }
+  /** Anyone: take one of a card's options, as a decision or as a to-do. */
+  | { type: "agent.pick"; cardId: string; index: number; as: "decision" | "task" }
+  /** Anyone: take a card off the board. */
+  | { type: "agent.dismiss"; cardId: string }
   /** The host, or whoever took it: take the snap off everyone's middle screen. It stays on the item. */
   | { type: "stage.snap.close" }
   | { type: "meeting.end" }
@@ -617,6 +658,8 @@ export type ServerMessage =
   | { type: "cost"; cost: MeetingCost }
   /** The board's running list, after every change. Null when there's no model to keep one: the tabs read the live notes. */
   | { type: "list"; items: ListNote[] | null }
+  /** What ✦ Stand, the meeting's own agent, has put on the board so far (meetingAgent.ts). */
+  | { type: "agent"; cards: AgentCard[] }
   | { type: "meeting.ended"; meetingId: string }
   /** The server has a message the client sent with this cid. */
   | { type: "ack"; cid: string }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import type { Board, ClientMessage, ConxtLive, Discussion, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { AgentCard, Board, ClientMessage, ConxtLive, Discussion, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -35,6 +35,8 @@ export function Stage(props: {
   board: Board | null;
   /** The board's running list (server/liveList.ts); null when the server keeps none. */
   list: ListNote[] | null;
+  /** What ✦ Stand has put on the board (server/meetingAgent.ts); null when the server runs no agent. */
+  agentCards: AgentCard[] | null;
   notes: Note[];
   /** Items whose live notes are being redrawn right now (keyed "" for off the agenda). */
   notesBusy: string[];
@@ -246,6 +248,18 @@ export function Stage(props: {
       onAcceptMove={props.offline ? undefined : (title) => send({ type: "board.accept", title })}
       notes={props.list ?? props.notes}
       followUps={state.followUps}
+      agent={
+        props.agentCards && !props.ending && !props.offline
+          ? {
+              cards: props.agentCards,
+              onFind: (noteId) => send({ type: "agent.options", noteId }),
+              onPick: (cardId, index, as) => send({ type: "agent.pick", cardId, index, as }),
+              onDismiss: (cardId) => send({ type: "agent.dismiss", cardId }),
+            }
+          : props.agentCards?.length
+            ? { cards: props.agentCards }
+            : undefined
+      }
       onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
       onRemove={canSteer && !props.ending ? removeNote : undefined}
       checkIn={state.checkIn}

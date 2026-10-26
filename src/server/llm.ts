@@ -10,6 +10,7 @@ import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind,
 import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, BoardDriftSchema, DRIFT_SYSTEM } from "./board.ts";
 import { config } from "./config.ts";
 import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
+import { OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, type RunUsage } from "./meetingAgent.ts";
 import { findQuote, type Said } from "./quotes.ts";
 import { recordUsage } from "./usage.ts";
 
@@ -181,6 +182,9 @@ export interface Agent {
   /** The board's running list (liveList.ts): what the newest talk adds, changes or closes. Left out
    *  without a model; the board's tabs then read the live notes. */
   liveList?(context: string, talk: string): Promise<ListAnswer | null>;
+  /** ✦ Stand's options for an open question (meetingAgent.ts), searching the web as it needs. Left out
+   *  without a model. */
+  findOptions?(prompt: string): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
   settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
@@ -231,6 +235,8 @@ export interface AgendaPolishRow {
 const BOARD_TIMEOUT_MS = 25_000;
 /** The running list answers in about 2 s; past this the next pause tries again. */
 const LIST_TIMEOUT_MS = 15_000;
+/** A run of ✦ Stand's options can search the web a few times; past this, the card says it couldn't. */
+const AGENT_TIMEOUT_MS = 90_000;
 /** The board's context (people, earlier threads) changes rarely, so it's cached ahead of the talk. */
 const boardContent = (context: string, talk: string): Anthropic.Beta.BetaContentBlockParam[] => [
   { type: "text", text: context, cache_control: { type: "ephemeral" } },
@@ -874,6 +880,42 @@ Answer for every smaller topic exactly once.`,
 
   async liveList(context: string, talk: string): Promise<ListAnswer | null> {
     return this.parse(ListAnswerSchema, boardContent(context, talk), LIST_SYSTEM, "low", config.listModel, { timeout: LIST_TIMEOUT_MS, maxTokens: 2000, thinking: false });
+  }
+
+  async findOptions(prompt: string): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }> {
+    const model = config.agentModel;
+    const usage: RunUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0 };
+    const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
+    // A turn that searches can pause partway; send it back as it stands and the server carries on.
+    for (let turn = 0; turn < 3; turn++) {
+      const res = await this.client.beta.messages.parse(
+        {
+          model,
+          max_tokens: 6000,
+          system: OPTIONS_SYSTEM,
+          messages,
+          tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 2 }],
+          output_config: { effort: "low", format: betaZodOutputFormat(OptionsAnswerSchema) },
+          betas: ["server-side-fallback-2026-07-01"],
+          fallbacks: "default",
+        },
+        { timeout: AGENT_TIMEOUT_MS, maxRetries: 1 },
+      );
+      const u = res.usage;
+      usage.input += u.input_tokens;
+      usage.output += u.output_tokens;
+      usage.cacheRead += u.cache_read_input_tokens ?? 0;
+      usage.cacheWrite += u.cache_creation_input_tokens ?? 0;
+      usage.searches += u.server_tool_use?.web_search_requests ?? 0;
+      console.log(`[agent] options ${model} in=${u.input_tokens} out=${u.output_tokens} searches=${u.server_tool_use?.web_search_requests ?? 0} stop=${res.stop_reason}`);
+      if (res.stop_reason === "pause_turn") {
+        messages.push({ role: "assistant", content: res.content as Anthropic.Beta.BetaContentBlockParam[] });
+        continue;
+      }
+      if (res.stop_reason === "refusal") return { answer: null, model, usage };
+      return { answer: (res.parsed_output as OptionsAnswer | null) ?? null, model, usage };
+    }
+    return { answer: null, model, usage };
   }
 
   async boardDrift(context: string, talk: string): Promise<BoardDrift | null> {

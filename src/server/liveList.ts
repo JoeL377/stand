@@ -184,6 +184,18 @@ export class ListKeeper {
     return it;
   }
 
+  /** A line someone put on the list with a click (✦ Stand's options, meetingAgent.ts). A decision that
+   *  settles an open question closes it as answered. Returns the new line, or null when one like it is there. */
+  addByHand(kind: Kind, who: string | null, text: string, itemId: string | null, answers: string | null = null, at = Date.now()): ListItem | null {
+    const t = clip(text.trim(), 200);
+    if (!t || this.items.length >= MAX_ITEMS || this.items.some((i) => i.closed?.how !== "wrong" && similar(i.text, t))) return null;
+    const q = answers ? this.items.find((i) => i.id === answers && i.kind === "open" && !i.closed) : undefined;
+    if (q) q.closed = { how: "answered", at };
+    const it: ListItem = { id: `li_${++this.n}`, kind, who, text: t, itemId, said: at, doneAt: null, doneBy: null, closed: null, answers: q ? q.id : null };
+    this.items.push(it);
+    return it;
+  }
+
   /** One pass over the talk up to `now`. `itemAt` is the agenda item in focus when a line was said.
    *  Returns whether the list changed. */
   async run(
