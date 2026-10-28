@@ -457,6 +457,13 @@ export interface DoneSlide {
   shot: { url: string; caption: string | null; by?: string; ts?: number } | null;
 }
 
+/** The host's middle screen: the board's tab beside a share or deck, and a chapter they opened on the bar. */
+export interface HostView {
+  tab: "main" | "board";
+  /** A chapter (or the Kickoff, id "kickoff") as it stood at `at`; live: the thread on screen when it was opened. */
+  rewind: { id: string; key: string; at: number; live: string | null; page?: number } | null;
+}
+
 export interface RoomState {
   /** This meeting's snaps. */
   snaps: Snap[];
@@ -490,6 +497,8 @@ export interface RoomState {
   /** Action items from earlier meetings that are still open, oldest first, plus any closed since
    *  the meeting before this one ended (so the check-in shows them and they can be reopened). */
   followUps: FollowUp[];
+  /** What the host has on their middle screen, which everyone else follows until they look elsewhere. */
+  hostView?: HostView | null;
   /** The opening board ("Done since" pages, then the "Since last time" check-in): whether someone moved on
    *  from it, when anyone last answered or turned a page on it, and the page everyone is on. */
   checkIn?: { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null; held?: boolean };
@@ -574,6 +583,8 @@ export type ClientMessage = (
   | { type: "task.saidDone.undo"; noteId: string }
   /** Anyone: move on from the "Since last time" check-in (open: false), or bring it back. */
   | { type: "checkin"; open: boolean; page?: number }
+  /** The host: what their middle screen shows now, for everyone following them. */
+  | { type: "host.view"; view: HostView }
   /** Anyone: turn the opening board to a page, for everyone. */
   | { type: "checkin.page"; page: number }
   // Host only: fix what the agent wrote down for the item in focus.

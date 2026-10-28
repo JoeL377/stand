@@ -800,6 +800,24 @@ test("Undo of Switch and move puts the focus and every remark back, late ones to
   await session.end();
 });
 
+test("the host's view goes to everyone; nobody else can set it, and a new host starts it fresh", async () => {
+  const { session } = setup();
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  const view = { tab: "board" as const, rewind: { id: "t1", key: "t1-5", at: 5, live: "t2" } };
+  await say(joe, { type: "host.view", view });
+  assert.deepEqual(session.state().hostView, view);
+  await say(ann, { type: "host.view", view: { tab: "main", rewind: null } });
+  assert.deepEqual(session.state().hostView, view);
+  await say(joe, { type: "host.view", view: { tab: "sideways", rewind: null } as never });
+  assert.deepEqual(session.state().hostView, view);
+  await say(joe, { type: "host.give", participantId: "u2" });
+  assert.equal(session.state().hostView, null);
+  await say(ann, { type: "host.view", view: { tab: "main", rewind: { id: "kickoff", key: "kickoff", at: 1, live: null, page: 2 } } });
+  assert.deepEqual(session.state().hostView?.rewind?.page, 2);
+  await session.end();
+});
+
 test("only one person shares at a time; the second is told who is", async () => {
   const { session } = setup();
   const joe = await join(session, { id: "u1", name: "Joe" });

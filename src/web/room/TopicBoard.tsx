@@ -123,6 +123,12 @@ export function TopicBoard(props: {
   doneDeck?: DoneDeck | null;
   /** ✦ Stand's cards on open questions, and asking for them. */
   agent?: AgentActs;
+  /** Following the host: the chapter they have open (null: live), by name. Unset: this screen goes its own way. */
+  follow?: { rewind: Rewind | null; host: string } | null;
+  /** Someone following the host opened something else here: their screen goes its own way from now. */
+  onOwn?: () => void;
+  /** The host: the chapter open on this screen changed (null: back on live), for everyone following. */
+  onRewind?: (r: Rewind | null) => void;
 }) {
   const now = useNow(15_000);
   const board = props.board;
@@ -138,7 +144,14 @@ export function TopicBoard(props: {
   const [peek, setPeek] = useState<{ id: string; key: string; pinned: boolean } | null>(null);
   // A chapter clicked on the bar: the board as it stood at that stretch's end, on this screen only.
   // live: the thread that was on screen when it was opened, so a move since can be pointed out.
-  const [rewind, setRewind] = useState<{ id: string; key: string; at: number; live: string | null } | null>(null);
+  // While following the host it's theirs; any look of your own here breaks off from them.
+  const [ownRewind, setOwnRewind] = useState<Rewind | null>(null);
+  const following = props.follow ?? null;
+  const rewind = following ? following.rewind : ownRewind;
+  const setRewind = (r: Rewind | null) => {
+    setOwnRewind(r);
+    if (following) props.onOwn?.();
+  };
   const boardRef = useRef<HTMLDivElement>(null);
   const latest = props.segments.at(-1);
   const live = !!latest && now - latest.ts < NOW_MS;
@@ -150,7 +163,12 @@ export function TopicBoard(props: {
   const checkingIn = showOpener(opening);
   // On the bar it's the first chapter; topics talked about while it was up start where it ends.
   const kickoff = hasKickoff(props.doneDeck, props.followUps ?? [], props.meetingStartedAt) ? { from: props.meetingStartedAt, to: kickoffEnd(opening) ?? now } : null;
-  const [kickPage, setKickPage] = useState(0);
+  const [ownKickPage, setOwnKickPage] = useState(0);
+  const kickPage = following?.rewind?.page ?? ownKickPage;
+  const setKickPage = (page: number) => {
+    setOwnKickPage(page);
+    if (following) setRewind(rewind);
+  };
   const stretches = threads
     .flatMap((t) => t.spans.map(([from, to]) => ({ id: t.id, from, to: t.id === current?.id && live ? Math.max(to, now) : to })))
     .map((x) => (kickoff ? { ...x, from: Math.max(x.from, kickoff.to) } : x))
@@ -173,7 +191,13 @@ export function TopicBoard(props: {
     const key = (e: KeyboardEvent) => e.key === "Escape" && setRewind(null);
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [rewind]);
+  }, [rewind, !!following]);
+  // The host's own look back goes out to everyone following them.
+  const sent = rewind && { ...rewind, page: rewind.id === KICKOFF ? kickPage : undefined };
+  const sentKey = JSON.stringify(sent);
+  useEffect(() => {
+    if (!following) props.onRewind?.(sent);
+  }, [sentKey, !!following, !!props.onRewind]);
   const liveTasks = useTasks(props.notes ?? [], props.followUps ?? [], current, live ? now : 0, start);
   const pastTasks = useTasks(asOf(props.notes ?? [], rewind?.at ?? 0), props.followUps ?? [], rewound, 0, start);
   const tasks = rewound ? pastTasks : liveTasks;
@@ -197,6 +221,10 @@ export function TopicBoard(props: {
                   ✦
                 </span>{" "}
                 New topic: <strong>{movedOn.title}</strong> · Back to live →
+              </>
+            ) : following ? (
+              <>
+                {first(following.host)} is showing this · Back to live →
               </>
             ) : (
               <>Back to live →</>
@@ -406,6 +434,10 @@ export function BoardStrip({ board, focusItemId, onOpen }: { board: Board | null
     </div>
   );
 }
+
+/** A chapter opened on the bar: the board as it stood at `at`. live: the thread on screen when it was opened,
+ *  so a move since can be pointed out; page: the Kickoff's page. */
+export type Rewind = { id: string; key: string; at: number; live: string | null; page?: number };
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.max(0, Math.min(100, (part / whole) * 100)) : 0);
 

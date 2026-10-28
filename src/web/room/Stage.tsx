@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import type { AgentCard, Board, ClientMessage, ConxtLive, Discussion, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { AgentCard, Board, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
@@ -8,7 +8,7 @@ import { CameraIcon, ShareIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
-import { BoardStrip, TopicBoard } from "./TopicBoard.tsx";
+import { BoardStrip, TopicBoard, type Rewind } from "./TopicBoard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
@@ -134,9 +134,31 @@ export function Stage(props: {
   // one you're on (null: the main screen, "board": the board over a share or deck). Yours
   // alone: nobody else's screen changes.
   const [tabs, setTabs] = useState<string[]>([]);
-  const [tab, setTab] = useState<string | null>(null);
+  const [ownTab, setTab] = useState<string | null>(null);
   // A share or a deck has the middle, so the board waits behind a tab of its own.
   const middleTaken = showingScreen || Boolean(sharer) || deckUp;
+  // Everyone's middle screen follows the host's: the board's tab, and a chapter they open on the bar.
+  // Opening anything yourself goes your own way, until Follow, or until the host comes to where you are.
+  const hostView = state.hostView ?? null;
+  const [own, setOwn] = useState(false);
+  const following = !canSteer && !!host && !own;
+  const tab = following ? (hostView?.tab === "board" ? "board" : null) : ownTab;
+  const pickTab = (t: string | null) => {
+    setTab(t);
+    if (following) setOwn(true);
+  };
+  // What this screen's board has open on its bar (null: live), as it last said.
+  const [myRewind, setMyRewind] = useState<Rewind | null>(null);
+  const myView: HostView = { tab: middleTaken && tab === "board" ? "board" : "main", rewind: myRewind };
+  const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
+  const hostKey = JSON.stringify(hostView);
+  useEffect(() => {
+    if (own && sameView(hostView, myView)) setOwn(false);
+  }, [hostKey]);
+  const myKey = JSON.stringify(myView);
+  useEffect(() => {
+    if (canSteer && !props.offline) send({ type: "host.view", view: myView });
+  }, [canSteer, myKey, props.offline]);
   const boardOpen = middleTaken && tab === "board";
   // Once the middle is free the board is the main screen again; the next share opens on itself.
   useEffect(() => {
@@ -216,7 +238,7 @@ export function Stage(props: {
   const openSnap = tab ? tabSnaps.find((s) => s.id === tab) : undefined;
   const openTab = (id: string) => {
     setTabs((t) => (t.includes(id) ? t : [...t, id].slice(-6)));
-    setTab(id);
+    pickTab(id);
   };
   const closeTab = (id: string) => {
     setTabs((t) => t.filter((x) => x !== id));
@@ -264,6 +286,9 @@ export function Stage(props: {
       onRemove={canSteer && !props.ending ? removeNote : undefined}
       checkIn={state.checkIn}
       doneDeck={state.doneDeck}
+      follow={following ? { rewind: hostView?.rewind ?? null, host: host!.name } : null}
+      onOwn={() => setOwn(true)}
+      onRewind={setMyRewind}
       checkInActs={
         props.ending || props.offline
           ? null
@@ -306,7 +331,7 @@ export function Stage(props: {
               role="tab"
               aria-selected={!openSnap && !boardOpen}
               className={openSnap || boardOpen ? "stage-tab" : "stage-tab on"}
-              onClick={() => setTab(null)}
+              onClick={() => pickTab(null)}
             >
               {mainLabel}
             </button>
@@ -315,7 +340,7 @@ export function Stage(props: {
                 role="tab"
                 aria-selected={boardOpen}
                 className={boardOpen ? "stage-tab on" : "stage-tab"}
-                onClick={() => setTab("board")}
+                onClick={() => pickTab("board")}
                 title="The board, just for you; the share keeps going"
               >
                 Board
@@ -323,7 +348,7 @@ export function Stage(props: {
             )}
             {tabSnaps.map((s) => (
               <span key={s.id} className={s === openSnap ? "stage-tab snap on" : "stage-tab snap"} title={s.caption ?? undefined}>
-                <button role="tab" aria-selected={s === openSnap} onClick={() => setTab(s.id)}>
+                <button role="tab" aria-selected={s === openSnap} onClick={() => pickTab(s.id)}>
                   <CameraIcon />
                   {snapLabel(s, props.participantId)}
                 </button>
@@ -335,7 +360,16 @@ export function Stage(props: {
           </span>
         )}
         {host ? (
-          <span className="host-note muted small">{canSteer ? "You're the host" : `${host.name} is hosting`}</span>
+          <>
+            {/* Looking on your own while the host shows something else: one click back to their screen. */}
+            {!canSteer && own && !sameView(hostView, myView) ? (
+              <button key={hostKey} type="button" className="follow-host" onClick={() => setOwn(false)} title={`${host.name} is hosting: see what they see`}>
+                Follow {host.name.split(" ")[0]} →
+              </button>
+            ) : (
+              <span className="host-note muted small">{canSteer ? "You're the host" : `${host.name} is hosting`}</span>
+            )}
+          </>
         ) : (
           state.hostAway && (
             <span
@@ -395,7 +429,7 @@ export function Stage(props: {
         {!props.ending && <ConxtNudges cards={state.conxt ?? []} me={props.participantId} offline={props.offline} send={send} />}
         {/* A share or a deck has the middle: the topic stays in view as one line over it. */}
         {middleTaken && !boardOpen && !openSnap && (
-          <BoardStrip board={props.board} focusItemId={state.focusItemId} onOpen={() => setTab("board")} />
+          <BoardStrip board={props.board} focusItemId={state.focusItemId} onOpen={() => pickTab("board")} />
         )}
         </div>
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}

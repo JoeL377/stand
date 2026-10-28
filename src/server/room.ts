@@ -11,6 +11,7 @@ import type {
   ClientMessage,
   DoneDeck,
   Discussion,
+  HostView,
   Item,
   Note,
   Participant,
@@ -129,6 +130,8 @@ export class RoomSession implements SpeechSink {
   /** See RoomState.stageSnapId. */
   private stageSnapId: string | null = null;
   private pinnedBy: string | null = null;
+  /** See RoomState.hostView. */
+  private hostView: HostView | null = null;
   private suggestion: Suggestion | null = null;
   /** (ts, item) pairs, so late-arriving transcripts land on the item that was
    *  in focus when the words were spoken. */
@@ -315,6 +318,8 @@ export class RoomSession implements SpeechSink {
     this.hostAwayUntil = 0;
     if (id === this.hostId) return;
     this.hostId = id;
+    // The new host sends their own view; until then everyone is on live.
+    this.hostView = null;
     this.db.setMeetingHost(this.meetingId, id);
   }
 
@@ -375,6 +380,7 @@ export class RoomSession implements SpeechSink {
       participants: [...this.participants.values()].map(({ conns: _c, ...p }) => ({ ...p, isHost: p.id === this.hostId })),
       focusItemId: this.focusItemId,
       pinnedBy: this.pinnedBy,
+      hostView: this.hostView,
       transcriptionDown: this.transcriptionDown,
       transcriptionRestarting: this.transcriptionDown && this.transcriberRestarting,
       hostAway: this.hostAwayTimer && this.hostId && !this.participants.has(this.hostId) ? (this.names.get(this.hostId) ?? "The host") : null,
@@ -794,6 +800,14 @@ export class RoomSession implements SpeechSink {
       }
       case "task.saidDone.undo": {
         if (!this.db.setSaidDone(this.roomId, msg.noteId, null)) break;
+        this.broadcastState();
+        break;
+      }
+      case "host.view": {
+        if (!isHost || this.ended) return;
+        const v = asHostView(msg.view);
+        if (!v || JSON.stringify(v) === JSON.stringify(this.hostView)) return;
+        this.hostView = v;
         this.broadcastState();
         break;
       }
@@ -1924,4 +1938,16 @@ export function keepLeftOut(before: Discussion[], drafts: DraftDiscussion[], win
     for (const id of lost) placed.add(id);
   }
   return revived;
+}
+
+/** A host view as sent, or null when it isn't one. */
+function asHostView(v: unknown): HostView | null {
+  const o = v as HostView | null;
+  if (!o || (o.tab !== "main" && o.tab !== "board")) return null;
+  const r = o.rewind;
+  if (r === null) return { tab: o.tab, rewind: null };
+  const str = (x: unknown, max = 200) => typeof x === "string" && x.length <= max;
+  if (!r || !str(r.id) || !str(r.key) || !Number.isFinite(r.at) || !(r.live === null || str(r.live))) return null;
+  const page = Number.isInteger(r.page) && r.page! >= 0 && r.page! <= 50 ? r.page : undefined;
+  return { tab: o.tab, rewind: { id: r.id, key: r.key, at: r.at, live: r.live, ...(page !== undefined && { page }) } };
 }
