@@ -286,26 +286,20 @@ export function Meeting(props: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleMic]);
-  // The agenda folds to a thin strip for more stage; this browser remembers the choice.
-  const [agendaFolded, setAgendaFolded] = useState(() => {
-    try {
-      return localStorage.getItem(AGENDA_FOLDED_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  // The agenda folds to a thin strip for more stage, and starts that way; this browser remembers the choice.
+  const [agendaFolded, setAgendaFolded] = useState(() => remembered(AGENDA_FOLDED_KEY, true));
+  // So do Chat and Transcript, to a rail on the right. A chat message from someone else opens it for a
+  // moment (peek) without changing the choice.
+  const [sideFolded, setSideFolded] = useState(() => remembered(SIDE_FOLDED_KEY, true));
+  const [sidePeek, setSidePeek] = useState(false);
+  const foldSide = () => {
+    setSidePeek(false);
+    setSideFolded((f) => remember(SIDE_FOLDED_KEY, !f));
+  };
   // On a phone the three columns don't fit: one shows at a time, picked from a strip under the top bar.
   const phone = usePhone();
   const [phoneView, setPhoneView] = useState<"agenda" | "board" | "chat">("board");
-  const foldAgenda = () =>
-    setAgendaFolded((f) => {
-      try {
-        localStorage.setItem(AGENDA_FOLDED_KEY, f ? "0" : "1");
-      } catch {
-        // Private windows can refuse storage; it just won't be remembered.
-      }
-      return !f;
-    });
+  const foldAgenda = () => setAgendaFolded((f) => remember(AGENDA_FOLDED_KEY, !f));
   const foldRef = useRef(foldAgenda);
   foldRef.current = foldAgenda;
   useEffect(() => {
@@ -451,7 +445,7 @@ export function Meeting(props: {
       )}
 
       <div
-        className={`meeting-grid${agendaFolded && !phone ? " agenda-folded" : ""}${phone ? ` phone-${phoneView}` : ""}`}
+        className={`meeting-grid${agendaFolded && !phone ? " agenda-folded" : ""}${sideFolded && !phone ? " side-folded" : ""}${phone ? ` phone-${phoneView}` : ""}`}
         // Picking an item from the agenda on a phone goes back to the board to show it.
         onClick={(e) => phone && phoneView === "agenda" && (e.target as HTMLElement).closest(".item-main") && setPhoneView("board")}
       >
@@ -500,6 +494,10 @@ export function Meeting(props: {
           send={send}
           participantId={participantId}
           board={room.board}
+          folded={sideFolded && !phone}
+          peeking={sidePeek}
+          onFold={foldSide}
+          onPeek={setSidePeek}
         />
       </div>
 
@@ -779,7 +777,26 @@ function DemoMode({ parts }: { parts: string[] }) {
 
 // Key names written out: ⇧ alone reads as an arrow.
 const IS_MAC = /Mac/.test(navigator.platform);
-const AGENDA_FOLDED_KEY = "stand.agendaFolded";
+// v2: both sides start folded now, so earlier choices start over once.
+const AGENDA_FOLDED_KEY = "stand.agendaFolded.v2";
+const SIDE_FOLDED_KEY = "stand.sideFolded";
+/** A folded side as this browser last left it. */
+function remembered(key: string, fallback: boolean) {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+function remember(key: string, folded: boolean) {
+  try {
+    localStorage.setItem(key, folded ? "1" : "0");
+  } catch {
+    // Private windows can refuse storage; it just won't be remembered.
+  }
+  return folded;
+}
 const MOD = IS_MAC ? { ctrl: "Control", alt: "Option", cmd: "Command" } : { ctrl: "Ctrl", alt: "Alt", cmd: "Ctrl" };
 
 function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => void }) {

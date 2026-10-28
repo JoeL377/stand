@@ -1531,6 +1531,7 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 .stage-tabs { margin-left: auto; display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
 /* The tabs need the room more; the Host tag on the person shows who hosts. */
 .stage-tabs + .host-note { display: none; }
+.stage-tabs + .follow-host { margin-left: 8px; }
 .stage-tab, .stage-tab button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .stage-tab.snap { flex: none; padding: 0; }
 .stage-tab.snap > button:first-child { padding-right: 2px; background: none; }
@@ -1647,6 +1648,22 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 .rail-item:disabled { cursor: default; opacity: 1; }
 .rail-item.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 .agenda.rail.offline .rail-item:not(.active) { opacity: 0.55; }
+/* Chat and Transcript folded to a rail on the right; a chat message opens it over the board for a moment. */
+.meeting-grid.side-folded { grid-template-columns: 272px minmax(0, 1fr) 44px; }
+.meeting-grid.agenda-folded.side-folded { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+@media (max-width: 1100px) {
+  .meeting-grid.side-folded { grid-template-columns: 236px minmax(0, 1fr) 44px; }
+  .meeting-grid.agenda-folded.side-folded { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+}
+.meeting-grid.side-folded { position: relative; }
+.side.rail { align-items: center; gap: 4px; padding: 10px 0; overflow: hidden; }
+.side-fold { flex: none; color: var(--muted); }
+.side-head .side-fold { margin: -2px -6px 0 0; }
+.side-rail-tab { position: relative; margin-top: 2px; }
+.side-rail-tab .side-tab-badge { position: absolute; top: -4px; right: -6px; margin: 0; }
+.side.peeking { position: absolute; z-index: 20; top: 0; right: 8px; bottom: 0; width: 352px; box-shadow: 0 12px 40px rgb(0 0 0 / 0.35); border: 1px solid var(--line); animation: side-peek 0.18s ease-out; }
+@keyframes side-peek { from { opacity: 0; transform: translateX(16px); } }
+@media (prefers-reduced-motion: reduce) { .side.peeking { animation: none; } }
 @media (max-width: 820px) {
   .meeting-grid.agenda-folded { grid-template-columns: 1fr; }
   .agenda.rail { flex-direction: row; justify-content: flex-start; min-height: 44px; padding: 6px 8px; overflow: visible; }
@@ -2333,6 +2350,9 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .topic-live-back.moved { background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); animation: live-back-glow 1.6s ease-in-out 3; }
 @keyframes live-back-glow { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .topic-live-back.moved { animation: none; } }
+/* Looking on your own: back to the host's screen. Glows each time the host moves. */
+.follow-host { flex: none; margin-left: auto; font-size: 12.5px; padding: 3px 12px; min-height: 0; border-radius: 999px; white-space: nowrap; background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); animation: live-back-glow 1.6s ease-in-out 2; }
+@media (prefers-reduced-motion: reduce) { .follow-host { animation: none; } }
 .topic-board.rewinding .topic-stretch.current { cursor: pointer; }
 /* The Kickoff card: the meeting's first card, built like a topic card ("Done since" pages as its tabs, then the check-in). */
 .opener-close { margin-left: auto; font-size: 12.5px; padding: 3px 10px; min-height: 0; }
