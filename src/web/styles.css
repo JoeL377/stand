@@ -2480,3 +2480,19 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .agent-space > li { display: block; padding: 0; }
 .agent-space-when { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--text) 6%, transparent); font-size: 11px; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .agent-card.working .agent-mark { animation: none; } }
+
+/* What ✦ Stand is up to, for the whole call: a quiet "✦ Finding options" on the card's top line,
+   then "✦ Options ready" for a few seconds (a click shows the card). The card itself glows once. */
+.agent-status { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 8px; border: 0; border-radius: 999px; font: inherit; font-size: 11px; line-height: 18px; white-space: nowrap; animation: fade-in 300ms ease-out; }
+.agent-status .agent-mark { font-size: 11px; color: var(--accent-text); }
+.agent-status.working { color: var(--muted); background: none; }
+.agent-status.working .agent-mark { display: inline-block; animation: notes-pulse 1.2s ease-in-out infinite; }
+.agent-status.ready { background: var(--accent-soft); color: var(--accent-text); cursor: pointer; }
+.agent-status.ready:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.agent-card.fresh { animation: topic-flash 1.6s ease-out; }
+.agent-tab-mark { font-size: 10px; color: var(--accent-text); }
+.agent-tab-mark.working { animation: notes-pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-status, .agent-status.working .agent-mark, .agent-card.fresh, .agent-tab-mark.working { animation: none; }
+}
+@media (max-width: 640px) { .agent-status.working { padding: 0 2px; } }
