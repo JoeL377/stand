@@ -9,6 +9,7 @@ import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from ".
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { BoardStrip, TopicBoard } from "./TopicBoard.tsx";
+import { AgentTabMark } from "./AgentCard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
@@ -319,6 +320,7 @@ export function Stage(props: {
                 title="The board, just for you; the share keeps going"
               >
                 Board
+                {!boardOpen && <AgentTabMark cards={props.agentCards} />}
               </button>
             )}
             {tabSnaps.map((s) => (

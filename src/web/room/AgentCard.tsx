@@ -2,6 +2,10 @@
 // card of options under an open question on the Open tab, asked for with "✦ Options" on that line.
 // Each option is one line with its tradeoff under it and the page it leans on; anyone can take it
 // as a decision or a to-do. What the space already had on the question sits under the options.
+// While a card is being worked on, everyone on the call sees a quiet "✦ Finding options" on the
+// card's top line (and on the Board tab beside a share); when it's back, "✦ Options ready" for a
+// few seconds, which jumps to the card.
+import { useEffect, useState } from "react";
 import type { AgentCard } from "../../shared/protocol.ts";
 
 export interface AgentActs {
@@ -20,6 +24,84 @@ const host = (url: string) => {
     return url;
   }
 };
+
+/** How long "✦ Options ready" stays up after a card comes back. */
+export const READY_MS = 12_000;
+/** Asks the board to show a card: its tab opens and it scrolls into view. */
+export const SHOW_CARD = "stand:agent-show";
+
+export function showCard(id: string) {
+  window.dispatchEvent(new CustomEvent(SHOW_CARD, { detail: id }));
+  // After the tab has switched and the card is on screen.
+  setTimeout(() => document.getElementById(`agent-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 80);
+}
+
+/** A small ✦ on the Board tab beside a share: pulsing while ✦ Stand works, still for a moment once it's back. */
+export function AgentTabMark({ cards }: { cards: AgentCard[] | null | undefined }) {
+  const { working, ready } = useAgentStatus(cards);
+  if (!working.length && !ready.length) return null;
+  return (
+    <span className={working.length ? "agent-tab-mark working" : "agent-tab-mark ready"} aria-label={working.length ? "Stand is finding options" : "Options ready"}>
+      ✦
+    </span>
+  );
+}
+
+/** What ✦ Stand is up to, for everyone: cards being worked on, and ones that came back a moment ago. */
+export function useAgentStatus(cards: AgentCard[] | null | undefined) {
+  const [now, setNow] = useState(Date.now);
+  const live = (cards ?? []).filter((c) => !c.dismissed);
+  const working = live.filter((c) => c.status === "working");
+  const ready = live.filter((c) => c.status === "ready" && c.readyAt !== null && now - c.readyAt < READY_MS);
+  const next = ready.length ? Math.min(...ready.map((c) => c.readyAt! + READY_MS)) : null;
+  useEffect(() => {
+    setNow(Date.now());
+  }, [cards]);
+  useEffect(() => {
+    if (next === null) return;
+    const t = setTimeout(() => setNow(Date.now()), Math.max(0, next - Date.now()) + 50);
+    return () => clearTimeout(t);
+  }, [next]);
+  return { working, ready };
+}
+
+/** The quiet line on the card's top line: "✦ Finding options" while a run is on, then "✦ Options ready". */
+export function AgentStatus({ cards, onShow }: { cards: AgentCard[] | null | undefined; onShow?: () => void }) {
+  const { working, ready } = useAgentStatus(cards);
+  const first = (n: string) => n.split(" ")[0];
+  if (ready.length) {
+    const c = ready.at(-1)!;
+    return (
+      <button
+        key={c.id}
+        type="button"
+        className="agent-status ready"
+        title={`${c.question}\nAsked by ${first(c.by)}`}
+        onClick={() => {
+          onShow?.();
+          setTimeout(() => showCard(c.id), 0);
+        }}
+      >
+        <span className="agent-mark" aria-hidden>
+          ✦
+        </span>{" "}
+        Options ready
+      </button>
+    );
+  }
+  if (working.length) {
+    const c = working.at(-1)!;
+    return (
+      <span className="agent-status working" title={`${c.question}\nAsked by ${first(c.by)}`} role="status">
+        <span className="agent-mark" aria-hidden>
+          ✦
+        </span>{" "}
+        Finding options{working.length > 1 ? ` · ${working.length}` : ""}
+      </span>
+    );
+  }
+  return null;
+}
 
 /** The card on an open question, if one is up. */
 export function cardFor(acts: AgentActs | undefined, noteId: string): AgentCard | undefined {
@@ -42,9 +124,10 @@ export function FindOptions({ noteId, acts }: { noteId: string; acts: AgentActs 
 export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }) {
   const picked = card.picked;
   const cost = card.costUsd !== null ? ` · $${card.costUsd < 0.01 ? card.costUsd.toFixed(3) : card.costUsd.toFixed(2)}` : "";
+  const fresh = card.status === "ready" && card.readyAt !== null && Date.now() - card.readyAt < READY_MS;
   const log = `Asked by ${card.by}${card.readyAt ? ` · ${Math.max(1, Math.round((card.readyAt - card.at) / 1000))} s` : ""}${card.model ? ` · ${card.model}` : ""}${cost}`;
   return (
-    <div className={["agent-card", card.status].join(" ")} aria-live="polite">
+    <div id={`agent-${card.id}`} className={["agent-card", card.status, fresh && "fresh"].filter(Boolean).join(" ")} aria-live="polite">
       <div className="agent-card-head">
         <span className="agent-mark" aria-hidden>
           ✦

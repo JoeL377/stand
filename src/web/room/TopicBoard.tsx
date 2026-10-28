@@ -20,7 +20,7 @@ import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 import { Opener, type OpenerActs, hasKickoff, kickoffEnd, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
-import { type AgentActs, cardFor, FindOptions, OptionsCard } from "./AgentCard.tsx";
+import { type AgentActs, AgentStatus, cardFor, FindOptions, OptionsCard, SHOW_CARD } from "./AgentCard.tsx";
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
@@ -475,6 +475,7 @@ function Card(props: {
         <span className={props.updating ? "topic-updating on" : "topic-updating"} aria-hidden>
           <span className="agent-mark">✦</span> Updating
         </span>
+        {!props.rewoundAt && <AgentStatus cards={props.acts.agent?.cards} onShow={() => props.view === "feed" && props.onView("card")} />}
         {props.kickoff && (
           <button type="button" className="topic-kick-back" onClick={props.kickoff.open} title="Look at the Kickoff card again, on your screen">
             <span className="agent-mark" aria-hidden>
@@ -637,6 +638,12 @@ function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; tasks: Task
       // Not remembered; it still switches.
     }
   };
+  // "✦ Options ready" opens the Open tab and brings the card into view.
+  useEffect(() => {
+    const show = () => setTab("open");
+    window.addEventListener(SHOW_CARD, show);
+    return () => window.removeEventListener(SHOW_CARD, show);
+  }, []);
   const people = props.t.card.details.filter((d) => d.kind === "position");
   return (
     <div className="topic-tabs-wrap">
