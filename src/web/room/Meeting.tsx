@@ -5,6 +5,7 @@ import { useMedia, type Mic } from "./useMedia.ts";
 import { browserSpeechSupported, useBrowserSpeech } from "./useBrowserSpeech.ts";
 import { useFrameSampler } from "./useFrameSampler.ts";
 import { AgendaPanel } from "./AgendaPanel.tsx";
+import { People } from "./People.tsx";
 import { Stage } from "./Stage.tsx";
 import { SidePanel } from "./SidePanel.tsx";
 import { costLines, fmtCost, fmtDuration, keyOf } from "../util.ts";
@@ -404,6 +405,15 @@ export function Meeting(props: {
           )}
         </div>
         <div className="topbar-right">
+          <People
+            participants={state.participants}
+            participantId={participantId}
+            speaking={media.speaking}
+            interims={room.interims}
+            canSteer={canSteer && !writingUp}
+            offline={!room.connected}
+            send={send}
+          />
           {offParts.length > 0 && <DemoMode parts={offParts} />}
           {room.cost && (
             <span className="cost-pill" title={`What this meeting's Claude calls have cost so far:\n${costLines(room.cost).join("\n")}`}>
@@ -472,7 +482,6 @@ export function Meeting(props: {
           send={send}
           localScreen={media.localScreen}
           remoteScreen={media.remoteScreen}
-          speaking={media.speaking}
           interims={room.interims}
           segments={room.segments}
           discussions={room.discussions}

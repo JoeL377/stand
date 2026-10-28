@@ -310,8 +310,6 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); }
 .video video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; }
 .video figcaption { font-size: 12px; padding: 6px 10px; color: #a5a5b3; }
 
-.people { display: flex; gap: 14px; flex-wrap: wrap; padding: 4px 2px; }
-.person { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 72px; }
 .avatar {
   width: 44px;
   height: 44px;
@@ -323,9 +321,6 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); }
   box-shadow: 0 0 0 3px transparent;
   transition: box-shadow 0.15s;
 }
-.person.talking .avatar { box-shadow: 0 0 0 3px var(--ok); }
-.person-name { font-size: 12px; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.person-tag { font-size: 10px; color: var(--muted); margin-top: -3px; white-space: nowrap; }
 
 /* ---- side panel ---- */
 .tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 8px; }
@@ -456,7 +451,6 @@ img.avatar { object-fit: cover; }
   text-decoration: none;
 }
 a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
-.person-action { font-size: 11px; }
 .focus-desc { max-height: 40vh; overflow-y: auto; text-align: left; }
 /* Floats over the top of the screen, so the slide or shared screen under it doesn't move. */
 /* Nudges stack in the top left corner of the middle screen. */
@@ -672,44 +666,6 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .slide-bar .ghost:hover:not(:disabled) { background: rgb(255 255 255 / 0.14); }
 .nudge { background: var(--panel-2); box-shadow: 0 6px 20px rgb(0 0 0 / 0.35), inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 
-/* Participant tiles, like a call's gallery strip. */
-.people { gap: 8px; padding: 0 0 2px; flex-wrap: nowrap; overflow-x: auto; }
-.person {
-  position: relative;
-  flex: none;
-  width: 156px;
-  height: 92px;
-  border-radius: 12px;
-  background: var(--panel-2);
-  display: grid;
-  place-items: center;
-  box-shadow: inset 0 0 0 2px transparent;
-  /* Snaps on when someone talks, eases off, so short pauses don't flicker it. */
-  transition: box-shadow 300ms ease-out;
-}
-.person.talking { transition-duration: 80ms; }
-.person .avatar { width: 44px !important; height: 44px !important; box-shadow: none; }
-.person.talking { box-shadow: inset 0 0 0 2px var(--ok); }
-.person.talking .avatar { box-shadow: 0 0 0 4px rgb(22 163 74 / 0.25); transition-duration: 80ms; }
-.person .avatar { transition: box-shadow 300ms ease-out; }
-.person-label {
-  position: absolute;
-  left: 6px;
-  bottom: 6px;
-  max-width: calc(100% - 12px);
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  background: rgb(0 0 0 / 0.55);
-  border-radius: 6px;
-  padding: 2px 7px;
-  font-size: 12px;
-  color: #fff;
-}
-.person-name { max-width: none; font-weight: 500; }
-.person-tag { margin: 0; color: rgb(255 255 255 / 0.65); font-size: 11px; }
-.person-action { position: absolute; top: 6px; right: 8px; opacity: 0; transition: opacity 0.12s; }
-.person:hover .person-action { opacity: 1; }
 
 /* Call controls: icon over label, end in red. */
 .controls { background: var(--bg); border-top: 0; padding: 8px 16px 10px; justify-content: center; position: relative; }
@@ -1467,10 +1423,6 @@ html.mac-app :is(.topbar, .lobby-bar, .editor-top) { -webkit-app-region: drag; }
 .focus-notes.earlier .focus-notes-head { padding: 10px 12px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .focus-notes.earlier .focus-notes-head .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
 .focus-notes.earlier .followups .check { width: 15px; height: 15px; border-radius: 4px; margin-top: 2px; }
-/* Participant tiles: sharing is an icon, so the name keeps its room. */
-.person-tag { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.person-tag svg { width: 12px; height: 12px; color: #3ecf8e; }
-.person-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A deck's icon and title line up with the task rows above it. */
 .agenda .deck-toggle .kind { margin-left: 0; }
 
@@ -1601,20 +1553,15 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 /* Long names stay on one line. */
 .room-name { min-width: 0; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tk .owner { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-.person-action.confirm { opacity: 1; display: inline-flex; gap: 6px; align-items: center; }
 .rec-dot.off { background: var(--muted); box-shadow: none; }
 .topbar .not-recording { border: 0; cursor: pointer; color: #fff; background: #b42318; font-weight: 600; }
 .shortcuts .how { margin: 8px 0 14px; padding-left: 16px; display: grid; gap: 5px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
 .shortcuts .how + .shortcuts-head { padding-top: 12px; border-top: 1px solid var(--line); }
 /* Keyboard users reach Make host too, and it's a big enough target for what it does. */
-.person:focus-within .person-action { opacity: 1; }
-.person-action, .person-action .link { font-size: 12px; }
-.person-action .link, .person-action.link { padding: 3px 4px; }
 .signin-form input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3px rgb(229 72 77 / 0.15); }
 /* The row scrolled into view clears the sticky Agenda header. */
 .meeting .agenda { scroll-padding-top: 52px; }
 /* No hover on touch screens: Make host shows without it. */
-@media (hover: none) { .person-action { opacity: 1; } }
 /* A long URL in a note or a message wraps instead of running out of its box. */
 .tk-text, .toast-text, .note-text { overflow-wrap: anywhere; }
 /* A long name can't squeeze "Now discussing" to nothing. */
@@ -1679,7 +1626,6 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 .pinned-badge .link { font-size: 11.5px; }
 .host-note .link { margin-left: 8px; font-size: inherit; }
 .note-form-hint { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
-.not-recorded-flag { position: absolute; top: 6px; left: 6px; padding: 1px 7px; border-radius: 6px; background: rgb(0 0 0 / 0.55); color: #ff9a9a; font-size: 11px; font-weight: 500; }
 .lobby-wrapping { margin: 6px 0 0; font-size: 13px; }
 
 /* The item changed under you (someone else switched): the new one fades in so the change
@@ -2284,8 +2230,6 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .control.popout { display: none; }
   .control.pill { padding: 9px 12px; white-space: nowrap; }
   .agenda .panel-head .agenda-fold, .now-label, .host-note:not(:has(button)) { display: none; }
-  .person { width: 108px; height: 72px; }
-  .person .avatar { width: 30px !important; height: 30px !important; font-size: 12px !important; margin-bottom: 20px; }
   .control span { white-space: nowrap; }
   .screen > .topic-board, .board-tab > .topic-board { padding: 10px; }
   .topic-now { gap: 10px; padding: 14px 16px 12px; }
@@ -2516,3 +2460,49 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .agent-status, .agent-status.working .agent-mark, .agent-card.fresh, .agent-tab-mark.working { animation: none; }
 }
 @media (max-width: 640px) { .agent-status.working { padding: 0 2px; } }
+
+/* Who's in the room, in the top bar: small faces, who's talking, the list a click away. */
+.people-btn { display: inline-flex; align-items: center; gap: 8px; padding: 3px 8px 3px 4px; border: 0; border-radius: 999px; background: none; color: var(--text); cursor: pointer; }
+.people-btn:hover, .people-btn[aria-expanded="true"] { background: var(--hover); }
+.people-stack { display: inline-flex; align-items: center; }
+.people-face { position: relative; display: inline-flex; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); transition: box-shadow 300ms ease-out; }
+.people-face + .people-face { margin-left: -5px; }
+.people-face .avatar { font-size: 10px !important; box-shadow: none; }
+/* Snaps on when someone talks, eases off, so short pauses don't flicker it. */
+.people-face.talking { z-index: 1; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ok); transition-duration: 80ms; }
+.people-face.unheard::after, .people-face.sharing::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
+.people-face.sharing::after { background: var(--ok); }
+.people-face.unheard::after { background: #f04438; }
+.people-more { margin-left: 4px; font-size: 11.5px; color: var(--muted); }
+.people-talking, .people-unheard { display: inline-flex; align-items: center; gap: 5px; max-width: 160px; padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.people-talking { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.people-talking-names { overflow: hidden; text-overflow: ellipsis; }
+.people-unheard { color: #ff9a9a; background: rgb(240 68 56 / 0.14); }
+.talk-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; flex: none; }
+.talk-bars i { width: 2px; height: 100%; border-radius: 1px; background: var(--ok); transform-origin: bottom; animation: talk-bar 0.9s ease-in-out infinite; }
+.talk-bars i:nth-child(2) { animation-delay: -0.3s; }
+.talk-bars i:nth-child(3) { animation-delay: -0.6s; }
+@keyframes talk-bar { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .talk-bars i { animation: none; } .talk-bars i:nth-child(2n+1) { transform: scaleY(0.6); } }
+.people-pop { width: 300px; padding: 6px; }
+.people-pop-head { padding: 4px 6px 6px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.people-row { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 6px; border-radius: 8px; font-size: 13px; }
+.people-row:hover { background: var(--hover); }
+.people-row .avatar { flex: none; font-size: 10px !important; }
+.people-row.talking .avatar { box-shadow: 0 0 0 2px var(--panel-2), 0 0 0 4px var(--ok); }
+.people-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.people-tag { display: inline-flex; align-items: center; gap: 4px; flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; color: var(--muted); background: rgb(255 255 255 / 0.07); }
+.people-tag svg { width: 11px; height: 11px; }
+.people-tag.green { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.people-tag.red { color: #ff9a9a; background: rgb(240 68 56 / 0.14); }
+.add-menu .people-act, .people-act .link { flex: none; padding: 2px 4px; font-size: 12px; }
+.people-act { opacity: 0; transition: opacity 0.12s; }
+.people-row:hover .people-act, .people-row:focus-within .people-act, .people-act.confirm { opacity: 1; }
+.people-act.confirm { display: inline-flex; gap: 4px; align-items: center; }
+@media (hover: none) { .people-act { opacity: 1; } }
+@media (max-width: 640px) {
+  .people-face:nth-child(n + 3), .people-more { display: none; }
+  .people-talking { max-width: 72px; }
+  .people-unheard { display: none; }
+  .people-pop { position: fixed; left: 8px; right: 8px; top: 52px; width: auto; }
+}
