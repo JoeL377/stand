@@ -144,12 +144,21 @@ export const ChevronIcon = ({ size = 12 }: { size?: number }) => (
   </Svg>
 );
 
-/** A side panel with an arrow: pointing in to hide the panel, out to show it. */
-export const PanelIcon = ({ size = 16, open }: { size?: number; open: boolean }) => (
+/** A side panel with an arrow: pointing in to hide the panel, out to show it. right: the panel on the right. */
+export const PanelIcon = ({ size = 16, open, right }: { size?: number; open: boolean; right?: boolean }) => (
   <Svg size={size}>
-    <rect x="3" y="4" width="18" height="16" rx="2" />
-    <path d="M9 4v16" />
-    <path d={open ? "m15.5 10-2 2 2 2" : "m13.5 10 2 2-2 2"} />
+    <g transform={right ? "matrix(-1 0 0 1 24 0)" : undefined}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
+      <path d={open ? "m15.5 10-2 2 2 2" : "m13.5 10 2 2-2 2"} />
+    </g>
+  </Svg>
+);
+
+/** Lines of text, for the transcript. */
+export const TranscriptIcon = ({ size = 15 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M5 6h14M5 10h14M5 14h10M5 18h7" />
   </Svg>
 );
 

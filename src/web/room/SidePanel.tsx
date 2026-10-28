@@ -4,8 +4,11 @@ import { moverText } from "./TopicBoard.tsx";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
 import { SnapsPill } from "../Snaps.tsx";
-import { SendIcon } from "../icons.tsx";
+import { ChatIcon, PanelIcon, SendIcon, TranscriptIcon } from "../icons.tsx";
 import { Linkified } from "../Linkified.tsx";
+
+/** How long a chat message keeps the folded panel open. */
+const PEEK_MS = 12_000;
 
 export function SidePanel(props: {
   state: RoomState;
@@ -15,11 +18,17 @@ export function SidePanel(props: {
   send: (m: ClientMessage) => boolean;
   participantId: string;
   board?: Board | null;
+  /** Folded to a rail (the board gets the room); peeking: open for a moment on a new chat message. */
+  folded?: boolean;
+  peeking?: boolean;
+  onFold?: () => void;
+  onPeek?: (on: boolean) => void;
 }) {
   const { state, segments, interims, send } = props;
   // Two tabs: the meeting's chat and the spoken transcript. The topics and their notes sit on the
   // middle screen, so the transcript opens first.
   const [tab, setTab] = useState<"chat" | "transcript">("transcript");
+  const shut = !!props.folded && !props.peeking;
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId && s.kind !== "chat");
   // Each time the board moved to another topic on this item, and who moved it (Stand by itself, or a person).
@@ -36,28 +45,87 @@ export function SidePanel(props: {
   // New remarks for this item while the Transcript tab isn't open.
   const [seen, setSeen] = useState(0);
   useEffect(() => {
-    if (tab === "transcript") setSeen(shown.length);
-  }, [tab, shown.length]);
+    if (tab === "transcript" && !shut) setSeen(shown.length);
+  }, [tab, shown.length, shut]);
   useEffect(() => setSeen(shown.length), [state.focusItemId]);
   const unseen = Math.max(0, shown.length - seen);
   // Messages from others since the Chat tab was last open; your own don't count.
   const othersChats = chats.filter((s) => s.speakerId !== props.participantId).length;
   const [chatSeen, setChatSeen] = useState(othersChats);
   useEffect(() => {
-    if (tab === "chat") setChatSeen(othersChats);
-  }, [tab, othersChats]);
+    if (tab === "chat" && !shut) setChatSeen(othersChats);
+  }, [tab, othersChats, shut]);
   const chatUnseen = Math.max(0, othersChats - chatSeen);
+  // Folded, a message from someone else opens the chat for a moment, then it folds again unless the
+  // pointer or the cursor is in it.
+  const lastChats = useRef(othersChats);
+  useEffect(() => {
+    if (othersChats > lastChats.current && props.folded) {
+      setTab("chat");
+      props.onPeek?.(true);
+    }
+    lastChats.current = othersChats;
+  }, [othersChats]);
+  const [holding, setHolding] = useState(false);
+  useEffect(() => {
+    if (!props.peeking || !props.folded || holding) return;
+    const t = setTimeout(() => props.onPeek?.(false), PEEK_MS);
+    return () => clearTimeout(t);
+  }, [props.peeking, props.folded, holding, othersChats]);
   const isHost = state.participants.some((p) => p.id === props.participantId && p.isHost);
   const focusSnaps = (state.snaps ?? []).filter((p) => p.itemId === state.focusItemId);
 
+  if (shut)
+    return (
+      <aside className="panel side rail" aria-label="Chat and transcript">
+        <button className="icon side-fold" title="Show chat and transcript" aria-label="Show chat and transcript" onClick={props.onFold}>
+          <PanelIcon open={false} right />
+        </button>
+        {(["chat", "transcript"] as const).map((t) => {
+          const n = t === "chat" ? chatUnseen : 0;
+          return (
+            <button
+              key={t}
+              className="rail-item side-rail-tab"
+              title={t === "chat" ? "Chat" : "Transcript"}
+              aria-label={`${t === "chat" ? "Chat" : "Transcript"}${n ? `, ${n} new` : ""}`}
+              onClick={() => {
+                setTab(t);
+                props.onFold?.();
+              }}
+            >
+              {t === "chat" ? <ChatIcon /> : <TranscriptIcon />}
+              {n > 0 && <span className="side-tab-badge">{n}</span>}
+            </button>
+          );
+        })}
+      </aside>
+    );
+
   return (
-    <aside className="panel side">
+    <aside
+      className={props.peeking && props.folded ? "panel side peeking" : "panel side"}
+      onMouseEnter={() => setHolding(true)}
+      onMouseLeave={() => setHolding(false)}
+      onFocus={() => setHolding(true)}
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHolding(false)}
+    >
       <div className="side-head">
         <h2 className="side-head-title" title={focus?.title}>
           {focus ? focus.title : "General / off-agenda"}
         </h2>
         <SnapsPill snaps={focusSnaps} me={props.participantId} isHost={isHost} className="side-head-snaps" />
         {keyOf(focus) && <span className="side-head-key">{keyOf(focus)}</span>}
+        {props.onFold && (
+          <button
+            className="icon side-fold"
+            title={props.peeking && props.folded ? "Keep chat and transcript open" : "Hide chat and transcript"}
+            aria-label={props.peeking && props.folded ? "Keep open" : "Hide chat and transcript"}
+            onClick={props.onFold}
+          >
+            <PanelIcon open={!(props.peeking && props.folded)} right />
+          </button>
+        )}
       </div>
 
       <div className="side-toggle" role="tablist" aria-label="Discussion views">

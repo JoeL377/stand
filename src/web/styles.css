@@ -1648,6 +1648,22 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 .rail-item:disabled { cursor: default; opacity: 1; }
 .rail-item.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 .agenda.rail.offline .rail-item:not(.active) { opacity: 0.55; }
+/* Chat and Transcript folded to a rail on the right; a chat message opens it over the board for a moment. */
+.meeting-grid.side-folded { grid-template-columns: 272px minmax(0, 1fr) 44px; }
+.meeting-grid.agenda-folded.side-folded { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+@media (max-width: 1100px) {
+  .meeting-grid.side-folded { grid-template-columns: 236px minmax(0, 1fr) 44px; }
+  .meeting-grid.agenda-folded.side-folded { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+}
+.meeting-grid.side-folded { position: relative; }
+.side.rail { align-items: center; gap: 4px; padding: 10px 0; overflow: hidden; }
+.side-fold { flex: none; color: var(--muted); }
+.side-head .side-fold { margin: -2px -6px 0 0; }
+.side-rail-tab { position: relative; margin-top: 2px; }
+.side-rail-tab .side-tab-badge { position: absolute; top: -4px; right: -6px; margin: 0; }
+.side.peeking { position: absolute; z-index: 20; top: 0; right: 8px; bottom: 0; width: 352px; box-shadow: 0 12px 40px rgb(0 0 0 / 0.35); border: 1px solid var(--line); animation: side-peek 0.18s ease-out; }
+@keyframes side-peek { from { opacity: 0; transform: translateX(16px); } }
+@media (prefers-reduced-motion: reduce) { .side.peeking { animation: none; } }
 @media (max-width: 820px) {
   .meeting-grid.agenda-folded { grid-template-columns: 1fr; }
   .agenda.rail { flex-direction: row; justify-content: flex-start; min-height: 44px; padding: 6px 8px; overflow: visible; }

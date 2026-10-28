@@ -99,6 +99,9 @@ async function meeting() {
   await step("start talking", async () => {
     await page.getByRole("button", { name: "Start talking" }).click();
     await page.getByRole("button", { name: "End meeting" }).waitFor();
+    // The agenda starts folded to its numbered strip; open it to read the rows.
+    const show = page.getByRole("button", { name: "Show the agenda" });
+    if (await show.count()) await show.click();
     await snap("meeting-start");
   });
   await step("play the scripted 4-person demo", async () => {
