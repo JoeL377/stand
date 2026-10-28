@@ -4,7 +4,7 @@ import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, initials, keyOf } from "../util.ts";
 import { Slide } from "../slides.tsx";
-import { CameraIcon, ShareIcon } from "../icons.tsx";
+import { CameraIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
@@ -26,7 +26,6 @@ export function Stage(props: {
   ending?: boolean;
   localScreen: MediaStream | null;
   remoteScreen: RemoteScreen | null;
-  speaking: Set<string>;
   interims: Record<string, Interim>;
   segments: Segment[];
   /** Live notes: the topics the talk is grouped into, and what came of them. */
@@ -44,7 +43,7 @@ export function Stage(props: {
   /** Set to a function that snaps the shared screen while one is up, for the pop-out bar. */
   snapRef?: MutableRefObject<(() => Promise<boolean>) | null>;
 }) {
-  const { state, focusItem, canSteer, send, localScreen, remoteScreen, speaking, interims } = props;
+  const { state, focusItem, canSteer, send, localScreen, remoteScreen, interims } = props;
   const suggested = state.suggestion ? state.items.find((i) => i.id === state.suggestion!.itemId) : null;
   const sharer = state.participants.find((p) => p.isSharing);
   const host = state.participants.find((p) => p.isHost);
@@ -278,10 +277,6 @@ export function Stage(props: {
     />
   );
 
-  // Demo speakers and remote talkers who aren't connected still show while talking.
-  const talkingIds = new Set([...speaking, ...Object.keys(interims)]);
-  const ghosts = Object.values(interims).filter((i) => !state.participants.some((p) => p.id === i.speakerId));
-
   return (
     <main className="stage">
       <div className="now">
@@ -471,89 +466,7 @@ export function Stage(props: {
         )}
       </div>
 
-      <div className="people">
-        {state.participants.map((p) => (
-          <Person
-            key={p.id}
-            id={p.id}
-            name={p.name}
-            picture={p.picture}
-            talking={talkingIds.has(p.id)}
-            tag={p.isHost ? "Host" : undefined}
-            sharing={p.isSharing}
-            notRecorded={p.notRecording}
-            onMakeHost={
-              canSteer && !props.offline && p.id !== props.participantId ? () => send({ type: "host.give", participantId: p.id }) : undefined
-            }
-          />
-        ))}
-        {ghosts.map((g) => (
-          <Person key={g.speakerId} id={g.speakerId} name={g.speakerName} talking tag="Demo" />
-        ))}
-      </div>
     </main>
-  );
-}
-
-function Person(props: {
-  id: string;
-  name: string;
-  picture?: string | null;
-  talking: boolean;
-  tag?: string;
-  sharing?: boolean;
-  /** Their browser can't transcribe them, so what they say isn't in the notes. */
-  notRecorded?: boolean;
-  onMakeHost?: () => void;
-}) {
-  const { id, name, picture, talking, tag, sharing, notRecorded, onMakeHost } = props;
-  // Handing over hosting takes a second click, so a stray one doesn't give the meeting away.
-  const [confirm, setConfirm] = useState(false);
-  useEffect(() => {
-    if (!confirm) return;
-    const t = setTimeout(() => setConfirm(false), 5000);
-    return () => clearTimeout(t);
-  }, [confirm]);
-  return (
-    <div className={talking ? "person talking" : "person"}>
-      <Avatar id={id} name={name} picture={picture} />
-      {/* In words, in the corner: a crossed-out mic would read as muted, and the name keeps its room. */}
-      {notRecorded && (
-        <span className="not-recorded-flag" title={`What ${name.split(" ")[0]} says isn't in the notes: their browser can't transcribe it.`}>
-          Not recorded
-        </span>
-      )}
-      <div className="person-label">
-        <span className="person-name" title={name}>
-          {name}
-        </span>
-        {(tag || sharing) && (
-          <span className="person-tag">
-            {tag}
-            {sharing && (
-              <span title={`${name} is sharing their screen`} aria-label="sharing" role="img">
-                <ShareIcon />
-              </span>
-            )}
-          </span>
-        )}
-      </div>
-      {onMakeHost &&
-        (confirm ? (
-          <span className="person-action confirm">
-            <button className="link" onClick={onMakeHost} title={`${name.split(" ")[0]} will choose the item everyone talks about`}>
-              Hand over
-            </button>
-            <button className="link muted" onClick={() => setConfirm(false)} aria-label="Cancel">
-              ✕
-            </button>
-          </span>
-        ) : (
-          <button className="link person-action" onClick={() => setConfirm(true)} title={`Let ${name} drive the meeting`}>
-            Make host
-          </button>
-        ))}
-    </div>
   );
 }
 
