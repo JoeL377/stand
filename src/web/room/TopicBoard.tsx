@@ -1,26 +1,29 @@
-// The topic board: what the middle screen shows while nobody shares or presents. One card for
-// the thread of discussion the group is on (server/board.ts): a title that stays put, a paragraph
-// Stand keeps up to date every 30 seconds as the talk moves on, then fixed sections (where each
-// person stands, decided, to do, open), and the point being made right now at its foot. An update
-// changes single sentences and lines and leaves the rest where it is: a new line slides in with a
-// green mark, a reworded one gets a short underline, so people see what changed without rereading. Underneath, a chapter bar runs from the start of the
-// meeting to now, one stretch per thread: hovering one peeks at it, clicking one rewinds the whole
-// board (card and tabs) to how it stood at that stretch's end, on your own screen only, until "Back to
-// live" (which says so when a new topic starts meanwhile), Escape, or a click on the current stretch.
-// The Decided, To do and Open tabs keep the whole meeting: they read the running list
-// (server/liveList.ts), which has a line up about 5 s after it's said and never rewords or regroups
-// it (the live notes when there's no list). The current topic's lines come first, oldest at the top,
-// so a new one joins at the foot of the list with a short glow and nothing moves; the rest fold into
-// "Earlier". While someone's pointer is on a list, new lines wait behind a "2 new" pill. An answered
-// question folds into its decision and a checked to-do into "Done", each after a moment in place.
-import { type CSSProperties, Fragment, type RefObject, useEffect, useRef, useState } from "react";
-import type { Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
-import { barSpan } from "../../shared/chapters.ts";
+// The topic board: what the middle screen shows while nobody shares or presents. A stack of cards,
+// one in focus at a time: the Kickoff, one card per thread of discussion (server/board.ts), and one per
+// question asked to ✦ Stand (push-to-talk or @stand), its follow-ups landing on the same card. The card
+// in focus follows the talk: the current topic, or an answer while it's being asked and for a few
+// minutes after it lands, unless the talk moves to a new topic meanwhile. A topic card has a title that
+// stays put, a paragraph Stand keeps up to date every 30 seconds, then the People/Decided/To do/Open tabs,
+// and the point being made right now at its foot. An update changes single sentences and lines and
+// leaves the rest where it is: a new line slides in with a green mark, a reworded one gets a short
+// underline. A list down the left names every card, with the Running list (the whole meeting's to-dos,
+// decisions and questions) pinned on top; clicking one, the arrow keys, or scrolling past the end of a
+// card opens another on your own screen only (as it stood when it ended), until "Back to live" (which
+// names a new card that went live meanwhile), Escape, or a click on the live one. The right-hand side
+// stays folded. On a phone the list is a sheet behind a button over the card.
+// The tabs keep the whole meeting: they read the running list (server/liveList.ts), which has a line up
+// about 5 s after it's said and never rewords or regroups it (the live notes when there's no list). The
+// current topic's lines come first, oldest at the top, so a new one joins at the foot of the list with a
+// short glow and nothing moves; the rest fold into "Earlier". While someone's pointer is on a list, new
+// lines wait behind a "2 new" pill. An answered question folds into its decision and a checked to-do
+// into "Done", each after a moment in place.
+import { type CSSProperties, Fragment, useEffect, useRef, useState } from "react";
+import type { AgentCard, Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 import { Opener, type OpenerActs, hasKickoff, kickoffEnd, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
-import { type AgentActs, AgentStatus, cardFor, FindOptions, OptionsCard, SHOW_CARD } from "./AgentCard.tsx";
+import { type AgentActs, AgentStatus, AnswerPart, cardFor, FindOptions, OptionsCard, SHOW_CARD } from "./AgentCard.tsx";
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
@@ -28,7 +31,6 @@ const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short"
 const NOW_MS = 120_000;
 /** Remarks the middle shows before the first card. */
 const WARMUP_REMARKS = 4;
-const PEEK_DETAILS = 3;
 /** How long "New topic" or "Back to" stays up after the board switches. */
 const ARRIVAL_MS = 8_000;
 /** How long a new line keeps its green mark, and a reworded one its underline. */
@@ -45,7 +47,6 @@ const TASK_NEW_MS = 3_000;
 const LEAVE_MS = 4_000;
 const MARK: Record<BoardDetail["kind"], string> = { position: "", decided: "✓", todo: "○", open: "?" };
 const MARK_LABEL: Record<BoardDetail["kind"], string> = { position: "", decided: "Decided", todo: "To do", open: "Open question" };
-const DETAIL_ORDER: Record<BoardDetail["kind"], number> = { position: 0, decided: 1, todo: 2, open: 3 };
 const SECTIONS = [
   { kind: "decided", label: "Decided" },
   { kind: "todo", label: "To do" },
@@ -96,6 +97,28 @@ const splitNow = (now: string) => {
 /** The Kickoff chapter's id on the bar. */
 const KICKOFF = "kickoff";
 
+/** The Running list's id in the card list. */
+const RUNNING = "list";
+/** An answer from ✦ Stand stays the live card this long after it lands, unless the talk starts a new topic. */
+const ANSWER_HOLD_MS = 3 * 60_000;
+/** How far a wheel or trackpad has to push past the end of a card before the next one comes up. */
+const WHEEL_STEP = 120;
+/** After the board steps to another card, the wheel rests this long so one flick moves one card. */
+const WHEEL_REST_MS = 700;
+
+/** One card in the stack: the Kickoff, a topic of discussion, or a question to ✦ Stand with its follow-ups. */
+interface Entry {
+  id: string;
+  kind: "kickoff" | "topic" | "answer";
+  title: string;
+  /** When it started. */
+  at: number;
+  /** The moment the card shows as of when someone opens it from the list. */
+  asOf: number;
+  meta: string;
+  chain?: AgentCard[];
+}
+
 export function TopicBoard(props: {
   board: Board | null;
   segments: Segment[];
@@ -124,13 +147,13 @@ export function TopicBoard(props: {
   checkIn?: { closed: boolean; answeredAt: number | null; page?: number };
   checkInActs?: OpenerActs | null;
   doneDeck?: DoneDeck | null;
-  /** ✦ Stand's cards on open questions, and asking for them. */
+  /** ✦ Stand's cards (options on open questions, answers to questions asked out loud), and acting on them. */
   agent?: AgentActs;
-  /** Following the host: the chapter they have open (null: live), by name. Unset: this screen goes its own way. */
+  /** Following the host: the card they have open (null: live), by name. Unset: this screen goes its own way. */
   follow?: { rewind: Rewind | null; host: string } | null;
   /** Someone following the host opened something else here: their screen goes its own way from now. */
   onOwn?: () => void;
-  /** The host: the chapter open on this screen changed (null: back on live), for everyone following. */
+  /** The host: the card open on this screen changed (null: back on live), for everyone following. */
   onRewind?: (r: Rewind | null) => void;
 }) {
   const now = useNow(15_000);
@@ -140,13 +163,11 @@ export function TopicBoard(props: {
   // After the host moves to another agenda item, the old card steps aside until that item has its own.
   const current = onBoard && onBoard.itemId === props.focusItemId ? onBoard : null;
   const arrival = useArrival(current?.id ?? null);
-  const [view, setView] = useBoardView();
   // The color for a person: by their id when they're here, else by name.
   const idOf = (name: string) => props.participants.find((p) => same(p.name, name))?.id ?? name;
   const nameOf = (name: string) => props.participants.find((p) => same(p.name, name))?.name ?? props.segments.find((s) => same(s.speakerName, name))?.speakerName ?? name;
-  const [peek, setPeek] = useState<{ id: string; key: string; pinned: boolean } | null>(null);
-  // A chapter clicked on the bar: the board as it stood at that stretch's end, on this screen only.
-  // live: the thread that was on screen when it was opened, so a move since can be pointed out.
+  // A card opened from the list (or by the wheel): on this screen only, as it stood then, until "Back to live".
+  // live: the card that was live when it was opened, so a new one since can be pointed out.
   // While following the host it's theirs; any look of your own here breaks off from them.
   const [ownRewind, setOwnRewind] = useState<Rewind | null>(null);
   const following = props.follow ?? null;
@@ -155,7 +176,8 @@ export function TopicBoard(props: {
     setOwnRewind(r);
     if (following) props.onOwn?.();
   };
-  const boardRef = useRef<HTMLDivElement>(null);
+  const [listOpen, setListOpen] = useState(false);
+  const paneRef = useRef<HTMLDivElement>(null);
   const latest = props.segments.at(-1);
   const live = !!latest && now - latest.ts < NOW_MS;
   const speaking = Object.values(props.interims).find((i) => i.text.trim());
@@ -164,7 +186,6 @@ export function TopicBoard(props: {
   const cardSince = threads.length ? Math.min(...threads.flatMap((t) => t.spans.map(([a]) => a))) : null;
   const opening = { deck: props.doneDeck, followUps: props.followUps ?? [], meetingStartedAt: props.meetingStartedAt, checkIn: props.checkIn, cardSince, now };
   const checkingIn = showOpener(opening);
-  // On the bar it's the first chapter; topics talked about while it was up start where it ends.
   const kickoff = hasKickoff(props.doneDeck, props.followUps ?? [], props.meetingStartedAt) ? { from: props.meetingStartedAt, to: kickoffEnd(opening) ?? now } : null;
   const [ownKickPage, setOwnKickPage] = useState(0);
   const kickPage = following?.rewind?.page ?? ownKickPage;
@@ -172,29 +193,99 @@ export function TopicBoard(props: {
     setOwnKickPage(page);
     if (following) setRewind(rewind);
   };
-  const stretches = threads
-    .flatMap((t) => t.spans.map(([from, to]) => ({ id: t.id, from, to: t.id === current?.id && live ? Math.max(to, now) : to })))
-    .map((x) => (kickoff ? { ...x, from: Math.max(x.from, kickoff.to) } : x))
-    .filter((x) => x.to > x.from)
-    .sort((a, b) => a.from - b.from);
-  const start = Math.min(props.meetingStartedAt, stretches[0]?.from ?? Infinity);
-  // The bar spans a set length, longer as the meeting runs on, so talk fills it from the left.
-  const span = barSpan(now - start);
-  const peeked = peek ? threads.find((t) => t.id === peek.id) : undefined;
-  const shown = peeked && peeked !== current ? peeked : null;
-  // Before the first card for the item in focus, the middle shows the talk so far.
-  const talkSoFar = current ? [] : props.segments.filter((s) => s.itemId === props.focusItemId).slice(-WARMUP_REMARKS);
-  const item = props.focusItem;
+  const start = Math.min(props.meetingStartedAt, cardSince ?? Infinity);
+  // Questions asked to ✦ Stand, each with its follow-ups: one card per first question.
+  const answers = (props.agent?.cards ?? []).filter((c) => c.kind === "answer" && !(c.status === "failed" && !c.question));
+  const chains = new Map<string, AgentCard[]>();
+  for (const c of answers) {
+    let root = c;
+    for (let hops = 0; root.follows && hops < 50; hops++) {
+      const up = answers.find((x) => x.id === root.follows);
+      if (!up) break;
+      root = up;
+    }
+    chains.set(root.id, [...(chains.get(root.id) ?? []), c]);
+  }
+  // An answer takes the live card from the topic while it's being asked and for a while after it lands,
+  // unless the talk has started a topic since.
+  const topicSince = current?.spans.at(-1)?.[0] ?? 0;
+  const liveChain = [...chains]
+    .filter(([, ch]) => {
+      const last = ch.at(-1)!;
+      const busy = ch.some((c) => c.status === "listening" || c.status === "working");
+      return last.at >= topicSince && (busy || now - (last.readyAt ?? last.at) < ANSWER_HOLD_MS);
+    })
+    .sort(([, a], [, b]) => a.at(-1)!.at - b.at(-1)!.at)
+    .at(-1)?.[0];
+  // This meeting's lines, as each card counts them: the ones said while it was the topic.
+  const said = (props.notes ?? []).filter((n) => !(n as Partial<ListNote>).heard && !(n as Partial<ListNote>).closed);
+  const inThread = (t: BoardThread, n: Note) => {
+    const at = n.quote?.ts ?? n.ts;
+    return n.itemId === t.itemId && t.spans.some(([a, b]) => at >= a && at <= b + TOPIC_SLACK_MS);
+  };
+  const counted = (t: BoardThread) => {
+    const todo = said.filter((n) => n.kind === "action" && inThread(t, n)).length;
+    const decided = said.filter((n) => n.kind === "decision" && inThread(t, n)).length;
+    return [todo && `${todo} to do`, decided && `${decided} decided`].filter(Boolean).join(" · ");
+  };
+  const entries: Entry[] = [
+    ...(kickoff
+      ? [{ id: KICKOFF, kind: "kickoff" as const, title: props.doneDeck?.slides.length ? `Done since ${day(props.doneDeck.sinceStartedAt)}` : "Since last time", at: kickoff.from, asOf: kickoff.to, meta: "Kickoff" }]
+      : []),
+    ...threads.map((t) => {
+      const at = Math.max(t.spans[0]?.[0] ?? start, kickoff?.to ?? 0);
+      return { id: t.id, kind: "topic" as const, title: t.title, at, asOf: t.spans.at(-1)?.[1] ?? at, meta: [clock(at - start), counted(t)].filter(Boolean).join(" · ") };
+    }),
+    ...[...chains].map(([id, chain]) => ({
+      id,
+      kind: "answer" as const,
+      title: chain[0].question || `${first(chain[0].by)} is asking Stand…`,
+      at: chain[0].at,
+      asOf: now,
+      meta: [clock(chain[0].at - start), `✦ ${first(chain[0].by)}`, chain.length > 1 && `${chain.length} questions`].filter(Boolean).join(" · "),
+      chain,
+    })),
+  ].sort((a, b) => a.at - b.at);
+  const liveId = liveChain ?? (checkingIn ? KICKOFF : (current?.id ?? null));
+  const shownId = rewind?.id ?? liveId;
+  const open = (id: string) => {
+    setListOpen(false);
+    const e = entries.find((x) => x.id === id);
+    if (id === RUNNING) return setRewind(rewind?.id === RUNNING ? null : { id, key: id, at: now, live: liveId });
+    if (!e || id === liveId) return setRewind(null);
+    setRewind({ id, key: id, at: e.asOf, live: liveId });
+  };
+  const index = entries.findIndex((e) => e.id === shownId);
+  const step = (d: 1 | -1) => {
+    const next = index < 0 ? (d < 0 ? entries.at(-1) : undefined) : entries[index + d];
+    if (next) open(next.id);
+  };
+  const stepRef = useRef(step);
+  stepRef.current = step;
+  const shownEntry = entries[index] ?? null;
+  const liveEntry = entries.find((e) => e.id === liveId) ?? null;
   const rewound = rewind ? (threads.find((t) => t.id === rewind.id) ?? null) : null;
   const rewoundKickoff = rewind?.id === KICKOFF;
-  // The topic moved on while this screen looks back: say so, and where.
-  const movedOn = (!!rewound || rewoundKickoff) && (current?.id ?? null) !== rewind!.live && current && current.id !== rewound?.id ? current : null;
+  // A new card went live while this screen looks back: say so.
+  const movedOn = rewind && liveEntry && rewind.live !== liveId && liveId !== rewind.id ? liveEntry : null;
   useEffect(() => {
-    if (!rewind) return;
-    const key = (e: KeyboardEvent) => e.key === "Escape" && setRewind(null);
+    const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      // Not while typing, while a deck takes the arrows, or while the board is out of sight.
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || t?.closest("input, textarea, select, [contenteditable]") || !paneRef.current?.offsetParent) return;
+      if (e.key === "Escape" && rewind) setRewind(null);
+      else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        stepRef.current(e.key === "ArrowDown" ? 1 : -1);
+      }
+    };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [rewind, !!following]);
+  // Each card opens at its top.
+  useEffect(() => {
+    paneRef.current?.scrollTo({ top: 0 });
+  }, [shownId]);
   // The host's own look back goes out to everyone following them.
   const sent = rewind && { ...rewind, page: rewind.id === KICKOFF ? kickPage : undefined };
   const sentKey = JSON.stringify(sent);
@@ -203,8 +294,9 @@ export function TopicBoard(props: {
   }, [sentKey, !!following, !!props.onRewind]);
   const liveTasks = useTasks(props.notes ?? [], props.followUps ?? [], current, live ? now : 0, start);
   const pastTasks = useTasks(asOf(props.notes ?? [], rewind?.at ?? 0), props.followUps ?? [], rewound, 0, start);
+  const allTasks = useTasks(props.notes ?? [], props.followUps ?? [], null, 0, start);
   const tasks = rewound ? pastTasks : liveTasks;
-  const acts: TaskActs = rewound ? { start, agent: props.agent && { cards: props.agent.cards } } : {
+  const liveActs: TaskActs = {
     agent: props.agent,
     onDone: props.onDone,
     onRemove: props.onRemove,
@@ -214,202 +306,238 @@ export function TopicBoard(props: {
     onConfirm: props.onConfirm,
     onNotYet: props.onNotYet,
   };
+  const acts: TaskActs = rewound ? { start, agent: props.agent && { cards: props.agent.cards } } : liveActs;
+  // The wheel scrolls a long card first; pushed on past its end, it steps to the next card.
+  const wheel = useRef({ push: 0, at: 0 });
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const down = e.deltaY > 0;
+    const atEnd = down ? el.scrollTop + el.clientHeight >= el.scrollHeight - 2 : el.scrollTop <= 0;
+    const w = wheel.current;
+    if (!atEnd || Date.now() - w.at < WHEEL_REST_MS) return void (w.push = 0);
+    w.push += e.deltaY;
+    if (Math.abs(w.push) < WHEEL_STEP) return;
+    w.push = 0;
+    w.at = Date.now();
+    step(down ? 1 : -1);
+  };
+  const totals = `${allTasks.count.todo} to do · ${allTasks.count.decided} decided · ${allTasks.count.open} open`;
 
+  const view =
+    rewind?.id === RUNNING ? (
+      <RunningList tasks={allTasks} acts={liveActs} idOf={idOf} nameOf={nameOf} />
+    ) : shownEntry?.chain ? (
+      <AnswerStack chain={shownEntry.chain} live={shownId === liveId} onTodo={rewind ? undefined : props.agent?.onTodo} />
+    ) : rewoundKickoff ? (
+      <Opener
+        deck={props.doneDeck}
+        followUps={props.followUps ?? []}
+        meetingStartedAt={props.meetingStartedAt}
+        page={kickPage}
+        acts={{ onPage: setKickPage, onState: () => {}, onUndoSaid: () => {}, onClose: () => setRewind(null), onOpen: () => {} }}
+        rewound
+        onShowAll={
+          props.checkInActs
+            ? (page) => {
+                props.checkInActs!.onOpen(page);
+                setRewind(null);
+              }
+            : undefined
+        }
+      />
+    ) : rewound ? (
+      <Card
+        t={rewound}
+        live={false}
+        rewoundAt={clock(rewind!.at - start)}
+        movedBy={moveInto(board?.moves, rewound.id, rewind!.at)}
+        updating={false}
+        pending={null}
+        meetingStart={start}
+        arrival={null}
+        tasks={tasks}
+        acts={acts}
+        speaking={null}
+        idOf={idOf}
+        nameOf={nameOf}
+      />
+    ) : checkingIn ? (
+      <Opener
+        deck={props.doneDeck}
+        followUps={props.followUps ?? []}
+        meetingStartedAt={props.meetingStartedAt}
+        page={props.checkIn?.page ?? 0}
+        acts={props.checkInActs ?? null}
+        next={current?.title ?? null}
+      />
+    ) : current ? (
+      <Card
+        t={current}
+        live={live}
+        movedBy={moveInto(board?.moves, current.id)}
+        updating={!!board?.busy}
+        pending={board?.pending ?? null}
+        onAcceptMove={props.onAcceptMove}
+        meetingStart={start}
+        arrival={arrival}
+        tasks={tasks}
+        acts={acts}
+        speaking={speaking ? { name: speaking.speakerName, id: speaking.speakerId, text: speaking.text } : null}
+        idOf={idOf}
+        nameOf={nameOf}
+      />
+    ) : (
+      <Waiting
+        remarks={props.segments.filter((s) => s.itemId === props.focusItemId).slice(-WARMUP_REMARKS).map((s) => ({ key: s.id, name: s.speakerName, id: idOf(s.speakerName), text: s.text, now: false }))}
+        speaking={speaking && { key: "now", name: speaking.speakerName, id: speaking.speakerId, text: speaking.text, now: true }}
+        updating={!!board?.busy}
+        item={props.focusItem}
+      />
+    );
+  const before = index > 0 ? entries[index - 1] : null;
+  const after = index >= 0 && index < entries.length - 1 ? entries[index + 1] : null;
   return (
-    <div ref={boardRef} className={["topic-board", shown && "peeking", (rewound || rewoundKickoff) && "rewinding"].filter(Boolean).join(" ")}>
-      {rewound || rewoundKickoff ? (
-        <>
-          <button type="button" className={movedOn ? "topic-live-back moved" : "topic-live-back"} onClick={() => setRewind(null)} title="Escape">
+    <div className={["topic-board", "stack", rewind && "rewinding", listOpen && "list-open"].filter(Boolean).join(" ")}>
+      <nav className="card-list" aria-label="Cards in this meeting">
+        <button type="button" className={rewind?.id === RUNNING ? "card-entry running on" : "card-entry running"} onClick={() => open(RUNNING)} aria-pressed={rewind?.id === RUNNING}>
+          <span className="card-entry-mark" aria-hidden>
+            ☰
+          </span>
+          <span className="card-entry-body">
+            <span className="card-entry-title">Running list</span>
+            <span className="card-entry-meta">{totals}</span>
+          </span>
+        </button>
+        <span className="card-list-label">
+          Cards <span className="card-list-count">{entries.length}</span>
+        </span>
+        {entries.map((e, i) => (
+          <button
+            key={e.id}
+            type="button"
+            className={["card-entry", e.kind, e.id === shownId && rewind?.id !== RUNNING && "on"].filter(Boolean).join(" ")}
+            aria-current={e.id === shownId && rewind?.id !== RUNNING ? "true" : undefined}
+            onClick={() => open(e.id)}
+            title={e.title}
+          >
+            <span className="card-entry-mark" aria-hidden>
+              {e.kind === "answer" ? "✦" : e.kind === "kickoff" ? "↺" : entries.slice(0, i + 1).filter((x) => x.kind === "topic").length}
+            </span>
+            <span className="card-entry-body">
+              <span className="card-entry-title">{e.title}</span>
+              <span className="card-entry-meta">{e.meta}</span>
+            </span>
+            {e.id === liveId && <span className="card-entry-live" aria-label="live" />}
+          </button>
+        ))}
+      </nav>
+      <div className="card-pane" ref={paneRef} onWheel={onWheel}>
+        <button type="button" className="card-list-toggle" onClick={() => setListOpen((o) => !o)} aria-expanded={listOpen}>
+          <span aria-hidden>☰</span>
+          <span className="card-list-toggle-title">{rewind?.id === RUNNING ? "Running list" : (shownEntry?.title ?? "Cards")}</span>
+          <span className="card-list-count">{entries.length}</span>
+        </button>
+        {before && (
+          <button type="button" className="card-step up" onClick={() => open(before.id)}>
+            ↑ {before.title}
+          </button>
+        )}
+        {view}
+        {rewind ? (
+          <button type="button" className={movedOn ? "card-step live moved" : "card-step live"} onClick={() => setRewind(null)} title="Escape">
             {movedOn ? (
               <>
                 <span className="agent-mark" aria-hidden>
                   ✦
                 </span>{" "}
-                New topic: <strong>{movedOn.title}</strong> · Back to live →
+                New card: <strong>{movedOn.title}</strong> · Back to live ↓
               </>
             ) : following ? (
-              <>
-                {first(following.host)} is showing this · Back to live →
-              </>
+              <>{first(following.host)} is showing this · Back to live ↓</>
             ) : (
-              <>Back to live →</>
+              <>Back to live{liveEntry ? `: ${liveEntry.title}` : ""} ↓</>
             )}
           </button>
-          {rewoundKickoff ? (
-            <Opener
-              deck={props.doneDeck}
-              followUps={props.followUps ?? []}
-              meetingStartedAt={props.meetingStartedAt}
-              page={kickPage}
-              acts={{ onPage: setKickPage, onState: () => {}, onUndoSaid: () => {}, onClose: () => setRewind(null), onOpen: () => {} }}
-              rewound
-              onShowAll={
-                props.checkInActs
-                  ? (page) => {
-                      props.checkInActs!.onOpen(page);
-                      setRewind(null);
-                    }
-                  : undefined
-              }
-            />
-          ) : (
-          <Card
-            t={rewound!}
-            live={false}
-            rewoundAt={clock(rewind!.at - start)}
-            movedBy={moveInto(board?.moves, rewound!.id, rewind!.at)}
-            updating={false}
-            pending={null}
-            view={view}
-            onView={setView}
-            threads={threads}
-            meetingStart={start}
-            arrival={null}
-            tasks={tasks}
-            acts={acts}
-            speaking={null}
-            idOf={idOf}
-            nameOf={nameOf}
-          />
-          )}
-        </>
-      ) : checkingIn ? (
-        <Opener
-          deck={props.doneDeck}
-          followUps={props.followUps ?? []}
-          meetingStartedAt={props.meetingStartedAt}
-          page={props.checkIn?.page ?? 0}
-          acts={props.checkInActs ?? null}
-          next={current?.title ?? null}
-        />
-      ) : current ? (
-        <Card
-          t={current}
-          live={live}
-          movedBy={moveInto(board?.moves, current.id)}
-          updating={!!board?.busy}
-          pending={board?.pending ?? null}
-          onAcceptMove={props.onAcceptMove}
-          kickoff={
-            kickoff
-              ? {
-                  label: props.doneDeck?.slides.length ? "Done since" : "Since last time",
-                  date: props.doneDeck?.slides.length ? day(props.doneDeck.sinceStartedAt) : null,
-                  open: () => {
-                    setPeek(null);
-                    setRewind({ id: KICKOFF, key: KICKOFF, at: kickoff.to, live: current?.id ?? null });
-                  },
-                }
-              : undefined
-          }
-          view={view}
-          onView={setView}
-          threads={threads}
-          meetingStart={start}
-          arrival={arrival}
-          tasks={tasks}
-          acts={acts}
-          speaking={speaking ? { name: speaking.speakerName, id: speaking.speakerId, text: speaking.text } : null}
-          idOf={idOf}
-          nameOf={nameOf}
-        />
-      ) : talkSoFar.length || speaking ? (
-        <Warmup
-          remarks={talkSoFar.map((s) => ({ key: s.id, name: s.speakerName, id: idOf(s.speakerName), text: s.text, now: false }))}
-          speaking={speaking && { key: "now", name: speaking.speakerName, id: speaking.speakerId, text: speaking.text, now: true }}
-          updating={!!board?.busy}
-        />
-      ) : (
-        <div className="topic-waiting">
-          {item && (
-            <div key={item.id} className="focus-card arrive">
-              {keyOf(item) && <div className="key big">{keyOf(item)}</div>}
-              <h2>{item.title}</h2>
-              {item.description && <p className="muted pre focus-desc">{item.description}</p>}
-              {item.url && (
-                <a href={item.url} target="_blank" rel="noreferrer">
-                  Open in {item.source === "linear" ? "Linear" : "new tab"} ↗
-                </a>
-              )}
-            </div>
-          )}
-          <p className={board?.busy ? "topic-hint updating" : "topic-hint"}>
-            <span className="agent-mark small">✦</span> The topic shows up here as people talk
-          </p>
-        </div>
-      )}
-      {(stretches.length > 0 || kickoff) && (
-        <div className="topic-chapters">
-          <div className="topic-bar" role="group" aria-label="Topics so far">
-            <div className="topic-bar-elapsed" style={{ width: `${pct(now - start, span)}%` }} />
-            {kickoff && (
-              <button
-                type="button"
-                className={["topic-stretch", "kickoff", checkingIn && "current", rewoundKickoff && "on"].filter(Boolean).join(" ")}
-                style={{ left: `${pct(kickoff.from - start, span)}%`, width: `${pct(kickoff.to - kickoff.from, span)}%` }}
-                aria-label={`0:00, Kickoff${checkingIn ? ", now" : ""}`}
-                aria-pressed={checkingIn ? !rewind : rewoundKickoff}
-                title="Kickoff"
-                onClick={() => {
-                  // Like a chapter: a click shows the Kickoff card as it was, here only; again comes back to live.
-                  setPeek(null);
-                  setRewind(checkingIn || rewoundKickoff ? null : { id: KICKOFF, key: KICKOFF, at: kickoff.to, live: current?.id ?? null });
-                }}
-              />
-            )}
-            {stretches.map((s) => {
-              const t = threads.find((x) => x.id === s.id)!;
-              const isCurrent = t === current;
-              const key = `${s.id}-${s.from}`;
-              const open = (pinned: boolean) => setPeek((p) => (p?.pinned && !pinned ? p : { id: s.id, key, pinned }));
-              const isRewound = rewind?.key === key;
-              return (
-                <button
-                  key={key}
-                  data-key={key}
-                  type="button"
-                  className={["topic-stretch", isCurrent && "current", isCurrent && (arrival || movedOn) && "arrived", !isCurrent && "peekable", (peek?.id === s.id || isRewound) && "on"].filter(Boolean).join(" ")}
-                  style={{ left: `${pct(s.from - start, span)}%`, width: `${pct(s.to - s.from, span)}%` }}
-                  aria-label={`${clock(s.from - start)}, ${t.title}${isCurrent ? ", now" : ""}`}
-                  aria-pressed={isCurrent ? !rewind : isRewound}
-                  title={isCurrent ? t.title : undefined}
-                  onMouseEnter={() => !isCurrent && !isRewound && open(false)}
-                  onMouseLeave={() => setPeek((p) => (p?.pinned ? p : null))}
-                  onFocus={() => !isCurrent && !isRewound && open(false)}
-                  onBlur={() => setPeek((p) => (p?.pinned ? p : null))}
-                  onClick={() => {
-                    // A click rewinds the whole board to that chapter, here only; the current one, or the same again, comes back to live.
-                    setPeek(null);
-                    setRewind(isCurrent || isRewound ? null : { id: s.id, key, at: s.to, live: current?.id ?? null });
-                  }}
-                />
-              );
-            })}
-          </div>
-          <div className="topic-bar-times" aria-hidden="true">
-            {pct(now - start, span) >= 15 && <span>0:00</span>}
-            {/* Shifted back by as much of its width as the bar is full, so it never hangs off either end. */}
-            <span className="topic-bar-now" style={{ left: `${pct(now - start, span)}%`, transform: `translateX(-${pct(now - start, span)}%)` }}>
-              {clock(now - start)}
+        ) : (
+          after && (
+            <button type="button" className="card-step down" onClick={() => open(after.id)}>
+              ↓ {after.title}
+            </button>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The Running list: everything the meeting has produced so far, To do, Decided and Open side by side. */
+function RunningList(props: { tasks: Tasks; acts: TaskActs; idOf: (name: string) => string; nameOf: (name: string) => string }) {
+  return (
+    <section className="topic-now running-list" aria-label="Running list">
+      <div className="topic-now-head">
+        <span className="topic-now-label">Running list</span>
+        <span className="topic-mins">The whole meeting so far</span>
+      </div>
+      <div className="topic-sections columns">
+        {SECTIONS.map((sec) => (
+          <div key={sec.kind} className={`topic-section ${sec.kind}`}>
+            <span className="topic-section-label">
+              {sec.label} {props.tasks.count[sec.kind] > 0 && <span className="topic-tab-count">{props.tasks.count[sec.kind]}</span>}
             </span>
+            <TaskList kind={sec.kind} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} compact />
           </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** A question to ✦ Stand as a card: the first question is its title, each follow-up lands under the last answer. */
+function AnswerStack({ chain, live, onTodo }: { chain: AgentCard[]; live: boolean; onTodo?: (cardId: string) => void }) {
+  const root = chain[0];
+  return (
+    <section className={live ? "topic-now answer-stack live" : "topic-now answer-stack"} aria-label="A question to Stand">
+      <div className="topic-now-head">
+        <span className="topic-now-label ask">✦ Asked by {first(root.by)}</span>
+        {live && <span className="topic-now-label live">Now</span>}
+      </div>
+      <h2 className="topic-now-title">{root.question ? `“${root.question}”` : `${first(root.by)} is asking Stand…`}</h2>
+      {chain.map((c, i) => (
+        <AnswerPart key={c.id} card={c} followUp={i > 0} onTodo={onTodo} />
+      ))}
+      <p className="topic-hint">
+        <span className="agent-mark small">✦</span> Hold Ask Stand to follow up; the answer lands here
+      </p>
+    </section>
+  );
+}
+
+/** Before the first topic for the item in focus: the talk so far, or the item and a hint. */
+function Waiting(props: {
+  remarks: Array<{ key: string; name: string; id: string; text: string; now: boolean }>;
+  speaking: { key: string; name: string; id: string; text: string; now: boolean } | undefined | false;
+  updating: boolean;
+  item: Item | null;
+}) {
+  if (props.remarks.length || props.speaking) return <Warmup remarks={props.remarks} speaking={props.speaking} updating={props.updating} />;
+  const item = props.item;
+  return (
+    <div className="topic-waiting">
+      {item && (
+        <div key={item.id} className="focus-card arrive">
+          {keyOf(item) && <div className="key big">{keyOf(item)}</div>}
+          <h2>{item.title}</h2>
+          {item.description && <p className="muted pre focus-desc">{item.description}</p>}
+          {item.url && (
+            <a href={item.url} target="_blank" rel="noreferrer">
+              Open in {item.source === "linear" ? "Linear" : "new tab"} ↗
+            </a>
+          )}
         </div>
       )}
-      {shown && peek && (
-        <Peek
-          t={shown}
-          at={clock((stretches.find((s) => `${s.id}-${s.from}` === peek.key)?.from ?? start) - start)}
-          movedBy={moveInto(board?.moves, shown.id, stretches.find((s) => `${s.id}-${s.from}` === peek.key)?.to)}
-          start={start}
-          anchor={peek.key}
-          elsewhere={shown.itemId !== props.focusItemId ? (props.items.find((i) => i.id === shown.itemId)?.title ?? "General") : null}
-          idOf={idOf}
-          nameOf={nameOf}
-          boardRef={boardRef}
-          onClose={() => setPeek(null)}
-          pinned={peek.pinned}
-        />
-      )}
+      <p className={props.updating ? "topic-hint updating" : "topic-hint"}>
+        <span className="agent-mark small">✦</span> The topic shows up here as people talk
+      </p>
     </div>
   );
 }
@@ -440,13 +568,11 @@ export function BoardStrip({ board, focusItemId, onOpen }: { board: Board | null
   );
 }
 
-/** A chapter opened on the bar: the board as it stood at `at`. live: the thread on screen when it was opened,
- *  so a move since can be pointed out; page: the Kickoff's page. */
+/** A card opened from the card list (or the Running list): a topic as it stood at `at`. live: the card that was
+ *  live when it was opened, so a new one since can be pointed out; page: the Kickoff's page. */
 export type Rewind = { id: string; key: string; at: number; live: string | null; page?: number };
 
-const pct = (part: number, whole: number) => (whole > 0 ? Math.max(0, Math.min(100, (part / whole) * 100)) : 0);
-
-/** The time, again every so often, so the chapter bar keeps up with the meeting. */
+/** The time, again every so often, so the card list and answers keep up with the meeting. */
 function useNow(every: number) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -471,13 +597,6 @@ function Card(props: {
   onAcceptMove?: (title: string) => void;
   /** Who moved the board onto this stretch of the thread. */
   movedBy: BoardMove | null;
-  /** The Kickoff card, once the board has moved on from it: a pill in the head opens it again on this screen. */
-  kickoff?: { label: string; date: string | null; open: () => void };
-  /** How this person likes the board laid out; the same data either way. */
-  view: BoardView;
-  onView: (v: BoardView) => void;
-  /** Every thread so far, for the running feed. */
-  threads: BoardThread[];
   meetingStart: number;
   /** The meeting's to-dos, decisions and questions for the tabs and columns. */
   tasks: Tasks;
@@ -489,7 +608,6 @@ function Card(props: {
   const { t } = props;
   const label = props.rewoundAt ? `At ${props.rewoundAt}` : props.arrival === "new" ? "New topic" : props.arrival === "back" ? "Back to" : props.live ? "Now" : "Last";
   const marks = useChanges(t);
-  const positions = t.card.details.filter((d) => d.kind === "position");
   const said = splitNow(t.card.now);
   const foot = props.speaking
     ? { name: props.speaking.name, id: props.speaking.id, text: props.speaking.text, now: true }
@@ -499,7 +617,7 @@ function Card(props: {
   return (
     <section
       key={t.id}
-      className={["topic-now", props.rewoundAt && "rewound", props.arrival && "topic-in", props.updating && "updating", props.view === "feed" && "feed"].filter(Boolean).join(" ")}
+      className={["topic-now", props.rewoundAt && "rewound", props.arrival && "topic-in", props.updating && "updating"].filter(Boolean).join(" ")}
       aria-label={props.rewoundAt ? `Topic at ${props.rewoundAt}` : "Current topic"}
       aria-busy={props.updating}
     >
@@ -512,22 +630,8 @@ function Card(props: {
         <span className={props.updating ? "topic-updating on" : "topic-updating"} aria-hidden>
           <span className="agent-mark">✦</span> Updating
         </span>
-        {!props.rewoundAt && <AgentStatus cards={props.acts.agent?.cards} onShow={() => props.view === "feed" && props.onView("card")} />}
-        {props.kickoff && (
-          <button type="button" className="topic-kick-back" onClick={props.kickoff.open} title="Look at the Kickoff card again, on your screen">
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>{" "}
-            {props.kickoff.label}
-            {props.kickoff.date && <span className="topic-kick-date"> {props.kickoff.date}</span>}
-          </button>
-        )}
-        <ViewSwitch view={props.view} onView={props.onView} />
+        {!props.rewoundAt && <AgentStatus cards={props.acts.agent?.cards} />}
       </div>
-      {props.view === "feed" ? (
-        <Feed threads={props.threads} current={t} marks={marks} start={props.meetingStart} idOf={props.idOf} nameOf={props.nameOf} />
-      ) : (
-        <>
       <h2 className="topic-now-title" aria-live="polite">
         {t.title}
       </h2>
@@ -541,26 +645,7 @@ function Card(props: {
           </span>
         ))}
       </p>
-      {props.view === "card" ? (
-        <CardTabs t={t} marks={marks} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} />
-      ) : (
-        <div className="topic-sections columns">
-          <div className="topic-section position">
-            <span className="topic-section-label">People</span>
-            {positions.length ? <Details details={positions} marks={marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>}
-          </div>
-          {SECTIONS.map((sec) => (
-            <div key={sec.kind} className={`topic-section ${sec.kind}`}>
-              <span className="topic-section-label">
-                {sec.label} {props.tasks.count[sec.kind] > 0 && <span className="topic-tab-count">{props.tasks.count[sec.kind]}</span>}
-              </span>
-              <TaskList kind={sec.kind} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} compact />
-            </div>
-          ))}
-        </div>
-      )}
-        </>
-      )}
+      <CardTabs t={t} marks={marks} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} />
       {props.pending && (
         <button
           key={props.pending.title}
@@ -997,94 +1082,6 @@ function HeardActs({ id, acts }: { id: string; acts: TaskActs }) {
   );
 }
 
-export type BoardView = "card" | "columns" | "feed";
-const VIEWS: Array<{ id: BoardView; label: string }> = [
-  { id: "card", label: "Card" },
-  { id: "columns", label: "Columns" },
-  { id: "feed", label: "Feed" },
-];
-const VIEW_KEY = "stand.boardView";
-
-/** The layout this person picked, remembered in this browser. */
-function useBoardView(): [BoardView, (v: BoardView) => void] {
-  const [view, setView] = useState<BoardView>(() => {
-    try {
-      const v = localStorage.getItem(VIEW_KEY);
-      return VIEWS.some((x) => x.id === v) ? (v as BoardView) : "card";
-    } catch {
-      return "card";
-    }
-  });
-  return [
-    view,
-    (v) => {
-      setView(v);
-      try {
-        localStorage.setItem(VIEW_KEY, v);
-      } catch {
-        // Not remembered; it still switches.
-      }
-    },
-  ];
-}
-
-function ViewSwitch(props: { view: BoardView; onView: (v: BoardView) => void }) {
-  return (
-    <span className="topic-views" role="group" aria-label="Board layout, on your screen only">
-      {VIEWS.map((v) => (
-        <button key={v.id} type="button" className={props.view === v.id ? "on" : undefined} aria-pressed={props.view === v.id} onClick={() => props.onView(v.id)}>
-          {v.label}
-        </button>
-      ))}
-    </span>
-  );
-}
-
-/** The running feed: every thread so far in order, each line where it came in, newest at the bottom. */
-function Feed(props: { threads: BoardThread[]; current: BoardThread; marks: Map<string, Mark>; start: number; idOf: (name: string) => string; nameOf: (name: string) => string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const order = [...props.threads].sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0));
-  const shown = [...order.filter((t) => t !== props.current), props.current];
-  const count = shown.reduce((n, t) => n + t.card.details.length + t.card.summary.length, 0);
-  // Stay at the newest unless the person has scrolled up to read.
-  const pinned = useRef(true);
-  useEffect(() => {
-    const el = ref.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [count, props.current.id]);
-  const byArrival = (a: BoardDetail, b: BoardDetail) => (Number(a.id.slice(1)) || 0) - (Number(b.id.slice(1)) || 0);
-  return (
-    <div ref={ref} className="topic-feed" onScroll={(e) => (pinned.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
-      {shown.map((t) => {
-        const isCurrent = t === props.current;
-        return (
-          <section key={t.id} className={isCurrent ? "topic-feed-thread current" : "topic-feed-thread"}>
-            <div className="topic-feed-head">
-              <span className="topic-peek-at">{clock((t.spans[0]?.[0] ?? props.start) - props.start)}</span>
-              <strong>{t.title}</strong>
-            </div>
-            {isCurrent && (
-              <p className="topic-feed-summary">
-                <span className="agent-mark" aria-hidden>
-                  ✦
-                </span>{" "}
-                {t.card.summary.map((x, i) => (
-                  <span key={i} className={mark(props.marks.get(`s${i}`))}>
-                    {x}{" "}
-                  </span>
-                ))}
-              </p>
-            )}
-            {t.card.details.length > 0 && (
-              <Details details={[...t.card.details].sort(byArrival)} marks={isCurrent ? props.marks : undefined} idOf={props.idOf} nameOf={props.nameOf} feed />
-            )}
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
 function Warmup(props: {
   remarks: Array<{ key: string; name: string; id: string; text: string; now: boolean }>;
   speaking: { key: string; name: string; id: string; text: string; now: boolean } | undefined | false;
@@ -1110,68 +1107,6 @@ function Warmup(props: {
         <span className="agent-mark small">✦</span> Working out the topic
       </p>
     </section>
-  );
-}
-
-/** A thread from earlier, opened from the bar on your own screen. */
-function Peek(props: {
-  t: BoardThread;
-  /** When talk turned to it, into the meeting, at the stretch it was opened from. */
-  at: string;
-  /** The stretch of the bar it was opened from. */
-  anchor: string;
-  /** The agenda item it was under, when that isn't the one in focus. */
-  elsewhere: string | null;
-  /** Who moved the board onto that stretch. */
-  movedBy: BoardMove | null;
-  start: number;
-  pinned: boolean;
-  idOf: (name: string) => string;
-  nameOf: (name: string) => string;
-  boardRef: RefObject<HTMLDivElement | null>;
-  onClose: () => void;
-}) {
-  const { t } = props;
-  const [pos, setPos] = useState<CSSProperties>({ visibility: "hidden" });
-  const ref = useRef<HTMLDivElement>(null);
-  const { onClose, pinned } = props;
-  // Sit just above its stretch of the bar, centered on it, kept inside the board.
-  useEffect(() => {
-    const board = props.boardRef.current;
-    const stretch = board?.querySelector<HTMLElement>(`.topic-stretch[data-key="${CSS.escape(props.anchor)}"]`);
-    if (!board || !stretch || !ref.current) return;
-    const b = board.getBoundingClientRect();
-    const r = stretch.getBoundingClientRect();
-    const w = ref.current.offsetWidth;
-    setPos({ left: Math.max(16, Math.min(r.left - b.left + r.width / 2 - w / 2, b.width - w - 16)), bottom: b.bottom - r.top + 6 });
-  }, [props.anchor, props.boardRef]);
-  useEffect(() => {
-    if (!pinned) return;
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    const click = (e: MouseEvent) => {
-      const el = e.target as Element;
-      if (!ref.current?.contains(el) && !el.closest(".topic-stretch")) onClose();
-    };
-    window.addEventListener("keydown", key);
-    window.addEventListener("mousedown", click);
-    return () => {
-      window.removeEventListener("keydown", key);
-      window.removeEventListener("mousedown", click);
-    };
-  }, [pinned, onClose]);
-  const details = [...t.card.details].sort((a, b) => DETAIL_ORDER[a.kind] - DETAIL_ORDER[b.kind]).slice(0, PEEK_DETAILS);
-  return (
-    <div ref={ref} className="topic-peek" role="dialog" aria-label={t.title} style={pos}>
-      <div className="topic-now-head">
-        <span className="topic-peek-at">{props.at}</span>
-        {spent(t) >= 60_000 && <span className="topic-mins">{fmtDuration(spent(t))}</span>}
-        {props.elsewhere && <span className="topic-mins topic-peek-item">· {props.elsewhere}</span>}
-      </div>
-      <strong className="topic-peek-title">{t.title}</strong>
-      <MovedBy move={props.movedBy} start={props.start} nameOf={props.nameOf} idOf={props.idOf} />
-      <p className="topic-peek-summary">{t.card.summary.join(" ")}</p>
-      {details.length > 0 && <Details details={details} idOf={props.idOf} nameOf={props.nameOf} small />}
-    </div>
   );
 }
 

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentCard, Board, ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
-import { AnswerCard } from "./AgentCard.tsx";
+import type { Board, ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { moverText } from "./TopicBoard.tsx";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtTime, keyOf } from "../util.ts";
@@ -19,8 +18,6 @@ export function SidePanel(props: {
   send: (m: ClientMessage) => boolean;
   participantId: string;
   board?: Board | null;
-  /** ✦ Stand's cards; its answers show in the Chat. */
-  agentCards?: AgentCard[] | null;
   /** Folded to a rail (the board gets the room); peeking: open for a moment on a new chat message. */
   folded?: boolean;
   peeking?: boolean;
@@ -52,10 +49,8 @@ export function SidePanel(props: {
   }, [tab, shown.length, shut]);
   useEffect(() => setSeen(shown.length), [state.focusItemId]);
   const unseen = Math.max(0, shown.length - seen);
-  // ✦ Stand's answers are part of the chat: the meeting's history with it.
-  const answers = (props.agentCards ?? []).filter((c) => c.kind === "answer");
-  // Messages from others since the Chat tab was last open; your own don't count, Stand's answers do.
-  const othersChats = chats.filter((s) => s.speakerId !== props.participantId).length + answers.filter((c) => c.status === "ready" || c.status === "failed").length;
+  // Messages from others since the Chat tab was last open; your own don't count.
+  const othersChats = chats.filter((s) => s.speakerId !== props.participantId).length;
   const [chatSeen, setChatSeen] = useState(othersChats);
   useEffect(() => {
     if (tab === "chat" && !shut) setChatSeen(othersChats);
@@ -175,15 +170,7 @@ export function SidePanel(props: {
         <Transcript segments={shown} moves={moves} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." />
       ) : (
         <>
-          <Transcript
-            segments={chats}
-            answers={answers}
-            onTodo={state.ending ? undefined : (cardId) => send({ type: "agent.todo", cardId })}
-            items={state.items}
-            interims={{}}
-            send={send}
-            empty="No messages yet. Hold ✦ Ask Stand, or type @stand, to ask Stand."
-          />
+          <Transcript segments={chats} items={state.items} interims={{}} send={send} empty="No messages yet." />
           {!state.ending && <ChatBox send={send} />}
         </>
       )}
@@ -207,8 +194,6 @@ type MoveRow = { key: string; ts: number; by: string | null; text: string; title
 function Transcript(props: {
   segments: Segment[];
   moves?: MoveRow[];
-  answers?: AgentCard[];
-  onTodo?: (cardId: string) => void;
   items: Item[];
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => boolean;
@@ -222,7 +207,7 @@ function Transcript(props: {
   useEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [segments.length, props.moves?.length, interimList.length, interimList.map((i) => i.text).join(""), (props.answers ?? []).map((a) => a.status).join("")]);
+  }, [segments.length, props.moves?.length, interimList.length, interimList.map((i) => i.text).join("")]);
 
   return (
     <div
@@ -233,19 +218,13 @@ function Transcript(props: {
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {segments.length === 0 && !props.moves?.length && !props.answers?.length && interimList.length === 0 && (
+      {segments.length === 0 && !props.moves?.length && interimList.length === 0 && (
         <p className="muted empty">{props.empty}</p>
       )}
-      {[
-        ...segments.map((s) => ({ ts: s.ts, seg: s, move: null, answer: null })),
-        ...(props.moves ?? []).map((m) => ({ ts: m.ts, seg: null, move: m, answer: null })),
-        ...(props.answers ?? []).map((a) => ({ ts: a.at, seg: null, move: null, answer: a })),
-      ]
+      {[...segments.map((s) => ({ ts: s.ts, seg: s, move: null })), ...(props.moves ?? []).map((m) => ({ ts: m.ts, seg: null, move: m }))]
         .sort((a, b) => a.ts - b.ts)
         .map((r) =>
-          r.answer ? (
-            <AnswerCard key={r.answer.id} card={r.answer} onTodo={props.onTodo} />
-          ) : r.seg ? (
+          r.seg ? (
             <SegmentRow key={r.seg.id} segment={r.seg} items={items} send={send} />
           ) : (
             <div key={r.move!.key} className="seg board-move" role="note" title={`${r.move!.text}: ${r.move!.title}`}>

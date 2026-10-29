@@ -277,6 +277,7 @@ export function Stage(props: {
               onFind: (noteId) => send({ type: "agent.options", noteId }),
               onPick: (cardId, index, as) => send({ type: "agent.pick", cardId, index, as }),
               onDismiss: (cardId) => send({ type: "agent.dismiss", cardId }),
+              onTodo: (cardId) => send({ type: "agent.todo", cardId }),
             }
           : props.agentCards?.length
             ? { cards: props.agentCards }

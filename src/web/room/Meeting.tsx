@@ -503,7 +503,6 @@ export function Meeting(props: {
           send={send}
           participantId={participantId}
           board={room.board}
-          agentCards={room.agentCards}
           folded={sideFolded && !phone}
           peeking={sidePeek}
           onFold={foldSide}
