@@ -50,7 +50,8 @@ export function AgentTabMark({ cards }: { cards: AgentCard[] | null | undefined 
 /** What ✦ Stand is up to, for everyone: cards being worked on, and ones that came back a moment ago. */
 export function useAgentStatus(cards: AgentCard[] | null | undefined) {
   const [now, setNow] = useState(Date.now);
-  const live = (cards ?? []).filter((c) => !c.dismissed);
+  // Answers show in the Chat (AnswerCard); this is about options on the board.
+  const live = (cards ?? []).filter((c) => c.kind === "options" && !c.dismissed);
   const working = live.filter((c) => c.status === "working");
   const ready = live.filter((c) => c.status === "ready" && c.readyAt !== null && now - c.readyAt < READY_MS);
   const next = ready.length ? Math.min(...ready.map((c) => c.readyAt! + READY_MS)) : null;
@@ -105,7 +106,7 @@ export function AgentStatus({ cards, onShow }: { cards: AgentCard[] | null | und
 
 /** The card on an open question, if one is up. */
 export function cardFor(acts: AgentActs | undefined, noteId: string): AgentCard | undefined {
-  return acts?.cards.filter((c) => c.about === noteId && !c.dismissed).at(-1);
+  return acts?.cards.filter((c) => c.kind === "options" && c.about === noteId && !c.dismissed).at(-1);
 }
 
 /** "✦ Options" at the end of an open question's line, while it has no card. */
@@ -189,6 +190,68 @@ export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** ✦ Stand's answer to a question someone asked it (push-to-talk or @stand), in the Chat: who asked
+ *  and what Stand heard, then the answer, the pages it leans on, what the space already had, and a
+ *  next step anyone can take as a to-do. */
+export function AnswerCard({ card, onTodo }: { card: AgentCard; onTodo?: (cardId: string) => void }) {
+  const first = (n: string) => n.split(" ")[0];
+  const cost = card.costUsd !== null ? ` · $${card.costUsd < 0.01 ? card.costUsd.toFixed(3) : card.costUsd.toFixed(2)}` : "";
+  const log = `Asked by ${card.by}${card.readyAt ? ` · ${Math.max(1, Math.round((card.readyAt - card.at) / 1000))} s` : ""}${card.model ? ` · ${card.model}` : ""}${cost}`;
+  return (
+    <div className={["seg", "agent-answer", card.status].join(" ")} aria-live="polite">
+      <div className="seg-head">
+        <span className="agent-mark" aria-hidden>
+          ✦
+        </span>
+        <span className="agent-answer-who">Stand</span>
+        <span className="agent-answer-for" title={log}>
+          {card.follows ? "following up" : "for"} {first(card.by)}
+        </span>
+      </div>
+      {card.status === "listening" ? (
+        <div className="agent-answer-asking">Listening to {first(card.by)}…</div>
+      ) : (
+        card.question && <div className="agent-answer-q">“{card.question}”</div>
+      )}
+      {card.status === "working" && <div className="agent-answer-working">Answering…</div>}
+      {(card.status === "ready" || card.status === "failed") && card.note && <div className={card.status === "failed" ? "agent-answer-text failed" : "agent-answer-text"}>{card.note}</div>}
+      {card.status === "ready" && (card.sources?.length ?? 0) > 0 && (
+        <div className="agent-answer-sources">
+          {card.sources!.map((x) => (
+            <a key={x.url} href={x.url} target="_blank" rel="noreferrer" title={x.title}>
+              {host(x.url)} ↗
+            </a>
+          ))}
+        </div>
+      )}
+      {card.status === "ready" && card.fromSpace.length > 0 && (
+        <ul className="agent-space">
+          {card.fromSpace.map((f, i) => (
+            <li key={i}>
+              <span className="agent-space-when">{shortDate(f.when)}</span>
+              {f.text}
+            </li>
+          ))}
+        </ul>
+      )}
+      {card.status === "ready" && card.todo && (
+        <div className="agent-answer-todo">
+          <span className="agent-answer-todo-text">{card.todo}</span>
+          {card.picked ? (
+            <span className="agent-option-picked">To do · {first(card.picked.by)}</span>
+          ) : (
+            onTodo && (
+              <button type="button" onClick={() => onTodo(card.id)}>
+                To do
+              </button>
+            )
+          )}
+        </div>
       )}
     </div>
   );

@@ -2518,3 +2518,28 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .people-unheard { display: none; }
   .people-pop { position: fixed; left: 8px; right: 8px; top: 52px; width: auto; }
 }
+
+/* ✦ Ask Stand, push-to-talk, beside the mic. Held: lit, the ✦ pulses. */
+.control.ask { user-select: none; -webkit-user-select: none; touch-action: none; }
+.ask-mark { font-size: 15px; line-height: 18px; height: 18px; color: var(--accent-text); }
+.control.ask.on { background: var(--accent-soft); color: var(--accent-text); }
+.control.ask.on .ask-mark { animation: notes-pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .control.ask.on .ask-mark { animation: none; } }
+/* ✦ Stand's answers in the Chat. */
+.seg.agent-answer .seg-head { align-items: center; gap: 5px; }
+.seg.agent-answer .agent-mark { color: var(--accent-text); }
+.agent-answer-who { font-weight: 600; font-size: 13px; color: var(--accent-text); }
+.agent-answer-for { font-size: 11px; color: var(--muted); cursor: default; }
+.agent-answer-q { margin-top: 2px; color: var(--muted); font-style: italic; overflow-wrap: anywhere; }
+.agent-answer-asking, .agent-answer-working { margin-top: 2px; color: var(--muted); }
+.seg.agent-answer.listening .agent-mark, .seg.agent-answer.working .agent-mark { display: inline-block; animation: notes-pulse 1.2s ease-in-out infinite; }
+.agent-answer-text { margin-top: 4px; padding: 6px 9px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 7%, var(--panel-2)); overflow-wrap: anywhere; }
+.agent-answer-text.failed { background: var(--panel-2); color: var(--muted); }
+.agent-answer-sources { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; font-size: 11px; }
+.agent-answer-sources a { color: var(--muted); }
+.agent-answer-sources a:hover { color: var(--accent-text); }
+.seg.agent-answer .agent-space { margin-top: 4px; }
+.agent-answer-todo { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; }
+.agent-answer-todo-text { min-width: 0; flex: 1; }
+.agent-answer-todo-text::before { content: "☐ "; color: var(--muted); }
+.agent-answer-todo button { flex: none; padding: 0 8px; border: 1px solid var(--accent); border-radius: 999px; background: none; color: var(--accent-text); font: inherit; font-size: 11px; line-height: 18px; cursor: pointer; }

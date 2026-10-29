@@ -22,7 +22,7 @@ import type {
 } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
-import { AgentKeeper, costOf, optionsPrompt, type SpaceHistory, toCard } from "./meetingAgent.ts";
+import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
 import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
@@ -212,6 +212,8 @@ export class RoomSession implements SpeechSink {
   private list: ListKeeper | null = null;
   /** What ✦ Stand put on the board (meetingAgent.ts); null without a model to run it. */
   private agentCards: AgentKeeper | null = null;
+  /** Push-to-talk: what each person says while their Ask Stand button is down. */
+  private asks = new AskCapture();
   private listTimer: NodeJS.Timeout | null = null;
   private listRun: Promise<void> | null = null;
   /** The check-in at the start ("Since last time"): someone moved on from it, and the last answer anyone gave. */
@@ -304,6 +306,7 @@ export class RoomSession implements SpeechSink {
       if (p && --p.conns <= 0) {
         this.participants.delete(conn.participantId);
         if (this.hostId === conn.participantId) this.hostLeft();
+        this.endAsk(conn.participantId);
       }
       this.broadcastState();
     }
@@ -727,6 +730,13 @@ export class RoomSession implements SpeechSink {
         const text = msg.text.trim().slice(0, 2000);
         if (!text) return;
         this.addSegment(conn.participantId, conn.name, "chat", text, Date.now());
+        const q = typedAsk(text);
+        if (q && this.agentCards && this.agent.answer && !this.ended) {
+          if (!this.agentCards.canRun()) return this.send(ws, { type: "error", message: "Stand has answered as many times as it can in one meeting." });
+          const card = this.agentCards.ask(conn.name, conn.participantId, q);
+          this.agentChanged();
+          void this.runAnswer(card.id);
+        }
         break;
       }
       case "speech":
@@ -915,6 +925,33 @@ export class RoomSession implements SpeechSink {
       }
       case "agent.dismiss": {
         if (this.agentCards?.dismiss(msg.cardId, conn.name)) this.agentChanged();
+        break;
+      }
+      case "agent.ask.start": {
+        if (this.ended || !this.agentCards || !this.agent.answer || this.asks.asking(conn.participantId)) return;
+        if (!this.agentCards.canRun()) return this.send(ws, { type: "error", message: "Stand has answered as many times as it can in one meeting." });
+        const card = this.agentCards.ask(conn.name, conn.participantId, null);
+        this.asks.start(conn.participantId, card.id, Date.now());
+        // The question gets its own line in the transcript, not the end of what they said before.
+        if (this.lastSpeech?.speakerId === conn.participantId) this.lastSpeech = null;
+        const who = conn.participantId;
+        setTimeout(() => this.endAsk(who, card.id), ASK_MAX_MS).unref?.();
+        this.agentChanged();
+        break;
+      }
+      case "agent.ask.end":
+        this.endAsk(conn.participantId);
+        break;
+      case "agent.todo": {
+        if (this.ended || !this.agentCards || !this.list) return;
+        const card = this.agentCards.takeTodo(msg.cardId, conn.name);
+        if (!card?.todo) return;
+        const itemId = this.focusItemId;
+        if (this.list.addByHand("todo", null, card.todo, itemId)) this.listChanged();
+        this.db.addNote(this.meetingId, itemId, { kind: "action", text: card.todo, owner: null }, conn.name);
+        this.sendItemNotes(itemId);
+        this.broadcastState();
+        this.agentChanged();
         break;
       }
       case "list.confirm": {
@@ -1164,6 +1201,7 @@ export class RoomSession implements SpeechSink {
   addSpeech(speakerId: string, speakerName: string, text: string, startedAt: number) {
     const t = text.trim();
     if (!t || this.ended) return;
+    this.asks.hear(speakerId, t, startedAt);
     // Speech-to-text ends a line at every short pause, so one thought arrives
     // in fragments. Keep adding to the speaker's last entry until they pause
     // for a while, someone else speaks, or the focus moves on.
@@ -1381,6 +1419,41 @@ export class RoomSession implements SpeechSink {
       questions: this.db.spaceNotes(this.roomId, "question", 40).map((n) => ({ text: n.text, ts: n.ts })),
       notes: this.db.spaceJots(this.roomId, 0, 40).map((j) => ({ text: j.text, by: j.by, ts: j.ts })),
     };
+  }
+
+  /** Someone's Ask Stand button came up (or was held too long, or they left): once the last words
+   *  have been transcribed, Stand answers what it heard. `cardId`: only if it's still that ask. */
+  private endAsk(who: string, cardId?: string) {
+    const id = this.asks.end(who, Date.now());
+    if (!id || (cardId && id !== cardId)) return;
+    if (this.lastSpeech?.speakerId === who) this.lastSpeech = null;
+    setTimeout(() => {
+      const got = this.asks.take(who);
+      if (!got || !this.agentCards) return;
+      const card = this.agentCards.heard(got.cardId, got.question);
+      this.agentChanged();
+      if (card?.status === "working") void this.runAnswer(card.id);
+    }, ASK_SETTLE_MS).unref?.();
+  }
+
+  private async runAnswer(cardId: string) {
+    const cards = this.agentCards;
+    const card = cards?.get(cardId);
+    if (!cards || !card || !this.agent.answer) return;
+    const started = Date.now();
+    const earlier = cards.followUp(started).filter((c) => c.id !== cardId);
+    let out: Parameters<AgentKeeper["finishAnswer"]>[1] = { fields: null, follows: earlier.at(-1)?.id ?? null, model: null, costUsd: null };
+    try {
+      const history = this.spaceHistory();
+      const prompt = answerPrompt(card.question, card.by, this.db.meetingSegments(this.meetingId), started, history, earlier.map((c) => ({ by: c.by, question: c.question, answer: c.note ?? "" })));
+      const run = await this.agent.answer(prompt);
+      out = { ...out, fields: run.answer && toAnswer(run.answer, history), model: run.model, costUsd: costOf(run.model, run.usage) };
+    } catch (e) {
+      console.error(`[agent] answer ${this.meetingId}: ${(e as Error).message}`);
+    }
+    cards.finishAnswer(cardId, out);
+    console.log(`[agent] answer for "${card.question}" (${card.by}): ${card.status} in ${((Date.now() - started) / 1000).toFixed(1)}s, $${out.costUsd ?? "?"}`);
+    this.agentChanged();
   }
 
   private agentChanged() {

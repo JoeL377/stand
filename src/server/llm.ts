@@ -10,7 +10,7 @@ import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind,
 import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, BoardDriftSchema, DRIFT_SYSTEM } from "./board.ts";
 import { config } from "./config.ts";
 import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
-import { OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, type RunUsage } from "./meetingAgent.ts";
+import { ANSWER_SYSTEM, type Answer, AnswerSchema, OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, type RunUsage } from "./meetingAgent.ts";
 import { findQuote, type Said } from "./quotes.ts";
 import { recordUsage } from "./usage.ts";
 
@@ -185,6 +185,8 @@ export interface Agent {
   /** ✦ Stand's options for an open question (meetingAgent.ts), searching the web as it needs. Left out
    *  without a model. */
   findOptions?(prompt: string): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
+  /** ✦ Stand's answer to a question someone asked it on the call (push-to-talk or @stand). Left out without a model. */
+  answer?(prompt: string): Promise<{ answer: Answer | null; model: string; usage: RunUsage }>;
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
   settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
@@ -883,6 +885,15 @@ Answer for every smaller topic exactly once.`,
   }
 
   async findOptions(prompt: string): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }> {
+    return this.searchRun("options", OptionsAnswerSchema, OPTIONS_SYSTEM, prompt);
+  }
+
+  async answer(prompt: string): Promise<{ answer: Answer | null; model: string; usage: RunUsage }> {
+    return this.searchRun("answer", AnswerSchema, ANSWER_SYSTEM, prompt);
+  }
+
+  /** One ✦ Stand run that may search the web twice, with what it cost. */
+  private async searchRun<T extends z.ZodTypeAny>(label: string, schema: T, system: string, prompt: string): Promise<{ answer: z.infer<T> | null; model: string; usage: RunUsage }> {
     const model = config.agentModel;
     const usage: RunUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0 };
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
@@ -892,28 +903,29 @@ Answer for every smaller topic exactly once.`,
         {
           model,
           max_tokens: 6000,
-          system: OPTIONS_SYSTEM,
+          system,
           messages,
           tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 2 }],
-          output_config: { effort: "low", format: betaZodOutputFormat(OptionsAnswerSchema) },
+          output_config: { effort: "low", format: betaZodOutputFormat(schema) },
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
         },
         { timeout: AGENT_TIMEOUT_MS, maxRetries: 1 },
       );
       const u = res.usage;
+      recordUsage(res.model ?? model, u);
       usage.input += u.input_tokens;
       usage.output += u.output_tokens;
       usage.cacheRead += u.cache_read_input_tokens ?? 0;
       usage.cacheWrite += u.cache_creation_input_tokens ?? 0;
       usage.searches += u.server_tool_use?.web_search_requests ?? 0;
-      console.log(`[agent] options ${model} in=${u.input_tokens} out=${u.output_tokens} searches=${u.server_tool_use?.web_search_requests ?? 0} stop=${res.stop_reason}`);
+      console.log(`[agent] ${label} ${model} in=${u.input_tokens} out=${u.output_tokens} searches=${u.server_tool_use?.web_search_requests ?? 0} stop=${res.stop_reason}`);
       if (res.stop_reason === "pause_turn") {
         messages.push({ role: "assistant", content: res.content as Anthropic.Beta.BetaContentBlockParam[] });
         continue;
       }
       if (res.stop_reason === "refusal") return { answer: null, model, usage };
-      return { answer: (res.parsed_output as OptionsAnswer | null) ?? null, model, usage };
+      return { answer: (res.parsed_output as z.infer<T> | null) ?? null, model, usage };
     }
     return { answer: null, model, usage };
   }

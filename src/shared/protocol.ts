@@ -130,16 +130,19 @@ export interface AgentOption {
   source: { title: string; url: string } | null;
 }
 
-/** Something ✦ Stand, the meeting's own agent, did on the board because someone asked: for now,
- *  options for an open question. Kept with the meeting, so it is also the agent's log of what it
- *  did, for whom, and what it cost. */
+/** Something ✦ Stand, the meeting's own agent, did because someone asked: options for an open
+ *  question on the board, or an answer to a question someone asked out loud (push-to-talk) or typed
+ *  to @stand in the chat, which shows in the Chat. Kept with the meeting, so it is also the agent's
+ *  log of what it did, for whom, and what it cost. */
 export interface AgentCard {
   id: string;
-  kind: "options";
-  /** The open question's line on the board's list. */
+  kind: "options" | "answer";
+  /** Options: the open question's line on the board's list. An answer: who asked (participant id). */
   about: string;
+  /** An answer: what Stand heard while the button was held (empty while it listens). */
   question: string;
-  status: "working" | "ready" | "failed";
+  /** listening: an answer's button is held and Stand is taking down the question. */
+  status: "listening" | "working" | "ready" | "failed";
   /** Who asked for it. */
   by: string;
   at: number;
@@ -147,8 +150,15 @@ export interface AgentCard {
   options: AgentOption[];
   /** What the space already had on it: earlier decisions, to-dos and notes, each with when it was said. */
   fromSpace: Array<{ text: string; when: number }>;
-  /** A line instead of options: why there are none, or the answer when the space already has one. */
+  /** A line instead of options: why there are none, or the answer when the space already has one.
+   *  An answer card: the answer. */
   note: string | null;
+  /** An answer: the pages it leans on. */
+  sources?: Array<{ title: string; url: string }>;
+  /** An answer: a next step it suggests, which anyone can take as a to-do (picked, index 0). */
+  todo?: string | null;
+  /** An answer: the earlier answer it follows up on. */
+  follows?: string | null;
   picked: { index: number; as: "decision" | "task"; by: string; at: number } | null;
   dismissed: { by: string; at: number } | null;
   model: string | null;
@@ -600,6 +610,12 @@ export type ClientMessage = (
   | { type: "agent.pick"; cardId: string; index: number; as: "decision" | "task" }
   /** Anyone: take a card off the board. */
   | { type: "agent.dismiss"; cardId: string }
+  /** Push-to-talk: the Ask Stand button went down (Stand starts taking down what this person says)
+   *  and came back up (Stand answers what it heard, in the Chat). */
+  | { type: "agent.ask.start" }
+  | { type: "agent.ask.end" }
+  /** Anyone: take the next step an answer suggests as a to-do. */
+  | { type: "agent.todo"; cardId: string }
   /** Anyone: a decision Stand heard is one (confirm), or isn't (dismiss). */
   | { type: "list.confirm"; noteId: string }
   | { type: "list.dismiss"; noteId: string }
