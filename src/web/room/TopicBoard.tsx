@@ -116,6 +116,9 @@ export function TopicBoard(props: {
   onDone?: (noteId: string, done: boolean) => void;
   /** Host only: take a line off that Stand got wrong (with Undo). */
   onRemove?: (note: Note) => void;
+  /** Anyone: a decision Stand heard is one (confirm), or isn't yet. Missing while the board can't say. */
+  onConfirm?: (noteId: string) => void;
+  onNotYet?: (noteId: string) => void;
   /** The opening board ("Done since" pages, then the "Since last time" check-in), and what turning and
    *  answering on it does (null while it can't be answered). */
   checkIn?: { closed: boolean; answeredAt: number | null; page?: number };
@@ -208,6 +211,8 @@ export function TopicBoard(props: {
     start,
     onCheckIn: props.checkInActs?.onOpen,
     onUndoSaid: props.checkInActs?.onUndoSaid,
+    onConfirm: props.onConfirm,
+    onNotYet: props.onNotYet,
   };
 
   return (
@@ -720,6 +725,10 @@ interface TaskRow {
   done: boolean;
   /** A decision that settled an open question: the question. */
   answers: string | null;
+  /** A decision Stand heard that nobody has confirmed yet. */
+  heard: boolean;
+  /** An open question: the answer Stand heard for it, waiting for a click. */
+  heardAnswer: Note | null;
 }
 interface Tasks {
   rows: Record<TaskKind, TaskRow[]>;
@@ -738,6 +747,9 @@ interface TaskActs {
   onCheckIn?: () => void;
   onUndoSaid?: (noteId: string) => void;
   agent?: AgentActs;
+  /** Anyone: a decision Stand heard is one, or isn't yet. */
+  onConfirm?: (noteId: string) => void;
+  onNotYet?: (noteId: string) => void;
 }
 
 /** The meeting's to-dos, decisions and questions, sorted for the board: the topic on screen
@@ -749,10 +761,18 @@ function useTasks(notes: Note[], followUps: FollowUp[], current: BoardThread | n
   const spans = (current?.spans ?? []).map(([a, b], i, all) => [a, i === all.length - 1 && liveNow ? Math.max(b, liveNow) : b] as const);
   const here = (n: Note, at: number) => n.itemId === current?.itemId && spans.some(([a, b]) => at >= a && at <= b + TOPIC_SLACK_MS);
   const rows: Tasks["rows"] = { decided: [], todo: [], open: [] };
-  const questions = new Map(notes.filter((n) => n.kind === "question").map((n) => [n.id, n.text]));
+  const questions = new Map(notes.filter((n) => n.kind === "question").map((n) => [n.id, n]));
+  const isHeard = (n: Note) => !!(n as Partial<ListNote>).heard && !(n as Partial<ListNote>).closed;
+  // A heard answer to a question still open sits under that question, not on the Decided tab.
+  const heardAnswers = new Map<string, Note>();
+  for (const n of notes) {
+    const q = (n as Partial<ListNote>).answers;
+    if (n.kind === "decision" && isHeard(n) && q && questions.has(q) && !(questions.get(q) as Partial<ListNote>).closed) heardAnswers.set(q, n);
+  }
+  const under = new Set([...heardAnswers.values()].map((n) => n.id));
   for (const note of notes) {
     const kind = TASK_KIND[note.kind];
-    if (!kind) continue;
+    if (!kind || under.has(note.id)) continue;
     const closed = (note as Partial<ListNote>).closed;
     const leaving = !!closed && now - closed.at < LEAVE_MS;
     if (closed && !leaving) continue;
@@ -765,13 +785,15 @@ function useTasks(notes: Note[], followUps: FollowUp[], current: BoardThread | n
       here: here(note, at),
       leaving,
       done: !!note.doneAt && now - note.doneAt >= LEAVE_MS,
-      answers: answers ? (questions.get(answers) ?? null) : null,
+      answers: answers ? (questions.get(answers)?.text ?? null) : null,
+      heard: isHeard(note),
+      heardAnswer: heardAnswers.get(note.id) ?? null,
     });
   }
   for (const k of Object.keys(rows) as TaskKind[]) rows[k].sort((a, b) => a.at - b.at);
   return {
     rows,
-    count: { decided: rows.decided.length, todo: rows.todo.filter((r) => !r.note.doneAt).length, open: rows.open.filter((r) => !r.leaving).length },
+    count: { decided: rows.decided.filter((r) => !r.heard).length, todo: rows.todo.filter((r) => !r.note.doneAt).length, open: rows.open.filter((r) => !r.leaving).length },
     fresh,
     earlier: followUps,
   };
@@ -858,13 +880,26 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
   const row = (note: Note, opts: { at: string; r?: TaskRow; removable?: boolean }) => {
     // A picked card stays under its question while the question leaves, so the pick shows first.
     const card = props.kind === "open" ? cardFor(props.acts.agent, note.id) : undefined;
-    const line = taskLine(note, opts, card ? null : props.kind === "open" && !opts.r?.leaving && props.acts.agent ? props.acts.agent : null);
-    return card ? (
+    const heard = props.kind === "open" && !opts.r?.leaving ? (opts.r?.heardAnswer ?? null) : null;
+    const line = taskLine(note, opts, card || heard ? null : props.kind === "open" && !opts.r?.leaving && props.acts.agent ? props.acts.agent : null);
+    return card || heard ? (
       <Fragment key={note.id}>
         {line}
-        <li className="agent-card-row">
-          <OptionsCard card={card} acts={props.acts.agent!} />
-        </li>
+        {heard && (
+          <li className="heard-row">
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>
+            <span className="heard-label">Sounds settled:</span>
+            <span className="heard-text">{heard.text}</span>
+            <HeardActs id={heard.id} acts={props.acts} />
+          </li>
+        )}
+        {card && (
+          <li className="agent-card-row">
+            <OptionsCard card={card} acts={props.acts.agent!} />
+          </li>
+        )}
       </Fragment>
     ) : (
       line
@@ -873,7 +908,7 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
   const taskLine = (note: Note, opts: { at: string; r?: TaskRow; removable?: boolean }, find: AgentActs | null) => (
     <li
       key={note.id}
-      className={[props.kind, "topic-task", opts.r?.here && "here", note.doneAt && "done", opts.r?.leaving && "leaving", props.tasks.fresh.has(note.id) && "topic-new"].filter(Boolean).join(" ")}
+      className={[props.kind, "topic-task", opts.r?.here && "here", opts.r?.heard && "heard", note.doneAt && "done", opts.r?.leaving && "leaving", props.tasks.fresh.has(note.id) && "topic-new"].filter(Boolean).join(" ")}
     >
       {props.kind === "todo" ? (
         <button
@@ -886,11 +921,12 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
           onClick={() => props.acts.onDone?.(note.id, !note.doneAt)}
         />
       ) : (
-        <span className="topic-note-mark" aria-label={opts.r?.leaving ? "Answered" : MARK_LABEL[props.kind]}>
-          {opts.r?.leaving ? "✓" : MARK[props.kind]}
+        <span className={opts.r?.heard ? "topic-note-mark agent-mark" : "topic-note-mark"} aria-label={opts.r?.leaving ? "Answered" : opts.r?.heard ? "Heard, not confirmed" : MARK_LABEL[props.kind]}>
+          {opts.r?.leaving ? "✓" : opts.r?.heard ? "✦" : MARK[props.kind]}
         </span>
       )}
       <span className="topic-task-text">{note.text}</span>
+      {opts.r?.heard && <HeardActs id={note.id} acts={props.acts} />}
       {note.saidDone && !note.doneAt && <SaidDonePill quote={note.saidDone} onUndo={props.acts.onUndoSaid && (() => props.acts.onUndoSaid!(note.id))} />}
       {opts.r?.answers && (
         <span className="topic-task-answers" title={`Answers: ${opts.r.answers}`}>
@@ -943,6 +979,21 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
       )}
       {past && earlier.map((f) => row(f, { at: shortDate(f.meetingStartedAt) }))}
     </ul>
+  );
+}
+
+/** Confirm or Not yet on a decision Stand heard. It isn't decided until someone clicks Confirm. */
+function HeardActs({ id, acts }: { id: string; acts: TaskActs }) {
+  if (!acts.onConfirm || !acts.onNotYet) return <span className="heard-pill" title="Stand heard this; nobody has confirmed it">Heard</span>;
+  return (
+    <span className="heard-acts">
+      <button type="button" title="Lock this in as decided" onClick={() => acts.onConfirm!(id)}>
+        Confirm
+      </button>
+      <button type="button" title="Not decided: take it off" onClick={() => acts.onNotYet!(id)}>
+        Not yet
+      </button>
+    </span>
   );
 }
 

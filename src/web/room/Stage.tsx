@@ -284,6 +284,8 @@ export function Stage(props: {
       }
       onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
       onRemove={canSteer && !props.ending ? removeNote : undefined}
+      onConfirm={props.ending || props.offline ? undefined : (noteId) => send({ type: "list.confirm", noteId })}
+      onNotYet={props.ending || props.offline ? undefined : (noteId) => send({ type: "list.dismiss", noteId })}
       checkIn={state.checkIn}
       doneDeck={state.doneDeck}
       follow={following ? { rewind: hostView?.rewind ?? null, host: host!.name } : null}

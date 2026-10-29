@@ -2415,6 +2415,18 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .topic-task:hover .agent-find, .agent-find:focus-visible { opacity: 1; }
 @media (hover: none) { .agent-find { opacity: 1; } }
 .agent-card-row { display: block !important; padding: 2px 0 8px 20px; }
+/* A decision Stand heard: it isn't one until someone confirms it. */
+.topic-tasks li.heard .topic-task-text { color: var(--muted); font-style: italic; }
+.topic-tasks li.heard .topic-note-mark { color: var(--accent-text); }
+.heard-row { display: flex !important; align-items: center; gap: 6px; padding: 0 0 6px 20px; font-size: 13px; }
+.heard-row .agent-mark { color: var(--accent-text); }
+.heard-label { flex: none; color: var(--muted); }
+.heard-text { min-width: 0; font-style: italic; }
+.heard-acts { flex: none; margin-left: auto; display: inline-flex; gap: 4px; }
+.heard-acts button { padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--text); font: inherit; font-size: 11px; line-height: 18px; cursor: pointer; }
+.heard-acts button:first-child { border-color: var(--accent); color: var(--accent-text); }
+.heard-acts button:hover { border-color: var(--accent); color: var(--accent-text); }
+.heard-pill { flex: none; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 11px; cursor: default; }
 .agent-card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: color-mix(in srgb, var(--accent) 4%, transparent); font-size: 13px; }
 .agent-card-head { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .agent-card .agent-mark { color: var(--accent-text); }

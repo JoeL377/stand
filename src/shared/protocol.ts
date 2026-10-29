@@ -117,6 +117,8 @@ export interface ListNote extends Note {
   closed: { how: "answered" | "dropped" | "wrong"; at: number } | null;
   /** A decision that settled an open question: that question's id. */
   answers: string | null;
+  /** A decision Stand heard that nobody has confirmed yet: it isn't decided until someone does. */
+  heard?: boolean;
 }
 
 /** One way to settle an open question, as ✦ Stand found it. */
@@ -598,6 +600,9 @@ export type ClientMessage = (
   | { type: "agent.pick"; cardId: string; index: number; as: "decision" | "task" }
   /** Anyone: take a card off the board. */
   | { type: "agent.dismiss"; cardId: string }
+  /** Anyone: a decision Stand heard is one (confirm), or isn't (dismiss). */
+  | { type: "list.confirm"; noteId: string }
+  | { type: "list.dismiss"; noteId: string }
   /** The host, or whoever took it: take the snap off everyone's middle screen. It stays on the item. */
   | { type: "stage.snap.close" }
   | { type: "meeting.end" }

@@ -917,6 +917,16 @@ export class RoomSession implements SpeechSink {
         if (this.agentCards?.dismiss(msg.cardId, conn.name)) this.agentChanged();
         break;
       }
+      case "list.confirm": {
+        if (this.ended || !this.list) return;
+        if (this.list.confirm(msg.noteId, conn.name)) this.listChanged();
+        break;
+      }
+      case "list.dismiss": {
+        if (this.ended || !this.list) return;
+        if (this.list.dismiss(msg.noteId)) this.listChanged();
+        break;
+      }
       case "upnext.add":
       case "upnext.addAll": {
         if (!isHost) return;
