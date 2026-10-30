@@ -2548,6 +2548,14 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .answer-stack .agent-answer-todo button { font-size: 12px; line-height: 22px; padding: 0 10px; }
 .answer-stack .topic-hint { margin-top: auto; }
 .running-list .topic-sections.columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* ✦ Stand writing as it goes: a caret after the words so far, searches as a quiet line, options sliding in. */
+.streaming::after { content: ""; display: inline-block; width: 0.45em; height: 1em; margin-left: 2px; vertical-align: -0.12em; background: var(--accent); border-radius: 1px; animation: notes-pulse 1s ease-in-out infinite; }
+.agent-searched { font-size: 12px; color: var(--muted); }
+.answer-stack .agent-searched { font-size: 12.5px; }
+.agent-options.drafting > li { animation: line-in 240ms var(--ease-out, ease-out); }
+.agent-options > li.arriving { animation: line-in 260ms var(--ease-out, ease-out) both; }
+.agent-draft-searching { color: var(--accent-text); }
+@media (prefers-reduced-motion: reduce) { .streaming::after, .agent-options.drafting > li, .agent-options > li.arriving { animation: none; } }
 @media (prefers-reduced-motion: reduce) {
   .card-slide.from-next, .card-slide.from-prev, .card-step.live.moved, .card-entry-live, .answer-stack .agent-answer-asking, .answer-stack .agent-answer-working,
   .card-entry.signal, .card-entry.fresh, .card-entry.signal .card-entry-mark, .card-entry.pending .card-entry-mark, .card-list-toggle-signal { animation: none; }

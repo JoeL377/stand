@@ -626,7 +626,13 @@ function signalOf(e: Entry, now: number): Entry["signal"] {
   if (!cards.length) return null;
   const last = cards.at(-1)!;
   if (last.status === "listening") return { text: `✦ ${first(last.by)} is asking…`, tone: "working" };
-  if (last.status === "working") return { text: e.kind === "options" ? "✦ Finding options…" : "✦ Finding an answer…", tone: "working" };
+  if (last.status === "working") {
+    const d = last.draft;
+    if (d?.text || d?.options.length) return { text: "✦ Writing…", tone: "working" };
+    if (d?.pages?.length) return { text: "✦ Reading what it found…", tone: "working" };
+    if (d?.searches.length) return { text: "✦ Searching the web…", tone: "working" };
+    return { text: e.kind === "options" ? "✦ Finding options…" : "✦ Finding an answer…", tone: "working" };
+  }
   if (last.status === "ready" && last.readyAt !== null && now - last.readyAt < READY_MS) return { text: e.kind === "options" ? "✦ Options ready" : "✦ Answer ready", tone: "ready" };
   return null;
 }

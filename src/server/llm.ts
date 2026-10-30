@@ -10,7 +10,7 @@ import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind,
 import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, BoardDriftSchema, DRIFT_SYSTEM } from "./board.ts";
 import { config } from "./config.ts";
 import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
-import { ANSWER_SYSTEM, type Answer, AnswerSchema, OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, type RunUsage } from "./meetingAgent.ts";
+import { ANSWER_SYSTEM, type Answer, AnswerSchema, OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, readPartial, type RunUsage } from "./meetingAgent.ts";
 import { findQuote, type Said } from "./quotes.ts";
 import { recordUsage } from "./usage.ts";
 
@@ -129,6 +129,17 @@ export interface ScreenMatch {
   reason: string;
 }
 
+const siteOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+};
+
+/** A ✦ Stand run as it streams: the web searches so far, and the structured answer so far (partial JSON). */
+export type OnDraft = (d: { searches: string[]; pages: string[]; partial: unknown }) => void;
+
 export interface Agent {
   /** Groups an item's talk into discussions and writes the notes that came out of each. */
   notesFor(
@@ -184,9 +195,9 @@ export interface Agent {
   liveList?(context: string, talk: string): Promise<ListAnswer | null>;
   /** ✦ Stand's options for an open question (meetingAgent.ts), searching the web as it needs. Left out
    *  without a model. */
-  findOptions?(prompt: string): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
+  findOptions?(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
   /** ✦ Stand's answer to a question someone asked it on the call (push-to-talk or @stand). Left out without a model. */
-  answer?(prompt: string): Promise<{ answer: Answer | null; model: string; usage: RunUsage }>;
+  answer?(prompt: string, onDraft?: OnDraft): Promise<{ answer: Answer | null; model: string; usage: RunUsage }>;
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
   settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
@@ -884,22 +895,31 @@ Answer for every smaller topic exactly once.`,
     return this.parse(ListAnswerSchema, boardContent(context, talk), LIST_SYSTEM, "low", config.listModel, { timeout: LIST_TIMEOUT_MS, maxTokens: 2000, thinking: false });
   }
 
-  async findOptions(prompt: string): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }> {
-    return this.searchRun("options", OptionsAnswerSchema, OPTIONS_SYSTEM, prompt);
+  async findOptions(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }> {
+    return this.searchRun("options", OptionsAnswerSchema, OPTIONS_SYSTEM, prompt, onDraft);
   }
 
-  async answer(prompt: string): Promise<{ answer: Answer | null; model: string; usage: RunUsage }> {
-    return this.searchRun("answer", AnswerSchema, ANSWER_SYSTEM, prompt);
+  async answer(prompt: string, onDraft?: OnDraft): Promise<{ answer: Answer | null; model: string; usage: RunUsage }> {
+    return this.searchRun("answer", AnswerSchema, ANSWER_SYSTEM, prompt, onDraft);
   }
 
-  /** One ✦ Stand run that may search the web twice, with what it cost. */
-  private async searchRun<T extends z.ZodTypeAny>(label: string, schema: T, system: string, prompt: string): Promise<{ answer: z.infer<T> | null; model: string; usage: RunUsage }> {
+  /** One ✦ Stand run that may search the web twice, with what it cost. It streams: onDraft hears each web
+   *  search as it starts and the answer as it's written (the JSON so far, read leniently). */
+  private async searchRun<T extends z.ZodTypeAny>(
+    label: string,
+    schema: T,
+    system: string,
+    prompt: string,
+    onDraft?: OnDraft,
+  ): Promise<{ answer: z.infer<T> | null; model: string; usage: RunUsage }> {
     const model = config.agentModel;
     const usage: RunUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0 };
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
     // A turn that searches can pause partway; send it back as it stands and the server carries on.
+    const searches: string[] = [];
+    const pages: string[] = [];
     for (let turn = 0; turn < 3; turn++) {
-      const res = await this.client.beta.messages.parse(
+      const stream = this.client.beta.messages.stream(
         {
           model,
           max_tokens: 6000,
@@ -912,6 +932,28 @@ Answer for every smaller topic exactly once.`,
         },
         { timeout: AGENT_TIMEOUT_MS, maxRetries: 1 },
       );
+      if (onDraft) {
+        stream.on("contentBlock", (b) => {
+          const query = b.type === "server_tool_use" && b.name === "web_search" ? (b.input as { query?: unknown }).query : null;
+          if (typeof query === "string" && query.trim()) {
+            searches.push(query.trim());
+            onDraft({ searches: [...searches], pages: [...pages], partial: null });
+          }
+          // What a search found comes back before anything is written: the sites, so people see it reading.
+          if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+            for (const r of b.content) {
+              const site = r.type === "web_search_result" ? siteOf(r.url) : null;
+              if (site && !pages.includes(site)) pages.push(site);
+            }
+            onDraft({ searches: [...searches], pages: [...pages], partial: null });
+          }
+        });
+        stream.on("text", (_delta, snapshot) => {
+          const partial = readPartial(snapshot);
+          if (partial && typeof partial === "object") onDraft({ searches: [...searches], pages: [...pages], partial });
+        });
+      }
+      const res = await stream.finalMessage();
       const u = res.usage;
       recordUsage(res.model ?? model, u);
       usage.input += u.input_tokens;

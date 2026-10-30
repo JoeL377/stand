@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AGENT_MAX_RUNS, AgentKeeper, answerPrompt, AskCapture, costOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
+import { AGENT_MAX_RUNS, AgentKeeper, answerPrompt, AskCapture, costOf, draftOf, optionsPrompt, readPartial, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
 import { type ListAnswer, ListKeeper } from "./liveList.ts";
 import type { Segment } from "../shared/protocol.ts";
 
@@ -155,4 +155,26 @@ test("an answer's prompt carries the asker, the question and what it follows up 
   assert.match(p, /D1 \(.*\) decided: Host on Railway for now/);
   const card = toAnswer({ answer: " About $4. ", sources: [{ url: "https://fly.io/pricing", title: "Fly pricing" }, { url: "not a link", title: "x" }], todo: " ", from_space: [{ key: "d1", line: "We chose Railway for now" }] }, h);
   assert.deepEqual(card, { note: "About $4.", sources: [{ url: "https://fly.io/pricing", title: "Fly pricing" }], todo: null, fromSpace: [{ text: "We chose Railway for now", when: T0 - 86_400_000 }] });
+});
+
+test("a streaming run's draft: the words so far, options as they come, searches kept", async () => {
+  const answer = draftOf("answer", ["stripe checkout pricing"], readPartial('{"answer":"Stripe charges 2.9% plus 30'));
+  assert.deepEqual(answer, { searches: ["stripe checkout pricing"], pages: [], text: "Stripe charges 2.9% plus 30", options: [] });
+  const opts = draftOf("options", [], readPartial('{"options":[{"title":"Move to Fly.io","why":"Cheaper, but"},{"title":"Stay on'));
+  assert.deepEqual(opts.options, [
+    { title: "Move to Fly.io", why: "Cheaper, but" },
+    { title: "Stay on", why: "" },
+  ]);
+  assert.equal(opts.text, null);
+  // A half-written escape at the end is left off until it's whole.
+  assert.deepEqual(readPartial('{"answer":"Say \\"hi\\'), { answer: 'Say "hi' });
+  // Before any words: just the searches.
+  assert.deepEqual(draftOf("answer", ["q"], null, ["stripe.com"]), { searches: ["q"], pages: ["stripe.com"], text: null, options: [] });
+  // Once it's done the card drops its draft.
+  const keeper = new AgentKeeper(null);
+  const card = keeper.start("n1", "Where do we host?", "Joe", T0);
+  keeper.draft(card.id, opts);
+  assert.equal(keeper.get(card.id)?.draft?.options.length, 2);
+  keeper.finish(card.id, { fields: { options: [], fromSpace: [], note: "Stay on Railway" }, model: "m", costUsd: 0 });
+  assert.equal(keeper.get(card.id)?.draft, null);
 });

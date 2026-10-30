@@ -164,6 +164,19 @@ export interface AgentCard {
   model: string | null;
   /** What the run cost, in US dollars, when the price of its model is known. */
   costUsd: number | null;
+  /** While it's working: what Stand has written so far, as it writes it, and what it searched the web for. */
+  draft?: AgentDraft | null;
+}
+/** ✦ Stand's card as it's being written (streamed from the model). */
+export interface AgentDraft {
+  /** Web searches so far, oldest first; the last one is running while nothing's written yet. */
+  searches: string[];
+  /** The pages those searches found, by site, in the order they came (a few). */
+  pages?: string[];
+  /** An answer: its words so far. Options: the note so far, when there are no options. */
+  text: string | null;
+  /** Options as they come, each one's tradeoff possibly cut off mid-sentence. */
+  options: Array<{ title: string; why: string }>;
 }
 
 /** Someone's own words behind a line the agent wrote, copied from the transcript and checked

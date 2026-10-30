@@ -13,8 +13,9 @@
 // open to-dos, open questions, notes from the bar), and may search the web a few times. Each card
 // is kept with the meeting and records who asked, when, the model and what it cost, so it doubles
 // as the agent's log.
+import { partialParse } from "@anthropic-ai/sdk/_vendor/partial-json-parser/parser";
 import { z } from "zod";
-import type { AgentCard, AgentOption, Segment } from "../shared/protocol.ts";
+import type { AgentCard, AgentDraft, AgentOption, Segment } from "../shared/protocol.ts";
 
 /** Most runs one meeting may start: a cost cap while it's tried on real calls. */
 export const AGENT_MAX_RUNS = 20;
@@ -351,9 +352,18 @@ export class AgentKeeper {
   }
 
   /** How an answer run ended. */
+  /** What a working card has so far, as the run streams it (null once it's done). */
+  draft(id: string, draft: AgentDraft | null) {
+    const card = this.get(id);
+    if (!card || (draft && card.status !== "working")) return null;
+    card.draft = draft;
+    return card;
+  }
+
   finishAnswer(id: string, out: { fields: Pick<AgentCard, "note" | "sources" | "todo" | "fromSpace"> | null; follows: string | null; model: string | null; costUsd: number | null }, at = Date.now()) {
     const card = this.get(id);
     if (!card || card.kind !== "answer") return null;
+    card.draft = null;
     card.readyAt = at;
     card.model = out.model;
     card.costUsd = out.costUsd;
@@ -380,6 +390,7 @@ export class AgentKeeper {
   finish(id: string, out: { fields: Pick<AgentCard, "options" | "fromSpace" | "note"> | null; model: string | null; costUsd: number | null }, at = Date.now()) {
     const card = this.get(id);
     if (!card) return null;
+    card.draft = null;
     card.readyAt = at;
     card.model = out.model;
     card.costUsd = out.costUsd;
@@ -406,4 +417,39 @@ export class AgentKeeper {
     card.dismissed = { by, at };
     return card;
   }
+}
+
+/** JSON cut off mid-stream, read as far as it goes, including a string still being written (the SDK's
+ *  partial parser leaves those out, which would hold back every word until the field closes). */
+export function readPartial(json: string): unknown {
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
+    if (c === "\\" && inString) i++;
+    else if (c === '"') inString = !inString;
+  }
+  let text = json;
+  if (inString) {
+    // Close the open string, minus a half-written escape at its end.
+    text = text.replace(/\\u[0-9a-fA-F]{0,3}$/, "").replace(/(^|[^\\])((?:\\\\)*)\\$/, "$1$2");
+    text += '"';
+  }
+  try {
+    return partialParse(text);
+  } catch {
+    return null;
+  }
+}
+
+/** A run's answer as it streams, for the card: what it searched for, the words so far (an answer's text,
+ *  or the note on options), and options as they come. The JSON so far is read leniently. */
+export function draftOf(kind: AgentCard["kind"], searches: string[], partial: unknown, pages: string[] = []): AgentDraft {
+  const p = (partial && typeof partial === "object" ? partial : {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const text = str(kind === "answer" ? p.answer : p.note).trim();
+  const options = (Array.isArray(p.options) ? p.options : [])
+    .map((o) => (o && typeof o === "object" ? (o as Record<string, unknown>) : {}))
+    .map((o) => ({ title: str(o.title).trim(), why: str(o.why).trim() }))
+    .filter((o) => o.title);
+  return { searches, pages: pages.slice(0, 6), text: text || null, options: kind === "options" ? options : [] };
 }

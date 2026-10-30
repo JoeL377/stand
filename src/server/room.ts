@@ -7,6 +7,8 @@ import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
   User,
+  AgentCard,
+  AgentDraft,
   ChapterRecap,
   ClientMessage,
   DoneDeck,
@@ -22,10 +24,10 @@ import type {
 } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
-import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
+import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, draftOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
-import { type Agent, type ItemNotesDraft, NotesTrouble, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
+import { type Agent, type ItemNotesDraft, NotesTrouble, type OnDraft, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
 import { meetingChapters } from "../shared/chapters.ts";
 import { currentDoneDeck } from "./doneDeck.ts";
 import { sampleSprint } from "./linear.ts";
@@ -43,6 +45,8 @@ import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
 const SUGGEST_MIN_CONFIDENCE = 0.55;
 /** The cost shown on the call is sent again at most this often. */
 const COST_EVERY_MS = 5_000;
+/** ✦ Stand's card as it streams goes out to everyone at most this often. */
+const DRAFT_EVERY_MS = 150;
 /** A dismissed item isn't suggested again for this long. */
 const DISMISS_QUIET_MS = 90_000;
 /** A word Conxt says was used two ways stays raised this long after it is said. */
@@ -212,6 +216,7 @@ export class RoomSession implements SpeechSink {
   private list: ListKeeper | null = null;
   /** What ✦ Stand put on the board (meetingAgent.ts); null without a model to run it. */
   private agentCards: AgentKeeper | null = null;
+  private draftTimer: NodeJS.Timeout | null = null;
   /** Push-to-talk: what each person says while their Ask Stand button is down. */
   private asks = new AskCapture();
   private listTimer: NodeJS.Timeout | null = null;
@@ -1402,7 +1407,7 @@ export class RoomSession implements SpeechSink {
     let out: Parameters<AgentKeeper["finish"]>[1] = { fields: null, model: null, costUsd: null };
     try {
       const history = this.spaceHistory();
-      const run = await this.agent.findOptions(optionsPrompt(card.question, this.db.meetingSegments(this.meetingId), Date.now(), history));
+      const run = await this.agent.findOptions(optionsPrompt(card.question, this.db.meetingSegments(this.meetingId), Date.now(), history), this.drafting(cardId, "options"));
       out = { fields: run.answer && toCard(run.answer, history), model: run.model, costUsd: costOf(run.model, run.usage) };
     } catch (e) {
       console.error(`[agent] options ${this.meetingId}: ${(e as Error).message}`);
@@ -1454,7 +1459,7 @@ export class RoomSession implements SpeechSink {
     try {
       const history = this.spaceHistory();
       const prompt = answerPrompt(card.question, card.by, this.db.meetingSegments(this.meetingId), started, history, earlier.map((c) => ({ by: c.by, question: c.question, answer: c.note ?? "" })));
-      const run = await this.agent.answer(prompt);
+      const run = await this.agent.answer(prompt, this.drafting(cardId, "answer"));
       out = { ...out, fields: run.answer && toAnswer(run.answer, history), model: run.model, costUsd: costOf(run.model, run.usage) };
     } catch (e) {
       console.error(`[agent] answer ${this.meetingId}: ${(e as Error).message}`);
@@ -1462,6 +1467,24 @@ export class RoomSession implements SpeechSink {
     cards.finishAnswer(cardId, out);
     console.log(`[agent] answer for "${card.question}" (${card.by}): ${card.status} in ${((Date.now() - started) / 1000).toFixed(1)}s, $${out.costUsd ?? "?"}`);
     this.agentChanged();
+  }
+
+  /** A run streaming into a card: everyone sees the searches and the words as they come, a few times a
+   *  second at most (not saved; the finished card is). */
+  private drafting(cardId: string, kind: AgentCard["kind"]): OnDraft {
+    let last: AgentDraft | null = null;
+    return ({ searches, pages, partial }) => {
+      const prev = last;
+      const next = draftOf(kind, searches, partial ?? (prev ? { answer: prev.text, note: prev.text, options: prev.options } : null), pages);
+      if (JSON.stringify(next) === JSON.stringify(prev)) return;
+      last = next;
+      if (!this.agentCards?.draft(cardId, next)) return;
+      if (this.draftTimer) return;
+      this.draftTimer = setTimeout(() => {
+        this.draftTimer = null;
+        if (this.agentCards && !this.ended) this.broadcast({ type: "agent", cards: this.agentCards.all() });
+      }, DRAFT_EVERY_MS);
+    };
   }
 
   private agentChanged() {
