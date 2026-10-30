@@ -277,6 +277,7 @@ export function Stage(props: {
               onFind: (noteId) => send({ type: "agent.options", noteId }),
               onPick: (cardId, index, as) => send({ type: "agent.pick", cardId, index, as }),
               onDismiss: (cardId) => send({ type: "agent.dismiss", cardId }),
+              onTodo: (cardId) => send({ type: "agent.todo", cardId }),
             }
           : props.agentCards?.length
             ? { cards: props.agentCards }
@@ -284,6 +285,8 @@ export function Stage(props: {
       }
       onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
       onRemove={canSteer && !props.ending ? removeNote : undefined}
+      onConfirm={props.ending || props.offline ? undefined : (noteId) => send({ type: "list.confirm", noteId })}
+      onNotYet={props.ending || props.offline ? undefined : (noteId) => send({ type: "list.dismiss", noteId })}
       checkIn={state.checkIn}
       doneDeck={state.doneDeck}
       follow={following ? { rewind: hostView?.rewind ?? null, host: host!.name } : null}

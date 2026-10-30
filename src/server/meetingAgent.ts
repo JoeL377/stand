@@ -1,8 +1,13 @@
-// ✦ Stand, the meeting's own agent: the reference for what an agent can do in a live call. For now
-// one thing, on a click: an open question on the board's list ("where do we move off Railway?")
-// gets a card of options, each with its tradeoff, and what the space already said about it.
-// Anyone can take an option as a decision or a to-do, or dismiss the card. Nothing reaches the
-// board's list or the space without that click.
+// ✦ Stand, the meeting's own agent: the reference for what an agent can do in a live call. Two
+// things, each only when someone asks:
+// - On a click, an open question on the board's list ("where do we move off Railway?") gets a card
+//   of options, each with its tradeoff, and what the space already said about it. Anyone can take
+//   an option as a decision or a to-do, or dismiss the card.
+// - Push-to-talk: someone holds Ask Stand, says their question and lets go (or types @stand in the
+//   chat). Stand answers in the Chat, which is the meeting's history with it; asking again soon
+//   after follows up on the last answer. An answer can suggest a next step anyone can take as a
+//   to-do. It never decides anything (Oct 28 call).
+// Nothing reaches the board's list or the space without a click.
 //
 // A run reads the question, the last few minutes of talk, and the space's history (decisions,
 // open to-dos, open questions, notes from the bar), and may search the web a few times. Each card
@@ -12,7 +17,18 @@ import { z } from "zod";
 import type { AgentCard, AgentOption, Segment } from "../shared/protocol.ts";
 
 /** Most runs one meeting may start: a cost cap while it's tried on real calls. */
-export const AGENT_MAX_RUNS = 12;
+export const AGENT_MAX_RUNS = 20;
+/** How long after the button comes up Stand keeps taking down the question: the last words'
+ *  transcript lands a moment after they're said. */
+export const ASK_SETTLE_MS = 2_500;
+/** Speech that started this long before the button went down still counts: people start as they press. */
+const ASK_LEAD_MS = 1_000;
+/** Longest a hold may run before Stand answers what it has. */
+export const ASK_MAX_MS = 60_000;
+/** An answer within this long of the last one follows up on it. */
+const FOLLOW_MS = 5 * 60_000;
+/** A question typed to Stand in the chat. */
+const AT_STAND = /^@stand\b[\s,:]*/i;
 /** How much recent talk a run reads. */
 const TALK_MS = 4 * 60_000;
 /** Most lines of each kind of space history a run is shown. */
@@ -141,6 +157,113 @@ export function toCard(answer: OptionsAnswer, history: SpaceHistory): Pick<Agent
   return { options, fromSpace, note: answer.note?.trim() ? clip(answer.note.trim(), 240) : null };
 }
 
+export const AnswerSchema = z.object({
+  answer: z.string().describe("The answer, at most 60 words, plain. Lead with it; no preamble"),
+  sources: z
+    .array(z.object({ url: z.string(), title: z.string().describe("The page's short title") }))
+    .describe("At most 2 pages from your searches that the answer leans on. Empty when you didn't search"),
+  todo: z
+    .string()
+    .nullable()
+    .describe("A next step the answer points to, as a to-do of at most 10 words starting with its verb, when there is a clear one. Usually null"),
+  from_space: z
+    .array(z.object({ key: z.string().describe("The history line's key, D1, T1, Q1 or N1"), line: z.string().describe("How it bears on the question, at most 20 words") }))
+    .describe("History lines that bear on the question. Usually empty; never stretch"),
+});
+export type Answer = z.infer<typeof AnswerSchema>;
+
+export const ANSWER_SYSTEM = `You are Stand, the agent in a team's live meeting. Someone on the call held the Ask Stand button and asked you something out loud, or typed it to you in the chat. Everyone on the call reads your answer in the meeting chat a few seconds from now, while they keep talking.
+
+Answer the question itself, briefly: what they would want from a sharp colleague who looked it up. The question comes from speech-to-text, so read through misheard words, and use the last few minutes of the call to know what they're talking about. When it needs current facts (products, prices, limits, how something works now), search the web, at most twice, and give the pages you leaned on. When it follows up an earlier answer, build on that answer.
+
+You also get the space's history. If an earlier decision, to-do, question or note bears on the question, say so in the answer and list it in from_space with its key: teams forget what they already settled.
+
+Never decide anything for the team and never say something was decided. When the answer points to a clear next step, offer it as todo; people choose whether to take it.
+
+Plain words, no hype, no hedging. Never invent prices, limits or quotes you didn't find. If you can't tell what they asked, say so in a line.`;
+
+/** The question typed to Stand in the chat ("@stand which plan has SSO?"), or null when the message isn't one. */
+export function typedAsk(text: string): string | null {
+  if (!AT_STAND.test(text)) return null;
+  const q = text.replace(AT_STAND, "").trim();
+  return q.length >= 3 ? q : null;
+}
+
+/** The prompt for one answer. `earlier`: the answers it may follow up on, oldest first. */
+export function answerPrompt(question: string, by: string, talk: Segment[], now: number, history: SpaceHistory, earlier: Array<{ by: string; question: string; answer: string }> = []): string {
+  const lines = keyed(history);
+  const recent = talk
+    .filter((s) => s.ts >= now - TALK_MS && s.ts <= now)
+    .map((s) => `${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
+    .join("\n");
+  const before = earlier.map((e) => `${e.by} asked: ${e.question}\nYou answered: ${e.answer}`).join("\n\n");
+  return `Space: ${history.name}${history.purpose ? `\nWhat it's for: ${clip(history.purpose, 500)}` : ""}
+Today: ${day(now)}
+${before ? `\nWhat you were asked just before, and answered:\n${before}\n` : ""}
+${by} asks you: ${question}
+
+The last few minutes of the call:
+${recent || "(nothing yet)"}
+
+The space's history, newest first:
+${lines.map((l) => `- ${l.key} (${day(l.ts)}) ${l.shown}`).join("\n") || "(none)"}`;
+}
+
+/** The answer as card fields: real links only, history keys back to dated lines. */
+export function toAnswer(answer: Answer, history: SpaceHistory): Pick<AgentCard, "note" | "sources" | "todo" | "fromSpace"> {
+  const lines = keyed(history);
+  const seen = new Set<string>();
+  const fromSpace = answer.from_space
+    .map((f) => ({ f, l: lines.find((l) => l.key === f.key.trim().toUpperCase()) }))
+    .filter(({ l }) => l && !seen.has(l.key) && seen.add(l.key))
+    .slice(0, 3)
+    .map(({ f, l }) => ({ text: clip(f.line.trim() || l!.text, 200), when: l!.ts }));
+  const sources = answer.sources
+    .filter((x) => /^https?:\/\//.test(x.url.trim()))
+    .slice(0, 2)
+    .map((x) => ({ url: x.url.trim(), title: clip(x.title.trim() || new URL(x.url.trim()).hostname, 80) }));
+  return { note: clip(answer.answer.trim(), 600) || null, sources, todo: answer.todo?.trim() ? clip(answer.todo.trim(), 120) : null, fromSpace };
+}
+
+/** Push-to-talk: what each person says while their Ask Stand button is down. */
+export class AskCapture {
+  private open = new Map<string, { cardId: string; from: number; until: number | null; parts: string[] }>();
+
+  /** The button went down. False when this person is already asking. */
+  start(who: string, cardId: string, at: number): boolean {
+    if (this.open.has(who)) return false;
+    this.open.set(who, { cardId, from: at, until: null, parts: [] });
+    return true;
+  }
+
+  /** The button came up: speech that started after this no longer counts. Returns the card's id. */
+  end(who: string, at: number): string | null {
+    const a = this.open.get(who);
+    if (!a || a.until !== null) return null;
+    a.until = at;
+    return a.cardId;
+  }
+
+  asking(who: string): boolean {
+    return this.open.has(who);
+  }
+
+  /** A line of transcript from this person; kept when it was said while the button was down. */
+  hear(who: string, text: string, startedAt: number) {
+    const a = this.open.get(who);
+    if (!a || startedAt < a.from - ASK_LEAD_MS || (a.until !== null && startedAt > a.until)) return;
+    a.parts.push(text.trim());
+  }
+
+  /** The question as heard, once; the capture ends. */
+  take(who: string): { cardId: string; question: string } | null {
+    const a = this.open.get(who);
+    if (!a) return null;
+    this.open.delete(who);
+    return { cardId: a.cardId, question: a.parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim() };
+  }
+}
+
 /** Keeps one meeting's cards. */
 export class AgentKeeper {
   private cards: AgentCard[];
@@ -149,6 +272,8 @@ export class AgentKeeper {
   constructor(saved?: AgentCard[] | null) {
     this.cards = saved ?? [];
     this.n = Math.max(0, ...this.cards.map((c) => Number(c.id.slice(3)) || 0));
+    // A question being taken down when the server restarted is lost with the hold.
+    for (const c of this.cards) if (c.status === "listening") Object.assign(c, { status: "failed", readyAt: c.at, note: "Stand restarted while you were asking. Ask again." });
   }
 
   all(): AgentCard[] {
@@ -161,7 +286,7 @@ export class AgentKeeper {
 
   /** The card already on a question, unless it was dismissed or failed. */
   onQuestion(about: string): AgentCard | undefined {
-    return this.cards.find((c) => c.about === about && !c.dismissed && c.status !== "failed");
+    return this.cards.find((c) => c.kind === "options" && c.about === about && !c.dismissed && c.status !== "failed");
   }
 
   /** Whether another run may start: under the meeting's cap. */
@@ -191,6 +316,66 @@ export class AgentKeeper {
     return card;
   }
 
+  /** Someone asked Stand something: by push-to-talk (listening until the button comes up) or typed. */
+  ask(by: string, who: string, question: string | null, at = Date.now()): AgentCard {
+    const card = this.start(who, question ?? "", by, at);
+    card.kind = "answer";
+    card.status = question === null ? "listening" : "working";
+    card.sources = [];
+    card.todo = null;
+    card.follows = null;
+    return card;
+  }
+
+  /** What Stand heard while the button was down; nothing heard fails the card. */
+  heard(id: string, question: string): AgentCard | null {
+    const card = this.get(id);
+    if (!card || card.kind !== "answer" || card.status !== "listening") return null;
+    if (!question) {
+      card.status = "failed";
+      card.readyAt = Date.now();
+      card.note = "Didn't catch a question. Hold Ask Stand while you talk, then let go.";
+      return card;
+    }
+    card.question = clip(question, 1000);
+    card.status = "working";
+    return card;
+  }
+
+  /** The answers a new one may follow up on: the last two, if the latest came back a moment ago. */
+  followUp(now = Date.now()): AgentCard[] {
+    const done = this.cards.filter((c) => c.kind === "answer" && c.status === "ready" && c.note);
+    const last = done.at(-1);
+    if (!last || now - (last.readyAt ?? last.at) > FOLLOW_MS) return [];
+    return done.slice(-2);
+  }
+
+  /** How an answer run ended. */
+  finishAnswer(id: string, out: { fields: Pick<AgentCard, "note" | "sources" | "todo" | "fromSpace"> | null; follows: string | null; model: string | null; costUsd: number | null }, at = Date.now()) {
+    const card = this.get(id);
+    if (!card || card.kind !== "answer") return null;
+    card.readyAt = at;
+    card.model = out.model;
+    card.costUsd = out.costUsd;
+    card.follows = out.follows;
+    if (out.fields?.note) {
+      Object.assign(card, out.fields);
+      card.status = "ready";
+    } else {
+      card.status = "failed";
+      card.note = "Couldn't answer that this time.";
+    }
+    return card;
+  }
+
+  /** Someone took an answer's next step as a to-do. */
+  takeTodo(id: string, by: string, at = Date.now()) {
+    const card = this.get(id);
+    if (!card || card.kind !== "answer" || card.status !== "ready" || !card.todo || card.picked) return null;
+    card.picked = { index: 0, as: "task", by, at };
+    return card;
+  }
+
   /** How a run ended: its answer as a card, or failed. */
   finish(id: string, out: { fields: Pick<AgentCard, "options" | "fromSpace" | "note"> | null; model: string | null; costUsd: number | null }, at = Date.now()) {
     const card = this.get(id);
@@ -210,7 +395,7 @@ export class AgentKeeper {
 
   pick(id: string, index: number, as: "decision" | "task", by: string, at = Date.now()) {
     const card = this.get(id);
-    if (!card || card.status !== "ready" || card.picked || card.dismissed || !card.options[index]) return null;
+    if (!card || card.kind !== "options" || card.status !== "ready" || card.picked || card.dismissed || !card.options[index]) return null;
     card.picked = { index, as, by, at };
     return card;
   }

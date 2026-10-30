@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Capabilities, User } from "../../shared/protocol.ts";
+import type { Capabilities, ClientMessage, User } from "../../shared/protocol.ts";
 import { useRoomSocket } from "./useRoomSocket.ts";
 import { useMedia, type Mic } from "./useMedia.ts";
 import { browserSpeechSupported, useBrowserSpeech } from "./useBrowserSpeech.ts";
@@ -543,6 +543,15 @@ export function Meeting(props: {
             </span>
           </button>
           <MicMenu mics={media.mics} micId={media.micId} onPick={(id) => void media.pickMic(id)} onOpen={() => void media.refreshMics()} />
+          {room.agentCards && !writingUp && (
+            <AskStand
+              send={send}
+              offline={!room.connected}
+              micOn={media.micOn && !media.audioDown}
+              canUnmute={!media.audioDown && !media.audioAway}
+              toggleMic={media.toggleMic}
+            />
+          )}
           {/* Phone browsers can't share a screen. */}
           {!canShare ? null : sharing ? (
             <button className="control sharing" onClick={() => void media.stopShare()}>
@@ -818,6 +827,7 @@ function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => vo
         ] as Array<[string, string]>)
       : []),
     [`${MOD.cmd} + D`, "Mute or unmute"],
+    [`Hold ${MOD.ctrl} + Space`, "Ask Stand: say your question, then let go"],
     [`${MOD.cmd} + \\`, "Hide or show the agenda"],
     [`${MOD.ctrl} + Shift + S`, "Snap the shared screen into the meeting"],
     ["Paste or drop an image", "Add a screenshot to the item in focus"],
@@ -852,5 +862,91 @@ function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => vo
         ))}
       </dl>
     </div>
+  );
+}
+
+/** How long a press may last and still count as a tap: a tap starts asking, the next tap sends it. */
+const ASK_TAP_MS = 350;
+/** After the button comes up, the mic stays on this long so the last words get through. */
+const ASK_TAIL_MS = 700;
+
+/** ✦ Ask Stand, push-to-talk: hold it (or Control + Space), say your question, let go. Stand answers
+ *  in the Chat. Muted, holding it unmutes you, so everyone hears the question too. */
+function AskStand(props: { send: (m: ClientMessage) => boolean; offline: boolean; micOn: boolean; canUnmute: boolean; toggleMic: () => Promise<unknown> | void }) {
+  const [held, setHeld] = useState(false);
+  const live = useRef({ held: false, at: 0, unmuted: false, latched: false });
+  const p = useRef(props);
+  p.current = props;
+  const down = () => {
+    const s = live.current;
+    if (s.held) return;
+    if (!p.current.send({ type: "agent.ask.start" })) return;
+    Object.assign(s, { held: true, at: Date.now(), unmuted: false, latched: false });
+    setHeld(true);
+    if (!p.current.micOn && p.current.canUnmute) {
+      s.unmuted = true;
+      void p.current.toggleMic();
+    }
+  };
+  const up = (tap: boolean) => {
+    const s = live.current;
+    if (!s.held) return;
+    // A quick tap keeps it listening until the next one (phones, or anyone who'd rather not hold).
+    if (tap && !s.latched && Date.now() - s.at < ASK_TAP_MS) {
+      s.latched = true;
+      return;
+    }
+    s.held = false;
+    setHeld(false);
+    p.current.send({ type: "agent.ask.end" });
+    if (s.unmuted) setTimeout(() => p.current.micOn && void p.current.toggleMic(), ASK_TAIL_MS);
+  };
+  useEffect(() => {
+    const isAsk = (e: KeyboardEvent) => e.code === "Space" && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    const onDown = (e: KeyboardEvent) => {
+      if (!isAsk(e)) return;
+      e.preventDefault();
+      if (!e.repeat) down();
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (live.current.held && !live.current.latched && (e.code === "Space" || e.key === "Control")) up(false);
+    };
+    const onBlur = () => live.current.held && up(false);
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+  return (
+    <button
+      type="button"
+      className={held ? "control ask on" : "control ask"}
+      disabled={props.offline && !held}
+      aria-pressed={held}
+      title={held ? "Listening. Let go (or tap again) to ask" : `Hold, ask Stand out loud, let go. Stand answers in the Chat (hold ${MOD.ctrl} + Space)`}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        if (live.current.held && live.current.latched) up(false);
+        else down();
+      }}
+      onPointerUp={() => up(true)}
+      onPointerCancel={() => up(false)}
+      onKeyDown={(e) => {
+        if ((e.key === "Enter" || e.key === " ") && !e.repeat && !e.ctrlKey) {
+          e.preventDefault();
+          live.current.held ? up(false) : (down(), (live.current.latched = true));
+        }
+      }}
+    >
+      <span className="ask-mark" aria-hidden>
+        ✦
+      </span>
+      <span>{held ? "Listening…" : "Ask Stand"}</span>
+    </button>
   );
 }

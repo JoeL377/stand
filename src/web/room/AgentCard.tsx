@@ -4,7 +4,8 @@
 // as a decision or a to-do. What the space already had on the question sits under the options.
 // While a card is being worked on, everyone on the call sees a quiet "✦ Finding options" on the
 // card's top line (and on the Board tab beside a share); when it's back, "✦ Options ready" for a
-// few seconds, which jumps to the card.
+// few seconds, which jumps to the card. A question asked out loud (push-to-talk) or typed (@stand)
+// gets a card of its own in the board's stack instead: AnswerPart is one question and its answer.
 import { useEffect, useState } from "react";
 import type { AgentCard } from "../../shared/protocol.ts";
 
@@ -14,6 +15,8 @@ export interface AgentActs {
   onFind?: (noteId: string) => void;
   onPick?: (cardId: string, index: number, as: "decision" | "task") => void;
   onDismiss?: (cardId: string) => void;
+  /** Take an answer's suggested next step as a to-do. */
+  onTodo?: (cardId: string) => void;
 }
 
 const shortDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -39,9 +42,10 @@ export function showCard(id: string) {
 /** A small ✦ on the Board tab beside a share: pulsing while ✦ Stand works, still for a moment once it's back. */
 export function AgentTabMark({ cards }: { cards: AgentCard[] | null | undefined }) {
   const { working, ready } = useAgentStatus(cards);
-  if (!working.length && !ready.length) return null;
+  const asked = (cards ?? []).some((c) => c.kind === "answer" && (c.status === "listening" || c.status === "working"));
+  if (!working.length && !ready.length && !asked) return null;
   return (
-    <span className={working.length ? "agent-tab-mark working" : "agent-tab-mark ready"} aria-label={working.length ? "Stand is finding options" : "Options ready"}>
+    <span className={working.length || asked ? "agent-tab-mark working" : "agent-tab-mark ready"} aria-label={asked ? "Stand is answering" : working.length ? "Stand is finding options" : "Options ready"}>
       ✦
     </span>
   );
@@ -50,7 +54,8 @@ export function AgentTabMark({ cards }: { cards: AgentCard[] | null | undefined 
 /** What ✦ Stand is up to, for everyone: cards being worked on, and ones that came back a moment ago. */
 export function useAgentStatus(cards: AgentCard[] | null | undefined) {
   const [now, setNow] = useState(Date.now);
-  const live = (cards ?? []).filter((c) => !c.dismissed);
+  // Answers have their own card on the board (AnswerPart); this is about options on open questions.
+  const live = (cards ?? []).filter((c) => c.kind === "options" && !c.dismissed);
   const working = live.filter((c) => c.status === "working");
   const ready = live.filter((c) => c.status === "ready" && c.readyAt !== null && now - c.readyAt < READY_MS);
   const next = ready.length ? Math.min(...ready.map((c) => c.readyAt! + READY_MS)) : null;
@@ -105,7 +110,7 @@ export function AgentStatus({ cards, onShow }: { cards: AgentCard[] | null | und
 
 /** The card on an open question, if one is up. */
 export function cardFor(acts: AgentActs | undefined, noteId: string): AgentCard | undefined {
-  return acts?.cards.filter((c) => c.about === noteId && !c.dismissed).at(-1);
+  return acts?.cards.filter((c) => c.kind === "options" && c.about === noteId && !c.dismissed).at(-1);
 }
 
 /** "✦ Options" at the end of an open question's line, while it has no card. */
@@ -189,6 +194,56 @@ export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** ✦ Stand's answer to a question someone asked it (push-to-talk or @stand), on its card on the board:
+ *  a follow-up's question, then the answer, the pages it leans on, what the space already had, and a
+ *  next step anyone can take as a to-do. */
+export function AnswerPart({ card, followUp, onTodo }: { card: AgentCard; followUp: boolean; onTodo?: (cardId: string) => void }) {
+  const first = (n: string) => n.split(" ")[0];
+  const cost = card.costUsd !== null ? ` · $${card.costUsd < 0.01 ? card.costUsd.toFixed(3) : card.costUsd.toFixed(2)}` : "";
+  const log = `Asked by ${card.by}${card.readyAt ? ` · ${Math.max(1, Math.round((card.readyAt - card.at) / 1000))} s` : ""}${card.model ? ` · ${card.model}` : ""}${cost}`;
+  return (
+    <div id={`agent-${card.id}`} className={["agent-answer", followUp && "follow-up", card.status].filter(Boolean).join(" ")} aria-live="polite" title={log}>
+      {followUp && (card.status === "listening" ? <div className="agent-answer-q">{first(card.by)} is following up…</div> : card.question && <div className="agent-answer-q">{first(card.by)}: “{card.question}”</div>)}
+      {card.status === "listening" && !followUp && <div className="agent-answer-asking">Listening to {first(card.by)}…</div>}
+      {card.status === "working" && <div className="agent-answer-working">✦ Answering…</div>}
+      {(card.status === "ready" || card.status === "failed") && card.note && <div className={card.status === "failed" ? "agent-answer-text failed" : "agent-answer-text"}>{card.note}</div>}
+      {card.status === "ready" && (card.sources?.length ?? 0) > 0 && (
+        <div className="agent-answer-sources">
+          {card.sources!.map((x) => (
+            <a key={x.url} href={x.url} target="_blank" rel="noreferrer" title={x.title}>
+              {host(x.url)} ↗
+            </a>
+          ))}
+        </div>
+      )}
+      {card.status === "ready" && card.fromSpace.length > 0 && (
+        <ul className="agent-space">
+          {card.fromSpace.map((f, i) => (
+            <li key={i}>
+              <span className="agent-space-when">{shortDate(f.when)}</span>
+              {f.text}
+            </li>
+          ))}
+        </ul>
+      )}
+      {card.status === "ready" && card.todo && (
+        <div className="agent-answer-todo">
+          <span className="agent-answer-todo-text">{card.todo}</span>
+          {card.picked ? (
+            <span className="agent-option-picked">To do · {first(card.picked.by)}</span>
+          ) : (
+            onTodo && (
+              <button type="button" onClick={() => onTodo(card.id)}>
+                To do
+              </button>
+            )
+          )}
+        </div>
       )}
     </div>
   );

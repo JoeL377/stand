@@ -7,6 +7,8 @@
 // lines add, change or close. A line on the list is never rewritten wholesale, regrouped or
 // dropped by a later run, so what people are reading stays where it is. The live notes still
 // group the talk into topics for the chapter bar and the recap; the list is only for the screen.
+// Stand never decides on its own: a decision it hears comes in as heard, and stays heard (an open
+// question it seems to settle stays open) until someone confirms it with a click (Oct 28 call).
 // On the Oct 17 and Oct 22 replays it showed lines about 5 s after they were said (live notes:
 // 21-77 s) and caught every core item (scripts/live-eval).
 import { z } from "zod";
@@ -88,6 +90,10 @@ export interface ListItem {
   closed: { how: "answered" | "dropped" | "wrong"; at: number } | null;
   /** A decision that answered an open question: the question's id. */
   answers: string | null;
+  /** A decision Stand heard that nobody has confirmed yet. Missing on lists saved before heard lines. */
+  heard?: boolean;
+  /** Who confirmed a heard decision. */
+  confirmedBy?: string | null;
 }
 
 const at = (ms: number, start: number) => {
@@ -148,6 +154,7 @@ export class ListKeeper {
         discussionId: null,
         closed: i.closed,
         answers: i.answers,
+        heard: !!i.heard,
       }));
   }
 
@@ -184,6 +191,26 @@ export class ListKeeper {
     return it;
   }
 
+  /** Someone confirmed a decision Stand heard: it counts as decided, and the question it answers closes. */
+  confirm(id: string, by: string, at = Date.now()): ListItem | null {
+    const it = this.items.find((i) => i.id === id && i.kind === "decided" && i.heard && !i.closed);
+    if (!it) return null;
+    it.heard = false;
+    it.confirmedBy = by;
+    const q = it.answers ? this.items.find((i) => i.id === it.answers && i.kind === "open" && !i.closed) : undefined;
+    if (q) q.closed = { how: "answered", at };
+    return it;
+  }
+
+  /** Someone said a heard decision isn't one. Its words stay so a later run doesn't hear it again;
+   *  the question it seemed to answer stays open. */
+  dismiss(id: string, at = Date.now()): ListItem | null {
+    const it = this.items.find((i) => i.id === id && i.kind === "decided" && i.heard && !i.closed);
+    if (!it) return null;
+    it.closed = { how: "wrong", at };
+    return it;
+  }
+
   /** A line someone put on the list with a click (✦ Stand's options, meetingAgent.ts). A decision that
    *  settles an open question closes it as answered. Returns the new line, or null when one like it is there. */
   addByHand(kind: Kind, who: string | null, text: string, itemId: string | null, answers: string | null = null, at = Date.now()): ListItem | null {
@@ -212,8 +239,10 @@ export class ListKeeper {
     if (firstNew === -1) return false;
     const from = Math.min(firstNew, Math.max(0, talk.findIndex((s) => s.ts > now - LIST_WINDOW_MS)));
     const shown = talk.slice(from);
-    const list =
-      this.items.map((i) => `- [${i.id}] ${i.kind}${i.who ? ` (${i.who})` : ""}: ${i.text}${i.closed ? ` (closed: ${i.closed.how})` : i.doneAt ? " (closed: done)" : ""}`).join("\n") || "(empty)";
+    const heardFor = new Set(this.items.filter((i) => i.heard && !i.closed && i.answers).map((i) => i.answers));
+    const state = (i: ListItem) =>
+      i.closed ? ` (closed: ${i.closed.how})` : i.doneAt ? " (closed: done)" : i.heard ? " (heard, waiting for someone to confirm)" : heardFor.has(i.id) ? " (answer heard, waiting for someone to confirm)" : "";
+    const list = this.items.map((i) => `- [${i.id}] ${i.kind}${i.who ? ` (${i.who})` : ""}: ${i.text}${state(i)}`).join("\n") || "(empty)";
     const lines = shown
       .map((s, k) => `${from + k >= firstNew ? "NEW " : ""}[${k + 1}] [${at(s.ts, this.meetingStartedAt)}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
       .join("\n");
@@ -226,7 +255,19 @@ export class ListKeeper {
     const add = (kind: Kind, who: string | null, text: string, said: number, answers: string | null = null) => {
       const t = clip(text.trim(), 200);
       if (!t || this.items.length >= MAX_ITEMS || this.items.some((i) => i.id !== answers && similar(i.text, t))) return null;
-      const it: ListItem = { id: `li_${++this.n}`, kind, who: who?.trim().split(/\s+/)[0] || null, text: t, itemId: itemAt(said), said, doneAt: null, doneBy: null, closed: null, answers };
+      const it: ListItem = {
+        id: `li_${++this.n}`,
+        kind,
+        who: who?.trim().split(/\s+/)[0] || null,
+        text: t,
+        itemId: itemAt(said),
+        said,
+        doneAt: null,
+        doneBy: null,
+        closed: null,
+        answers,
+        ...(kind === "decided" ? { heard: true } : {}),
+      };
       this.items.push(it);
       changed = true;
       return it;
@@ -251,9 +292,10 @@ export class ListKeeper {
         it.doneAt = now;
         it.doneBy = null;
       } else if (c.how === "answered") {
-        if (it.kind !== "open") continue;
-        it.closed = { how: "answered", at: now };
-        if (c.decision?.trim()) add("decided", null, c.decision, shown.at(-1)!.ts, it.id);
+        // The question stays open with the answer Stand heard under it, until someone confirms it.
+        if (it.kind !== "open" || heardFor.has(it.id) || !c.decision?.trim()) continue;
+        if (add("decided", null, c.decision, shown.at(-1)!.ts, it.id)) heardFor.add(it.id);
+        continue;
       } else it.closed = { how: c.how, at: now };
       changed = true;
     }
