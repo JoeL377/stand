@@ -395,8 +395,10 @@ export function TopicBoard(props: {
   // The wheel scrolls a long card first; pushed on past its end, it steps to the next card.
   const wheel = useRef({ push: 0, at: 0 });
   const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
     const down = e.deltaY > 0;
+    // A card that scrolls inside itself (an answer's chat) scrolls to its end before the board steps on.
+    const inner = (e.target as HTMLElement).closest<HTMLElement>(".card-scroll");
+    const el = inner && inner.scrollHeight > inner.clientHeight + 2 ? inner : e.currentTarget;
     const atEnd = down ? el.scrollTop + el.clientHeight >= el.scrollHeight - 2 : el.scrollTop <= 0;
     const w = wheel.current;
     if (!atEnd || Date.now() - w.at < WHEEL_REST_MS) return void (w.push = 0);
@@ -617,7 +619,7 @@ export function TopicBoard(props: {
         )}
         <div
           key={shownId ?? "none"}
-          className={["card-slide", cameFrom && `from-${cameFrom}`, drag !== 0 && "dragging"].filter(Boolean).join(" ")}
+          className={["card-slide", (rewind?.id === NEW || (rewind?.id !== RUNNING && shownEntry?.chain)) && "fill", cameFrom && `from-${cameFrom}`, drag !== 0 && "dragging"].filter(Boolean).join(" ")}
           style={drag ? { transform: `translateX(${drag}px)` } : undefined}
         >
           {view}
@@ -706,14 +708,32 @@ function RunningList(props: { tasks: Tasks; acts: TaskActs; idOf: (name: string)
 
 /** A question to ✦ Stand as a card: the first question is its title, each follow-up lands under the last answer. */
 function AnswerStack({ chain, live, onTodo, pilot, focus, onAsked }: { chain: AgentCard[]; live: boolean; onTodo?: (cardId: string) => void; pilot?: PilotActs; focus?: boolean; onAsked?: () => void }) {
-  // Like a chat, a new question (a follow-up) scrolls into view as it's asked.
+  // The chat scrolls inside the card, box at its foot. Like a chat, it opens at the latest, a new question
+  // (a follow-up) scrolls into view as it's asked, and an answer being written stays in view as it grows
+  // unless someone has scrolled up to read.
   const lastId = chain.at(-1)?.id;
   const seen = useRef(lastId);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const atEnd = useRef(true);
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
   useEffect(() => {
     if (!lastId || seen.current === lastId) return;
     seen.current = lastId;
+    atEnd.current = true;
     document.getElementById(`agent-${lastId}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [lastId]);
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    const follow = new MutationObserver(() => {
+      if (atEnd.current) el.scrollTop = el.scrollHeight;
+    });
+    follow.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => follow.disconnect();
+  }, []);
   return (
     <section className={live ? "topic-now answer-stack live" : "topic-now answer-stack"} aria-label="A question to Stand">
       <div className="topic-now-head">
@@ -721,7 +741,7 @@ function AnswerStack({ chain, live, onTodo, pilot, focus, onAsked }: { chain: Ag
         {live && <span className="topic-now-label live">Now</span>}
         {pilot?.view && <PilotPill acts={pilot} />}
       </div>
-      <div className="ask-thread">
+      <div className="ask-thread card-scroll" ref={threadRef} onScroll={(e) => (atEnd.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
         {chain.map((c) => (
           <AnswerPart key={c.id} card={c} onTodo={onTodo} />
         ))}
