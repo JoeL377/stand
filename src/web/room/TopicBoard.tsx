@@ -677,17 +677,25 @@ function RunningList(props: { tasks: Tasks; acts: TaskActs; idOf: (name: string)
 
 /** A question to ✦ Stand as a card: the first question is its title, each follow-up lands under the last answer. */
 function AnswerStack({ chain, live, onTodo }: { chain: AgentCard[]; live: boolean; onTodo?: (cardId: string) => void }) {
-  const root = chain[0];
+  // Like a chat, a new question (a follow-up) scrolls into view as it's asked.
+  const lastId = chain.at(-1)?.id;
+  const seen = useRef(lastId);
+  useEffect(() => {
+    if (!lastId || seen.current === lastId) return;
+    seen.current = lastId;
+    document.getElementById(`agent-${lastId}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [lastId]);
   return (
     <section className={live ? "topic-now answer-stack live" : "topic-now answer-stack"} aria-label="A question to Stand">
       <div className="topic-now-head">
-        <span className="topic-now-label ask">✦ Asked by {first(root.by)}</span>
+        <span className="topic-now-label ask">✦ Ask Stand</span>
         {live && <span className="topic-now-label live">Now</span>}
       </div>
-      <h2 className="topic-now-title">{root.question ? `“${root.question}”` : `${first(root.by)} is asking Stand…`}</h2>
-      {chain.map((c, i) => (
-        <AnswerPart key={c.id} card={c} followUp={i > 0} onTodo={onTodo} />
-      ))}
+      <div className="ask-thread">
+        {chain.map((c) => (
+          <AnswerPart key={c.id} card={c} onTodo={onTodo} />
+        ))}
+      </div>
       <p className="topic-hint">
         <span className="agent-mark small">✦</span> Hold Ask Stand to follow up; the answer lands here
       </p>

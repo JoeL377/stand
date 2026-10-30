@@ -208,10 +208,11 @@ export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }
   );
 }
 
-/** ✦ Stand's answer to a question someone asked it (push-to-talk or @stand), on its card on the board:
- *  a follow-up's question, then the answer, the pages it leans on, what the space already had, and a
- *  next step anyone can take as a to-do. */
-export function AnswerPart({ card, followUp, onTodo }: { card: AgentCard; followUp: boolean; onTodo?: (cardId: string) => void }) {
+/** ✦ Stand's answer to a question someone asked it (push-to-talk or @stand), as one turn of a chat on its
+ *  card, the way an assistant app shows it: the question in a bubble on the right, then Stand's steps (the
+ *  web searches and what it read, folded to one line once it's written) and the answer under them, then the
+ *  pages it leans on, what the space already had, and a next step anyone can take as a to-do. */
+export function AnswerPart({ card, onTodo }: { card: AgentCard; onTodo?: (cardId: string) => void }) {
   const first = (n: string) => n.split(" ")[0];
   const cost = card.costUsd !== null ? ` · $${card.costUsd < 0.01 ? card.costUsd.toFixed(3) : card.costUsd.toFixed(2)}` : "";
   const log = `Asked by ${card.by}${card.readyAt ? ` · ${Math.max(1, Math.round((card.readyAt - card.at) / 1000))} s` : ""}${card.model ? ` · ${card.model}` : ""}${cost}`;
@@ -219,45 +220,93 @@ export function AnswerPart({ card, followUp, onTodo }: { card: AgentCard; follow
   // Its sources, what the space had and the next step come in once the words are all there.
   const done = card.status === "ready" && !typing;
   return (
-    <div id={`agent-${card.id}`} className={["agent-answer", followUp && "follow-up", card.status].filter(Boolean).join(" ")} aria-live="polite" title={log}>
-      {followUp && (card.status === "listening" ? <div className="agent-answer-q">{first(card.by)} is following up…</div> : card.question && <div className="agent-answer-q">{first(card.by)}: “{card.question}”</div>)}
-      {card.status === "listening" && !followUp && <div className="agent-answer-asking">Listening to {first(card.by)}…</div>}
-      {card.status === "working" && !shown && <div className="agent-answer-working">✦ {doing(card.draft, "Answering…")}</div>}
-      {shown && (
-        // The answer as Stand writes it, with a caret at the end until it's all there.
-        <div className={["agent-answer-text", card.status === "failed" && "failed", (typing || card.status === "working") && "streaming"].filter(Boolean).join(" ")}>{shown}</div>
-      )}
-      {card.status === "working" && shown && (card.draft?.searches.length ?? 0) > 0 && <Searched draft={card.draft!} />}
-      {done && (card.sources?.length ?? 0) > 0 && (
-        <div className="agent-answer-sources">
-          {card.sources!.map((x) => (
-            <a key={x.url} href={x.url} target="_blank" rel="noreferrer" title={x.title}>
-              {host(x.url)} ↗
-            </a>
-          ))}
+    <div id={`agent-${card.id}`} className={["ask-turn", card.status].filter(Boolean).join(" ")} aria-live="polite">
+      <div className="ask-q">
+        <span className="ask-q-who">{first(card.by)}</span>
+        <div className="ask-q-bubble">{card.status === "listening" ? <span className="ask-shimmer">Listening…</span> : card.question}</div>
+      </div>
+      {card.status !== "listening" && (
+        <div className="ask-a" title={log}>
+          <Steps draft={card.draft} working={card.status === "working" && !shown} />
+          {shown && (
+            // The answer as Stand writes it, with a caret at the end until it's all there.
+            <div className={["ask-a-text", card.status === "failed" && "failed", (typing || card.status === "working") && "streaming"].filter(Boolean).join(" ")}>{shown}</div>
+          )}
+          {done && (card.sources?.length ?? 0) > 0 && (
+            <div className="ask-sources">
+              {card.sources!.map((x) => (
+                <a key={x.url} href={x.url} target="_blank" rel="noreferrer" title={x.title}>
+                  {host(x.url)}
+                </a>
+              ))}
+            </div>
+          )}
+          {done && card.fromSpace.length > 0 && (
+            <ul className="agent-space">
+              {card.fromSpace.map((f, i) => (
+                <li key={i}>
+                  <span className="agent-space-when">{shortDate(f.when)}</span>
+                  {f.text}
+                </li>
+              ))}
+            </ul>
+          )}
+          {done && card.todo && (
+            <div className="agent-answer-todo">
+              <span className="agent-answer-todo-text">{card.todo}</span>
+              {card.picked ? (
+                <span className="agent-option-picked">To do · {first(card.picked.by)}</span>
+              ) : (
+                onTodo && (
+                  <button type="button" onClick={() => onTodo(card.id)}>
+                    To do
+                  </button>
+                )
+              )}
+            </div>
+          )}
         </div>
       )}
-      {done && card.fromSpace.length > 0 && (
-        <ul className="agent-space">
-          {card.fromSpace.map((f, i) => (
-            <li key={i}>
-              <span className="agent-space-when">{shortDate(f.when)}</span>
-              {f.text}
-            </li>
+    </div>
+  );
+}
+
+/** Stand's steps before it writes, like an assistant app's tool calls: one line that says what it's doing
+ *  while it does it, and once it's written, folds to "Searched the web · N pages", which opens to the
+ *  searches and the sites. */
+function Steps({ draft, working }: { draft: AgentDraft | null | undefined; working: boolean }) {
+  const [open, setOpen] = useState(false);
+  const searches = draft?.searches ?? [];
+  const pages = draft?.pages ?? [];
+  if (!searches.length) return working ? <div className="ask-step"><span className="ask-shimmer">Thinking…</span></div> : null;
+  const what = working ? (pages.length ? `Reading ${pages.length} ${pages.length === 1 ? "page" : "pages"}` : "Searching the web") : `Searched the web${pages.length ? ` · ${pages.length} ${pages.length === 1 ? "page" : "pages"}` : ""}`;
+  const shown = open || working;
+  return (
+    <div className="ask-steps">
+      <button type="button" className="ask-step" onClick={() => setOpen((o) => !o)} aria-expanded={shown} disabled={working}>
+        <span className="ask-step-icon" aria-hidden>
+          ⌕
+        </span>
+        <span className={working ? "ask-shimmer" : undefined}>{what}</span>
+        {!working && (
+          <span className="ask-step-chev" aria-hidden>
+            {open ? "⌄" : "›"}
+          </span>
+        )}
+      </button>
+      {shown && (
+        <div className="ask-step-detail">
+          {searches.map((q, i) => (
+            <div key={i} className="ask-step-query">
+              {q}
+            </div>
           ))}
-        </ul>
-      )}
-      {done && card.todo && (
-        <div className="agent-answer-todo">
-          <span className="agent-answer-todo-text">{card.todo}</span>
-          {card.picked ? (
-            <span className="agent-option-picked">To do · {first(card.picked.by)}</span>
-          ) : (
-            onTodo && (
-              <button type="button" onClick={() => onTodo(card.id)}>
-                To do
-              </button>
-            )
+          {pages.length > 0 && (
+            <div className="ask-step-sites">
+              {pages.map((p) => (
+                <span key={p}>{p}</span>
+              ))}
+            </div>
           )}
         </div>
       )}

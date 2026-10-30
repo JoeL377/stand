@@ -363,7 +363,8 @@ export class AgentKeeper {
   finishAnswer(id: string, out: { fields: Pick<AgentCard, "note" | "sources" | "todo" | "fromSpace"> | null; follows: string | null; model: string | null; costUsd: number | null }, at = Date.now()) {
     const card = this.get(id);
     if (!card || card.kind !== "answer") return null;
-    card.draft = null;
+    // What it searched and read stays, folded under the answer; the words are the answer now.
+    card.draft = card.draft?.searches.length ? { ...card.draft, text: null, options: [] } : null;
     card.readyAt = at;
     card.model = out.model;
     card.costUsd = out.costUsd;
