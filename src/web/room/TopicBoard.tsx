@@ -105,6 +105,8 @@ const ANSWER_HOLD_MS = 3 * 60_000;
 const WHEEL_STEP = 120;
 /** After the board steps to another card, the wheel rests this long so one flick moves one card. */
 const WHEEL_REST_MS = 700;
+/** How far a finger has to move sideways before a swipe opens the next card. */
+const SWIPE_PX = 60;
 
 /** One card in the stack: the Kickoff, a topic of discussion, or a question to ✦ Stand with its follow-ups. */
 interface Entry {
@@ -321,6 +323,43 @@ export function TopicBoard(props: {
     w.at = Date.now();
     step(down ? 1 : -1);
   };
+  // On a phone a sideways swipe moves between cards, like a deck: left for the next, right for the one
+  // before. The card follows the finger and the next one slides in from the side it came from. Swipes
+  // that start on the Kickoff (its own pages turn sideways) or on a sideways-scrolling tab strip are left alone.
+  const touch = useRef<{ x: number; y: number; sideways: boolean | null } | null>(null);
+  const [drag, setDrag] = useState(0);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touch.current = e.touches.length === 1 && !(e.target as HTMLElement).closest(".opener, .topic-tabs, .opener-tabs, input, textarea") ? { x: t.clientX, y: t.clientY, sideways: null } : null;
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const from = touch.current;
+    const t = e.touches[0];
+    if (!from || !t) return;
+    const dx = t.clientX - from.x;
+    const dy = t.clientY - from.y;
+    // Decided once per touch: sideways moves the card, anything else is an ordinary scroll.
+    if (from.sideways === null && Math.abs(dx) + Math.abs(dy) > 10) from.sideways = Math.abs(dx) > 1.5 * Math.abs(dy);
+    if (!from.sideways) return;
+    // Past the first or the last card it gives a little and springs back.
+    const end = dx < 0 ? !entries[index + 1] && index >= 0 : index <= 0;
+    setDrag(end ? dx / 4 : dx);
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const from = touch.current;
+    touch.current = null;
+    setDrag(0);
+    const t = e.changedTouches[0];
+    if (!from?.sideways || !t) return;
+    const dx = t.clientX - from.x;
+    if (Math.abs(dx) > SWIPE_PX) step(dx < 0 ? 1 : -1);
+  };
+  // Which way the card on screen came in, so it slides from that side.
+  const lastIndex = useRef(index);
+  const cameFrom = index === lastIndex.current ? null : index > lastIndex.current ? "next" : "prev";
+  useEffect(() => {
+    lastIndex.current = index;
+  }, [index]);
   const totals = `${allTasks.count.todo} to do · ${allTasks.count.decided} decided · ${allTasks.count.open} open`;
 
   const view =
@@ -431,18 +470,24 @@ export function TopicBoard(props: {
           </button>
         ))}
       </nav>
-      <div className="card-pane" ref={paneRef} onWheel={onWheel}>
+      <div className="card-pane" ref={paneRef} onWheel={onWheel} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
         <button type="button" className="card-list-toggle" onClick={() => setListOpen((o) => !o)} aria-expanded={listOpen}>
           <span aria-hidden>☰</span>
           <span className="card-list-toggle-title">{rewind?.id === RUNNING ? "Running list" : (shownEntry?.title ?? "Cards")}</span>
-          <span className="card-list-count">{entries.length}</span>
+          <span className="card-list-count">{index >= 0 ? `${index + 1} of ${entries.length}` : entries.length}</span>
         </button>
         {before && (
           <button type="button" className="card-step up" onClick={() => open(before.id)}>
             ↑ {before.title}
           </button>
         )}
-        {view}
+        <div
+          key={shownId ?? "none"}
+          className={["card-slide", cameFrom && `from-${cameFrom}`, drag !== 0 && "dragging"].filter(Boolean).join(" ")}
+          style={drag ? { transform: `translateX(${drag}px)` } : undefined}
+        >
+          {view}
+        </div>
         {rewind ? (
           <button type="button" className={movedOn ? "card-step live moved" : "card-step live"} onClick={() => setRewind(null)} title="Escape">
             {movedOn ? (
