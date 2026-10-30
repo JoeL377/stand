@@ -227,6 +227,7 @@ export class RoomSession implements SpeechSink {
   private checkInClosedAt: number | null = null;
   /** "Done since last time" as of when it was last read (undefined: read it again). */
   private doneDeckCache: DoneDeck | null | undefined;
+  private lastMeetingCache: number | null | undefined;
   ended = false;
   /** When End meeting started the write-up. */
   endingSince = 0;
@@ -396,6 +397,7 @@ export class RoomSession implements SpeechSink {
       followUps: this.carried(true),
       checkIn: { closed: this.checkInClosed, answeredAt: this.checkInAnsweredAt, page: this.checkInPage, closedAt: this.checkInClosedAt, held: this.checkInHeld },
       doneDeck: this.doneDeck(),
+      lastMeetingAt: this.lastMeetingAt(),
       updates: this.db.roomUpdates(this.roomId, this.db.previousMeetingStart(this.roomId, this.meetingStartedAt) ?? 0),
       ...this.upNext(),
       capabilities: capabilities(),
@@ -577,6 +579,12 @@ export class RoomSession implements SpeechSink {
       this.doneDeckCache = currentDoneDeck(this.db, this.roomId, this.meetingStartedAt);
     }
     return this.doneDeckCache;
+  }
+
+  /** When the last meeting before this one started: what the "Done since" card counts from. */
+  private lastMeetingAt(): number | null {
+    if (this.lastMeetingCache === undefined) this.lastMeetingCache = this.db.lastRealMeeting(this.roomId, this.meetingStartedAt)?.startedAt ?? null;
+    return this.lastMeetingCache;
   }
 
   /** Called by the REST API after an action item is checked off elsewhere. */

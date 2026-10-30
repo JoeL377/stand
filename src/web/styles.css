@@ -2250,6 +2250,8 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 @media (prefers-reduced-motion: reduce) { .follow-host { animation: none; } }
 /* The Kickoff card: the meeting's first card, built like a topic card ("Done since" pages as its tabs, then the check-in). */
 .opener-close { margin-left: auto; font-size: 12.5px; padding: 3px 10px; min-height: 0; }
+.opener-on { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.opener-on + .opener-close, .opener-on + .opener-next { margin-left: 0; }
 .opener-tabs { overflow-x: auto; scrollbar-width: none; }
 .opener-tabs::-webkit-scrollbar { display: none; }
 .opener-tabs button { flex: none; white-space: nowrap; }
@@ -2503,6 +2505,21 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .card-entry-meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-entry-live { position: absolute; top: 11px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); animation: notes-pulse 1.4s ease-in-out infinite; }
 .card-entry .card-entry-body:has(+ .card-entry-live) { padding-right: 10px; }
+.card-entry.done .card-entry-mark, .card-entry.options .card-entry-mark { background: none; color: var(--accent-text); font-size: 13px; }
+/* Something happening on a card, said on its line: the topic just changed or is about to, ✦ Stand is at work or just back. */
+.card-entry-signal { color: var(--accent-text); font-weight: 500; }
+.card-entry.signal.move { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); animation: card-entry-glow 1.6s ease-in-out 2; }
+.card-entry.signal.working .card-entry-mark { animation: notes-pulse 1.2s ease-in-out infinite; }
+.card-entry.signal.ready { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.card-entry.fresh { animation: card-entry-in 320ms var(--ease-out, ease-out); }
+.card-entry.fresh.signal.move { animation: card-entry-in 320ms var(--ease-out, ease-out), card-entry-glow 1.6s ease-in-out 320ms 2; }
+.card-entry.pending { border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+.card-entry.pending .card-entry-mark { background: none; color: var(--accent-text); animation: notes-pulse 1.2s ease-in-out infinite; }
+.card-entry.pending .card-entry-title { color: var(--muted); }
+.card-entry.pending:disabled { cursor: default; }
+@keyframes card-entry-in { from { opacity: 0; transform: translateX(-10px); } }
+@keyframes card-entry-glow { 50% { background: var(--accent-soft); } }
+.card-list-toggle-signal { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: notes-pulse 1.2s ease-in-out infinite; }
 .card-pane { position: relative; flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; padding: 16px; }
 .card-slide { flex: 1 0 auto; display: flex; flex-direction: column; touch-action: pan-y; transition: transform 220ms var(--ease-out, ease-out); }
 .card-slide.dragging { transition: none; }
@@ -2532,7 +2549,8 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .answer-stack .topic-hint { margin-top: auto; }
 .running-list .topic-sections.columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (prefers-reduced-motion: reduce) {
-  .card-slide.from-next, .card-slide.from-prev, .card-step.live.moved, .card-entry-live, .answer-stack .agent-answer-asking, .answer-stack .agent-answer-working { animation: none; }
+  .card-slide.from-next, .card-slide.from-prev, .card-step.live.moved, .card-entry-live, .answer-stack .agent-answer-asking, .answer-stack .agent-answer-working,
+  .card-entry.signal, .card-entry.fresh, .card-entry.signal .card-entry-mark, .card-entry.pending .card-entry-mark, .card-list-toggle-signal { animation: none; }
 }
 @media (max-width: 900px) {
   .card-list { width: 188px; }

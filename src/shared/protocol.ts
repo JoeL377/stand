@@ -516,6 +516,9 @@ export interface RoomState {
   checkIn?: { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null; held?: boolean };
   /** What the space finished since its last meeting, laid out ahead of time as pages to open this one with. */
   doneDeck?: DoneDeck | null;
+  /** When the space's last meeting (one more than one person talked in) started, for the "Done since" card
+   *  every meeting opens with, even when nothing closed since. Null for a space's first meeting. */
+  lastMeetingAt?: number | null;
   /** Updates agents and people reported on this space's items since the last meeting started. */
   updates: ItemUpdate[];
   /** The agent's suggested agenda for this space. */

@@ -1,6 +1,8 @@
 // The topic board: what the middle screen shows while nobody shares or presents. A stack of cards,
-// one in focus at a time: the Kickoff, one card per thread of discussion (server/board.ts), and one per
-// question asked to ✦ Stand (push-to-talk or @stand), its follow-ups landing on the same card. The card
+// one in focus at a time: "Done since" (what the space closed since its last meeting, in every meeting
+// after a space's first, even when nothing closed), the check-in on what's still open from earlier, one
+// card per thread of discussion (server/board.ts), one per question asked to ✦ Stand (push-to-talk or
+// @stand), its follow-ups landing on the same card, and one per set of options ✦ Stand found. The card
 // in focus follows the talk: the current topic, or an answer while it's being asked and for a few
 // minutes after it lands, unless the talk moves to a new topic meanwhile. A topic card has a title that
 // stays put, a paragraph Stand keeps up to date every 30 seconds, then the People/Decided/To do/Open tabs,
@@ -10,7 +12,10 @@
 // decisions and questions) pinned on top; clicking one, the arrow keys, or scrolling past the end of a
 // card opens another on your own screen only (as it stood when it ended), until "Back to live" (which
 // names a new card that went live meanwhile), Escape, or a click on the live one. The right-hand side
-// stays folded. On a phone the list is a sheet behind a button over the card.
+// stays folded. On a phone the list is a sheet behind a button over the card. The list says what's
+// happening as it happens, on the card's own line: "✦ New topic" (or "↩ Back to this") when the board
+// moves, a dashed line for the topic the board thinks the talk is moving to (a click takes the move),
+// and "✦ Finding an answer…" / "✦ Finding options…" while Stand works, then "ready" for a moment.
 // The tabs keep the whole meeting: they read the running list (server/liveList.ts), which has a line up
 // about 5 s after it's said and never rewords or regroups it (the live notes when there's no list). The
 // current topic's lines come first, oldest at the top, so a new one joins at the foot of the list with a
@@ -21,9 +26,10 @@ import { type CSSProperties, Fragment, useEffect, useRef, useState } from "react
 import type { AgentCard, Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
-import { Opener, type OpenerActs, hasKickoff, kickoffEnd, showOpener } from "./Opener.tsx";
+import { Opener, type OpenerActs, hasKickoff, kickoffEnd, openerPages, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
-import { type AgentActs, AgentStatus, AnswerPart, cardFor, FindOptions, OptionsCard, SHOW_CARD } from "./AgentCard.tsx";
+import { unanswered } from "./CheckIn.tsx";
+import { type AgentActs, AgentStatus, AnswerPart, cardFor, FindOptions, OptionsCard, READY_MS, SHOW_CARD } from "./AgentCard.tsx";
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
@@ -94,8 +100,12 @@ const splitNow = (now: string) => {
   return m ? { who: m[1].trim(), text: m[2] } : { who: null, text: now.trim() };
 };
 
-/** The Kickoff chapter's id on the bar. */
+/** The "Since last time" check-in's card (once the Kickoff, done pages and check-in together). */
 const KICKOFF = "kickoff";
+/** The "Done since" card every meeting opens with: what the space closed since its last meeting. */
+const DONE = "done";
+/** The card the board thinks the talk is moving to, before it moves. */
+const PENDING = "pending";
 
 /** The Running list's id in the card list. */
 const RUNNING = "list";
@@ -108,10 +118,11 @@ const WHEEL_REST_MS = 700;
 /** How far a finger has to move sideways before a swipe opens the next card. */
 const SWIPE_PX = 60;
 
-/** One card in the stack: the Kickoff, a topic of discussion, or a question to ✦ Stand with its follow-ups. */
+/** One card in the stack: Done since, the check-in, a topic of discussion, a question to ✦ Stand with its
+ *  follow-ups, options ✦ Stand found on an open question, or the topic the board thinks the talk is moving to. */
 interface Entry {
   id: string;
-  kind: "kickoff" | "topic" | "answer";
+  kind: "done" | "kickoff" | "topic" | "answer" | "options" | "pending";
   title: string;
   /** When it started. */
   at: number;
@@ -119,6 +130,9 @@ interface Entry {
   asOf: number;
   meta: string;
   chain?: AgentCard[];
+  card?: AgentCard;
+  /** Something happening on it right now, said in place of its meta: a topic change, ✦ Stand at work. */
+  signal?: { text: string; tone: "move" | "working" | "ready" } | null;
 }
 
 export function TopicBoard(props: {
@@ -149,6 +163,8 @@ export function TopicBoard(props: {
   checkIn?: { closed: boolean; answeredAt: number | null; page?: number };
   checkInActs?: OpenerActs | null;
   doneDeck?: DoneDeck | null;
+  /** When the space's last meeting started: the "Done since" card counts from it. Null: the space's first. */
+  lastMeetingAt?: number | null;
   /** ✦ Stand's cards (options on open questions, answers to questions asked out loud), and acting on them. */
   agent?: AgentActs;
   /** Following the host: the card they have open (null: live), by name. Unset: this screen goes its own way. */
@@ -230,10 +246,28 @@ export function TopicBoard(props: {
     const decided = said.filter((n) => n.kind === "decision" && inThread(t, n)).length;
     return [todo && `${todo} to do`, decided && `${decided} decided`].filter(Boolean).join(" · ");
   };
+  // Every meeting after a space's first opens with "Done since" as a card of its own, even when nothing
+  // closed; the check-in on what's still open from earlier follows it as another.
+  const deck = props.doneDeck?.slides.length ? props.doneDeck : null;
+  const doneSince = deck?.sinceStartedAt ?? props.lastMeetingAt ?? null;
+  const donePages = deck?.slides.length ?? 0;
+  const hasCheckIn = !!kickoff && openerPages(deck, props.followUps ?? [], props.meetingStartedAt).checkIn;
+  const toCheck = unanswered(props.followUps ?? [], props.meetingStartedAt).length;
+  const options = (props.agent?.cards ?? []).filter((c) => c.kind === "options" && !c.dismissed && c.status !== "failed");
   const entries: Entry[] = [
-    ...(kickoff
-      ? [{ id: KICKOFF, kind: "kickoff" as const, title: props.doneDeck?.slides.length ? `Done since ${day(props.doneDeck.sinceStartedAt)}` : "Since last time", at: kickoff.from, asOf: kickoff.to, meta: "Kickoff" }]
+    ...(doneSince !== null
+      ? [
+          {
+            id: DONE,
+            kind: "done" as const,
+            title: `Done since ${day(doneSince)}`,
+            at: start - 1,
+            asOf: kickoff?.to ?? now,
+            meta: deck ? `${deck.closed} closed${deck.dropped ? ` · ${deck.dropped} dropped` : ""}` : "Nothing closed",
+          },
+        ]
       : []),
+    ...(hasCheckIn ? [{ id: KICKOFF, kind: "kickoff" as const, title: "Still open from earlier", at: kickoff!.from, asOf: kickoff!.to, meta: toCheck ? `${toCheck} to check in on` : "Checked in" }] : []),
     ...threads.map((t) => {
       const at = Math.max(t.spans[0]?.[0] ?? start, kickoff?.to ?? 0);
       return { id: t.id, kind: "topic" as const, title: t.title, at, asOf: t.spans.at(-1)?.[1] ?? at, meta: [clock(at - start), counted(t)].filter(Boolean).join(" · ") };
@@ -247,8 +281,36 @@ export function TopicBoard(props: {
       meta: [clock(chain[0].at - start), `✦ ${first(chain[0].by)}`, chain.length > 1 && `${chain.length} questions`].filter(Boolean).join(" · "),
       chain,
     })),
+    ...options.map((c) => ({
+      id: c.id,
+      kind: "options" as const,
+      title: c.question || "Options",
+      at: c.at,
+      asOf: now,
+      meta: [clock(c.at - start), `✦ Options for ${first(c.by)}`].join(" · "),
+      card: c,
+    })),
   ].sort((a, b) => a.at - b.at);
-  const liveId = liveChain ?? (checkingIn ? KICKOFF : (current?.id ?? null));
+  const openingId = donePages && (props.checkIn?.page ?? 0) < donePages ? DONE : hasCheckIn ? KICKOFF : DONE;
+  const liveId = liveChain ?? (checkingIn ? openingId : (current?.id ?? null));
+  // What's happening on the list right now, so a glance at the left says it: the topic just changed (or
+  // the board thinks it's about to), ✦ Stand is answering a question or finding options, or just did.
+  for (const e of entries) e.signal = signalOf(e, now);
+  if (current && arrival) {
+    const e = entries.find((x) => x.id === current.id);
+    const move = moveInto(board?.moves, current.id);
+    const who = move?.by ? ` · ${first(move.by)} moved` : "";
+    if (e && !e.signal) e.signal = { text: arrival === "new" ? `✦ New topic${who}` : `↩ Back to this${who}`, tone: "move" };
+  }
+  const pending = board?.pending ?? null;
+  const pendingOn = pending ? entries.find((e) => e.kind === "topic" && e.title === pending.title && e.id !== current?.id) : undefined;
+  if (pending && pendingOn) pendingOn.signal = { text: "✦ Going back to this?", tone: "move" };
+  const ghost: Entry | null =
+    pending && !pendingOn && !(current && current.title === pending.title)
+      ? { id: PENDING, kind: "pending", title: pending.title, at: now, asOf: now, meta: "", signal: { text: "✦ Sounds like a new topic", tone: "move" } }
+      : null;
+  const fresh = useFresh(entries.map((e) => e.id));
+  const busyNow = entries.some((e) => e.signal?.tone === "working") || !!ghost || !!pendingOn;
   const shownId = rewind?.id ?? liveId;
   const open = (id: string) => {
     setListOpen(false);
@@ -267,7 +329,7 @@ export function TopicBoard(props: {
   const shownEntry = entries[index] ?? null;
   const liveEntry = entries.find((e) => e.id === liveId) ?? null;
   const rewound = rewind ? (threads.find((t) => t.id === rewind.id) ?? null) : null;
-  const rewoundKickoff = rewind?.id === KICKOFF;
+  const rewoundKickoff = rewind?.id === KICKOFF || rewind?.id === DONE;
   // A new card went live while this screen looks back: say so.
   const movedOn = rewind && liveEntry && rewind.live !== liveId && liveId !== rewind.id ? liveEntry : null;
   useEffect(() => {
@@ -289,7 +351,7 @@ export function TopicBoard(props: {
     paneRef.current?.scrollTo({ top: 0 });
   }, [shownId]);
   // The host's own look back goes out to everyone following them.
-  const sent = rewind && { ...rewind, page: rewind.id === KICKOFF ? kickPage : undefined };
+  const sent = rewind && { ...rewind, page: rewind.id === KICKOFF || rewind.id === DONE ? kickPage : undefined };
   const sentKey = JSON.stringify(sent);
   useEffect(() => {
     if (!following) props.onRewind?.(sent);
@@ -367,16 +429,21 @@ export function TopicBoard(props: {
       <RunningList tasks={allTasks} acts={liveActs} idOf={idOf} nameOf={nameOf} />
     ) : shownEntry?.chain ? (
       <AnswerStack chain={shownEntry.chain} live={shownId === liveId} onTodo={rewind ? undefined : props.agent?.onTodo} />
+    ) : shownEntry?.card ? (
+      <OptionsView card={shownEntry.card} start={start} acts={props.agent ?? { cards: [] }} />
     ) : rewoundKickoff ? (
       <Opener
-        deck={props.doneDeck}
+        key={rewind!.id}
+        part={rewind!.id === DONE ? "done" : "checkin"}
+        since={doneSince}
+        deck={deck}
         followUps={props.followUps ?? []}
         meetingStartedAt={props.meetingStartedAt}
-        page={kickPage}
+        page={rewind!.id === DONE ? kickPage : donePages}
         acts={{ onPage: setKickPage, onState: () => {}, onUndoSaid: () => {}, onClose: () => setRewind(null), onOpen: () => {} }}
         rewound
         onShowAll={
-          props.checkInActs
+          props.checkInActs && (rewind!.id === KICKOFF || donePages)
             ? (page) => {
                 props.checkInActs!.onOpen(page);
                 setRewind(null);
@@ -402,7 +469,9 @@ export function TopicBoard(props: {
       />
     ) : checkingIn ? (
       <Opener
-        deck={props.doneDeck}
+        part={liveId === DONE ? "done" : "checkin"}
+        since={doneSince}
+        deck={deck}
         followUps={props.followUps ?? []}
         meetingStartedAt={props.meetingStartedAt}
         page={props.checkIn?.page ?? 0}
@@ -454,25 +523,61 @@ export function TopicBoard(props: {
           <button
             key={e.id}
             type="button"
-            className={["card-entry", e.kind, e.id === shownId && rewind?.id !== RUNNING && "on"].filter(Boolean).join(" ")}
+            className={[
+              "card-entry",
+              e.kind,
+              e.id === shownId && rewind?.id !== RUNNING && "on",
+              e.signal && `signal ${e.signal.tone}`,
+              fresh.has(e.id) && "fresh",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             aria-current={e.id === shownId && rewind?.id !== RUNNING ? "true" : undefined}
             onClick={() => open(e.id)}
             title={e.title}
           >
             <span className="card-entry-mark" aria-hidden>
-              {e.kind === "answer" ? "✦" : e.kind === "kickoff" ? "↺" : entries.slice(0, i + 1).filter((x) => x.kind === "topic").length}
+              {e.kind === "answer" || e.kind === "options" ? "✦" : e.kind === "kickoff" ? "↺" : e.kind === "done" ? "✓" : entries.slice(0, i + 1).filter((x) => x.kind === "topic").length}
             </span>
             <span className="card-entry-body">
               <span className="card-entry-title">{e.title}</span>
-              <span className="card-entry-meta">{e.meta}</span>
+              {e.signal ? (
+                <span className="card-entry-meta card-entry-signal" role="status">
+                  {e.signal.text}
+                </span>
+              ) : (
+                <span className="card-entry-meta">{e.meta}</span>
+              )}
             </span>
             {e.id === liveId && <span className="card-entry-live" aria-label="live" />}
           </button>
         ))}
+        {ghost && (
+          // The board waits one more pass before it moves; anyone can take the move now.
+          <button
+            type="button"
+            className="card-entry pending signal move"
+            onClick={props.onAcceptMove ? () => props.onAcceptMove!(ghost.title) : undefined}
+            disabled={!props.onAcceptMove}
+            title={props.onAcceptMove ? "Move the board to it now, for everyone" : undefined}
+          >
+            <span className="card-entry-mark" aria-hidden>
+              …
+            </span>
+            <span className="card-entry-body">
+              <span className="card-entry-title">{ghost.title}</span>
+              <span className="card-entry-meta card-entry-signal" role="status">
+                {ghost.signal!.text}
+                {props.onAcceptMove ? " · Switch →" : ""}
+              </span>
+            </span>
+          </button>
+        )}
       </nav>
       <div className="card-pane" ref={paneRef} onWheel={onWheel} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
         <button type="button" className="card-list-toggle" onClick={() => setListOpen((o) => !o)} aria-expanded={listOpen}>
           <span aria-hidden>☰</span>
+          {busyNow && !listOpen && <span className="card-list-toggle-signal" aria-label="Something new on the list" />}
           <span className="card-list-toggle-title">{rewind?.id === RUNNING ? "Running list" : (shownEntry?.title ?? "Cards")}</span>
           <span className="card-list-count">{index >= 0 ? `${index + 1} of ${entries.length}` : entries.length}</span>
         </button>
@@ -512,6 +617,33 @@ export function TopicBoard(props: {
         )}
       </div>
     </div>
+  );
+}
+
+/** ✦ Stand at work on a card, or just back: what its line on the list says instead of its meta. */
+function signalOf(e: Entry, now: number): Entry["signal"] {
+  const cards = e.chain ?? (e.card ? [e.card] : []);
+  if (!cards.length) return null;
+  const last = cards.at(-1)!;
+  if (last.status === "listening") return { text: `✦ ${first(last.by)} is asking…`, tone: "working" };
+  if (last.status === "working") return { text: e.kind === "options" ? "✦ Finding options…" : "✦ Finding an answer…", tone: "working" };
+  if (last.status === "ready" && last.readyAt !== null && now - last.readyAt < READY_MS) return { text: e.kind === "options" ? "✦ Options ready" : "✦ Answer ready", tone: "ready" };
+  return null;
+}
+
+/** Options ✦ Stand found on an open question, as a card of their own in the stack. */
+function OptionsView({ card, start, acts }: { card: AgentCard; start: number; acts: AgentActs }) {
+  return (
+    <section className="topic-now options-view" aria-label="Options">
+      <div className="topic-now-head">
+        <span className="topic-now-label ask">✦ Options</span>
+        <span className="topic-mins">
+          {first(card.by)} asked at {clock(card.at - start)}
+        </span>
+      </div>
+      <h2 className="topic-now-title">{card.question || "Options"}</h2>
+      <OptionsCard card={card} acts={acts} />
+    </section>
   );
 }
 
