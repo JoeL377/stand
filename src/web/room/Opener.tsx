@@ -5,6 +5,8 @@
 // own the card offers it the way the board offers a move ("Looks like you've moved to …"); a click, Move
 // on, or that topic being up a while with nobody on the card hands the middle to it. It stays on the
 // chapter bar as the Kickoff chapter, so anyone can look back at it on their own screen.
+// In the meeting's card list the done pages and the check-in are two cards ("Done since" and "Still open
+// from earlier", the part prop); the space page's pop-up shows them together.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DoneDeck, DoneSlide, FollowUp, Snap } from "../../shared/protocol.ts";
@@ -17,7 +19,13 @@ export interface OpenerActs extends CheckInActs {
   onPage: (page: number) => void;
 }
 
-type CheckInState = { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null; held?: boolean };
+type CheckInState = {
+  closed: boolean;
+  answeredAt: number | null;
+  page?: number;
+  closedAt?: number | null;
+  held?: boolean;
+};
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
@@ -76,17 +84,30 @@ export function Opener(props: {
   label?: string;
   /** Opened from the board after it moved on: puts it back on everyone's board, on this page. */
   onShowAll?: (page: number) => void;
+  /** In the meeting's card list the done pages and the check-in are cards of their own: which this is.
+   *  Turning past the end of one goes on to the other (page numbers count across both). */
+  part?: "done" | "checkin";
+  /** The "Done since" card when nothing closed: when the last meeting started. */
+  since?: number | null;
 }) {
   const { deck, acts } = props;
   const { done, checkIn } = openerPages(deck, props.followUps, props.meetingStartedAt);
-  const total = done + (checkIn ? 1 : 0);
-  const page = Math.max(0, Math.min(props.page, total - 1));
+  const all = done + (checkIn ? 1 : 0);
+  // The pages this card shows, [lo, hi); live, turning goes on across both cards.
+  const lo = props.part === "checkin" ? done : 0;
+  const hi = props.part === "done" ? done : all;
+  const total = hi - lo;
+  const empty = props.part === "done" && !done;
+  const page = Math.max(lo, Math.min(props.page, hi - 1));
   const onCheckIn = page >= done;
   const left = unanswered(props.followUps, props.meetingStartedAt).length;
   const slide = onCheckIn ? null : deck!.slides[page];
   const card = useRef<HTMLElement>(null);
   const [full, setFull] = useState(false);
-  const turn = acts ? (to: number) => to >= 0 && to < total && to !== page && acts.onPage(to) : null;
+  const [first, last] = acts && !props.rewound ? [0, all - 1] : [lo, hi - 1];
+  const turn = acts && !empty ? (to: number) => to >= first && to <= last && to !== page && acts.onPage(to) : null;
+  const label = props.label ?? (props.part === "done" ? "Done since" : props.part === "checkin" ? "Since last time" : "Kickoff");
+  const sinceAt = deck?.sinceStartedAt ?? props.since ?? null;
   const titleOf = (i: number) => (i < done ? deck!.slides[i].title : "Still open");
   // On a phone the pages turn with a swipe, like a deck; the tabs' own sideways scroll is left alone.
   const swipe = useRef<{ x: number; y: number } | null>(null);
@@ -106,11 +127,15 @@ export function Opener(props: {
   const strip = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const on = strip.current?.querySelector<HTMLElement>(".on");
-    if (on && strip.current) strip.current.scrollTo({ left: on.offsetLeft - (strip.current.clientWidth - on.offsetWidth) / 2, behavior: "smooth" });
+    if (on && strip.current)
+      strip.current.scrollTo({
+        left: on.offsetLeft - (strip.current.clientWidth - on.offsetWidth) / 2,
+        behavior: "smooth",
+      });
   }, [page]);
 
   useEffect(() => {
-    if (!acts || total < 2) return;
+    if (!turn || last - first < 1) return;
     const key = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || t?.closest("input, textarea, select, [contenteditable]")) return;
@@ -118,29 +143,36 @@ export function Opener(props: {
       const pops = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
       const top = pops[pops.length - 1];
       if (top && !top.contains(card.current)) return;
-      if (e.key === "ArrowRight" && page < total - 1) acts.onPage(page + 1);
-      else if (e.key === "ArrowLeft" && page > 0) acts.onPage(page - 1);
+      if (e.key === "ArrowRight" && page < last) turn(page + 1);
+      else if (e.key === "ArrowLeft" && page > first) turn(page - 1);
       else return;
       e.preventDefault();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [acts, page, total]);
+  }, [acts, page, first, last, empty]);
 
-  const closed = deck ? `${deck.closed} closed${deck.dropped ? ` · ${deck.dropped} dropped` : ""}` : null;
+  const closed = deck && props.part !== "checkin" ? `${deck.closed} closed${deck.dropped ? ` · ${deck.dropped} dropped` : ""}` : null;
   return (
     <section
       ref={card}
-      className={`topic-now opener${props.rewound ? " rewound" : ""}${page > 0 ? " later" : ""}`}
-      aria-label={props.label ?? "Kickoff"}
+      className={`topic-now opener${props.part ? ` ${props.part}` : ""}${props.rewound ? " rewound" : ""}${page > 0 ? " later" : ""}`}
+      aria-label={label}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
       <div className="topic-now-head">
-        <span className={props.rewound ? "topic-now-label" : "topic-now-label live"}>{props.label ?? "Kickoff"}</span>
-        {deck && <span className="topic-mins opener-since">since {day(deck.sinceStartedAt)}</span>}
+        <span className={props.rewound ? "topic-now-label" : "topic-now-label live"}>{label}</span>
+        {sinceAt !== null && props.part !== "checkin" && <span className="topic-mins opener-since">since {day(sinceAt)}</span>}
         {closed && <span className="topic-mins opener-count">{closed}</span>}
-        {acts && !props.rewound &&
+        {props.part === "done" && checkIn && acts && !props.rewound && page >= done - 1 && (
+          // On a desk the pager is phone-only: the last done page hands on to the check-in card, for everyone.
+          <button type="button" className="opener-close opener-on" onClick={() => acts.onPage(done)} title="Turn everyone's board to what's still open from earlier">
+            Still open ({left}) →
+          </button>
+        )}
+        {acts &&
+          !props.rewound &&
           // Once the talk has a topic of its own, Move on becomes the board's offer to switch to it.
           (props.next ? (
             <button type="button" className="topic-moving opener-next" onClick={acts.onClose} title="Switch the board to it now, for everyone">
@@ -163,8 +195,9 @@ export function Opener(props: {
           </button>
         )}
       </div>
-      <h2 className="topic-now-title">{deck ? `Since ${day(deck.sinceStartedAt)}` : "Since last time"}</h2>
-      {deck && (
+      <h2 className="topic-now-title">{props.part === "checkin" ? "Still open from earlier" : sinceAt !== null ? `Since ${day(sinceAt)}` : "Since last time"}</h2>
+      {empty && <p className="topic-summary">Nothing was closed since the last meeting.</p>}
+      {deck && props.part !== "checkin" && (
         // In a meeting on a phone the opening line keeps to two lines until it's tapped.
         <p className={props.label || full ? "topic-summary" : "topic-summary clamped"} onClick={() => setFull(true)}>
           {deck.by === "claude" && (
@@ -179,8 +212,9 @@ export function Opener(props: {
       )}
       <div className="topic-tabs-wrap">
         {total > 1 && (
-          <div ref={strip} className="topic-tabs opener-tabs" role="tablist" aria-label="Kickoff pages">
-            {Array.from({ length: total }, (_, i) => {
+          <div ref={strip} className="topic-tabs opener-tabs" role="tablist" aria-label={`${label} pages`}>
+            {Array.from({ length: total }, (_, j) => {
+              const i = lo + j;
               const s = i < done ? deck!.slides[i] : null;
               return (
                 <button key={i} type="button" role="tab" aria-selected={i === page} className={i === page ? "on" : undefined} disabled={!acts} onClick={() => acts?.onPage(i)}>
@@ -194,31 +228,33 @@ export function Opener(props: {
         {total > 1 && (
           // On a phone the tabs give way to a deck's steps and the page's title.
           <div className="opener-steps" aria-hidden>
-            {Array.from({ length: total }, (_, i) => (
-              <span key={i} className={i <= page ? "on" : undefined} />
+            {Array.from({ length: total }, (_, j) => (
+              <span key={j} className={lo + j <= page ? "on" : undefined} />
             ))}
           </div>
         )}
         {total > 1 && <h3 className="opener-page-title">{titleOf(page)}</h3>}
-        <div role="tabpanel" className="topic-tab-panel">
-          {slide ? (
-            <Slide key={page} s={slide} at={deck!.at} />
-          ) : (
-            <CheckIn followUps={props.followUps} meetingStartedAt={props.meetingStartedAt} acts={props.rewound ? null : acts} embedded />
-          )}
-        </div>
-        {total > 1 && turn && (
+        {!empty && (
+          <div role="tabpanel" className="topic-tab-panel">
+            {slide ? (
+              <Slide key={page} s={slide} at={deck!.at} />
+            ) : (
+              <CheckIn followUps={props.followUps} meetingStartedAt={props.meetingStartedAt} acts={props.rewound ? null : acts} embedded />
+            )}
+          </div>
+        )}
+        {last > first && turn && (
           <div className="opener-pager">
-            <button type="button" className="opener-back" aria-label="Previous page" disabled={page === 0} onClick={() => turn(page - 1)}>
+            <button type="button" className="opener-back" aria-label="Previous page" disabled={page === first} onClick={() => turn(page - 1)}>
               ‹
             </button>
-            {page < total - 1 ? (
+            {page < last ? (
               <button type="button" className="opener-fwd" onClick={() => turn(page + 1)}>
                 <span className="opener-fwd-next">Next</span> {titleOf(page + 1)} ›
               </button>
             ) : (
               <span className="opener-fwd last">
-                {page + 1} of {total}
+                {page - first + 1} of {last - first + 1}
               </span>
             )}
           </div>

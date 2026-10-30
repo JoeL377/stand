@@ -289,6 +289,7 @@ export function Stage(props: {
       onNotYet={props.ending || props.offline ? undefined : (noteId) => send({ type: "list.dismiss", noteId })}
       checkIn={state.checkIn}
       doneDeck={state.doneDeck}
+      lastMeetingAt={state.lastMeetingAt ?? null}
       follow={following ? { rewind: hostView?.rewind ?? null, host: host!.name } : null}
       onOwn={() => setOwn(true)}
       onRewind={setMyRewind}

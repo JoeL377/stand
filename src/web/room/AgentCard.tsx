@@ -7,7 +7,7 @@
 // few seconds, which jumps to the card. A question asked out loud (push-to-talk) or typed (@stand)
 // gets a card of its own in the board's stack instead: AnswerPart is one question and its answer.
 import { useEffect, useState } from "react";
-import type { AgentCard } from "../../shared/protocol.ts";
+import type { AgentCard, AgentDraft } from "../../shared/protocol.ts";
 
 export interface AgentActs {
   cards: AgentCard[];
@@ -28,6 +28,8 @@ const host = (url: string) => {
   }
 };
 
+/** How often streamed-in words step on while they're typed out. */
+const REVEAL_TICK_MS = 35;
 /** How long "✦ Options ready" stays up after a card comes back. */
 export const READY_MS = 12_000;
 /** Asks the board to show a card: its tab opens and it scrolls into view. */
@@ -130,6 +132,8 @@ export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }
   const picked = card.picked;
   const cost = card.costUsd !== null ? ` · $${card.costUsd < 0.01 ? card.costUsd.toFixed(3) : card.costUsd.toFixed(2)}` : "";
   const fresh = card.status === "ready" && card.readyAt !== null && Date.now() - card.readyAt < READY_MS;
+  // Options that land together (a run that searched writes them in one go) come in one after another.
+  const [arriving] = useState(card.status === "working");
   const log = `Asked by ${card.by}${card.readyAt ? ` · ${Math.max(1, Math.round((card.readyAt - card.at) / 1000))} s` : ""}${card.model ? ` · ${card.model}` : ""}${cost}`;
   return (
     <div id={`agent-${card.id}`} className={["agent-card", card.status, fresh && "fresh"].filter(Boolean).join(" ")} aria-live="polite">
@@ -147,12 +151,17 @@ export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }
           </button>
         )}
       </div>
+      {card.status === "working" && card.draft && <DraftOptions draft={card.draft} />}
       {card.options.length > 0 && (
         <ol className="agent-options">
           {card.options.map((o, i) => {
             const mine = picked?.index === i;
             return (
-              <li key={i} className={[mine && "picked", picked && !mine && "passed"].filter(Boolean).join(" ")}>
+              <li
+                key={i}
+                className={[mine && "picked", picked && !mine && "passed", arriving && "arriving"].filter(Boolean).join(" ")}
+                style={arriving ? { animationDelay: `${i * 160}ms` } : undefined}
+              >
                 <div className="agent-option-line">
                   <span className="agent-option-title">{o.title}</span>
                   {o.source && (
@@ -199,52 +208,161 @@ export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }
   );
 }
 
-/** ✦ Stand's answer to a question someone asked it (push-to-talk or @stand), on its card on the board:
- *  a follow-up's question, then the answer, the pages it leans on, what the space already had, and a
- *  next step anyone can take as a to-do. */
-export function AnswerPart({ card, followUp, onTodo }: { card: AgentCard; followUp: boolean; onTodo?: (cardId: string) => void }) {
+/** ✦ Stand's answer to a question someone asked it (push-to-talk or @stand), as one turn of a chat on its
+ *  card, the way an assistant app shows it: the question in a bubble on the right, then Stand's steps (the
+ *  web searches and what it read, folded to one line once it's written) and the answer under them, then the
+ *  pages it leans on, what the space already had, and a next step anyone can take as a to-do. */
+export function AnswerPart({ card, onTodo }: { card: AgentCard; onTodo?: (cardId: string) => void }) {
   const first = (n: string) => n.split(" ")[0];
   const cost = card.costUsd !== null ? ` · $${card.costUsd < 0.01 ? card.costUsd.toFixed(3) : card.costUsd.toFixed(2)}` : "";
   const log = `Asked by ${card.by}${card.readyAt ? ` · ${Math.max(1, Math.round((card.readyAt - card.at) / 1000))} s` : ""}${card.model ? ` · ${card.model}` : ""}${cost}`;
+  const { shown, typing } = useReveal(card.status === "working" ? (card.draft?.text ?? "") : card.status === "listening" ? "" : (card.note ?? ""));
+  // Its sources, what the space had and the next step come in once the words are all there.
+  const done = card.status === "ready" && !typing;
   return (
-    <div id={`agent-${card.id}`} className={["agent-answer", followUp && "follow-up", card.status].filter(Boolean).join(" ")} aria-live="polite" title={log}>
-      {followUp && (card.status === "listening" ? <div className="agent-answer-q">{first(card.by)} is following up…</div> : card.question && <div className="agent-answer-q">{first(card.by)}: “{card.question}”</div>)}
-      {card.status === "listening" && !followUp && <div className="agent-answer-asking">Listening to {first(card.by)}…</div>}
-      {card.status === "working" && <div className="agent-answer-working">✦ Answering…</div>}
-      {(card.status === "ready" || card.status === "failed") && card.note && <div className={card.status === "failed" ? "agent-answer-text failed" : "agent-answer-text"}>{card.note}</div>}
-      {card.status === "ready" && (card.sources?.length ?? 0) > 0 && (
-        <div className="agent-answer-sources">
-          {card.sources!.map((x) => (
-            <a key={x.url} href={x.url} target="_blank" rel="noreferrer" title={x.title}>
-              {host(x.url)} ↗
-            </a>
-          ))}
-        </div>
-      )}
-      {card.status === "ready" && card.fromSpace.length > 0 && (
-        <ul className="agent-space">
-          {card.fromSpace.map((f, i) => (
-            <li key={i}>
-              <span className="agent-space-when">{shortDate(f.when)}</span>
-              {f.text}
-            </li>
-          ))}
-        </ul>
-      )}
-      {card.status === "ready" && card.todo && (
-        <div className="agent-answer-todo">
-          <span className="agent-answer-todo-text">{card.todo}</span>
-          {card.picked ? (
-            <span className="agent-option-picked">To do · {first(card.picked.by)}</span>
-          ) : (
-            onTodo && (
-              <button type="button" onClick={() => onTodo(card.id)}>
-                To do
-              </button>
-            )
+    <div id={`agent-${card.id}`} className={["ask-turn", card.status].filter(Boolean).join(" ")} aria-live="polite">
+      <div className="ask-q">
+        <span className="ask-q-who">{first(card.by)}</span>
+        <div className="ask-q-bubble">{card.status === "listening" ? <span className="ask-shimmer">Listening…</span> : card.question}</div>
+      </div>
+      {card.status !== "listening" && (
+        <div className="ask-a" title={log}>
+          <Steps draft={card.draft} working={card.status === "working" && !shown} />
+          {shown && (
+            // The answer as Stand writes it, with a caret at the end until it's all there.
+            <div className={["ask-a-text", card.status === "failed" && "failed", (typing || card.status === "working") && "streaming"].filter(Boolean).join(" ")}>{shown}</div>
+          )}
+          {done && (card.sources?.length ?? 0) > 0 && (
+            <div className="ask-sources">
+              {card.sources!.map((x) => (
+                <a key={x.url} href={x.url} target="_blank" rel="noreferrer" title={x.title}>
+                  {host(x.url)}
+                </a>
+              ))}
+            </div>
+          )}
+          {done && card.fromSpace.length > 0 && (
+            <ul className="agent-space">
+              {card.fromSpace.map((f, i) => (
+                <li key={i}>
+                  <span className="agent-space-when">{shortDate(f.when)}</span>
+                  {f.text}
+                </li>
+              ))}
+            </ul>
+          )}
+          {done && card.todo && (
+            <div className="agent-answer-todo">
+              <span className="agent-answer-todo-text">{card.todo}</span>
+              {card.picked ? (
+                <span className="agent-option-picked">To do · {first(card.picked.by)}</span>
+              ) : (
+                onTodo && (
+                  <button type="button" onClick={() => onTodo(card.id)}>
+                    To do
+                  </button>
+                )
+              )}
+            </div>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+/** Stand's steps before it writes, like an assistant app's tool calls: one line that says what it's doing
+ *  while it does it, and once it's written, folds to "Searched the web · N pages", which opens to the
+ *  searches and the sites. */
+function Steps({ draft, working }: { draft: AgentDraft | null | undefined; working: boolean }) {
+  const [open, setOpen] = useState(false);
+  const searches = draft?.searches ?? [];
+  const pages = draft?.pages ?? [];
+  if (!searches.length) return working ? <div className="ask-step"><span className="ask-shimmer">Thinking…</span></div> : null;
+  const what = working ? (pages.length ? `Reading ${pages.length} ${pages.length === 1 ? "page" : "pages"}` : "Searching the web") : `Searched the web${pages.length ? ` · ${pages.length} ${pages.length === 1 ? "page" : "pages"}` : ""}`;
+  const shown = open || working;
+  return (
+    <div className="ask-steps">
+      <button type="button" className="ask-step" onClick={() => setOpen((o) => !o)} aria-expanded={shown} disabled={working}>
+        <span className="ask-step-icon" aria-hidden>
+          ⌕
+        </span>
+        <span className={working ? "ask-shimmer" : undefined}>{what}</span>
+        {!working && (
+          <span className="ask-step-chev" aria-hidden>
+            {open ? "⌄" : "›"}
+          </span>
+        )}
+      </button>
+      {shown && (
+        <div className="ask-step-detail">
+          {searches.map((q, i) => (
+            <div key={i} className="ask-step-query">
+              {q}
+            </div>
+          ))}
+          {pages.length > 0 && (
+            <div className="ask-step-sites">
+              {pages.map((p) => (
+                <span key={p}>{p}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What a run is doing before it writes: searching, then reading what it found. */
+function doing(draft: AgentDraft | null | undefined, idle: string): string {
+  const pages = draft?.pages ?? [];
+  if (pages.length) return `Reading ${pages.slice(0, 3).join(", ")}${pages.length > 3 ? ` and ${pages.length - 3} more` : ""}…`;
+  if (draft?.searches.length) return `Searching the web: ${draft.searches.at(-1)}`;
+  return idle;
+}
+
+/** What a run looked up, as a quiet line under what it's writing. */
+function Searched({ draft }: { draft: AgentDraft }) {
+  return <div className="agent-searched">Searched {draft.searches.map((q) => `“${q}”`).join(", ")}</div>;
+}
+
+/** Text that arrives in one go comes in over a moment, a few letters at a time, like typing; text that was
+ *  already there when it came on screen shows whole. */
+function useReveal(text: string): { shown: string; typing: boolean } {
+  const [n, setN] = useState(text.length);
+  useEffect(() => {
+    if (n > text.length) return void setN(text.length);
+    if (n === text.length) return;
+    const t = setTimeout(() => {
+      // On to the end of the next word or two.
+      const at = text.indexOf(" ", Math.min(text.length, n + 8));
+      setN(at < 0 ? text.length : at);
+    }, REVEAL_TICK_MS);
+    return () => clearTimeout(t);
+  }, [text, n]);
+  return { shown: text.slice(0, n), typing: n < text.length };
+}
+
+/** Options as Stand writes them: each one slides in as it comes, the last one's tradeoff still being written. */
+function DraftOptions({ draft }: { draft: AgentDraft }) {
+  if (!draft.options.length && !draft.text) return draft.searches.length ? <div className="agent-card-note agent-draft-searching">✦ {doing(draft, "")}</div> : null;
+  return (
+    <>
+      {draft.options.length > 0 && (
+        <ol className="agent-options drafting">
+          {draft.options.map((o, i) => (
+            <li key={i}>
+              <div className="agent-option-line">
+                <span className="agent-option-title">{o.title}</span>
+              </div>
+              {o.why && <div className={i === draft.options.length - 1 ? "agent-option-why streaming" : "agent-option-why"}>{o.why}</div>}
+            </li>
+          ))}
+        </ol>
+      )}
+      {!draft.options.length && draft.text && <div className="agent-card-note streaming">{draft.text}</div>}
+      {draft.searches.length > 0 && <Searched draft={draft} />}
+    </>
   );
 }
