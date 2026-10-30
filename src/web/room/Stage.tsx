@@ -9,12 +9,15 @@ import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from ".
 import { macApp } from "../macApp.ts";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { BoardStrip, TopicBoard, type Rewind } from "./TopicBoard.tsx";
+import type { PilotActs } from "./Pilot.tsx";
 import { AgentTabMark } from "./AgentCard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
 
 export function Stage(props: {
+  /** Who pilots ✦ Stand, and asking it things on an answer card. */
+  pilot?: PilotActs;
   state: RoomState;
   me: Participant | undefined;
   focusItem: Item | null;
@@ -270,6 +273,7 @@ export function Stage(props: {
       onAcceptMove={props.offline ? undefined : (title) => send({ type: "board.accept", title })}
       notes={props.list ?? props.notes}
       followUps={state.followUps}
+      pilot={props.pilot}
       agent={
         props.agentCards && !props.ending && !props.offline
           ? {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentCard, Board, ClientMessage, Discussion, ListNote, MeetingCost, Note, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
+import type { AgentCard, Board, ClientMessage, Discussion, ListNote, MeetingCost, Note, PilotView, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
 
 export interface Interim {
   speakerId: string;
@@ -40,7 +40,7 @@ const LASTING = new Set<ClientMessage["type"]>([
  *  meeting as it happens, so they need the connection now. */
 const CAN_WAIT = new Set<ClientMessage["type"]>(["chat", "speech", "segment.move", "followup.done", "note.edit", "note.remove", "note.restore", "note.add"]);
 /** Sent on their own as things happen; nobody clicked anything. */
-const BACKGROUND = new Set<ClientMessage["type"]>(["hello", "ping", "speech.interim", "frame", "sharing", "recording"]);
+const BACKGROUND = new Set<ClientMessage["type"]>(["hello", "ping", "speech.interim", "frame", "sharing", "recording", "pilot.typing"]);
 /** No ack or pong this long after sending: the connection is dead, even if the browser hasn't noticed yet. */
 const ANSWER_WITHIN_MS = 6_000;
 const PING_EVERY_MS = 10_000;
@@ -113,6 +113,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [list, setList] = useState<ListNote[] | null>(null);
   /** What ✦ Stand has put on the board; null when the server runs no agent. */
   const [agentCards, setAgentCards] = useState<AgentCard[] | null>(null);
+  /** Who pilots ✦ Stand, with its server times moved onto this computer's clock. */
+  const [pilot, setPilot] = useState<PilotView | null>(null);
   /** Items whose notes the agent is rewriting right now ("" = off-agenda). */
   const [notesBusy, setNotesBusy] = useState<string[]>([]);
   const [interims, setInterims] = useState<Record<string, Interim>>({});
@@ -223,6 +225,13 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
           case "agent":
             setAgentCards(msg.cards);
             break;
+          case "pilot": {
+            // The countdown runs on this computer's clock; the rest stays on the server's (now, last.at).
+            const skew = Date.now() - msg.pilot.now;
+            const local = (t: number | null) => (t === null ? null : t + skew);
+            setPilot({ ...msg.pilot, handFrom: local(msg.pilot.handFrom), handAt: local(msg.pilot.handAt) });
+            break;
+          }
           case "notes.busy": {
             const key = msg.itemId ?? "";
             setNotesBusy((all) => (msg.busy ? [...all.filter((k) => k !== key), key] : all.filter((k) => k !== key)));
@@ -374,6 +383,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     cost,
     list,
     agentCards,
+    pilot,
     notesBusy,
     interims,
     endedMeetingId,

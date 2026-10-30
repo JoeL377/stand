@@ -1151,3 +1151,64 @@ test("since last time: carried tasks open the meeting, Stand hears one called do
   await say(joe, { type: "checkin", open: false });
   assert.deepEqual([state().checkIn?.closed, state().checkIn?.held], [true, false]);
 });
+
+/** An agent that answers every question with "Fly.io" at once, so ✦ Stand's cards run in tests. */
+class AnsweringAgent extends HeuristicAgent {
+  async liveList() {
+    return { add: [], change: [], close: [] } as never;
+  }
+  async findOptions() {
+    return { answer: null, model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0 } };
+  }
+  async answer(prompt: string) {
+    return { answer: { answer: `An answer (${prompt.length} characters asked)`, sources: [], todo: null, from_space: [] }, model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0 } };
+  }
+}
+
+test("Pilot: only the pilot asks Stand; a typed follow-up lands on its card; asking to pilot and handing over", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new AnsweringAgent(), room, () => {});
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const andy = await join(session, { id: "u2", name: "Andy" });
+  const pilotOf = (ws: FakeSocket) => ws.got.filter((m) => m.type === "pilot").at(-1);
+  const cardsOf = (ws: FakeSocket) => {
+    const m = ws.got.filter((x) => x.type === "agent").at(-1);
+    return m?.type === "agent" ? m.cards : [];
+  };
+
+  // Joe types first and takes the free seat.
+  await say(joe, { type: "agent.ask.text", text: "What does Fly.io cost?", follows: null });
+  const seat = pilotOf(andy);
+  assert.equal(seat?.type === "pilot" && seat.pilot.name, "Joe");
+  await new Promise((r) => setTimeout(r, 20));
+  const first = cardsOf(joe)[0];
+  assert.equal(first.status, "ready");
+
+  // Andy can't ask, out loud or typed; he's told who pilots.
+  await say(andy, { type: "agent.ask.text", text: "And Render?", follows: first.id });
+  await say(andy, { type: "agent.ask.start" });
+  assert.equal(cardsOf(joe).length, 1);
+  const told = andy.got.filter((m) => m.type === "error").at(-1);
+  assert.match(told?.type === "error" ? told.message : "", /Joe is piloting/);
+
+  // Joe's follow-up lands on the first card right away, while Stand works on it.
+  await say(joe, { type: "agent.ask.text", text: "And for two?", follows: first.id });
+  const follow = cardsOf(joe)[1];
+  assert.equal(follow.follows, first.id);
+
+  // Andy asks to pilot; Joe hands over; now Andy asks and Joe can't.
+  await say(andy, { type: "pilot.request" });
+  const asked = pilotOf(joe);
+  assert.deepEqual(asked?.type === "pilot" && asked.pilot.requests.map((r) => r.name), ["Andy"]);
+  await say(joe, { type: "pilot.answer", yes: true });
+  const moved = pilotOf(andy);
+  assert.equal(moved?.type === "pilot" && moved.pilot.last?.how, "gave");
+  assert.equal(moved?.type === "pilot" && moved.pilot.name, "Andy");
+  await say(andy, { type: "agent.ask.text", text: "New question", follows: null });
+  assert.equal(cardsOf(joe).at(-1)?.by, "Andy");
+  assert.equal(cardsOf(joe).at(-1)?.follows, null);
+  await say(joe, { type: "chat", text: "@stand one more" });
+  assert.equal(cardsOf(joe).at(-1)?.by, "Andy");
+  await session.end();
+});
