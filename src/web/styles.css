@@ -2564,6 +2564,55 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .answer-stack .agent-answer-todo { font-size: 14px; }
 .answer-stack .agent-answer-todo button { font-size: 12px; line-height: 22px; padding: 0 10px; }
 .answer-stack .topic-hint { margin-top: auto; }
+/* Pilot: one person drives ✦ Stand. The card's foot is their box, or who's piloting with Ask to pilot. */
+.answer-stack .topic-now-head .pilot-pill-wrap { margin-left: auto; }
+.pilot-pill-wrap { position: relative; display: inline-flex; }
+.pilot-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 0; height: 24px; padding: 0 10px 0 3px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--text) 7%, transparent); box-shadow: none; color: var(--text); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.pilot-pill.free { padding: 0 10px; color: var(--muted); }
+.pilot-pill.mine { background: var(--accent-soft); color: var(--accent-text); }
+.pilot-pill:disabled { opacity: 1; cursor: default; }
+.pilot-pill:not(:disabled):hover { background: color-mix(in srgb, var(--text) 11%, transparent); }
+.pilot-face { display: inline-grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-weight: 700; line-height: 1; }
+.pilot-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: flex; flex-direction: column; min-width: 190px; padding: 5px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 10px 28px rgb(0 0 0 / 0.22); }
+.pilot-menu-label { padding: 5px 8px 3px; font-size: 11px; color: var(--muted); }
+.pilot-menu button { display: flex; align-items: center; gap: 8px; min-height: 0; height: auto; padding: 6px 8px; border: 0; border-radius: 6px; background: none; box-shadow: none; font-size: 13px; text-align: left; color: var(--text); }
+.pilot-menu button:hover, .pilot-menu button:focus-visible { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.pilot-menu .pilot-menu-leave { color: var(--muted); border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; margin-top: 3px; padding-top: 8px; }
+/* The box stays in reach at the foot of the screen while a long answer scrolls (clip, unlike hidden, lets it stick). */
+.answer-stack { overflow: clip; }
+.ask-foot { position: sticky; bottom: 0; z-index: 2; margin-top: auto; max-width: 760px; width: 100%; padding: 10px 0 2px; background: linear-gradient(to bottom, transparent, var(--panel-2) 10px); }
+.ask-box { display: flex; align-items: flex-end; gap: 8px; padding: 7px 7px 7px 14px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); transition: border-color 140ms; }
+.ask-box:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.ask-box textarea { flex: 1; min-width: 0; min-height: 22px; max-height: 140px; padding: 4px 0; border: 0; outline: 0; background: none; resize: none; font: inherit; font-size: 15px; line-height: 1.45; color: var(--text); }
+.ask-box textarea, .ask-box textarea:focus { outline: 0; border: 0; box-shadow: none; border-radius: 0; }
+.ask-box-send { flex: none; width: 30px; min-height: 0; height: 30px; padding: 0; border: 0; border-radius: 9px; background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; line-height: 1; }
+.ask-box-send:disabled { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--muted); opacity: 1; }
+.pilot-watch { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 6px 6px 6px 10px; border-radius: 14px; border: 1px dashed var(--line); font-size: 13.5px; color: var(--muted); }
+.pilot-watch-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pilot-ask { min-height: 0; height: 30px; padding: 0 13px; border-radius: 999px; border: 0; background: var(--accent-soft); color: var(--accent-text); box-shadow: none; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.pilot-ask:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.pilot-asked { display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; }
+.pilot-asked-text { color: var(--accent-text); font-weight: 500; }
+.pilot-link { min-height: 0; height: auto; padding: 4px 6px; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 12.5px; }
+.pilot-link:hover { color: var(--text); }
+.pilot-bar { display: block; width: 56px; height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--text) 10%, transparent); overflow: hidden; }
+.pilot-bar i { display: block; height: 100%; width: 0; background: var(--accent); animation: pilot-run linear forwards; }
+@keyframes pilot-run { from { width: var(--pilot-from, 100%); } to { width: 0; } }
+/* The pilot's pop-up when someone asks: over the controls, so it's seen from any card or a share. */
+.pilot-request { position: absolute; bottom: calc(100% + 8px); left: 50%; z-index: 40; display: flex; flex-direction: column; gap: 10px; width: min(290px, calc(100vw - 32px)); padding: 12px 12px 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 14px 36px rgb(0 0 0 / 0.28); transform: translateX(-50%); animation: pilot-pop 200ms var(--ease-out, ease-out); }
+@keyframes pilot-pop { from { opacity: 0; transform: translate(-50%, 8px) scale(0.97); } }
+/* Toasts step up over it while it's open, so neither hides the other. */
+body:has(.pilot-request) .toasts { bottom: 196px; }
+.pilot-request-who { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.pilot-request .pilot-bar { width: 100%; }
+.pilot-more { margin-left: auto; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--text) 8%, transparent); font-size: 11.5px; color: var(--muted); }
+.pilot-request-acts { display: flex; justify-content: flex-end; gap: 6px; }
+.pilot-request-acts button { min-height: 0; height: 30px; padding: 0 13px; border-radius: 999px; font-size: 13px; }
+.control.ask.locked { color: var(--muted); }
+.control.ask.asked { background: var(--accent-soft); color: var(--accent-text); }
+.card-list-new { margin-left: auto; min-height: 0; height: 22px; padding: 0 8px; border: 0; border-radius: 999px; background: none; box-shadow: none; color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.card-list-new:hover, .card-list-new.on { background: var(--accent-soft); color: var(--accent-text); }
+@media (prefers-reduced-motion: reduce) { .pilot-request { animation: none; } .pilot-bar i { animation: none; width: var(--pilot-from, 100%); } }
 .running-list .topic-sections.columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 /* ✦ Stand writing as it goes: a caret after the words so far, searches as a quiet line, options sliding in. */
 .streaming::after { content: ""; display: inline-block; width: 0.45em; height: 1em; margin-left: 2px; vertical-align: -0.12em; background: var(--accent); border-radius: 1px; animation: notes-pulse 1s ease-in-out infinite; }

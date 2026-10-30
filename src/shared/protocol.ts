@@ -167,6 +167,30 @@ export interface AgentCard {
   /** While it's working: what Stand has written so far, as it writes it, and what it searched the web for. */
   draft?: AgentDraft | null;
 }
+/** The Pilot seat: the one person who drives ✦ Stand (types or holds Ask Stand) right now. */
+export interface PilotView {
+  /** The pilot (participant id and name), or null while the seat is free: whoever asks first takes it. */
+  id: string | null;
+  name: string | null;
+  /** No question from the pilot for a while: the next "Ask to pilot" takes the seat at once. */
+  idle: boolean;
+  /** The pilot's connection is down; the seat moves on if they're not back soon. */
+  away: boolean;
+  /** The pilot is typing a question. */
+  typing: boolean;
+  /** People asking to take over, first asked first. */
+  requests: Array<{ id: string; name: string; at: number }>;
+  /** The first asker's countdown: from when it started to when the seat goes to them by itself (server clock). */
+  handFrom: number | null;
+  handAt: number | null;
+  /** The last time the seat moved, so the new pilot hears "You're piloting" and the last one why. */
+  last: { fromId: string | null; from: string | null; toId: string | null; to: string | null; how: "free" | "asked" | "gave" | "took" | "auto" | "left"; at: number } | null;
+  /** The pilot said "Not now" to this person. */
+  declined: { id: string; by: string; at: number } | null;
+  /** The server's clock when this was sent, so clients can run the countdown on their own clock. */
+  now: number;
+}
+
 /** ✦ Stand's card as it's being written (streamed from the model). */
 export interface AgentDraft {
   /** Web searches so far, oldest first; the last one is running while nothing's written yet. */
@@ -628,8 +652,21 @@ export type ClientMessage = (
   | { type: "agent.dismiss"; cardId: string }
   /** Push-to-talk: the Ask Stand button went down (Stand starts taking down what this person says)
    *  and came back up (Stand answers what it heard, in the Chat). */
-  | { type: "agent.ask.start" }
+  | { type: "agent.ask.start"; follows?: string | null }
   | { type: "agent.ask.end" }
+  /** The pilot typed a question to Stand on an answer card's box. follows: the answer it follows up
+   *  (the card's last one), null for a new card. */
+  | { type: "agent.ask.text"; text: string; follows: string | null }
+  /** Pilot seat (server/pilot.ts). request: ask to take over (takes a free or idle seat at once).
+   *  answer: the pilot hands over to the first asker, or says not now. give: the pilot hands the seat
+   *  to someone here, or leaves it (null). take: the host takes it without asking. */
+  | { type: "pilot.request" }
+  | { type: "pilot.cancel" }
+  | { type: "pilot.answer"; yes: boolean }
+  | { type: "pilot.give"; participantId: string | null }
+  | { type: "pilot.take" }
+  /** The pilot is typing in the box (sent every few seconds while they do), or stopped. */
+  | { type: "pilot.typing"; on: boolean }
   /** Anyone: take the next step an answer suggests as a to-do. */
   | { type: "agent.todo"; cardId: string }
   /** Anyone: a decision Stand heard is one (confirm), or isn't (dismiss). */
@@ -708,6 +745,8 @@ export type ServerMessage =
   | { type: "list"; items: ListNote[] | null }
   /** What ✦ Stand, the meeting's own agent, has put on the board so far (meetingAgent.ts). */
   | { type: "agent"; cards: AgentCard[] }
+  /** Who pilots ✦ Stand, and who's asking to (server/pilot.ts), after every change. */
+  | { type: "pilot"; pilot: PilotView }
   | { type: "meeting.ended"; meetingId: string }
   /** The server has a message the client sent with this cid. */
   | { type: "ack"; cid: string }

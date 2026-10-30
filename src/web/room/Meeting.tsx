@@ -15,6 +15,7 @@ import { PopOutBar, canPopOut, usePopOut } from "./PopOutBar.tsx";
 import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
+import { PilotRequest, type PilotActs, seatOf, usePilotNotices } from "./Pilot.tsx";
 
 export function Meeting(props: {
   roomId: string;
@@ -313,6 +314,16 @@ export function Meeting(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Who pilots ✦ Stand, and asking it things (Pilot.tsx).
+  const pilot: PilotActs = {
+    view: room.pilot,
+    me: participantId,
+    isHost: canSteer,
+    participants: state?.participants ?? [],
+    send: room.agentCards && room.connected && !barEnding ? send : undefined,
+  };
+  usePilotNotices(pilot);
+
   if (!state) {
     return (
       <div className="loading">
@@ -474,6 +485,7 @@ export function Meeting(props: {
           notesBusy={room.notesBusy}
         />
         <Stage
+          pilot={pilot}
           state={state}
           me={me}
           focusItem={focusItem}
@@ -545,6 +557,7 @@ export function Meeting(props: {
           <MicMenu mics={media.mics} micId={media.micId} onPick={(id) => void media.pickMic(id)} onOpen={() => void media.refreshMics()} />
           {room.agentCards && !writingUp && (
             <AskStand
+              pilot={pilot}
               send={send}
               offline={!room.connected}
               micOn={media.micOn && !media.audioDown}
@@ -612,6 +625,7 @@ export function Meeting(props: {
           {writingUp ? "Writing notes…" : "End meeting"}
         </button>
         )}
+        <PilotRequest acts={pilot} />
       </footer>
       {popOut.win && state && (
         <PopOutBar
@@ -872,14 +886,22 @@ const ASK_TAIL_MS = 700;
 
 /** ✦ Ask Stand, push-to-talk: hold it (or Control + Space), say your question, let go. Stand answers
  *  in the Chat. Muted, holding it unmutes you, so everyone hears the question too. */
-function AskStand(props: { send: (m: ClientMessage) => boolean; offline: boolean; micOn: boolean; canUnmute: boolean; toggleMic: () => Promise<unknown> | void }) {
+function AskStand(props: { pilot: PilotActs; send: (m: ClientMessage) => boolean; offline: boolean; micOn: boolean; canUnmute: boolean; toggleMic: () => Promise<unknown> | void }) {
   const [held, setHeld] = useState(false);
+  // Someone else pilots Stand: the button asks to take over (or takes it back) instead of listening.
+  const seat = seatOf(props.pilot);
+  const locked = !seat.free && !seat.mine;
   const live = useRef({ held: false, at: 0, unmuted: false, latched: false });
   const p = useRef(props);
   p.current = props;
   const down = () => {
     const s = live.current;
     if (s.held) return;
+    const seat = seatOf(p.current.pilot);
+    if (!seat.free && !seat.mine) {
+      p.current.send(seat.place >= 0 ? { type: "pilot.cancel" } : { type: "pilot.request" });
+      return;
+    }
     if (!p.current.send({ type: "agent.ask.start" })) return;
     Object.assign(s, { held: true, at: Date.now(), unmuted: false, latched: false });
     setHeld(true);
@@ -924,10 +946,18 @@ function AskStand(props: { send: (m: ClientMessage) => boolean; offline: boolean
   return (
     <button
       type="button"
-      className={held ? "control ask on" : "control ask"}
+      className={["control ask", held && "on", locked && "locked", locked && seat.place >= 0 && "asked"].filter(Boolean).join(" ")}
       disabled={props.offline && !held}
       aria-pressed={held}
-      title={held ? "Listening. Let go (or tap again) to ask" : `Hold, ask Stand out loud, let go. Stand answers in the Chat (hold ${MOD.ctrl} + Space)`}
+      title={
+        locked
+          ? seat.place >= 0
+            ? `Asked ${seat.name} to hand over. Click to cancel`
+            : `${seat.name} is piloting Stand. Click to ask to pilot`
+          : held
+            ? "Listening. Let go (or tap again) to ask"
+            : `Hold, ask Stand out loud, let go. Stand answers on its card (hold ${MOD.ctrl} + Space)`
+      }
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -946,7 +976,7 @@ function AskStand(props: { send: (m: ClientMessage) => boolean; offline: boolean
       <span className="ask-mark" aria-hidden>
         ✦
       </span>
-      <span>{held ? "Listening…" : "Ask Stand"}</span>
+      <span>{held ? "Listening…" : locked ? (seat.place >= 0 ? `Asked ${seat.name}` : "Ask to pilot") : "Ask Stand"}</span>
     </button>
   );
 }

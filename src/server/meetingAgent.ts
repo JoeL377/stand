@@ -317,16 +317,41 @@ export class AgentKeeper {
     return card;
   }
 
-  /** Someone asked Stand something: by push-to-talk (listening until the button comes up) or typed. */
-  ask(by: string, who: string, question: string | null, at = Date.now()): AgentCard {
+  /** Someone asked Stand something: by push-to-talk (listening until the button comes up) or typed.
+   *  follows: asked on an answer card's own box, the answer it follows up (null: a new card). Left out,
+   *  it follows up the last answer if that came back a moment ago. */
+  ask(by: string, who: string, question: string | null, at = Date.now(), follows?: string | null): AgentCard {
     const card = this.start(who, question ?? "", by, at);
     card.kind = "answer";
     card.status = question === null ? "listening" : "working";
     card.sources = [];
     card.todo = null;
     card.follows = null;
+    if (follows !== undefined) {
+      const up = follows ? this.get(follows) : undefined;
+      // It shows on that card straight away, while Stand works on it.
+      card.follows = up?.kind === "answer" ? up.id : null;
+      this.chosen.add(card.id);
+    }
     return card;
   }
+
+  /** The answers a new one follows up on, as its asker chose them on a card: the one it follows and the
+   *  one before that. Undefined when the asker didn't choose (push-to-talk from the bar, @stand). */
+  chosenFollowUp(id: string): AgentCard[] | undefined {
+    const card = this.get(id);
+    if (!card || !this.chosen.has(id)) return undefined;
+    const out: AgentCard[] = [];
+    let up = card.follows ? this.get(card.follows) : undefined;
+    while (up && out.length < 2) {
+      if (up.status === "ready" && up.note) out.unshift(up);
+      up = up.follows ? this.get(up.follows) : undefined;
+    }
+    return out;
+  }
+
+  /** Answers asked on a card's own box, whose place (card.follows) the asker chose. */
+  private chosen = new Set<string>();
 
   /** What Stand heard while the button was down; nothing heard fails the card. */
   heard(id: string, question: string): AgentCard | null {

@@ -29,6 +29,7 @@ import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
 import { Opener, type OpenerActs, hasKickoff, kickoffEnd, openerPages, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
 import { unanswered } from "./CheckIn.tsx";
+import { PILOT_OPEN, PilotFoot, type PilotActs, PilotPill } from "./Pilot.tsx";
 import { type AgentActs, AgentStatus, AnswerPart, cardFor, FindOptions, OptionsCard, READY_MS, SHOW_CARD } from "./AgentCard.tsx";
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
@@ -109,6 +110,8 @@ const PENDING = "pending";
 
 /** The Running list's id in the card list. */
 const RUNNING = "list";
+/** A new question to ✦ Stand, being typed: a card with only its box, on this screen. */
+const NEW = "new";
 /** An answer from ✦ Stand stays the live card this long after it lands, unless the talk starts a new topic. */
 const ANSWER_HOLD_MS = 3 * 60_000;
 /** How far a wheel or trackpad has to push past the end of a card before the next one comes up. */
@@ -167,6 +170,8 @@ export function TopicBoard(props: {
   lastMeetingAt?: number | null;
   /** ✦ Stand's cards (options on open questions, answers to questions asked out loud), and acting on them. */
   agent?: AgentActs;
+  /** Who pilots ✦ Stand, and asking it things on an answer card (Pilot.tsx). */
+  pilot?: PilotActs;
   /** Following the host: the card they have open (null: live), by name. Unset: this screen goes its own way. */
   follow?: { rewind: Rewind | null; host: string } | null;
   /** Someone following the host opened something else here: their screen goes its own way from now. */
@@ -315,7 +320,7 @@ export function TopicBoard(props: {
   const open = (id: string) => {
     setListOpen(false);
     const e = entries.find((x) => x.id === id);
-    if (id === RUNNING) return setRewind(rewind?.id === RUNNING ? null : { id, key: id, at: now, live: liveId });
+    if (id === RUNNING || id === NEW) return setRewind(rewind?.id === id ? null : { id, key: id, at: now, live: liveId });
     if (!e || id === liveId) return setRewind(null);
     setRewind({ id, key: id, at: e.asOf, live: liveId });
   };
@@ -346,12 +351,28 @@ export function TopicBoard(props: {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [rewind, !!following]);
+  // "Ask" on the toast that hands you the seat: the answer card on screen (or the latest), box ready, or a new one.
+  const [focusBox, setFocusBox] = useState<string | null>(null);
+  const latestChain = [...chains.keys()].at(-1) ?? null;
+  const askRef = useRef(() => {});
+  askRef.current = () => {
+    const target = shownEntry?.kind === "answer" ? shownEntry.id : latestChain;
+    if (!target) return open(NEW);
+    setFocusBox(target);
+    if (target !== shownId) open(target);
+    setTimeout(() => setFocusBox(null), 500);
+  };
+  useEffect(() => {
+    const go = () => askRef.current();
+    window.addEventListener(PILOT_OPEN, go);
+    return () => window.removeEventListener(PILOT_OPEN, go);
+  }, []);
   // Each card opens at its top.
   useEffect(() => {
     paneRef.current?.scrollTo({ top: 0 });
   }, [shownId]);
   // The host's own look back goes out to everyone following them.
-  const sent = rewind && { ...rewind, page: rewind.id === KICKOFF || rewind.id === DONE ? kickPage : undefined };
+  const sent = rewind && rewind.id !== NEW ? { ...rewind, page: rewind.id === KICKOFF || rewind.id === DONE ? kickPage : undefined } : null;
   const sentKey = JSON.stringify(sent);
   useEffect(() => {
     if (!following) props.onRewind?.(sent);
@@ -427,8 +448,11 @@ export function TopicBoard(props: {
   const view =
     rewind?.id === RUNNING ? (
       <RunningList tasks={allTasks} acts={liveActs} idOf={idOf} nameOf={nameOf} />
+    ) : rewind?.id === NEW ? (
+      // Once it's asked, the question is the live card.
+      <AnswerStack chain={[]} live={false} pilot={props.pilot} focus onAsked={() => setRewind(null)} />
     ) : shownEntry?.chain ? (
-      <AnswerStack chain={shownEntry.chain} live={shownId === liveId} onTodo={rewind ? undefined : props.agent?.onTodo} />
+      <AnswerStack chain={shownEntry.chain} live={shownId === liveId} onTodo={rewind ? undefined : props.agent?.onTodo} pilot={props.pilot} focus={focusBox === shownEntry.id} />
     ) : shownEntry?.card ? (
       <OptionsView card={shownEntry.card} start={start} acts={props.agent ?? { cards: [] }} />
     ) : rewoundKickoff ? (
@@ -518,6 +542,11 @@ export function TopicBoard(props: {
         </button>
         <span className="card-list-label">
           Cards <span className="card-list-count">{entries.length}</span>
+          {props.pilot?.send && (
+            <button type="button" className={rewind?.id === NEW ? "card-list-new on" : "card-list-new"} onClick={() => open(NEW)} aria-pressed={rewind?.id === NEW} title="A new question to Stand">
+              ＋ New
+            </button>
+          )}
         </span>
         {entries.map((e, i) => (
           <button
@@ -676,7 +705,7 @@ function RunningList(props: { tasks: Tasks; acts: TaskActs; idOf: (name: string)
 }
 
 /** A question to ✦ Stand as a card: the first question is its title, each follow-up lands under the last answer. */
-function AnswerStack({ chain, live, onTodo }: { chain: AgentCard[]; live: boolean; onTodo?: (cardId: string) => void }) {
+function AnswerStack({ chain, live, onTodo, pilot, focus, onAsked }: { chain: AgentCard[]; live: boolean; onTodo?: (cardId: string) => void; pilot?: PilotActs; focus?: boolean; onAsked?: () => void }) {
   // Like a chat, a new question (a follow-up) scrolls into view as it's asked.
   const lastId = chain.at(-1)?.id;
   const seen = useRef(lastId);
@@ -688,17 +717,24 @@ function AnswerStack({ chain, live, onTodo }: { chain: AgentCard[]; live: boolea
   return (
     <section className={live ? "topic-now answer-stack live" : "topic-now answer-stack"} aria-label="A question to Stand">
       <div className="topic-now-head">
-        <span className="topic-now-label ask">✦ Ask Stand</span>
+        <span className="topic-now-label ask">{chain.length ? "✦ Ask Stand" : "✦ New question"}</span>
         {live && <span className="topic-now-label live">Now</span>}
+        {pilot?.view && <PilotPill acts={pilot} />}
       </div>
       <div className="ask-thread">
         {chain.map((c) => (
           <AnswerPart key={c.id} card={c} onTodo={onTodo} />
         ))}
       </div>
-      <p className="topic-hint">
-        <span className="agent-mark small">✦</span> Hold Ask Stand to follow up; the answer lands here
-      </p>
+      {pilot?.send ? (
+        <div className="ask-foot">
+          <PilotFoot acts={pilot} follows={chain.at(-1)?.id ?? null} onAsked={onAsked} focus={focus} />
+        </div>
+      ) : (
+        <p className="topic-hint">
+          <span className="agent-mark small">✦</span> Hold Ask Stand to follow up; the answer lands here
+        </p>
+      )}
     </section>
   );
 }
