@@ -68,7 +68,7 @@ export interface Segment {
   ts: number;
 }
 
-export type NoteKind = "summary" | "decision" | "action" | "question";
+export type NoteKind = "summary" | "decision" | "action" | "question" | "context";
 
 export interface Note {
   id: string;
@@ -109,6 +109,9 @@ export interface Note {
 export type TaskVerb = "do" | "decide" | "answer";
 /** Four plain states. Everything else (suggested, waiting on you, said done) is a mark on the task. */
 export type TaskState = "open" | "doing" | "done" | "dropped";
+
+/** How two things in a space relate (docs/mvp-primitives.md). */
+export type LinkRelation = "leaves" | "replaces" | "serves" | "conflicts" | "objects";
 
 /** A line on the board's running list (server/liveList.ts), in the shape of a note so the board's
  *  tabs read either. Lines are only added, changed by id or closed, never regrouped. */
@@ -864,6 +867,8 @@ export interface SpaceFeed {
   decided: Array<Note & { from?: NoteFrom; replacedBy?: { text: string; meetingId: string; startedAt: number } }>;
   /** Open questions from all its meetings that no later decision answered, newest first. */
   open: Array<Note & { from?: NoteFrom }>;
+  /** What's true in the space that nobody had to choose, newest first, without what a later line replaced. */
+  context: Note[];
   /** Questions someone answered or dropped by hand, or a later decision answered (answeredBy), newest first. */
   closedQuestions?: Array<Note & { from?: NoteFrom; answeredBy?: string }>;
 }

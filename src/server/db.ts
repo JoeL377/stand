@@ -20,6 +20,7 @@ import type {
   Jot,
   MeetingCost,
   Note,
+  LinkRelation,
   NoteKind,
   Quote,
   Segment,
@@ -330,6 +331,18 @@ CREATE TABLE IF NOT EXISTS work_shots (
   ts INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS work_shots_note ON work_shots(note_id, ts);
+-- How a space's tasks, decisions and context relate (docs/mvp-primitives.md).
+CREATE TABLE IF NOT EXISTS links (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  from_id TEXT NOT NULL,
+  to_id TEXT NOT NULL,
+  relation TEXT NOT NULL,
+  made_by TEXT NOT NULL,
+  made_at INTEGER NOT NULL,
+  UNIQUE (from_id, to_id, relation)
+);
+CREATE INDEX IF NOT EXISTS links_to ON links(to_id, relation);
 `;
 
 /** Reads a discussion with the earlier one it continues, if any. */
@@ -1212,16 +1225,20 @@ export function openDb(file?: string) {
         "DELETE FROM dismissed_notes WHERE rowid IN (SELECT rowid FROM dismissed_notes WHERE meeting_id = ? AND item_id IS ? AND kind = ? AND text = ? LIMIT 1)",
       ).run(n.meetingId, n.itemId, n.kind, n.text);
     },
-    /** A to-do someone added by hand, outside any meeting. Every note belongs to a meeting, so it
-     *  gets a holder of its own (meetings.kind "added", started and ended now) that lists of meetings
-     *  leave out; everything that lists a space's to-dos then finds it like any other. */
+    /** A to-do someone added by hand, outside any meeting. */
     addTask(roomId: string, t: { text: string; owner: string | null; itemId: string | null }, by: string): Note {
+      return this.addOutsideMeeting(roomId, { kind: "action", ...t }, by);
+    },
+    /** Every note belongs to a meeting, so one added by hand gets a holder of its own (meetings.kind
+     *  "added", started and ended now) that lists of meetings leave out; everything that lists a
+     *  space's notes then finds it like any other. */
+    addOutsideMeeting(roomId: string, n: { kind: NoteKind; text: string; owner: string | null; itemId: string | null }, by: string): Note {
       const at = Date.now();
       const meetingId = newId();
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare("INSERT INTO meetings (id, room_id, started_at, ended_at, kind) VALUES (?, ?, ?, ?, 'added')").run(meetingId, roomId, at, at);
-        const note = this.addNote(meetingId, t.itemId, { kind: "action", text: t.text, owner: t.owner }, by);
+        const note = this.addNote(meetingId, n.itemId, { kind: n.kind, text: n.text, owner: n.owner }, by);
         db.exec("COMMIT");
         return note;
       } catch (err) {
@@ -1544,6 +1561,31 @@ export function openDb(file?: string) {
       return (db.prepare("SELECT * FROM snaps WHERE item_id = ? ORDER BY ts DESC LIMIT ?").all(itemId, limit) as Row[]).map(toSnapRow);
     },
     /** Notes of one kind from a space's finished meetings, newest first. */
+    /** Says how two things in a space relate; saying it twice changes nothing. */
+    addLink(roomId: string, fromId: string, toId: string, relation: LinkRelation, by: string) {
+      db.prepare("INSERT OR IGNORE INTO links (id, room_id, from_id, to_id, relation, made_by, made_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        newId(12),
+        roomId,
+        fromId,
+        toId,
+        relation,
+        by,
+        Date.now(),
+      );
+    },
+    /** A space's context, newest first, without what a later line replaced. */
+    spaceContext(roomId: string, limit = 100): Note[] {
+      return (
+        db
+          .prepare(
+            `SELECT n.* FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE m.room_id = ? AND n.kind = 'context'
+               AND NOT EXISTS (SELECT 1 FROM links l WHERE l.to_id = n.id AND l.relation = 'replaces')
+             ORDER BY n.ts DESC, n.rowid DESC LIMIT ?`,
+          )
+          .all(roomId, limit) as Row[]
+      ).map(toNote);
+    },
     spaceNotes(roomId: string, kind: NoteKind, limit = 20): Note[] {
       return (
         db

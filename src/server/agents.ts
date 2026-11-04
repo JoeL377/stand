@@ -15,15 +15,15 @@ const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.
 import { linkSnaps, type SnapRow } from "./snaps.ts";
 import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, prOf, shotUrl, type UploadLinks } from "./workLog.ts";
 
-export type RefKind = "action" | "decision" | "question" | "topic";
-const NOTE_KINDS: Record<string, RefKind> = { action: "action", decision: "decision", question: "question" };
+export type RefKind = "action" | "decision" | "question" | "context" | "topic";
+const NOTE_KINDS: Record<string, RefKind> = { action: "action", decision: "decision", question: "question", context: "context" };
 
 export const refOf = (kind: RefKind, id: string) => `stand:${kind}/${id}`;
 export const refUrl = (baseUrl: string, kind: RefKind, id: string) => `${baseUrl}/ref/${kind}/${id}`;
 
 /** Reads "stand:action/n8f2k", "action/n8f2k" or a Stand link to one (…/ref/action/n8f2k). */
 export function parseRef(input: string): { kind: RefKind; id: string } | null {
-  const m = /(?:^|stand:|\/ref\/)(action|decision|question|topic)\/([a-z0-9]{4,24})\b/i.exec(input.trim());
+  const m = /(?:^|stand:|\/ref\/)(action|decision|question|context|topic)\/([a-z0-9]{4,24})\b/i.exec(input.trim());
   return m ? { kind: m[1].toLowerCase() as RefKind, id: m[2] } : null;
 }
 
@@ -366,7 +366,7 @@ export function agentApi(deps: AgentDeps) {
         .filter(Boolean)
         .join(", ");
       const ref = refOf(r.ref.kind, r.note?.id ?? r.topic!.id);
-      const what = { action: "to-do", decision: "decision", question: "open question", topic: "topic" }[r.ref.kind];
+      const what = { action: "to-do", decision: "decision", question: "open question", context: "line of context", topic: "topic" }[r.ref.kind];
       const text = r.note?.text ?? r.topic!.topic;
       const decided =
         r.note?.kind === "decision"
@@ -678,6 +678,43 @@ export function agentApi(deps: AgentDeps) {
         created: { ...actionInfo(now), space: room.name, item: itemId ? db.getItem(itemId)?.title : undefined, url: refUrl(baseUrl, "action", now.id) },
         log: update ? updateInfo(update, baseUrl) : undefined,
         shows_on: `The space's Tasks tab in Stand, and the next meeting's check-in while it's open.`,
+      };
+    },
+
+    /** Keeps a line of context: what's true in the space that nobody had to choose. */
+    addContext(caller: Caller, args: { space: string; text: string; replaces?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const room = findSpace(caller, args.space);
+      const text = oneLine(args.text, 1000);
+      if (!text) throw new AgentError("Context needs its text: what's true, in a line.");
+      const old = args.replaces ? resolve(caller, args.replaces) : null;
+      if (old && (old.note?.kind !== "context" || old.room.id !== room.id))
+        throw new AgentError("replaces takes a line of context from the same space: stand:context/<id>.");
+      const by = byOf(caller);
+      const note = db.addOutsideMeeting(room.id, { kind: "context", text, owner: null, itemId: null }, by);
+      if (old?.note) db.addLink(room.id, note.id, old.note.id, "replaces", by);
+      deps.notify(room.id, "followups");
+      return {
+        created: { ref: refOf("context", note.id), text: note.text, by, url: refUrl(baseUrl, "context", note.id) },
+        replaced: old?.note ? { ref: refOf("context", old.note.id), text: old.note.text } : undefined,
+        shows_on: "The space's Decisions tab in Stand.",
+      };
+    },
+
+    /** What's true in a space, without what a later line replaced. */
+    listContext(caller: Caller, spaceQuery: string, baseUrl = "") {
+      const room = findSpace(caller, spaceQuery);
+      const rows = db.spaceContext(room.id);
+      return {
+        space: { id: room.id, name: room.name },
+        count: rows.length,
+        context: rows.map((n) => ({
+          ref: refOf("context", n.id),
+          text: n.text,
+          by: n.editedBy ?? undefined,
+          on: day(n.ts),
+          url: refUrl(baseUrl, "context", n.id),
+        })),
       };
     },
 

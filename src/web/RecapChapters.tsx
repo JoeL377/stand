@@ -190,7 +190,7 @@ export function ChapterBar({ chapters, from, to, onPick }: { chapters: MeetingCh
   );
 }
 
-const NOTE_ORDER: Record<Note["kind"], number> = { action: 0, decision: 1, question: 2, summary: 3 };
+const NOTE_ORDER: Record<Note["kind"], number> = { action: 0, decision: 1, question: 2, summary: 3, context: 4 };
 const NOTE_ICON: Partial<Record<Note["kind"], (p: { size?: number }) => React.ReactElement>> = {
   action: TodoIcon,
   decision: DecidedIcon,

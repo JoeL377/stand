@@ -1702,7 +1702,7 @@ export class RoomSession implements SpeechSink {
           key: `T${i + 1}`,
           topic: d.topic,
           outcome: d.outcome,
-          notes: current.flatMap((n) => (n.discussionId === d.id && n.kind !== "summary" ? [{ kind: n.kind, text: n.text, owner: n.owner }] : [])),
+          notes: current.flatMap((n) => (n.discussionId === d.id && n.kind !== "summary" && n.kind !== "context" ? [{ kind: n.kind, text: n.text, owner: n.owner }] : [])),
           ...(i >= settled.length ? { going: true, positions: d.positions } : {}),
         }));
         const earlier = itemId

@@ -514,3 +514,44 @@ test("PR links and GitHub's answer about them", async () => {
   assert.equal(await githubPrState(pr, undefined, answer({ state: "open", merged: false })), "open");
   assert.equal(await githubPrState(pr, undefined, answer({ message: "Not Found" }, 404)), null);
 });
+
+test("add_context keeps what's true in a space, and a later line replaces an older one", () => {
+  const { db, api, joe, room, notified } = setup();
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const caller = { user: joe, token: info };
+  const meetingsBefore = db.listMeetings(room.id).length;
+  const first = api.addContext(caller, { space: "checkout", text: "  Checkout runs on   Stripe " }, "http://stand.test");
+  assert.equal(first.created.text, "Checkout runs on Stripe");
+  assert.match(first.created.ref, /^stand:context\//);
+  assert.equal(first.created.by, "Joe Liang via Claude Code");
+  assert.deepEqual(parseRef(first.created.ref)?.kind, "context");
+  assert.equal((api.get(caller, first.created.ref, "") as { kind: string }).kind, "context");
+  assert.ok(notified.includes(`${room.id}:followups`));
+
+  const second = api.addContext(caller, { space: room.id, text: "Checkout runs on Adyen", replaces: first.created.ref });
+  assert.equal(second.replaced?.text, "Checkout runs on Stripe");
+  assert.deepEqual(
+    api.listContext(caller, room.id).context.map((c) => c.text),
+    ["Checkout runs on Adyen"],
+  );
+  assert.deepEqual(
+    db.spaceContext(room.id).map((n) => n.text),
+    ["Checkout runs on Adyen"],
+  );
+  assert.equal(db.listMeetings(room.id).length, meetingsBefore, "context adds no meeting to the space's list");
+});
+
+test("add_context needs a write token, and only replaces context from the same space", () => {
+  const { db, api, joe, room, action } = setup();
+  const write = { user: joe, token: db.createToken(joe.id, "Claude Code", "write").info };
+  const read = { user: joe, token: db.createToken(joe.id, "Reader", "read").info };
+  assert.throws(() => api.addContext(read, { space: room.id, text: "Stripe" }), AgentError);
+  assert.throws(() => api.addContext(write, { space: room.id, text: "  " }), AgentError);
+  assert.throws(() => api.addContext(write, { space: room.id, text: "Stripe", replaces: `stand:action/${action.id}` }), AgentError);
+
+  const other = db.createRoom("Billing", joe.id, "");
+  db.touchMembership(other.id, joe.id);
+  const elsewhere = api.addContext(write, { space: other.id, text: "Invoices are monthly" });
+  assert.throws(() => api.addContext(write, { space: room.id, text: "Stripe", replaces: elsewhere.created.ref }), AgentError);
+  assert.equal(api.listContext(write, room.id).count, 0);
+});

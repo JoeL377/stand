@@ -13,11 +13,12 @@ const INSTRUCTIONS = `Stand records team meetings and pins what was said to the 
 
 Between meetings people also save notes to a space from the Stand bar on their Mac (typed or dictated), often with snaps of their screen pinned to them.
 
-References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
+References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:context/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
 "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 Working on a to-do: post_update with its ref and status working when you start, so people see it's being worked on. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
-A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.`;
+A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
+Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
 const fail = (err: unknown) => {
@@ -203,6 +204,34 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     reason: z.string().optional().describe("Dropped only: why, in a line"),
     links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5). A merged PR link on done shows the PR closed it"),
   };
+
+  server.registerTool(
+    "list_context",
+    {
+      title: "List a Stand space's context",
+      description:
+        "What's true in a Stand space that nobody had to choose, newest first: what the project is, how something works. A line a later one replaced isn't listed.",
+      inputSchema: { space: z.string().describe("The space's id or name (from list_spaces)") },
+      annotations: READ,
+    },
+    ({ space }) => run(() => api.listContext(caller, space, baseUrl)),
+  );
+
+  server.registerTool(
+    "add_context",
+    {
+      title: "Add context to a Stand space",
+      description:
+        "Keeps one line of what's true in a Stand space, for the next person or agent. Use it for facts nobody had to choose, like \"Stand runs on one SQLite volume\". It isn't for decisions or to-dos.",
+      inputSchema: {
+        space: z.string().describe("The space's id or name (from list_spaces)"),
+        text: z.string().describe("What's true, in a line"),
+        replaces: z.string().optional().describe("The older line this corrects, stand:context/<id>. It stops being listed"),
+      },
+      annotations: WRITE,
+    },
+    ({ space, text, replaces }) => run(() => api.addContext(caller, { space, text, replaces }, baseUrl)),
+  );
 
   server.registerTool(
     "create_action",

@@ -42,7 +42,7 @@ export type SettledTopic = {
   key: string;
   topic: string;
   outcome: DiscussionOutcome;
-  notes: Array<{ kind: Exclude<NoteKind, "summary">; text: string; owner: string | null }>;
+  notes: Array<{ kind: Exclude<NoteKind, "summary" | "context">; text: string; owner: string | null }>;
   going?: boolean;
   positions?: Array<{ speaker: string; position: string }>;
 };
