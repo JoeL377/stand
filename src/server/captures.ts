@@ -168,6 +168,7 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
     decided: withFrom(db, decided.filter(keep("decision")).slice(0, FEED_NOTES)),
     // A question someone answered or dropped by hand leaves Open for the Tasks tab's Done and Dropped.
     open: withFrom(db, open.filter(keep("question")).filter((n) => !isClosed(stateOf(n))).slice(0, FEED_NOTES)),
+    context: db.spaceContext(roomId, FEED_NOTES),
     closedQuestions: withFrom(
       db,
       [...open.filter((n) => isClosed(stateOf(n))), ...answered]

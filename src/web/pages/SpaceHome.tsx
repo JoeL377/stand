@@ -182,6 +182,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const suggested = (upNext?.suggestions ?? []).filter((s) => !gone.has(`suggestion:${s.key}`));
   const questions = (feed?.open ?? []).filter((n) => !gone.has(`question:${n.id}`));
   const decisions = (feed?.decided ?? []).filter((n) => !gone.has(`decision:${n.id}`));
+  const context = feed?.context ?? [];
   const meetings = (feed?.meetings ?? []).filter((m) => !gone.has(`meeting:${m.id}`));
   const counts: Record<TabKey, number> = {
     meetings: meetings.length,
@@ -328,7 +329,21 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             />
           )}
           {tab === "decisions" && (
-            <PointList kind="decided" notes={decisions} empty="No decisions yet." onArchive={(id) => archive(`decision:${id}`)} />
+            <>
+              <PointList kind="decided" notes={decisions} empty="No decisions yet." onArchive={(id) => archive(`decision:${id}`)} />
+              {context.length > 0 && (
+                <>
+                  <p className="sh-group" title="What's true in this space that nobody had to choose">
+                    Context · {context.length}
+                  </p>
+                  <ul className="sh-list">
+                    {context.map((n) => (
+                      <li key={n.id}>{n.text}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </>
           )}
 
           {tab === "next" &&
