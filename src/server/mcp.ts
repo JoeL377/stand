@@ -16,7 +16,7 @@ Between meetings people also save notes to a space from the Stand bar on their M
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:context/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
-Working on a to-do: post_update with its ref and status working when you start, so people see it's being worked on. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
+Working on a to-do: check it isn't already being worked on (working on the to-do, or being_worked_on in whats_new), then post_update with its ref and status working when you start, so people and other agents see you're on it. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
@@ -60,7 +60,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "List my Stand to-dos",
       description:
-        "To-dos owned by the person this token belongs to, across the Stand spaces they're in, newest meeting first. Each has its ref, item, the decision behind it, and the meeting date.",
+        "To-dos owned by the person this token belongs to, across the Stand spaces they're in, newest meeting first. Each has its ref, item, the decision behind it, and the meeting date. A to-do an agent is on has status doing and working: who, since when and what it said last; one waiting to ship has ready.",
       inputSchema: {
         space: z.string().optional().describe("Only this space (id or part of its name)"),
         status: z.enum(["open", "done", "all"]).optional().describe("Default open"),
@@ -77,7 +77,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "List a space's to-dos",
       description:
-        "Every to-do in one Stand space, whoever owns it, newest meeting first. Each has its ref, owner, status, item, the decision behind it, and the meeting date. Filter by status and owner.",
+        "Every to-do in one Stand space, whoever owns it, newest meeting first. Each has its ref, owner, status, item, the decision behind it, and the meeting date. A to-do an agent is on has status doing and working: who, since when and what it said last; one waiting to ship has ready. Check before you pick one up. Filter by status and owner.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         status: z.enum(["open", "done", "all"]).optional().describe("Default open"),
@@ -216,7 +216,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "See what changed in a Stand space",
       description:
-        "Everything that changed in a Stand space since a date, in one call: meetings with their summaries, decisions, open questions, context, to-dos added and closed, and what agents reported. Call it first when catching up. Then use get_meeting_brief for a meeting's detail or transcript.",
+        "Everything that changed in a Stand space since a date, in one call: meetings with their summaries, decisions, open questions, context, what's being worked on right now, to-dos added and closed, and what agents reported. Call it first when catching up. Then use get_meeting_brief for a meeting's detail or transcript.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         since: z.string().optional().describe("From this date or time, like 2026-10-11. Default: the last 7 days"),
