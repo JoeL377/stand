@@ -107,11 +107,23 @@ export function agentApi(deps: AgentDeps) {
     };
   };
 
+  /** Why a decision was made, from what's already kept: the discussion it came out of and the words it was settled in. */
+  const whyOf = (n: Note) => {
+    const d = n.discussionId ? db.getDiscussion(n.discussionId) : null;
+    if (!d && !n.quote) return undefined;
+    return {
+      topic: d?.topic,
+      positions: d?.positions.length ? d.positions.map(positionLine) : undefined,
+      in_their_words: n.quote ? `${n.quote.speaker}: "${n.quote.text}"` : undefined,
+    };
+  };
+
   /** Whether a decision still stands, for agents. Only a person's confirm replaces one. */
   const decisionInfo = (n?: ReturnType<typeof settledView>["decided"][number]) =>
     n
       ? {
           state: n.decisionState,
+          why: whyOf(n),
           replaced_by: n.replacedBy ? { ref: refOf("decision", n.replacedBy.noteId), text: n.replacedBy.text } : undefined,
           may_be_replaced_by: n.mayBeReplacedBy ? { ref: refOf("decision", n.mayBeReplacedBy.noteId), text: n.mayBeReplacedBy.text } : undefined,
         }

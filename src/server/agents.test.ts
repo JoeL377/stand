@@ -139,6 +139,16 @@ test("anyone in a space can confirm a replacement, and agents see whether a deci
   assert.equal(JSON.parse(link.made_actor_json).connection, "tok1");
 });
 
+test("a decision says why, from its discussion and quote, for agents catching up", () => {
+  const { api, joe, room, notes } = setup();
+  const decision = notes[0];
+  const caller = { user: joe, token: null };
+  const line = api.whatsNew(caller, { space: room.id, since: "2020-01-01" }).decided.find((d) => d.text === decision.text);
+  assert.equal(line?.why?.topic, "Where transcription runs");
+  assert.deepEqual(line?.why?.positions, ["Andy: Move it to the server"]);
+  assert.equal((api.get(caller, `stand:decision/${decision.id}`, "") as { why?: { topic?: string } }).why?.topic, "Where transcription runs");
+});
+
 test("a to-do closed by its PR merging keeps the agent that reported it ready", async () => {
   const { api, db, joe, room, action } = setup();
   const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
