@@ -910,3 +910,38 @@ test("start_work: one call marks the to-do and gives back all an agent needs, wi
   assert.throws(() => api.startWork({ user: joe, token: { ...mine.token, scope: "read" } }, { ref: second }), /read only/);
   assert.throws(() => api.startWork(mine, { ref: `stand:decision/${notes[0].id}` }), /to-do/);
 });
+
+test("agent reads stay light: one line per to-do in whats_new, and a brief leaves out what list_actions has", () => {
+  const { db, room, action, notes, joe } = setup();
+  const api = agentApi({
+    db,
+    notify: () => {},
+    brief: (id) => ({ meeting: id, carriedOver: [{ id: "a" }, { id: "b" }], items: [] }),
+    suggested: (r) => upNextView(db, r, null),
+    uploads: new UploadLinks(),
+  });
+  const caller = { user: joe, token: db.createToken(joe.id, "Claude Code", "write").info };
+  const first = `stand:action/${action.id}`;
+  const second = `stand:action/${notes.find((n) => n.text.startsWith("Write"))!.id}`;
+  api.postUpdate(caller, { ref: first, status: "working" });
+  api.postUpdate(caller, { ref: first, text: "Halfway" });
+  api.postUpdate(caller, { ref: first, text: "Nearly there" });
+  api.postUpdate(caller, { ref: second, status: "working" });
+  api.completeAction(caller, { ref: second, note: "Wrote the note" });
+
+  const news = api.whatsNew(caller, { space: room.id }, "");
+  assert.equal(news.updates.length, 1, "a closed to-do is told once, under closed_to_dos");
+  const line = news.updates[0] as { ref: string; text: string; reports?: number };
+  assert.equal(line.ref, first);
+  assert.equal(line.text, "Nearly there");
+  assert.equal(line.reports, 3);
+  assert.equal(news.closed_to_dos.find((a) => a.ref === second)?.summary, "Wrote the note");
+  assert.equal(api.whatsNew(caller, { space: room.id, allUpdates: true }, "").updates.length, 5);
+
+  const m = notes[0].meetingId;
+  const brief = api.meetingBrief(caller, { meetingId: m }, "") as Record<string, unknown>;
+  assert.equal(brief.carriedOver, undefined);
+  assert.equal(brief.carried_over_count, 2);
+  const full = api.meetingBrief(caller, { meetingId: m, carriedOver: true }, "") as Record<string, unknown>;
+  assert.equal((full.carriedOver as unknown[]).length, 2);
+});
