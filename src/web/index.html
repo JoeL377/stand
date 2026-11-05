@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Stand</title>
+    <script>
+      // Before the first paint, so a reload never flashes the wrong theme. theme.ts takes over from here.
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem("stand.theme"); } catch (e) {}
+        if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232d6cdf'/><path d='M9 20v-8M14 23V9M19 19v-6M24 17v-2' stroke='white' stroke-width='3' stroke-linecap='round'/></svg>" />

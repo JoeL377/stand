@@ -33,23 +33,22 @@
   --dur-ui: 200ms;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #191919;
-    --panel: #202020;
-    --panel-2: #262626;
-    --hover: rgb(255 255 255 / 0.055);
-    --line: rgb(255 255 255 / 0.09);
-    --text: #ebebea;
-    --muted: #9b9a97;
-    --ok-text: var(--ok);
-    --warn-text: var(--warn);
-    --accent: #4c8df6;
-    --accent-soft: rgb(76 141 246 / 0.16);
-    --accent-text: #8fb5fa;
-    --shadow: 0 6px 24px rgb(0 0 0 / 0.4);
-    color-scheme: dark;
-  }
+/* Light, dark or following the system: index.html and theme.ts set data-theme. */
+:root[data-theme="dark"] {
+  --bg: #191919;
+  --panel: #202020;
+  --panel-2: #262626;
+  --hover: rgb(255 255 255 / 0.055);
+  --line: rgb(255 255 255 / 0.09);
+  --text: #ebebea;
+  --muted: #9b9a97;
+  --ok-text: var(--ok);
+  --warn-text: var(--warn);
+  --accent: #4c8df6;
+  --accent-soft: rgb(76 141 246 / 0.16);
+  --accent-text: #8fb5fa;
+  --shadow: 0 6px 24px rgb(0 0 0 / 0.4);
+  color-scheme: dark;
 }
 /* The meeting room is dark whatever the system setting. */
 .meeting {
@@ -192,7 +191,7 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); }
 .topbar-right { flex-wrap: wrap; justify-content: flex-end; }
 .banner { padding: 8px 14px; background: var(--accent-soft); font-size: 13px; }
 .banner.error { background: #fde8e8; color: #991b1b; cursor: pointer; }
-@media (prefers-color-scheme: dark) { .banner.error { background: #3a1616; color: #fca5a5; } }
+[data-theme="dark"] .banner.error { background: #3a1616; color: #fca5a5; }
 
 .meeting-grid {
   flex: 1;
@@ -1185,15 +1184,13 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   --side-on-strong: #ffffff;
   display: flex; align-items: stretch; height: 100vh; overflow: hidden; background: var(--side-ground);
 }
-@media (prefers-color-scheme: dark) {
-  .sp-shell {
-    --side-ground: oklch(0.132 0.003 265);
-    --side-row: oklch(0.228 0.0035 265);
-    --side-hover: oklch(0.205 0.003 265 / 0.5);
-    --side-text: oklch(0.86 0.0025 265);
-    --side-strong: oklch(0.985 0 0);
-    --side-on-strong: oklch(0.16 0.003 265);
-  }
+[data-theme="dark"] .sp-shell {
+  --side-ground: oklch(0.132 0.003 265);
+  --side-row: oklch(0.228 0.0035 265);
+  --side-hover: oklch(0.205 0.003 265 / 0.5);
+  --side-text: oklch(0.86 0.0025 265);
+  --side-strong: oklch(0.985 0 0);
+  --side-on-strong: oklch(0.16 0.003 265);
 }
 .sp-content { flex: 1; min-width: 0; display: flex; padding: 8px; }
 .sp-surface { flex: 1; min-width: 0; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
@@ -1241,6 +1238,10 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .sp-profile-pop > button:hover:not(:disabled) { background: var(--hover); }
 .sp-profile-pop > button:disabled { opacity: 1; color: var(--muted); cursor: default; }
 .sp-soon { margin-left: auto; padding: 1px 6px; border-radius: 999px; background: var(--hover); font-size: 11px; color: var(--muted); }
+.sp-theme { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin: 2px 0; padding: 2px; border-radius: 9px; background: var(--hover); }
+.sp-theme button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 0 4px; border: 0; border-radius: 7px; background: none; box-shadow: none; font-size: 12.5px; font-weight: 400; color: var(--muted); cursor: pointer; }
+.sp-theme button:hover:not(:disabled) { background: none; color: var(--text); }
+.sp-theme button[aria-checked="true"], .sp-theme button[aria-checked="true"]:hover:not(:disabled) { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
 .sp-profile-rule { margin: 4px 0; border-top: 1px solid var(--line); }
 .sp-keys { width: min(520px, 100%); gap: 16px; }
 .sp-keys section { display: flex; flex-direction: column; gap: 8px; }
