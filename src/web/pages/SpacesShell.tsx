@@ -4,7 +4,7 @@ import { Check, ChevronUp, FolderOpen, LayoutGrid, Mic, PanelLeftClose, PanelLef
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { UserMenu } from "../auth.tsx";
-import { Logo } from "../icons.tsx";
+import { ConxtLogo } from "../ConxtLogo.tsx";
 import { SelectedTabWeld } from "../SideNavWeld.tsx";
 import { useDismiss } from "../useDismiss.ts";
 
@@ -176,8 +176,8 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
       <div className={collapsed ? "spaces-page sp-shell collapsed" : "spaces-page sp-shell"}>
         <aside className="sp-side" aria-label="Spaces navigation">
           <div className="sp-side-head">
-            <Link to="/" className="sp-side-brand" title="Stand" aria-label="Stand">
-              <Logo size={24} />
+            <Link to="/" className="sp-side-brand" title="Conxt">
+              <ConxtLogo />
             </Link>
           </div>
           <nav className="sp-side-nav">
