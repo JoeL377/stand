@@ -12,4 +12,4 @@ Do both parts of step 3. Stand finds merges by watching PRs reported ready. The 
 
 Before building, read `docs/mvp-plan.md`. For anything about decisions, conflicts or search, read `docs/engine-brief.md` too.
 
-Merging redeploys Stand, which can cut a live call. Check that no meeting is live before you merge.
+Merging redeploys Stand, which can cut a live call. Before you merge, call `list_spaces` and check that `live` is null everywhere.

@@ -7,7 +7,7 @@ import { openDb } from "./db.ts";
 import { addUpNext } from "./upNext.ts";
 import { upNextView } from "./upNextPolish.ts";
 
-function setup(deps: { readyToShip?: () => void } = {}) {
+function setup(deps: { readyToShip?: () => void; liveMeeting?: (roomId: string) => { meeting_id: string; people: string[] } | null } = {}) {
   const db = openDb(":memory:");
   const joe = db.upsertUser({ googleSub: "g-joe", email: "joe@example.com", name: "Joe Liang", picture: null });
   const andy = db.upsertUser({ googleSub: "g-andy", email: "andy@example.com", name: "Andy Li", picture: null });
@@ -43,6 +43,16 @@ function setup(deps: { readyToShip?: () => void } = {}) {
   const action = notes.find((n) => n.text.startsWith("Move"))!;
   return { db, api, joe, andy, room, item, topic, action, notes, notified };
 }
+
+test("list_spaces says which spaces have a meeting running", () => {
+  const meeting = { meeting_id: "m1", people: ["Joe Liang", "Andy Li"] };
+  const on = setup({ liveMeeting: () => meeting });
+  assert.deepEqual(on.api.listSpaces({ user: on.joe } as never)[0].live, meeting);
+  const off = setup({ liveMeeting: () => null });
+  assert.equal(off.api.listSpaces({ user: off.joe } as never)[0].live, null);
+  const unwired = setup();
+  assert.equal(unwired.api.listSpaces({ user: unwired.joe } as never)[0].live, null);
+});
 
 test("references parse from refs, short forms and Stand links", () => {
   assert.deepEqual(parseRef("stand:action/k3m9xq2p"), { kind: "action", id: "k3m9xq2p" });
