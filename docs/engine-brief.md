@@ -23,7 +23,7 @@ There are two halves:
 | `links` table: `leaves`, `replaces`, `serves`, `conflicts`, `objects` | `src/server/db.ts` | Only `replaces` is written so far |
 | `whats_new` | `src/server/agents.ts` | Shipped in #65 |
 | Heard decisions and Confirm | `src/server/liveList.ts` | Shipped in #56 |
-| The why, raw | `discussions.positions_json`, `notes.quote_json` | Stored, not yet shown as a why |
+| The why | `whyOf` in `src/server/agents.ts`, from `discussions.positions_json` and `notes.quote_json` | On decisions in `get` and `whats_new`. Not on the Decided card yet |
 | Reversal finding | `src/server/spaceSettle.ts` | Weak. One call over everything, told to be conservative. Its findings are now proposals: a decision stays kept until someone confirms |
 
 ## What to take from Conxt
