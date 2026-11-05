@@ -332,6 +332,17 @@ CREATE TABLE IF NOT EXISTS work_shots (
   ts INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS work_shots_note ON work_shots(note_id, ts);
+-- Conflict checks people's own agents run on a decision (decisionCheck.ts). A row means someone
+-- took it; done_at means it came back. A decision with no row is waiting.
+CREATE TABLE IF NOT EXISTS decision_checks (
+  note_id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  version TEXT NOT NULL,
+  claimed_until INTEGER NOT NULL,
+  done_at INTEGER,
+  actor_json TEXT,
+  findings_json TEXT
+);
 -- How a space's tasks, decisions and context relate (docs/mvp-primitives.md).
 CREATE TABLE IF NOT EXISTS links (
   id TEXT PRIMARY KEY,
@@ -1607,6 +1618,27 @@ export function openDb(file?: string) {
       );
     },
     /** A space's context, newest first, without what a later line replaced. */
+    /** Checks in a space that came back or that someone holds right now. */
+    takenChecks(roomId: string, now = Date.now()): Set<string> {
+      return new Set(
+        (db.prepare("SELECT note_id FROM decision_checks WHERE room_id = ? AND (done_at IS NOT NULL OR claimed_until > ?)").all(roomId, now) as Row[]).map(
+          (r) => r.note_id as string,
+        ),
+      );
+    },
+    /** Holds a check for a while, so two agents don't do the same one. */
+    claimCheck(roomId: string, noteId: string, version: string, until: number, actor: Actor) {
+      db.prepare(
+        `INSERT INTO decision_checks (note_id, room_id, version, claimed_until, actor_json) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (note_id) DO UPDATE SET version = excluded.version, claimed_until = excluded.claimed_until, actor_json = excluded.actor_json WHERE done_at IS NULL`,
+      ).run(noteId, roomId, version, until, JSON.stringify(actor));
+    },
+    finishCheck(noteId: string, actor: Actor, findings: unknown, version: string) {
+      const res = db
+        .prepare("UPDATE decision_checks SET done_at = ?, actor_json = ?, findings_json = ?, version = ? WHERE note_id = ? AND done_at IS NULL")
+        .run(Date.now(), JSON.stringify(actor), JSON.stringify(findings), version, noteId);
+      return res.changes > 0;
+    },
     /** A space's links of one relation, as from and to. */
     roomLinks(roomId: string, relation: LinkRelation): Array<{ fromId: string; toId: string }> {
       return (db.prepare("SELECT from_id, to_id FROM links WHERE room_id = ? AND relation = ? ORDER BY made_at").all(roomId, relation) as Row[]).map((r) => ({
