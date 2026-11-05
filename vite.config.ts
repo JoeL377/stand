@@ -2,7 +2,7 @@ import net from "node:net";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
-const API_PORT = 3001;
+const API_PORT = Number(process.env.PORT ?? 3001);
 
 function portOpen(port: number): Promise<boolean> {
   return new Promise((resolve) => {

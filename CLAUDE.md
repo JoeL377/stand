@@ -12,4 +12,6 @@ Do both parts of step 3. Stand finds merges by watching PRs reported ready. The 
 
 Before building, read `docs/mvp-plan.md`. For anything about decisions, conflicts or search, read `docs/engine-brief.md` too.
 
+Merging to main deploys straight to production, and there's no staging. To see a web change first, run `npm run preview:ui` and open http://localhost:5181.
+
 Merging redeploys Stand, which can cut a live call. Before you merge, call `list_spaces` and check that `live` is null everywhere.
