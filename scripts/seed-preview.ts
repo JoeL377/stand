@@ -287,5 +287,5 @@ raw.prepare("UPDATE notes SET done_at = ? WHERE id = ?").run(hoursAgo(30), key.i
 raw.prepare("UPDATE notes SET done_at = ? WHERE id = ?").run(hoursAgo(50), fraud.id);
 raw.close();
 
-console.log(`Sample data is in ${dir}. Sign in as Sam Rivera, sam@acme.test.`);
+console.log(`Sample data is in ${dir}. You are Sam Rivera, with no sign-in.`);
 process.exit(0);

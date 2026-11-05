@@ -644,6 +644,10 @@ export function openDb(file?: string) {
     userName(id: string): string | null {
       return ((db.prepare("SELECT name FROM users WHERE id = ?").get(id) as Row | undefined)?.name as string | undefined) ?? null;
     },
+    userByEmail(email: string): User | null {
+      const r = db.prepare("SELECT * FROM users WHERE email = ?").get(email.toLowerCase()) as Row | undefined;
+      return r ? toUser(r) : null;
+    },
     upsertUser(u: { googleSub: string | null; email: string; name: string; picture: string | null }): User {
       const email = u.email.toLowerCase();
       const existing =

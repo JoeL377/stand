@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express from "express";
-import { authRoutes } from "./auth.ts";
+import { authRoutes, userFromRequest } from "./auth.ts";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 
@@ -52,4 +53,20 @@ test("the Mac app signs in through the browser: a one-time code only the app's s
   assert.notEqual(session, browser.id, "the app gets a session of its own");
   assert.equal(db.sessionUser(session)?.user.email, "joe@example.com");
   assert.equal((await redeem({ code: code2, verifier })).status, 400, "codes work once");
+});
+
+test("the local preview needs no sign-in, and only outside production", () => {
+  const db = openDb(":memory:");
+  const sam = db.upsertUser({ googleSub: null, email: "sam@acme.test", name: "Sam Rivera", picture: null });
+  const noCookie = { headers: {} } as IncomingMessage;
+  const was = { previewUser: config.previewUser, production: config.production };
+  try {
+    assert.equal(userFromRequest(db, noCookie), null, "off unless the preview asks for it");
+    config.previewUser = "sam@acme.test";
+    assert.equal(userFromRequest(db, noCookie)?.id, sam.id);
+    config.production = true;
+    assert.equal(userFromRequest(db, noCookie), null, "production ignores it");
+  } finally {
+    Object.assign(config, was);
+  }
 });
