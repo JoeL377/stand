@@ -1198,7 +1198,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 
 /* 240 open and 56 folded, with these paddings, leave the 20px gutter the weld is drawn for. */
 .sp-side { position: relative; z-index: 2; flex: none; display: flex; flex-direction: column; width: 240px; height: 100%; padding: 9px 12px 16px; background: var(--side-ground); color: var(--side-text); transition: width 200ms ease, padding 200ms ease; }
-.sp-side-head { flex: none; display: flex; align-items: center; height: 52px; margin-bottom: 16px; padding: 0 8px; }
+.sp-side-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 52px; margin-bottom: 16px; padding: 0 0 0 8px; }
 .sp-side-brand { display: inline-flex; color: var(--side-strong); }
 .sp-side-nav { flex: none; display: flex; flex-direction: column; gap: 2px; }
 .sp-side-foot { margin-bottom: 12px; }
@@ -1228,7 +1228,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 @keyframes sp-count-bump { 0%, 100% { transform: scale(1); } 35% { transform: scale(1.18); } }
 @media (prefers-reduced-motion: reduce) { .sp-count.arriving, .sp-count.arriving::after { animation: none; } }
 
-.sp-side-user { flex: none; margin-bottom: 8px; }
+.sp-side-user { flex: none; }
 .sp-profile { position: relative; }
 .sp-profile-btn .avatar { box-shadow: none; flex: none; }
 .sp-profile-pop { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; display: flex; flex-direction: column; gap: 2px; width: 260px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); color: var(--text); }
@@ -1252,7 +1252,6 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .sp-keys dt, .sp-keys dd { margin: 0; }
 .sp-keys dd { font-size: 13px; }
 .sp-keys kbd { font: 11.5px var(--font); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
-.sp-side-foldrow { flex: none; margin-bottom: 8px; padding: 0 4px; }
 .sp-side-fold { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; min-height: 0; padding: 0; border: 0; border-radius: 10px; background: none; box-shadow: none; color: var(--muted); cursor: pointer; }
 .sp-side-fold:hover:not(:disabled) { background: var(--side-hover); color: var(--side-strong); }
 .sp-side-join { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--muted); opacity: 0; }
@@ -1264,10 +1263,9 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 /* Folded to a rail (Command + B). */
 @media (min-width: 761px) {
   .sp-shell.collapsed .sp-side { width: 56px; padding-left: 8px; padding-right: 8px; }
-  .sp-shell.collapsed .sp-side-head { justify-content: center; padding: 0; }
+  .sp-shell.collapsed .sp-side-head { flex-direction: column; justify-content: flex-start; gap: 10px; width: 36px; height: auto; margin-bottom: 12px; padding: 14px 0 0; }
   .sp-shell.collapsed .sp-navrow { justify-content: center; width: 36px; height: 36px; padding: 0; }
   .sp-shell.collapsed .sp-side-text { display: none; }
-  .sp-shell.collapsed .sp-side-foldrow { display: flex; justify-content: center; padding: 0; }
   .sp-shell.collapsed .sp-side-label { display: none; }
   .sp-shell.collapsed .sp-spacerow .sp-navrow { padding: 0; }
   .sp-shell.collapsed .sp-space-tile { width: 26px; height: 26px; border-radius: 7px; font-size: 11px; }
@@ -1284,7 +1282,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   .sp-side-spaces { flex: none; flex-direction: row; margin: 0; padding: 0; overflow: visible; }
   .sp-spacerow, .sp-side-label { display: none; }
   .sp-navrow { justify-content: center; width: 36px; height: 36px; padding: 0; }
-  .sp-side-text, .sp-weld, .sp-side-foldrow { display: none; }
+  .sp-side-text, .sp-weld, .sp-side-fold { display: none; }
   .sp-count { position: absolute; top: -2px; right: -2px; min-width: 14px; height: 14px; padding: 0; font-size: 9px; }
   .sp-side-user { margin: 0 0 0 4px; }
   .sp-profile-pop { top: calc(100% + 6px); right: 0; bottom: auto; left: auto; }

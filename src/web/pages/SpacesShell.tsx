@@ -138,6 +138,15 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
             <Link to="/" className="sp-side-brand" title="Conxt">
               <ConxtLogo />
             </Link>
+            <button
+              className="sp-side-fold"
+              onClick={toggle}
+              aria-label={collapsed ? "Expand the sidebar" : "Collapse the sidebar"}
+              aria-expanded={!collapsed}
+              title={`${collapsed ? "Expand" : "Collapse"} the sidebar (${SHORTCUT})`}
+            >
+              {collapsed ? <PanelLeftOpen size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}
+            </button>
           </div>
           <nav className="sp-side-nav">{row({ label: "All spaces", icon: LayoutGrid, to: "/" })}</nav>
           <div className="sp-side-spaces">
@@ -153,17 +162,6 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
           <nav className="sp-side-nav sp-side-foot">{FOOT_ROWS.map(row)}</nav>
           <div className="sp-side-user">
             <ProfileMenu collapsed={collapsed} />
-          </div>
-          <div className="sp-side-foldrow">
-            <button
-              className="sp-side-fold"
-              onClick={toggle}
-              aria-label={collapsed ? "Expand the sidebar" : "Collapse the sidebar"}
-              aria-expanded={!collapsed}
-              title={`${collapsed ? "Expand" : "Collapse"} the sidebar (${SHORTCUT})`}
-            >
-              {collapsed ? <PanelLeftOpen size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}
-            </button>
           </div>
         </aside>
         <div className="sp-content">
