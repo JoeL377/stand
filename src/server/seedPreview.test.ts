@@ -19,7 +19,7 @@ test("the preview's sample data still loads, with something in each state", () =
   const db = openDb(path.join(dir, "standup.db"));
   const sam = db.upsertUser({ googleSub: null, email: "sam@acme.test", name: "Sam Rivera", picture: null });
   const spaces = db.userRooms(sam.id);
-  assert.equal(spaces.length, 2);
+  assert.equal(spaces.length, 4);
   const room = spaces.find((s) => s.name === "Acme Checkout")!;
   const todos = db.memberActions(sam.id).filter((n) => n.roomId === room.id);
   assert.ok(todos.some((n) => n.doneAt && n.state !== "dropped"));

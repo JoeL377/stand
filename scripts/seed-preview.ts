@@ -35,10 +35,9 @@ const team = [sam, priya, leo, maya];
 
 const room = db.createRoom("Acme Checkout", sam.id, "Ship one-page checkout by Dec 1");
 const growth = db.createRoom("Acme Growth", sam.id, "Weekly numbers and experiments");
-for (const u of team) {
-  db.touchMembership(room.id, u.id);
-  db.touchMembership(growth.id, u.id);
-}
+const support = db.createRoom("Acme Support", priya.id, "What shoppers keep asking us");
+const hiring = db.createRoom("Acme Hiring", maya.id, "Two engineers by January");
+for (const u of team) for (const space of [room, growth, support, hiring]) db.touchMembership(space.id, u.id);
 const [retries, guest, mobile] = db.addItems(room.id, [
   { source: "agenda", externalId: "PAY-212", title: "Payment retries", url: null, description: "Failed cards should retry without the shopper noticing." },
   { source: "agenda", externalId: "PAY-219", title: "Guest checkout", url: null, description: "Buy without making an account." },
