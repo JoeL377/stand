@@ -774,3 +774,37 @@ test("whats_new says what changed in a space since a date, in one call", () => {
   assert.equal(later.decided.length + later.closed_to_dos.length + later.context.length + later.new_to_dos.length, 0);
   assert.throws(() => api.whatsNew(caller, { space: room.id, since: "last week" }), AgentError);
 });
+
+test("agents see who's on what: every read says when another agent is on a to-do or it waits to ship", () => {
+  const { api, db, joe, andy, room, item, action } = setup();
+  db.touchMembership(room.id, andy.id);
+  const token = (user: typeof joe, label: string) => ({
+    user,
+    token: { id: `t-${label}`, label, scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null },
+  });
+  const ref = `stand:action/${action.id}`;
+  const before = api.listActions(token(andy, "Codex"), { space: room.id }, "").actions.find((a) => a.ref === ref)!;
+  assert.equal(before.status, "open");
+  assert.equal(before.working, undefined);
+
+  api.postUpdate(token(joe, "Claude Code"), { ref, status: "working", text: "Moving capture" });
+
+  const row = api.listActions(token(andy, "Codex"), { space: room.id }, "").actions.find((a) => a.ref === ref)!;
+  assert.equal(row.status, "doing", "the status says so, not just the log");
+  assert.equal(row.working?.by, "Joe Liang via Claude Code");
+  assert.equal(row.working?.doing, "Moving capture");
+  const got = api.get(token(andy, "Codex"), ref, "") as { status?: string; working?: { by: string } };
+  assert.equal(got.status, "doing");
+  assert.equal(got.working?.by, "Joe Liang via Claude Code");
+  const onItem = api.itemContext(token(andy, "Codex"), item.id, "").open_todos.find((a) => a.ref === ref)!;
+  assert.equal(onItem.working?.by, "Joe Liang via Claude Code");
+  const news = api.whatsNew(token(andy, "Codex"), { space: room.id }, "");
+  assert.deepEqual(news.being_worked_on.map((a) => a.ref), [ref]);
+
+  api.postUpdate(token(joe, "Claude Code"), { ref, status: "ready", text: "PR is up", links: ["https://github.com/acme/stand/pull/9"] });
+
+  const ready = api.whatsNew(token(andy, "Codex"), { space: room.id }, "").being_worked_on[0];
+  assert.equal(ready.status, "open", "ready isn't being worked on, but it's spoken for");
+  assert.equal(ready.working, undefined);
+  assert.equal(ready.ready?.pr, "https://github.com/acme/stand/pull/9");
+});

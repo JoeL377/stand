@@ -6,7 +6,7 @@
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
 import { parseActor, type Actor } from "../shared/actors.ts";
-import type { AgentToken, Discussion, Item, ItemUpdate, Jot, Note, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
+import type { ActionWork, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
@@ -16,7 +16,7 @@ import { CHECK_INSTRUCTIONS, CHECK_LEASE_MS, CHECK_VERSION, SHOW_FROM } from "./
 /** A position as one line, with the person's own words when the meeting-end run kept them. */
 const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.position}${p.quote ? ` (in their words: "${p.quote.text}")` : ""}`;
 import { linkSnaps, type SnapRow } from "./snaps.ts";
-import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, prOf, shotUrl, type UploadLinks } from "./workLog.ts";
+import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, prOf, readyToShip, shotUrl, workingOn, type UploadLinks } from "./workLog.ts";
 
 export type RefKind = "action" | "decision" | "question" | "context" | "topic";
 const NOTE_KINDS: Record<string, RefKind> = { action: "action", decision: "decision", question: "question", context: "context" };
@@ -68,6 +68,8 @@ export interface AgentDeps {
   /** A to-do was just reported ready to ship: look at its PR now rather than on the next round. */
   readyToShip?: () => void;
 }
+
+type Work = Pick<ActionWork, "working" | "ready">;
 
 const UPDATE_STATUSES: UpdateStatus[] = ["working", "progress", "blocked", "needs_decision", "ready", "done"];
 
@@ -130,11 +132,27 @@ export function agentApi(deps: AgentDeps) {
         }
       : {};
 
-  const actionInfo = (n: Note) => ({
+  /** Who's on each to-do right now and what waits to ship: the same reading as the pills on the Tasks page. */
+  const workOn = (notes: Note[]) => {
+    const updates = db.notesUpdates(notes.map((n) => n.id));
+    return new Map(
+      notes.map((n): [string, Work] => {
+        const mine = updates.filter((u) => u.noteId === n.id);
+        return [n.id, { working: workingOn(mine, !!n.doneAt), ready: readyToShip(mine, !!n.doneAt) }];
+      }),
+    );
+  };
+  const workInfo = (work?: Work) => ({
+    working: work?.working ? { by: work.working.by, since: new Date(work.working.since).toISOString(), doing: work.working.text } : undefined,
+    ready: work?.ready ? { by: work.ready.by, since: new Date(work.ready.since).toISOString(), pr: work.ready.pr ?? undefined } : undefined,
+  });
+
+  const actionInfo = (n: Note, work?: Work) => ({
     ref: refOf("action", n.id),
     text: n.text,
     owner: n.owner ?? undefined,
-    status: stateOf(n),
+    status: stateOf(n, work),
+    ...workInfo(work),
     done_by: n.doneBy ?? undefined,
     done_actor: n.doneActor ?? undefined,
     why_dropped: n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
@@ -208,6 +226,8 @@ export function agentApi(deps: AgentDeps) {
     const notes = db.itemNotes(itemId).filter((n) => n.id !== skip);
     // Questions only count from the latest meeting that talked about the item; older ones were answered or carried.
     const latest = notes[0]?.meetingId;
+    const openTodos = notes.filter((n) => n.kind === "action" && !n.doneAt).slice(0, 6);
+    const work = workOn(openTodos);
     return {
       decisions: notes
         .filter((n) => n.kind === "decision")
@@ -217,10 +237,7 @@ export function agentApi(deps: AgentDeps) {
         .filter((n) => n.kind === "question" && n.meetingId === latest)
         .slice(0, 5)
         .map((n) => ({ ref: refOf("question", n.id), text: n.text })),
-      open_todos: notes
-        .filter((n) => n.kind === "action" && !n.doneAt)
-        .slice(0, 6)
-        .map(actionInfo),
+      open_todos: openTodos.map((n) => actionInfo(n, work.get(n.id))),
     };
   };
 
@@ -276,6 +293,7 @@ export function agentApi(deps: AgentDeps) {
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
   function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number; addedByHand?: boolean }>, baseUrl: string) {
     const items = new Map<string, Item | null>();
+    const work = workOn(rows);
     return rows.map((n) => {
       if (n.itemId && !items.has(n.itemId)) items.set(n.itemId, db.getItem(n.itemId));
       const item = n.itemId ? items.get(n.itemId)! : null;
@@ -283,7 +301,7 @@ export function agentApi(deps: AgentDeps) {
         ? db.meetingNotes(n.meetingId).find((x) => x.discussionId === n.discussionId && x.kind === "decision")
         : undefined;
       return {
-        ...actionInfo(n),
+        ...actionInfo(n, work.get(n.id)),
         space: n.roomName as string | undefined,
         item: item ? { id: item.id, title: item.title, key: item.externalId ?? undefined } : undefined,
         decided: decision?.text,
@@ -369,13 +387,15 @@ export function agentApi(deps: AgentDeps) {
       // The decision behind a to-do: from its own topic first, else the item's latest decision.
       const sameTopic = r.topic ? db.meetingNotes(r.meeting.id).filter((x) => x.discussionId === r.topic!.id && x.id !== n.id) : [];
       const updates = n.kind === "action" ? db.noteUpdates(n.id) : [];
+      const work = n.kind === "action" ? workOn([n]).get(n.id) : undefined;
       return {
         ref: refOf(r.ref.kind, n.id),
         kind: r.ref.kind,
         text: n.text,
         in_their_words: n.quote ? `${n.quote.speaker}: "${n.quote.text}"` : undefined,
         owner: n.owner ?? undefined,
-        status: n.kind === "action" ? stateOf(n) : undefined,
+        status: n.kind === "action" ? stateOf(n, work) : undefined,
+        ...workInfo(work),
         done_by: n.doneBy ?? undefined,
         ...(n.kind === "decision" ? decisionInfo(settledView(db, r.room.id).decided.find((x) => x.id === n.id)) : {}),
         why_dropped: n.kind === "action" && n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
@@ -581,7 +601,7 @@ export function agentApi(deps: AgentDeps) {
         recently_done: notes
           .filter((n) => n.kind === "action" && n.doneAt)
           .slice(0, 5)
-          .map(actionInfo),
+          .map((n) => actionInfo(n)),
         topics: topics.map((d) => ({
           ref: refOf("topic", d.id),
           topic: d.topic,
@@ -828,6 +848,8 @@ export function agentApi(deps: AgentDeps) {
       const line = (kind: RefKind) => (n: Note) => ({
         ...decisionInfo(standing.get(n.id)), ref: refOf(kind, n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, kind, n.id) });
       const actions = db.memberActions(caller.user.id).filter((n) => n.roomId === room.id);
+      const open = actions.filter((n) => !isClosed(stateOf(n)));
+      const work = workOn(open);
       return {
         space: { id: room.id, name: room.name },
         since: new Date(since).toISOString(),
@@ -848,7 +870,10 @@ export function agentApi(deps: AgentDeps) {
           .filter((n) => !isClosed(stateOf(n)))
           .map(line("question")),
         context: recent("context").map(line("context")),
-        new_to_dos: actions.filter((n) => n.ts >= since && !isClosed(stateOf(n))).map(actionInfo),
+        being_worked_on: open
+          .filter((n) => stateOf(n, work.get(n.id)) === "doing" || work.get(n.id)?.ready)
+          .map((n) => actionInfo(n, work.get(n.id))),
+        new_to_dos: open.filter((n) => n.ts >= since).map((n) => actionInfo(n, work.get(n.id))),
         closed_to_dos: actions.filter((n) => (n.doneAt ?? 0) >= since).map((n) => ({ ...actionInfo(n), closed_by: n.closedBy ?? undefined })),
         updates: db.roomUpdates(room.id, since, 50).map((u) => updateInfo(u)),
       };

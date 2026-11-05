@@ -48,7 +48,8 @@ export function prOf(link: string): { owner: string; repo: string; number: numbe
  *  screenshots no report has picked up yet as an entry of their own. */
 export function workLog(updates: ItemUpdate[], shots: WorkShot[]): ActionWork["log"] {
   const shotView = (s: WorkShot) => ({ url: shotUrl(s), caption: s.caption });
-  const entries: ActionWork["log"] = updates.map((u) => ({
+  // Newest first, so two reports in the same millisecond keep their order through the sort below.
+  const entries: ActionWork["log"] = [...updates].reverse().map((u) => ({
     id: u.id,
     by: by(u),
     status: u.status,
