@@ -10,6 +10,7 @@ import type { AgentToken, Discussion, Item, ItemUpdate, Jot, Note, TaskState, Up
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
+import { settledView } from "./spaceSettle.ts";
 
 /** A position as one line, with the person's own words when the meeting-end run kept them. */
 const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.position}${p.quote ? ` (in their words: "${p.quote.text}")` : ""}`;
@@ -105,6 +106,16 @@ export function agentApi(deps: AgentDeps) {
       at: new Date(u.ts).toISOString(),
     };
   };
+
+  /** Whether a decision still stands, for agents. Only a person's confirm replaces one. */
+  const decisionInfo = (n?: ReturnType<typeof settledView>["decided"][number]) =>
+    n
+      ? {
+          state: n.decisionState,
+          replaced_by: n.replacedBy ? { ref: refOf("decision", n.replacedBy.noteId), text: n.replacedBy.text } : undefined,
+          may_be_replaced_by: n.mayBeReplacedBy ? { ref: refOf("decision", n.mayBeReplacedBy.noteId), text: n.mayBeReplacedBy.text } : undefined,
+        }
+      : {};
 
   const actionInfo = (n: Note) => ({
     ref: refOf("action", n.id),
@@ -353,6 +364,7 @@ export function agentApi(deps: AgentDeps) {
         owner: n.owner ?? undefined,
         status: n.kind === "action" ? stateOf(n) : undefined,
         done_by: n.doneBy ?? undefined,
+        ...(n.kind === "decision" ? decisionInfo(settledView(db, r.room.id).decided.find((x) => x.id === n.id)) : {}),
         why_dropped: n.kind === "action" && n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
         ...where,
         topic,
@@ -705,6 +717,19 @@ export function agentApi(deps: AgentDeps) {
       };
     },
 
+    /** Says a later decision replaced an earlier one, or that both stand. Anyone in the space can. */
+    confirmReplaced(caller: Caller, args: { ref: string; by: string; replaced: boolean }) {
+      requireWrite(caller);
+      const old = resolve(caller, args.ref);
+      const later = resolve(caller, args.by);
+      if (old.note?.kind !== "decision" || later.note?.kind !== "decision" || old.room.id !== later.room.id)
+        throw new AgentError("Give two decisions from the same space: stand:decision/<id>.");
+      if (old.note.id === later.note.id) throw new AgentError("A decision can't replace itself.");
+      db.addLink(old.room.id, later.note.id, old.note.id, args.replaced ? "replaces" : "not_replaced", byOf(caller), actorOf(caller));
+      deps.notify(old.room.id, "followups");
+      return { ...decisionInfo(settledView(db, old.room.id).decided.find((n) => n.id === old.note!.id)), ref: refOf("decision", old.note.id) };
+    },
+
     /** Keeps a line of context: what's true in the space that nobody had to choose. */
     addContext(caller: Caller, args: { space: string; text: string; replaces?: string }, baseUrl = "") {
       requireWrite(caller);
@@ -717,7 +742,7 @@ export function agentApi(deps: AgentDeps) {
       const by = byOf(caller);
       const note = db.addOutsideMeeting(room.id, { kind: "context", text, owner: null, itemId: null }, by);
       db.setAddedActor(note.id, actorOf(caller));
-      if (old?.note) db.addLink(room.id, note.id, old.note.id, "replaces", by);
+      if (old?.note) db.addLink(room.id, note.id, old.note.id, "replaces", by, actorOf(caller));
       deps.notify(room.id, "followups");
       return {
         created: { ref: refOf("context", note.id), text: note.text, by, url: refUrl(baseUrl, "context", note.id) },
@@ -732,7 +757,9 @@ export function agentApi(deps: AgentDeps) {
       const since = opts.since ? Date.parse(opts.since) : Date.now() - WHATS_NEW_DAYS * 86_400_000;
       if (Number.isNaN(since)) throw new AgentError(`"${clip(opts.since ?? "", 40)}" isn't a date. Use one like 2026-10-11 or 2026-10-11T08:00.`);
       const recent = (kind: "decision" | "question" | "context") => db.spaceNotes(room.id, kind, 200).filter((n) => n.ts >= since);
-      const line = (kind: RefKind) => (n: Note) => ({ ref: refOf(kind, n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, kind, n.id) });
+      const standing = new Map(settledView(db, room.id).decided.map((n) => [n.id, n]));
+      const line = (kind: RefKind) => (n: Note) => ({
+        ...decisionInfo(standing.get(n.id)), ref: refOf(kind, n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, kind, n.id) });
       const actions = db.memberActions(caller.user.id).filter((n) => n.roomId === room.id);
       return {
         space: { id: room.id, name: room.name },

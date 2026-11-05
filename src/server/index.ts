@@ -1221,6 +1221,25 @@ app.patch(
   }),
 );
 
+// Someone confirms a later decision replaced this one, or says both stand: { by, replaced }.
+app.post(
+  "/api/rooms/:id/decisions/:noteId/replaced",
+  route((req, res) => {
+    if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
+    try {
+      res.json(
+        agents.confirmReplaced(
+          { user: req.user!, token: null },
+          { ref: `stand:decision/${req.params.noteId}`, by: `stand:decision/${String(req.body?.by ?? "")}`, replaced: req.body?.replaced !== false },
+        ),
+      );
+    } catch (err) {
+      if (err instanceof AgentError) return void res.status(400).json({ error: err.message });
+      throw err;
+    }
+  }),
+);
+
 // Move a to-do or open question (the space page's Tasks tab): { state: "done" | "dropped" | "open", reason? },
 // or { saidDone: false } to take off a Said done mark Stand heard wrong.
 app.patch(

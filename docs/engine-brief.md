@@ -24,7 +24,7 @@ There are two halves:
 | `whats_new` | `src/server/agents.ts` | Shipped in #65 |
 | Heard decisions and Confirm | `src/server/liveList.ts` | Shipped in #56 |
 | The why, raw | `discussions.positions_json`, `notes.quote_json` | Stored, not yet shown as a why |
-| Reversal finding | `src/server/spaceSettle.ts` | Weak. One call over everything, told to be conservative, and it applies results on its own. It has marked 0 of 40 as replaced |
+| Reversal finding | `src/server/spaceSettle.ts` | Weak. One call over everything, told to be conservative. Its findings are now proposals: a decision stays kept until someone confirms |
 
 ## What to take from Conxt
 

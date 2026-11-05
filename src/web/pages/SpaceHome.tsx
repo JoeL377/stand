@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { stateOf } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
@@ -330,7 +330,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
           )}
           {tab === "decisions" && (
             <>
-              <PointList kind="decided" notes={decisions} empty="No decisions yet." onArchive={(id) => archive(`decision:${id}`)} />
+              <PointList
+                kind="decided"
+                notes={decisions}
+                empty="No decisions yet."
+                onArchive={(id) => archive(`decision:${id}`)}
+                onReplaced={(id, by, replaced) => void api.confirmReplaced(room.id, id, by, replaced).then(load, errorToast("Couldn't save that"))}
+              />
               {context.length > 0 && (
                 <>
                   <p className="sh-group" title="What's true in this space that nobody had to choose">
@@ -862,7 +868,13 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
 
 /** Decisions or open questions across the space's meetings, as the recap lists them. A decision a
  *  later one replaced stays, muted and last, so the change of mind is still on record. */
-function PointList(props: { kind: "decided" | "question"; notes: SpaceFeed["decided"]; empty: string; onArchive: (id: string) => void }) {
+function PointList(props: {
+  kind: "decided" | "question";
+  notes: SpaceFeed["decided"];
+  empty: string;
+  onArchive: (id: string) => void;
+  onReplaced?: (id: string, by: string, replaced: boolean) => void;
+}) {
   if (!props.notes.length) return <p className="sh-card-empty">{props.empty}</p>;
   const Icon = props.kind === "decided" ? DecidedIcon : QuestionIcon;
   return (
@@ -876,6 +888,7 @@ function PointList(props: { kind: "decided" | "question"; notes: SpaceFeed["deci
               {n.quote && <QuoteMark quote={n.quote} />}
               {n.from && <FromChip from={n.from} />}
               {n.replacedBy && <ReplacedChip by={n.replacedBy} />}
+              {n.mayBeReplacedBy && props.onReplaced && <MaybeReplaced by={n.mayBeReplacedBy} onAnswer={(replaced) => props.onReplaced!(n.id, n.mayBeReplacedBy!.noteId, replaced)} />}
             </span>
           </span>
           <CopyForAgent kind={props.kind === "decided" ? "decision" : "question"} id={n.id} />
@@ -883,6 +896,21 @@ function PointList(props: { kind: "decided" | "question"; notes: SpaceFeed["deci
         </li>
       ))}
     </ul>
+  );
+}
+
+/** On a decision Stand thinks a later one replaced. It stands until someone says so. */
+function MaybeReplaced(props: { by: ReplacedBy; onAnswer: (replaced: boolean) => void }) {
+  return (
+    <span className="sh-maybe-replaced">
+      May be replaced by: {props.by.text}
+      <button type="button" className="rc-pill" onClick={() => props.onAnswer(true)}>
+        Replaced
+      </button>
+      <button type="button" className="rc-pill" onClick={() => props.onAnswer(false)}>
+        Both stand
+      </button>
+    </span>
   );
 }
 

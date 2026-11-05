@@ -114,6 +114,31 @@ test("a database from before actors opens, and its rows read their actor from th
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("anyone in a space can confirm a replacement, and agents see whether a decision stands", () => {
+  const { api, db, joe, andy, room, item, notes, action } = setup();
+  db.touchMembership(room.id, andy.id);
+  const old = notes[0];
+  const m = db.startMeeting(room.id);
+  const [later] = db.replaceNotes(m.id, item.id, [{ kind: "decision", text: "Drop LiveKit", owner: null }]);
+  db.endMeeting(m.id, null);
+  const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const ref = `stand:decision/${old.id}`;
+  const by = `stand:decision/${later.id}`;
+
+  assert.equal((api.get({ user: joe, token: null }, ref, "") as { state?: string }).state, "kept");
+  assert.throws(() => api.confirmReplaced({ user: joe, token: null }, { ref, by: `stand:action/${action.id}`, replaced: true }), /two decisions/);
+  assert.throws(() => api.confirmReplaced({ user: joe, token: null }, { ref, by: ref, replaced: true }), /itself/);
+  assert.throws(() => api.confirmReplaced({ user: joe, token: { ...token, scope: "read" } }, { ref, by, replaced: true }));
+
+  assert.equal(api.confirmReplaced({ user: andy, token }, { ref, by, replaced: true }).state, "replaced");
+  const seen = api.whatsNew({ user: joe, token: null }, { space: room.id, since: "2020-01-01" }).decided.find((d) => d.text === old.text);
+  assert.equal(seen?.state, "replaced");
+  assert.equal(seen?.replaced_by?.text, "Drop LiveKit");
+  const link = db.raw.prepare("SELECT made_by, made_actor_json FROM links WHERE relation = 'replaces'").get() as { made_by: string; made_actor_json: string };
+  assert.equal(link.made_by, "Andy Li via Codex");
+  assert.equal(JSON.parse(link.made_actor_json).connection, "tok1");
+});
+
 test("a to-do closed by its PR merging keeps the agent that reported it ready", async () => {
   const { api, db, joe, room, action } = setup();
   const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
