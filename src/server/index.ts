@@ -192,6 +192,10 @@ const agents = agentApi({
   db,
   uploads: uploadLinks,
   readyToShip: () => void shipWatch.check(),
+  liveMeeting: (roomId) => {
+    const s = live(roomId);
+    return s ? { meeting_id: s.meetingId, people: s.state().participants.map((p) => p.name) } : null;
+  },
   notify: (roomId, what) => {
     const s = live(roomId);
     if (s) what === "updates" ? s.updatesChanged() : s.followUpsChanged();

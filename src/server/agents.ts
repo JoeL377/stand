@@ -49,6 +49,8 @@ export interface Caller {
 }
 
 export interface AgentDeps {
+  /** The meeting running in a space right now, if any. Merging redeploys Stand, which cuts it. */
+  liveMeeting?: (roomId: string) => { meeting_id: string; people: string[] } | null;
   db: DB;
   /** Tells people in a live call that something changed on their space. */
   notify: (roomId: string, what: "updates" | "followups") => void;
@@ -502,6 +504,7 @@ export function agentApi(deps: AgentDeps) {
           .slice(0, 25)
           .map((i) => ({ id: i.id, title: i.externalId ? `${i.externalId} ${i.title}` : i.title })),
         latest_meeting_id: db.latestMeeting(row.id) ?? undefined,
+        live: deps.liveMeeting?.(row.id) ?? null,
       }));
     },
 
