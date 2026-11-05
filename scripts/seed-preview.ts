@@ -171,6 +171,7 @@ const latest = meeting(2, 41, "Fraud numbers came in low, so guest checkout goes
       { kind: "decision", text: "Ship guest checkout to everyone on Nov 20", line: 0 },
       { kind: "action", text: "Add a chargeback alert", owner: "Leo Park" },
       { kind: "action", text: "Write the guest checkout launch note" },
+      { kind: "action", text: "Update the terms link at checkout", owner: "Sam Rivera" },
     ],
   },
   {
@@ -254,6 +255,9 @@ api.linkTodos(priyasAgent, { ref: ref(browserPath), dependsOn: ref(worker) });
 // Finished and waiting to ship.
 api.startWork(leosAgent, { ref: ref(alert) });
 api.postUpdate(leosAgent, { ref: ref(alert), status: "ready", text: "Chargebacks over 1% of a day's orders now page the on-call.", links: ["https://github.com/acme-demo/checkout/pull/44"] });
+
+// Yours, with the work in and waiting on your look.
+api.postUpdate(samsAgent, { ref: ref(latest.note("Update the terms link")), status: "ready", text: "The link now points at the new terms.", links: ["https://github.com/acme-demo/checkout/pull/45"] });
 
 // Stuck, and someone has to decide.
 api.postUpdate({ user: maya, token: db.createToken(maya.id, "Cursor", "write").info }, { ref: ref(summaryBar), status: "needs_decision", text: "The bar hides the Apple Pay button on small phones. Keep the button or the total?" });
