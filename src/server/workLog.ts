@@ -19,9 +19,13 @@ export const MAX_SHOT_BYTES = 10 * 1024 * 1024;
 
 const by = (u: { userName: string; client: string | null }) => (u.client ? `${u.userName} via ${u.client}` : u.userName);
 
+/** Attaching a plan doesn't start or stop anything. */
+const aboutTheWork = (u: ItemUpdate) => u.status !== "plan";
+
 /** Who is on the to-do right now, if anyone: an agent whose latest word was "working" or progress,
  *  not long ago, on a to-do that isn't checked off. */
-export function workingOn(updates: ItemUpdate[], done: boolean, now = Date.now()): ActionWork["working"] {
+export function workingOn(all: ItemUpdate[], done: boolean, now = Date.now()): ActionWork["working"] {
+  const updates = all.filter(aboutTheWork);
   const last = updates.at(-1);
   if (done || !last || !last.client || (last.status !== "working" && last.status !== "progress")) return null;
   if (now - last.ts > WORKING_QUIET_MS) return null;
@@ -33,7 +37,7 @@ export function workingOn(updates: ItemUpdate[], done: boolean, now = Date.now()
 
 /** The finished work waiting to ship, if that's the last word on a to-do that isn't checked off. */
 export function readyToShip(updates: ItemUpdate[], done: boolean): ActionWork["ready"] {
-  const last = updates.at(-1);
+  const last = updates.filter(aboutTheWork).at(-1);
   if (done || !last || last.status !== "ready") return null;
   return { by: by(last), since: last.ts, text: last.text, pr: last.links.find((l) => prOf(l)) ?? null };
 }

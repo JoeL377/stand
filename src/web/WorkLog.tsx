@@ -80,6 +80,7 @@ const STATUS: Record<ActionWork["log"][number]["status"], string> = {
   ready: "Ready to ship",
   added: "Added",
   note: "Note",
+  plan: "Plan attached",
   shots: "Screenshots",
 };
 
@@ -118,6 +119,16 @@ export function WorkCard({ work }: { work: ActionWork }) {
   const shown = all ? work.log : work.log.slice(0, FIRST);
   return (
     <div className="fu-log">
+      {work.plan && (
+        <details className="wl-plan">
+          <summary>
+            Plan <span className="wl-by">{work.plan.by}</span> <time title={new Date(work.plan.ts).toLocaleString()}>{fmtAgo(work.plan.ts)}</time>
+          </summary>
+          <p className="wl-text">
+            <Linkified text={work.plan.text} />
+          </p>
+        </details>
+      )}
       {shown.map((e) => (
         <div key={e.id} className={`wl-entry ${e.status}`}>
           <div className="wl-head">

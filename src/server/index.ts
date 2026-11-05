@@ -312,7 +312,8 @@ app.get(
       const log = workLog(mine, shots.filter((s) => s.noteId === n.id));
       const working = workingOn(mine, !!n.doneAt);
       const ready = readyToShip(mine, !!n.doneAt);
-      if (log.length || working) out[n.id] = { working, ready, log };
+      const plan = log.length ? db.notePlan(n.id) : null;
+      if (log.length || working) out[n.id] = { working, ready, log, plan: plan && { by: plan.by, ts: plan.ts, text: plan.text } };
     }
     res.json(out);
   }),

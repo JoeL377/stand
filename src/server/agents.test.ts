@@ -808,3 +808,31 @@ test("agents see who's on what: every read says when another agent is on a to-do
   assert.equal(ready.working, undefined);
   assert.equal(ready.ready?.pr, "https://github.com/acme/stand/pull/9");
 });
+
+test("a plan lives on the to-do: it keeps versions, and attaching one doesn't change who's on it", () => {
+  const { api, db, joe, room, action, notes } = setup();
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const caller = { user: joe, token: info };
+  const ref = `stand:action/${action.id}`;
+  type Got = { status?: string; working?: { by: string }; plan?: { text: string; by: string; versions: number; actor?: { model?: string } } };
+
+  assert.equal((api.get(caller, ref, "") as Got).plan, undefined);
+  api.attachPlan({ ...caller, model: "claude-opus-5-5" }, { ref, plan: "# Move capture\n\n1. Worker\n2. Remove the old path" });
+  assert.equal(workingOn(db.notesUpdates([action.id]), false), null, "a plan alone doesn't mean anyone started");
+  assert.equal(db.notesUpdates([action.id])[0].text, "Move capture", "the log gets the title, not the whole plan");
+  assert.equal(api.listActions(caller, { space: room.id }, "").actions.find((a) => a.ref === ref)?.has_plan, true);
+
+  api.postUpdate(caller, { ref, status: "working" });
+  api.attachPlan(caller, { ref, plan: "Changed: keep the old path a week" });
+  const got = api.get(caller, ref, "") as Got;
+  assert.equal(got.working?.by, "Joe Liang via Claude Code", "attaching while working keeps the spinner");
+  assert.equal(got.plan?.text, "Changed: keep the old path a week");
+  assert.equal(got.plan?.versions, 2);
+  assert.equal(got.plan?.by, "Joe Liang via Claude Code");
+
+  assert.throws(() => api.attachPlan(caller, { ref, plan: "  " }), /empty/);
+  assert.throws(() => api.attachPlan(caller, { ref, plan: "x".repeat(100_001) }), /100000/);
+  const decision = notes.find((n) => n.kind === "decision")!;
+  assert.throws(() => api.attachPlan(caller, { ref: `stand:decision/${decision.id}`, plan: "x" }), /to-dos/);
+  assert.throws(() => api.attachPlan({ user: joe, token: { ...info, scope: "read" } }, { ref, plan: "x" }), /read only/);
+});

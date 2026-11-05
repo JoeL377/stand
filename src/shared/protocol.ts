@@ -295,8 +295,9 @@ export interface Snap {
  *  progress, a blocker, a question for the next meeting, or a to-do checked off. */
 /** "working": an agent says it has started on a to-do; it shows as working until it reports again or goes quiet.
  *  "ready": the work is finished and waits to ship, usually as a PR; Stand checks the to-do off when the PR merges. */
-/** "added": the details someone gave with a to-do they added by hand; "note": more about a to-do, not progress (MCP update_action). */
-export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done" | "added" | "note";
+/** "added": the details someone gave with a to-do they added by hand; "note": more about a to-do, not progress (MCP update_action).
+ *  "plan": a plan or spec was attached; it says nothing about whether anyone is on the to-do. */
+export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done" | "added" | "note" | "plan";
 export interface ItemUpdate {
   id: string;
   roomId: string;
@@ -336,6 +337,8 @@ export interface ActionWork {
   /** Set while the finished work waits to ship: who said so, when, and the PR Stand watches (null
    *  when the agent gave no GitHub PR link, so it can't be checked off on its own). */
   ready: { by: string; since: number; text: string; pr: string | null } | null;
+  /** The plan or spec attached to the to-do, the latest version. */
+  plan?: { by: string; ts: number; text: string } | null;
   /** Reports on it, newest first, with the screenshots that came with each. */
   log: Array<{
     id: string;
