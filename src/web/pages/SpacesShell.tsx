@@ -1,9 +1,12 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
+import { LayoutGrid, Mic, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
-import { UserMenu } from "../auth.tsx";
-import { Logo, MicIcon, PanelIcon } from "../icons.tsx";
+import { ConxtLogo } from "../ConxtLogo.tsx";
+import { ProfileMenu } from "../ProfileMenu.tsx";
+import { SelectedTabWeld } from "../SideNavWeld.tsx";
+import { colorFor, initials } from "../util.ts";
 
 export const spaceHref = (id: string) => `/s/${id}`;
 /** Straight into talking in the space, past its overview page. */
@@ -48,23 +51,92 @@ function useCollapsed() {
   return [collapsed, toggle] as const;
 }
 
-/** The frame around the spaces pages: a left sidebar for creating, navigating and
- *  jumping into a space, and the page itself on the right. */
+const FOOT_ROWS: Array<{ label: string; icon: LucideIcon; to: string }> = [
+  { label: "Manage spaces", icon: SlidersHorizontal, to: "/spaces/manage" },
+  { label: "Connect an agent", icon: Plug, to: "/agents" },
+];
+
+/** Counts each rise in what's waiting, so the badge plays its ping once per arrival. */
+function useArrivalTick(count: number) {
+  const [state, setState] = useState({ tick: 0, seen: count });
+  if (state.seen !== count) setState({ tick: count > state.seen ? state.tick + 1 : state.tick, seen: count });
+  return state.tick;
+}
+
+/** How many of your tasks in this space have work in and wait on your look. */
+function WaitingCount(props: { count: number; collapsed: boolean }) {
+  const tick = useArrivalTick(props.count);
+  if (props.count === 0) return null;
+  const label = `${props.count} of your tasks ${props.count === 1 ? "has" : "have"} work in and ${props.count === 1 ? "waits" : "wait"} on your look`;
+  return (
+    <span key={tick} className={`sp-count${props.collapsed ? " folded" : ""}${tick > 0 ? " arriving" : ""}`} title={label} aria-label={label}>
+      {props.count}
+    </span>
+  );
+}
+
+/** One space in the nav. A space is the team's home, so you only have a few and they stay in view:
+ *  one click goes in, and the mic starts talking there. */
+function SpaceRow(props: { space: SpaceSummary; collapsed: boolean }) {
+  const { space: s, collapsed } = props;
+  return (
+    <div className="sp-spacerow">
+      <NavLink to={spaceHref(s.id)} className="sp-navrow" title={collapsed ? s.name : s.purpose || s.name} aria-label={s.name}>
+        {({ isActive }) => (
+          <>
+            {isActive && <SelectedTabWeld />}
+            <span className="sp-space-tile" style={{ background: colorFor(s.id) }} aria-hidden>
+              {initials(s.name)}
+              {s.live && <span className="sp-side-dot live" />}
+            </span>
+            <span className="sp-side-text">{s.name}</span>
+            {s.live && <span className="sr-only">(talking now)</span>}
+            <WaitingCount count={s.waiting ?? 0} collapsed={collapsed} />
+          </>
+        )}
+      </NavLink>
+      {!collapsed && (
+        <Link
+          to={joinHref(s.id)}
+          className="sp-side-join"
+          title={s.live ? "Join them" : "Start talking"}
+          aria-label={`${s.live ? "Join them in" : "Start talking in"} ${s.name}`}
+        >
+          <Mic size={15} aria-hidden />
+        </Link>
+      )}
+    </div>
+  );
+}
+
+/** The frame around the spaces pages, after Conxt's: the nav on a darker ground, and the page on
+ *  an inset panel that lifts off it. The selected row welds to that panel. Conxt keeps its projects
+ *  behind a switcher; here spaces are the main thing in the nav, so they're listed. */
 export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: React.ReactNode }) {
   const [creating, setCreating] = useState<string | null>(null);
   const [collapsed, toggle] = useCollapsed();
   // Folded, each item says what it is on hover.
   const tip = (label: string) => (collapsed ? label : undefined);
-  const waiting = (props.spaces ?? []).reduce((n, s) => n + (s.waiting ?? 0), 0);
-  const quick = [...(props.spaces ?? [])].sort((a, b) => Number(!!b.live) - Number(!!a.live) || b.activeAt - a.activeAt);
+  // By name, so a row stays put when you open it. A call moves its space to the top.
+  const spaces = [...(props.spaces ?? [])].sort((a, b) => Number(!!b.live) - Number(!!a.live) || a.name.localeCompare(b.name));
+  const row = ({ label, icon: Icon, to }: (typeof FOOT_ROWS)[number]) => (
+    <NavLink key={to} to={to} end={to === "/"} className="sp-navrow" title={tip(label)} aria-label={label}>
+      {({ isActive }) => (
+        <>
+          {isActive && <SelectedTabWeld />}
+          <Icon size={16} aria-hidden />
+          <span className="sp-side-text">{label}</span>
+        </>
+      )}
+    </NavLink>
+  );
   return (
     <NewSpaceContext.Provider value={(name = "") => setCreating(name)}>
       <div className={collapsed ? "spaces-page sp-shell collapsed" : "spaces-page sp-shell"}>
         <aside className="sp-side" aria-label="Spaces navigation">
           <div className="sp-side-head">
-            <Link to="/" className="lobby-brand sp-side-brand" title={tip("Stand")}>
-              <Logo />
-              <span className="sp-side-text">Stand</span>
+            <Link to="/" className="sp-side-brand" title="Conxt">
+              <ConxtLogo />
             </Link>
             <button
               className="sp-side-fold"
@@ -73,62 +145,28 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
               aria-expanded={!collapsed}
               title={`${collapsed ? "Expand" : "Collapse"} the sidebar (${SHORTCUT})`}
             >
-              <PanelIcon size={16} open={!collapsed} />
+              {collapsed ? <PanelLeftOpen size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}
             </button>
           </div>
-          <button className="sp-side-new" onClick={() => setCreating("")} title={tip("New space")} aria-label="New space">
-            <PlusIcon />
-            <span className="sp-side-text">New space</span>
-          </button>
-          <nav className="sp-side-nav">
-            <NavLink to="/" end title={tip("All spaces")} aria-label="All spaces">
-              <GridIcon />
-              <span className="sp-side-text">All spaces</span>
-            </NavLink>
-            <NavLink to="/spaces/manage" title={tip("Manage spaces")} aria-label="Manage spaces">
-              <SlidersIcon />
-              <span className="sp-side-text">Manage spaces</span>
-            </NavLink>
-            <NavLink to="/agents" title={tip("Connect an agent")} aria-label="Connect an agent">
-              <PlugIcon />
-              <span className="sp-side-text">Connect an agent</span>
-            </NavLink>
-          </nav>
-          {quick.length > 0 && (
-            <div className="sp-side-list">
-              <div className="sp-side-label">Your spaces</div>
-              {quick.map((s) => (
-                <div key={s.id} className="sp-side-row">
-                  <Link to={spaceHref(s.id)} className="sp-side-space" title={collapsed ? s.name : s.purpose || s.name}>
-                    <span className={s.live ? "sp-side-dot live" : "sp-side-dot"} aria-hidden />
-                    <span className="sp-side-initial" aria-hidden>
-                      {s.name.trim().charAt(0).toUpperCase()}
-                    </span>
-                    <span className="sp-side-name">{s.name}</span>
-                    {s.live && <span className="sr-only">(talking now)</span>}
-                  </Link>
-                  <Link
-                    to={joinHref(s.id)}
-                    className="sp-side-join"
-                    title={s.live ? "Join them" : "Start talking"}
-                    aria-label={`${s.live ? "Join them in" : "Start talking in"} ${s.name}`}
-                  >
-                    <MicIcon />
-                  </Link>
-                </div>
-              ))}
-            </div>
-          )}
+          <nav className="sp-side-nav">{row({ label: "All spaces", icon: LayoutGrid, to: "/" })}</nav>
+          <div className="sp-side-spaces">
+            {spaces.length > 0 && <p className="sp-side-label">Spaces</p>}
+            {spaces.map((s) => (
+              <SpaceRow key={s.id} space={s} collapsed={collapsed} />
+            ))}
+            <button className="sp-navrow" onClick={() => setCreating("")} title={tip("New space")} aria-label="New space">
+              <Plus size={16} aria-hidden />
+              <span className="sp-side-text">New space</span>
+            </button>
+          </div>
+          <nav className="sp-side-nav sp-side-foot">{FOOT_ROWS.map(row)}</nav>
           <div className="sp-side-user">
-            <UserMenu />
-            {waiting > 0 && (
-              <span className="sp-side-waiting" title={`${waiting} of your tasks ${waiting === 1 ? "has" : "have"} work in and ${waiting === 1 ? "waits" : "wait"} on your look`}>
-                {waiting} waiting on you
-              </span>
-            )}
+            <ProfileMenu collapsed={collapsed} />
           </div>
         </aside>
-        <div className="sp-content">{props.children}</div>
+        <div className="sp-content">
+          <div className="sp-surface">{props.children}</div>
+        </div>
         {creating !== null && <NewSpaceDialog initialName={creating} onClose={() => setCreating(null)} />}
       </div>
     </NewSpaceContext.Provider>
@@ -203,30 +241,3 @@ function NewSpaceDialog(props: { initialName: string; onClose: () => void }) {
     </div>
   );
 }
-
-const PlusIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-    <path d="M12 5v14M5 12h14" />
-  </svg>
-);
-const GridIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-    <rect x="4" y="4" width="7" height="7" rx="1.5" />
-    <rect x="13" y="4" width="7" height="7" rx="1.5" />
-    <rect x="4" y="13" width="7" height="7" rx="1.5" />
-    <rect x="13" y="13" width="7" height="7" rx="1.5" />
-  </svg>
-);
-const SlidersIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
-    <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" />
-    <circle cx="16" cy="6" r="2" />
-    <circle cx="10" cy="12" r="2" />
-    <circle cx="18" cy="18" r="2" />
-  </svg>
-);
-const PlugIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4" />
-  </svg>
-);

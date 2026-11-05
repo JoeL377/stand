@@ -7,6 +7,8 @@ export const config = {
   port: Number(env("PORT") ?? 3001),
   dataDir: path.resolve(env("DATA_DIR") ?? "./data"),
   production: process.env.NODE_ENV === "production",
+  /** npm run preview:ui only: the sample person everyone is, so a local look needs no sign-in. */
+  previewUser: env("PREVIEW_USER"),
   livekit: {
     url: env("LIVEKIT_URL"),
     apiKey: env("LIVEKIT_API_KEY"),

@@ -47,6 +47,7 @@ export function emailAllowed(email: string) {
  *  Access is checked on every request, not just at sign-in, so taking someone
  *  off the allowlist or turning on Google locks out existing sessions too. */
 export function userFromRequest(db: DB, req: IncomingMessage): User | null {
+  if (config.previewUser && !config.production && !googleEnabled()) return db.userByEmail(config.previewUser);
   const sid = parseCookies(req.headers.cookie)[SESSION_COOKIE];
   const s = sid ? db.sessionUser(sid) : null;
   if (!s || !emailAllowed(s.user.email)) return null;

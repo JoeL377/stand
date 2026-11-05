@@ -27,7 +27,7 @@ npm test
 To look at the web app with data in it before anything ships:
 
 ```bash
-npm run preview:ui   # http://localhost:5181, sign in as Sam Rivera, sam@acme.test
+npm run preview:ui   # http://localhost:5181, signed in as Sam Rivera
 ```
 
 It runs your checkout with live reload on made-up Acme data ([scripts/seed-preview.ts](scripts/seed-preview.ts)): to-dos, decisions and context in each state the pages can show. It ignores `.env`, so it makes no paid model calls and leaves your own `data` alone, and it starts fresh each run. Audio and Google sign-in don't run here, so a live call still needs a real test.

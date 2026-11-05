@@ -35,10 +35,9 @@ const team = [sam, priya, leo, maya];
 
 const room = db.createRoom("Acme Checkout", sam.id, "Ship one-page checkout by Dec 1");
 const growth = db.createRoom("Acme Growth", sam.id, "Weekly numbers and experiments");
-for (const u of team) {
-  db.touchMembership(room.id, u.id);
-  db.touchMembership(growth.id, u.id);
-}
+const support = db.createRoom("Acme Support", priya.id, "What shoppers keep asking us");
+const hiring = db.createRoom("Acme Hiring", maya.id, "Two engineers by January");
+for (const u of team) for (const space of [room, growth, support, hiring]) db.touchMembership(space.id, u.id);
 const [retries, guest, mobile] = db.addItems(room.id, [
   { source: "agenda", externalId: "PAY-212", title: "Payment retries", url: null, description: "Failed cards should retry without the shopper noticing." },
   { source: "agenda", externalId: "PAY-219", title: "Guest checkout", url: null, description: "Buy without making an account." },
@@ -171,6 +170,7 @@ const latest = meeting(2, 41, "Fraud numbers came in low, so guest checkout goes
       { kind: "decision", text: "Ship guest checkout to everyone on Nov 20", line: 0 },
       { kind: "action", text: "Add a chargeback alert", owner: "Leo Park" },
       { kind: "action", text: "Write the guest checkout launch note" },
+      { kind: "action", text: "Update the terms link at checkout", owner: "Sam Rivera" },
     ],
   },
   {
@@ -255,6 +255,9 @@ api.linkTodos(priyasAgent, { ref: ref(browserPath), dependsOn: ref(worker) });
 api.startWork(leosAgent, { ref: ref(alert) });
 api.postUpdate(leosAgent, { ref: ref(alert), status: "ready", text: "Chargebacks over 1% of a day's orders now page the on-call.", links: ["https://github.com/acme-demo/checkout/pull/44"] });
 
+// Yours, with the work in and waiting on your look.
+api.postUpdate(samsAgent, { ref: ref(latest.note("Update the terms link")), status: "ready", text: "The link now points at the new terms.", links: ["https://github.com/acme-demo/checkout/pull/45"] });
+
 // Stuck, and someone has to decide.
 api.postUpdate({ user: maya, token: db.createToken(maya.id, "Cursor", "write").info }, { ref: ref(summaryBar), status: "needs_decision", text: "The bar hides the Apple Pay button on small phones. Keep the button or the total?" });
 
@@ -284,5 +287,5 @@ raw.prepare("UPDATE notes SET done_at = ? WHERE id = ?").run(hoursAgo(30), key.i
 raw.prepare("UPDATE notes SET done_at = ? WHERE id = ?").run(hoursAgo(50), fraud.id);
 raw.close();
 
-console.log(`Sample data is in ${dir}. Sign in as Sam Rivera, sam@acme.test.`);
+console.log(`Sample data is in ${dir}. You are Sam Rivera, with no sign-in.`);
 process.exit(0);

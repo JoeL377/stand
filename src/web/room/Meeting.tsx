@@ -15,6 +15,7 @@ import { PopOutBar, canPopOut, usePopOut } from "./PopOutBar.tsx";
 import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
+import { MOD, meetingShortcuts } from "../shortcuts.ts";
 import { PilotRequest, type PilotActs, seatOf, usePilotNotices } from "./Pilot.tsx";
 
 export function Meeting(props: {
@@ -829,25 +830,10 @@ function remember(key: string, folded: boolean) {
   }
   return folded;
 }
-const MOD = IS_MAC ? { ctrl: "Control", alt: "Option", cmd: "Command" } : { ctrl: "Ctrl", alt: "Alt", cmd: "Ctrl" };
 
 function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => void }) {
   const ref = useDismiss<HTMLDivElement>(true, onClose);
-  const rows: Array<[string, string]> = [
-    ...(canSteer
-      ? ([
-          [`${MOD.alt} + ↓  /  ↑`, "Next / previous agenda item"],
-          ["←  /  →", "Flip slides while a deck is open"],
-        ] as Array<[string, string]>)
-      : []),
-    [`${MOD.cmd} + D`, "Mute or unmute"],
-    [`Hold ${MOD.ctrl} + Space`, "Ask Stand: say your question, then let go"],
-    [`${MOD.cmd} + \\`, "Hide or show the agenda"],
-    [`${MOD.ctrl} + Shift + S`, "Snap the shared screen into the meeting"],
-    ["Paste or drop an image", "Add a screenshot to the item in focus"],
-    ["Esc", "Close a menu or form"],
-    ["?", "Show or hide these shortcuts"],
-  ];
+  const rows = meetingShortcuts(canSteer);
   return (
     <div className="shortcuts" role="dialog" aria-label="How Stand works and keyboard shortcuts" ref={ref}>
       <div className="shortcuts-head">
