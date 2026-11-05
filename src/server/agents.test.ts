@@ -555,3 +555,36 @@ test("add_context needs a write token, and only replaces context from the same s
   assert.throws(() => api.addContext(write, { space: room.id, text: "Stripe", replaces: elsewhere.created.ref }), AgentError);
   assert.equal(api.listContext(write, room.id).count, 0);
 });
+
+test("whats_new says what changed in a space since a date, in one call", () => {
+  const { db, api, joe, room, action } = setup();
+  const caller = { user: joe, token: db.createToken(joe.id, "Claude Code", "write").info };
+  api.addContext(caller, { space: room.id, text: "Checkout runs on Stripe" });
+  db.setActionDone(room.id, action.id, "Joe Liang", "confirmed");
+
+  const week = api.whatsNew(caller, { space: "checkout" });
+  assert.deepEqual(
+    week.decided.map((d) => d.text),
+    ["Keep LiveKit; drop the browser fallback"],
+  );
+  assert.deepEqual(
+    week.open_questions.map((q) => q.text),
+    ["Do we need it on mobile first?"],
+  );
+  assert.deepEqual(
+    week.context.map((c) => c.text),
+    ["Checkout runs on Stripe"],
+  );
+  assert.deepEqual(
+    week.new_to_dos.map((t) => t.text),
+    ["Write the migration note"],
+  );
+  assert.deepEqual(
+    week.closed_to_dos.map((t) => [t.text, t.closed_by]),
+    [["Move transcript capture to the server", "confirmed"]],
+  );
+
+  const later = api.whatsNew(caller, { space: room.id, since: "2999-01-01" });
+  assert.equal(later.decided.length + later.closed_to_dos.length + later.context.length + later.new_to_dos.length, 0);
+  assert.throws(() => api.whatsNew(caller, { space: room.id, since: "last week" }), AgentError);
+});
