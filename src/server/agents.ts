@@ -650,7 +650,7 @@ export function agentApi(deps: AgentDeps) {
       };
     },
 
-    meetingBrief(caller: Caller, opts: { meetingId?: string; spaceId?: string; transcript?: boolean }, baseUrl: string) {
+    meetingBrief(caller: Caller, opts: { meetingId?: string; spaceId?: string; transcript?: boolean; carriedOver?: boolean }, baseUrl: string) {
       let meetingId = opts.meetingId;
       if (!meetingId) {
         if (!opts.spaceId) throw new AgentError("Give a meeting_id, or a space_id for its latest meeting.");
@@ -661,7 +661,11 @@ export function agentApi(deps: AgentDeps) {
       const m = db.getMeeting(meetingId);
       if (!m) throw new AgentError("No meeting with that id.");
       space(m.roomId, caller);
-      return deps.brief(m.id, baseUrl, !!opts.transcript);
+      const brief = deps.brief(m.id, baseUrl, !!opts.transcript) as { carriedOver?: unknown[] };
+      // Every open to-do from earlier meetings: more than the rest of a brief put together, and list_actions has them.
+      if (opts.carriedOver || !brief.carriedOver) return brief;
+      const { carriedOver, ...rest } = brief;
+      return { ...rest, carried_over_count: carriedOver.length };
     },
 
     postUpdate(caller: Caller, args: { itemId?: string; ref?: string; text?: string; status?: string; links?: string[] }, baseUrl = "") {
@@ -974,7 +978,7 @@ export function agentApi(deps: AgentDeps) {
     },
 
     /** What changed in a space since a date, in one call. */
-    whatsNew(caller: Caller, opts: { space: string; since?: string }, baseUrl = "") {
+    whatsNew(caller: Caller, opts: { space: string; since?: string; allUpdates?: boolean }, baseUrl = "") {
       const room = findSpace(caller, opts.space);
       const since = opts.since ? Date.parse(opts.since) : Date.now() - WHATS_NEW_DAYS * 86_400_000;
       if (Number.isNaN(since)) throw new AgentError(`"${clip(opts.since ?? "", 40)}" isn't a date. Use one like 2026-10-11 or 2026-10-11T08:00.`);
@@ -985,6 +989,21 @@ export function agentApi(deps: AgentDeps) {
       const actions = db.memberActions(caller.user.id).filter((n) => n.roomId === room.id);
       const open = actions.filter((n) => !isClosed(stateOf(n)));
       const work = workOn(open);
+      const closed = actions.filter((n) => (n.doneAt ?? 0) >= since);
+      const closedIds = new Set(closed.map((n) => n.id));
+      const reports = db.roomUpdates(room.id, since, 300);
+      // Newest first, so the first report on a to-do is its latest word.
+      const latest = new Map<string, { update: ItemUpdate; reports: number }>();
+      for (const u of reports) {
+        const key = u.noteId ?? u.id;
+        const seen = latest.get(key);
+        if (seen) seen.reports++;
+        else latest.set(key, { update: u, reports: 1 });
+      }
+      const summaryOf = (n: Note) => {
+        const u = reports.find((x) => x.noteId === n.id && x.status === "done");
+        return u ? clip(u.text, 300) : undefined;
+      };
       return {
         space: { id: room.id, name: room.name },
         since: new Date(since).toISOString(),
@@ -1009,8 +1028,24 @@ export function agentApi(deps: AgentDeps) {
           .filter((n) => stateOf(n, work.get(n.id)) === "doing" || work.get(n.id)?.ready)
           .map((n) => actionInfo(n, work.get(n.id))),
         new_to_dos: open.filter((n) => n.ts >= since).map((n) => actionInfo(n, work.get(n.id))),
-        closed_to_dos: actions.filter((n) => (n.doneAt ?? 0) >= since).map((n) => ({ ...actionInfo(n), closed_by: n.closedBy ?? undefined })),
-        updates: db.roomUpdates(room.id, since, 50).map((u) => updateInfo(u)),
+        closed_to_dos: closed.map((n) => ({ ...actionInfo(n), done_actor: undefined, closed_by: n.closedBy ?? undefined, summary: summaryOf(n) })),
+        updates: opts.allUpdates
+          ? reports.slice(0, 50).map((u) => updateInfo(u))
+          : [...latest.values()]
+              .filter(({ update }) => !update.noteId || !closedIds.has(update.noteId))
+              .map(({ update, reports }) => {
+                const n = update.noteId ? db.getNote(update.noteId) : null;
+                return {
+                  ref: n ? refOf(NOTE_KINDS[n.kind], n.id) : undefined,
+                  on: update.noteText ? clip(update.noteText, 120) : undefined,
+                  by: update.client ? `${update.userName} via ${update.client}` : update.userName,
+                  status: update.status,
+                  text: clip(update.text, 300),
+                  links: update.links.length ? update.links : undefined,
+                  at: new Date(update.ts).toISOString(),
+                  reports: reports > 1 ? reports : undefined,
+                };
+              }),
       };
     },
 

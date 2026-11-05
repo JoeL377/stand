@@ -154,11 +154,12 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
         meeting_id: z.string().optional(),
         space_id: z.string().optional().describe("Use the latest meeting in this space"),
         transcript: z.boolean().optional().describe("Include what was said (long). Default false"),
+        carried_over: z.boolean().optional().describe("Include every open to-do from earlier meetings (long; list_actions has them too). Default false"),
       },
       annotations: READ,
     },
-    ({ meeting_id, space_id, transcript }) =>
-      run(() => api.meetingBrief(caller, { meetingId: meeting_id, spaceId: space_id, transcript }, baseUrl)),
+    ({ meeting_id, space_id, transcript, carried_over }) =>
+      run(() => api.meetingBrief(caller, { meetingId: meeting_id, spaceId: space_id, transcript, carriedOver: carried_over }, baseUrl)),
   );
 
   server.registerTool(
@@ -268,14 +269,15 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "See what changed in a Stand space",
       description:
-        "Everything that changed in a Stand space since a date, in one call: meetings with their summaries, decisions, open questions, context, what's being worked on right now, to-dos added and closed, and what agents reported. Call it first when catching up. Then use get_meeting_brief for a meeting's detail or transcript.",
+        "Everything that changed in a Stand space since a date, in one call: meetings with their summaries, decisions, open questions, context, what's being worked on right now, to-dos added and closed with their summaries, and the latest word on everything else. Call it first when catching up. Then use get_meeting_brief for a meeting's detail or transcript.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         since: z.string().optional().describe("From this date or time, like 2026-10-11. Default: the last 7 days"),
+        all_updates: z.boolean().optional().describe("Every report, up to the newest 50, instead of the latest word on each to-do"),
       },
       annotations: READ,
     },
-    ({ space, since }) => run(() => api.whatsNew(caller, { space, since }, baseUrl)),
+    ({ space, since, all_updates }) => run(() => api.whatsNew(caller, { space, since, allUpdates: all_updates }, baseUrl)),
   );
 
   server.registerTool(
