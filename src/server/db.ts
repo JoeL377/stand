@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { parseActor, type Actor } from "../shared/actors.ts";
 import { createHash, randomBytes } from "node:crypto";
 import type {
   AgentCard,
@@ -450,6 +451,8 @@ const toNote = (r: Row): Note => ({
   ts: r.ts as number,
   doneAt: (r.done_at as number) ?? null,
   doneBy: (r.done_by as string) ?? null,
+  doneActor: r.done_actor_json ? (JSON.parse(r.done_actor_json as string) as Actor) : parseActor(r.done_by as string | null),
+  addedActor: r.added_actor_json ? (JSON.parse(r.added_actor_json as string) as Actor) : null,
   discussionId: (r.discussion_id as string) ?? null,
   editedBy: (r.edited_by as string) ?? null,
   quote: r.quote_json ? (JSON.parse(r.quote_json as string) as Quote) : null,
@@ -462,6 +465,12 @@ const toNote = (r: Row): Note => ({
   checkedAt: (r.checked_at as number) ?? null,
 });
 
+/** An update's actor when nothing richer was given, and for rows saved before actors were kept. */
+const actorOfUpdate = (name: string, client: string | null, userId?: string): Actor | null => {
+  const actor = parseActor(client ? `${name} via ${client}` : name);
+  return actor && userId && actor.kind !== "github" ? { ...actor, personId: userId } : actor;
+};
+
 const toUpdate = (r: Row): ItemUpdate => ({
   id: r.id as string,
   roomId: r.room_id as string,
@@ -470,6 +479,7 @@ const toUpdate = (r: Row): ItemUpdate => ({
   noteText: (r.note_text as string) ?? null,
   userName: r.user_name as string,
   client: (r.client as string) ?? null,
+  actor: r.actor_json ? (JSON.parse(r.actor_json as string) as Actor) : actorOfUpdate(r.user_name as string, (r.client as string) ?? null, r.user_id as string),
   status: r.status as UpdateStatus,
   text: r.text as string,
   links: JSON.parse(r.links_json as string),
@@ -547,6 +557,9 @@ export function openDb(file?: string) {
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
+  // Who did it, as fields (shared/actors.ts). Older rows read theirs from done_by and edited_by.
+  if (!noteCols.includes("done_actor_json")) db.exec("ALTER TABLE notes ADD COLUMN done_actor_json TEXT; ALTER TABLE notes ADD COLUMN added_actor_json TEXT;");
+  if (!(db.prepare("PRAGMA table_info(updates)").all() as Row[]).some((c) => c.name === "actor_json")) db.exec("ALTER TABLE updates ADD COLUMN actor_json TEXT;");
   // A decision's words as said (protocol.ts Quote), from the run as the meeting ends.
   if (!noteCols.includes("quote_json")) db.exec("ALTER TABLE notes ADD COLUMN quote_json TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
@@ -1122,6 +1135,17 @@ export function openDb(file?: string) {
           r.id as string,
         ]),
       );
+      // Who closed or added a note comes back with its wording too.
+      const actors = new Map(
+        (
+          db
+            .prepare(
+              `SELECT kind, text, done_actor_json, added_actor_json FROM notes WHERE meeting_id = ? AND item_id IS ?
+               AND (done_actor_json IS NOT NULL OR added_actor_json IS NOT NULL)`,
+            )
+            .all(meetingId, itemId) as Row[]
+        ).map((r) => [`${r.kind}:${r.text}`, r]),
+      );
       db.prepare("DELETE FROM notes WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
       const st = db.prepare(
         "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by, quote_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1172,15 +1196,16 @@ export function openDb(file?: string) {
           note.editedBy ?? null,
           note.quote ? JSON.stringify(note.quote) : null,
         );
+        const a = actors.get(`${note.kind}:${note.text}`);
+        if (a) db.prepare("UPDATE notes SET done_actor_json = ?, added_actor_json = ? WHERE id = ?").run(a.done_actor_json as string | null, a.added_actor_json as string | null, note.id);
         const t = task.get(`${note.kind}:${note.text}`);
         if (t) {
           db.prepare(`UPDATE notes SET ${TASK_COLS.split(", ").map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).run(
             ...TASK_COLS.split(", ").map((c) => (t[c] as string | number | null) ?? null),
             note.id,
           );
-          return [toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(note.id) as Row)];
         }
-        return [note];
+        return [t || a ? toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(note.id) as Row) : note];
       });
     },
     /** The host's own wording for a note. Edited notes stay as written when the agent redrafts. */
@@ -1220,6 +1245,11 @@ export function openDb(file?: string) {
         n.id, n.meetingId, n.itemId, n.kind, n.text, n.owner, n.ts, n.doneAt, n.doneBy, n.discussionId, n.editedBy ?? null,
         n.state ?? null, n.doneWhen ?? null, n.parentId ?? null, n.closedBy ?? null, n.dropReason ?? null,
         n.saidDone ? JSON.stringify(n.saidDone) : null, n.checkedAt ?? null,
+      );
+      db.prepare("UPDATE notes SET done_actor_json = ?, added_actor_json = ? WHERE id = ?").run(
+        n.doneAt && n.doneActor ? JSON.stringify(n.doneActor) : null,
+        n.addedActor ? JSON.stringify(n.addedActor) : null,
+        n.id,
       );
       db.prepare(
         "DELETE FROM dismissed_notes WHERE rowid IN (SELECT rowid FROM dismissed_notes WHERE meeting_id = ? AND item_id IS ? AND kind = ? AND text = ? LIMIT 1)",
@@ -1361,13 +1391,13 @@ export function openDb(file?: string) {
 
     /** Checks an action item off (by someone) or reopens it (by: null). closedBy: what closed it
      *  (shared/tasks.ts), "confirmed" when a person ticked it with nothing to show. */
-    setActionDone(roomId: string, noteId: string, by: string | null, closedBy = "confirmed"): Note | null {
+    setActionDone(roomId: string, noteId: string, by: string | null, closedBy = "confirmed", actor: Actor | null = null): Note | null {
       const res = db
         .prepare(
-          `UPDATE notes SET done_at = ?, done_by = ?, state = ?, closed_by = ?, drop_reason = NULL
+          `UPDATE notes SET done_at = ?, done_by = ?, done_actor_json = ?, state = ?, closed_by = ?, drop_reason = NULL
            WHERE id = ? AND kind = 'action' AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)`,
         )
-        .run(by ? Date.now() : null, by, by ? "done" : null, by ? closedBy : null, noteId, roomId);
+        .run(by ? Date.now() : null, by, by && actor ? JSON.stringify(actor) : null, by ? "done" : null, by ? closedBy : null, noteId, roomId);
       if (!res.changes) return null;
       return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
     },
@@ -1377,18 +1407,19 @@ export function openDb(file?: string) {
     setTaskState(
       roomId: string,
       noteId: string,
-      change: { state: TaskState; by: string; closedBy?: string | null; reason?: string | null; checked?: boolean },
+      change: { state: TaskState; by: string; actor?: Actor | null; closedBy?: string | null; reason?: string | null; checked?: boolean },
     ): Note | null {
       const closed = change.state === "done" || change.state === "dropped";
       const res = db
         .prepare(
-          `UPDATE notes SET state = ?, done_at = ?, done_by = ?, closed_by = ?, drop_reason = ?, checked_at = CASE WHEN ? = 'keep' THEN checked_at ELSE ? END
+          `UPDATE notes SET state = ?, done_at = ?, done_by = ?, done_actor_json = ?, closed_by = ?, drop_reason = ?, checked_at = CASE WHEN ? = 'keep' THEN checked_at ELSE ? END
            WHERE id = ? AND kind IN ('action', 'question') AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)`,
         )
         .run(
           change.state === "open" ? null : change.state,
           closed ? Date.now() : null,
           closed ? change.by : null,
+          closed && change.actor ? JSON.stringify(change.actor) : null,
           change.state === "done" ? (change.closedBy ?? "confirmed") : null,
           change.state === "dropped" ? (change.reason ?? null) : null,
           change.checked === undefined ? "keep" : "set",
@@ -2017,7 +2048,12 @@ export function openDb(file?: string) {
       return r ? (r.id as string) : null;
     },
 
-    addUpdate(u: Omit<ItemUpdate, "id" | "ts"> & { userId: string }): ItemUpdate {
+    /** Keeps who added a note by hand. */
+    setAddedActor(noteId: string, actor: Actor) {
+      db.prepare("UPDATE notes SET added_actor_json = ? WHERE id = ?").run(JSON.stringify(actor), noteId);
+    },
+
+    addUpdate(u: Omit<ItemUpdate, "id" | "ts" | "actor"> & { userId: string; actor?: Actor | null }): ItemUpdate {
       const update: ItemUpdate = {
         id: newId(12),
         roomId: u.roomId,
@@ -2026,13 +2062,14 @@ export function openDb(file?: string) {
         noteText: u.noteText,
         userName: u.userName,
         client: u.client,
+        actor: u.actor ?? actorOfUpdate(u.userName, u.client, u.userId),
         status: u.status,
         text: u.text,
         links: u.links,
         ts: Date.now(),
       };
       db.prepare(
-        "INSERT INTO updates (id, room_id, item_id, note_id, note_text, user_id, user_name, client, status, text, links_json, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO updates (id, room_id, item_id, note_id, note_text, user_id, user_name, client, actor_json, status, text, links_json, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ).run(
         update.id,
         update.roomId,
@@ -2042,6 +2079,7 @@ export function openDb(file?: string) {
         u.userId,
         update.userName,
         update.client,
+        JSON.stringify(update.actor),
         update.status,
         update.text,
         JSON.stringify(update.links),

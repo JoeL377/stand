@@ -1,3 +1,4 @@
+import type { Actor } from "./actors.ts";
 // Types shared by the server and the browser. The WebSocket at /ws/rooms/:id
 // carries ClientMessage up and ServerMessage down as JSON.
 
@@ -81,6 +82,10 @@ export interface Note {
   /** Action items only: when someone checked it off, and who. */
   doneAt: number | null;
   doneBy: string | null;
+  /** The same as doneBy, as fields (shared/actors.ts). */
+  doneActor?: Actor | null;
+  /** Who added this by hand, when it wasn't caught in a meeting. */
+  addedActor?: Actor | null;
   /** The discussion this came out of, when the agent grouped the talk into discussions. */
   discussionId: string | null;
   /** Who in the meeting last edited or added this by hand. The agent keeps edited notes as written. */
@@ -301,6 +306,8 @@ export interface ItemUpdate {
   userName: string;
   /** The agent token's label, e.g. "Claude Code on Joe's Mac"; null when a person posted it. */
   client: string | null;
+  /** Who posted it, as fields (shared/actors.ts). */
+  actor?: Actor | null;
   status: UpdateStatus;
   text: string;
   links: string[];
