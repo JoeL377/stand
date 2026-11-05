@@ -516,7 +516,7 @@ export function Stage(props: {
 
 export function Avatar({ id, name, picture, size = 44 }: { id: string; name: string; picture?: string | null; size?: number }) {
   return picture ? (
-    <img className="avatar" src={picture} alt="" width={size} height={size} referrerPolicy="no-referrer" />
+    <img className="avatar" src={picture} alt="" style={{ width: size, height: size }} referrerPolicy="no-referrer" />
   ) : (
     <div className="avatar" style={{ background: colorFor(id), width: size, height: size, fontSize: Math.max(11, size * 0.36) }}>
       {initials(name)}

@@ -26,9 +26,12 @@ const DAY = 86_400_000;
 const MIN = 60_000;
 const now = Date.now();
 
-const person = (name: string, email: string) => db.upsertUser({ googleSub: null, email, name, picture: null });
-const sam = person("Sam Rivera", "sam@acme.test");
-const priya = person("Priya Shah", "priya@acme.test");
+const person = (name: string, email: string, picture: string | null = null) => db.upsertUser({ googleSub: null, email, name, picture });
+/** A stand-in for a Google photo, large like the real ones, since people in production have them. */
+const photo = (color: string) =>
+  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="${color}"/><circle cx="48" cy="38" r="18" fill="#fff"/><ellipse cx="48" cy="92" rx="32" ry="30" fill="#fff"/></svg>`)}`;
+const sam = person("Sam Rivera", "sam@acme.test", photo("#3f6f8f"));
+const priya = person("Priya Shah", "priya@acme.test", photo("#8f5f3f"));
 const leo = person("Leo Park", "leo@acme.test");
 const maya = person("Maya Chen", "maya@acme.test");
 const team = [sam, priya, leo, maya];
