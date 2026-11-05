@@ -440,7 +440,7 @@ export function agentApi(deps: AgentDeps) {
         url: refUrl(baseUrl, r.ref.kind, n.id),
         next:
           n.kind === "action"
-            ? "When you start, call post_update with this ref and status working so people see you're on it. If you write a plan or spec, attach_plan keeps it on this to-do. If it needs another to-do done first, link_todos says so. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR, put this ref in the PR description and call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
+            ? "When you start, call start_work with this ref so people and other agents see you're on it. If you write a plan or spec, attach_plan keeps it on this to-do. If it needs another to-do done first, link_todos says so. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR, put this ref in the PR description and call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
             : undefined,
       };
     },
@@ -478,7 +478,7 @@ export function agentApi(deps: AgentDeps) {
         `"${clip(text, 200)}" (${where})`,
         ...[...decided, ...fallback].map((d) => `Decided: ${clip(d.text, 200)}`),
         r.ref.kind === "action"
-          ? "Pull the full context with the Stand MCP (get), post_update with status working when you start, do the work, attach screenshots of anything that shows on screen (screenshot_upload_url), then report back: if it's a PR, put the ref in its description and post_update with status ready and the PR link (Stand checks it off when the PR merges), else complete_action with a summary of what changed."
+          ? "Call start_work with the Stand MCP when you start: it marks the to-do as yours and gives you the full context. Do the work, attach screenshots of anything that shows on screen (screenshot_upload_url), then report back: if it's a PR, put the ref in its description and post_update with status ready and the PR link (Stand checks it off when the PR merges), else complete_action with a summary of what changed."
           : r.ref.kind === "question"
             ? "Pull the full context with the Stand MCP (get), dig into it, then report what you found with post_update (status needs_decision if people must decide)."
             : "Pull the full context with the Stand MCP (get) before acting on it.",
@@ -717,6 +717,42 @@ export function agentApi(deps: AgentDeps) {
               ? `The to-do shows as ready to ship. Stand checks it off by itself when ${pr} merges, with your text as the summary; no need to come back to it.`
               : "The to-do shows as ready to ship, but with no GitHub PR link Stand can't tell when it ships: call complete_action when it does, or post ready again with the PR link."
             : undefined,
+      };
+    },
+
+    /** Starting on a to-do, in one call: says you're on it and gives back all you need, with anything
+     *  worth knowing first. Nothing here stops anyone; a heads-up is for the agent and its person to weigh. */
+    startWork(caller: Caller, args: { ref: string; note?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const ref = args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`;
+      const r = resolve(caller, ref);
+      if (!r.note || r.note.kind !== "action") throw new AgentError("start_work takes a to-do (stand:action/...). For anything else, use get.");
+      const n = r.note;
+      const work = workOn([n]).get(n.id);
+      const closed = isClosed(stateOf(n));
+      const dependencies = dependenciesOf(n);
+      const who = (d: NonNullable<typeof dependencies.waits_on>[number]) => d.working?.by ?? d.owner ?? "nobody yet";
+      const open = (list?: typeof dependencies.waits_on) => (list ?? []).filter((d) => d.status !== "done" && d.status !== "dropped");
+      const headsUp = [
+        closed ? `This to-do is already ${stateOf(n)}, so it wasn't marked as started.` : undefined,
+        work?.working && work.working.by !== byOf(caller)
+          ? `${work.working.by} is already on this, since ${new Date(work.working.since).toISOString()}. Their last word: ${clip(work.working.text, 200)}`
+          : undefined,
+        work?.ready ? `${work.ready.by} reported this ready to ship${work.ready.pr ? `: ${work.ready.pr}` : ""}.` : undefined,
+        ...open(dependencies.waits_on).map((d) => `This waits on "${clip(d.text, 120)}" (${d.status}, ${who(d)}): ${d.ref}`),
+        ...open(dependencies.waiting_on_this).map((d) => `"${clip(d.text, 120)}" waits on this (${d.status}, ${who(d)}): ${d.ref}`),
+      ].filter((line) => line !== undefined);
+      if (!closed) this.postUpdate(caller, { ref, status: "working", text: args.note }, baseUrl);
+      const others = db.memberActions(caller.user.id).filter((x) => x.roomId === r.room.id && x.id !== n.id && !isClosed(stateOf(x)));
+      const othersWork = workOn(others);
+      return {
+        started: !closed,
+        heads_up: headsUp.length ? headsUp : undefined,
+        ...(this.get(caller, ref, baseUrl) as object),
+        also_being_worked_on: others
+          .filter((x) => othersWork.get(x.id)?.working)
+          .map((x) => ({ ref: refOf("action", x.id), text: clip(x.text, 160), by: othersWork.get(x.id)!.working!.by, doing: clip(othersWork.get(x.id)!.working!.text, 160) })),
+        next: "Do the work. attach_plan if you write a plan or spec, link_todos if it needs another to-do done first. When it's in a PR, put this ref in the description and post_update with status ready and the PR link: Stand checks it off when the PR merges. With nothing to ship, complete_action with a summary.",
       };
     },
 

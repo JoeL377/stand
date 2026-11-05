@@ -15,8 +15,11 @@ Between meetings people also save notes to a space from the Stand bar on their M
 
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:context/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
+At the start of a session, call whats_new for the space you're working in and work from what it says. It covers the last 7 days and what's being worked on right now, so nobody has to re-explain.
+Before starting on a to-do, call start_work with its ref: one call marks it as yours and returns why it exists, its plan, what it depends on and what else is in progress. Tell your person about any heads_up before going on; nothing stops you.
+
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
-Working on a to-do: check it isn't already being worked on (working on the to-do, or being_worked_on in whats_new), then post_update with its ref and status working when you start, so people and other agents see you're on it. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
+If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
@@ -210,6 +213,22 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     reason: z.string().optional().describe("Dropped only: why, in a line"),
     links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5). A merged PR link on done shows the PR closed it"),
   };
+
+  server.registerTool(
+    "start_work",
+    {
+      title: "Start on a Stand to-do",
+      description:
+        "Call this when you start on a to-do. In one call it marks the to-do as being worked on, so people and other agents can see, and returns everything get does: the topic and decisions behind it, each person's position, quotes, its plan, what it waits on and what waits on it, plus what else in the space is being worked on right now. heads_up lists anything to weigh first, like someone else already being on it. Nothing stops you starting.",
+      inputSchema: {
+        ref: z.string().describe("The to-do's reference, stand:action/<id>"),
+        note: z.string().optional().describe("What you're about to do, in a sentence. Shows in Stand"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ ref, note, model }) => run(() => api.startWork(as(model), { ref, note }, baseUrl)),
+  );
 
   server.registerTool(
     "attach_plan",

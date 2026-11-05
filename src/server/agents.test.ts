@@ -870,3 +870,43 @@ test("to-dos can depend on each other: both sides see it, it never stops anyone,
   assert.equal((api.get(caller, second, "") as Got).waits_on, undefined);
   assert.equal((api.linkTodos(caller, { ref: second, dependsOn: first, remove: true }) as { unchanged?: boolean }).unchanged, true);
 });
+
+test("start_work: one call marks the to-do and gives back all an agent needs, with heads-ups that stop nothing", () => {
+  const { api, db, joe, andy, room, action, notes } = setup();
+  db.touchMembership(room.id, andy.id);
+  const mine = { user: joe, token: db.createToken(joe.id, "Claude Code", "write").info };
+  const theirs = { user: andy, token: db.createToken(andy.id, "Codex", "write").info };
+  const first = `stand:action/${action.id}`;
+  const second = `stand:action/${notes.find((n) => n.text.startsWith("Write"))!.id}`;
+  api.attachPlan(mine, { ref: first, plan: "# Move it" });
+  api.linkTodos(mine, { ref: first, dependsOn: second });
+
+  const started = api.startWork({ ...mine, model: "claude-opus-5-5" }, { ref: first, note: "Adding the worker" }) as Record<string, any>;
+  assert.equal(started.started, true);
+  assert.equal(started.status, "doing");
+  assert.equal(started.working.doing, "Adding the worker");
+  assert.equal(started.plan.text, "# Move it");
+  assert.equal(started.topic.topic, "Where transcription runs");
+  assert.deepEqual(started.decided_with_it, ["Keep LiveKit; drop the browser fallback"]);
+  assert.deepEqual(started.waits_on.map((d: { ref: string }) => d.ref), [second]);
+  assert.match(started.heads_up[0], /waits on "Write the migration note"/);
+  assert.equal(db.notesUpdates([action.id]).at(-1)?.actor?.model, "claude-opus-5-5");
+
+  const again = api.startWork(mine, { ref: first }) as Record<string, any>;
+  assert.equal(again.heads_up.length, 1, "you aren't warned about yourself");
+
+  const other = api.startWork(theirs, { ref: first }) as Record<string, any>;
+  assert.equal(other.started, true, "someone else being on it is a heads-up, not a stop");
+  assert.match(other.heads_up[0], /Joe Liang via Claude Code is already on this/);
+
+  const elsewhere = api.startWork(mine, { ref: second }) as Record<string, any>;
+  assert.deepEqual(elsewhere.also_being_worked_on.map((d: { ref: string }) => d.ref), [first]);
+  assert.match(elsewhere.heads_up[0], /waits on this/);
+
+  api.completeAction(mine, { ref: first, note: "Done" });
+  const late = api.startWork(mine, { ref: first }) as Record<string, any>;
+  assert.equal(late.started, false);
+  assert.match(late.heads_up[0], /already done/);
+  assert.throws(() => api.startWork({ user: joe, token: { ...mine.token, scope: "read" } }, { ref: second }), /read only/);
+  assert.throws(() => api.startWork(mine, { ref: `stand:decision/${notes[0].id}` }), /to-do/);
+});
