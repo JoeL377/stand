@@ -9,3 +9,7 @@ In every session:
 3. **Close it through the PR.** Put `stand:action/<id>` in the PR description, then call `post_update` with the ref, `status: "ready"`, a short summary and the PR link. Stand checks the to-do off when the PR merges.
 
 Do both parts of step 3. Stand finds merges by watching PRs reported ready. The ref on its own only closes a to-do through the Stand GitHub App, which is off in production.
+
+Before building, read `docs/mvp-plan.md`. For anything about decisions, conflicts or search, read `docs/engine-brief.md` too.
+
+Merging redeploys Stand, which can cut a live call. Check that no meeting is live before you merge.
