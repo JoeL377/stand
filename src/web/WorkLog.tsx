@@ -1,4 +1,4 @@
-// What agents do on a to-do: a loading mark while one is on it, and a log of
+// What agents do on a to-do: a pill while one is on it, and a log of
 // what it reported (the summary of what changed first, with its screenshots)
 // that opens under the to-do. Agents report through the Stand MCP.
 

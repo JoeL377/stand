@@ -2108,15 +2108,9 @@ a.sh-pill:hover { text-decoration: none; }
   border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent);
   animation: fu-spin 0.9s linear infinite;
 }
-.followups li.working .check { position: relative; border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
-.followups li.working .check::after {
-  content: ""; position: absolute; inset: -1.5px; border-radius: inherit;
-  border: 1.5px solid transparent; border-top-color: var(--accent); border-right-color: var(--accent);
-  animation: fu-spin 1.1s linear infinite;
-}
 @keyframes fu-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .fu-spin, .followups li.working .check::after { animation: none; }
+  .fu-spin { animation: none; }
 }
 
 .fu-log { margin: 6px 0 2px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }

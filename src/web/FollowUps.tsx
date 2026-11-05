@@ -55,7 +55,7 @@ export function FollowUpList(props: {
         const w = work[n.id];
         const open = opened === n.id && !!w?.log.length;
         return (
-          <li key={n.id} className={[done && "done", dropped && "dropped", w?.working && "working"].filter(Boolean).join(" ") || undefined}>
+          <li key={n.id} className={[done && "done", dropped && "dropped"].filter(Boolean).join(" ") || undefined}>
             <button
               className="check"
               role="checkbox"
