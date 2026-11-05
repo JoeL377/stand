@@ -71,6 +71,8 @@ export interface AgentDeps {
 
 type Work = Pick<ActionWork, "working" | "ready">;
 
+const PLAN_MAX = 100_000;
+
 const UPDATE_STATUSES: UpdateStatus[] = ["working", "progress", "blocked", "needs_decision", "ready", "done"];
 
 export function agentApi(deps: AgentDeps) {
@@ -294,6 +296,7 @@ export function agentApi(deps: AgentDeps) {
   function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number; addedByHand?: boolean }>, baseUrl: string) {
     const items = new Map<string, Item | null>();
     const work = workOn(rows);
+    const planned = db.plannedNotes(rows.map((n) => n.id));
     return rows.map((n) => {
       if (n.itemId && !items.has(n.itemId)) items.set(n.itemId, db.getItem(n.itemId));
       const item = n.itemId ? items.get(n.itemId)! : null;
@@ -302,6 +305,7 @@ export function agentApi(deps: AgentDeps) {
         : undefined;
       return {
         ...actionInfo(n, work.get(n.id)),
+        has_plan: planned.has(n.id) || undefined,
         space: n.roomName as string | undefined,
         item: item ? { id: item.id, title: item.title, key: item.externalId ?? undefined } : undefined,
         decided: decision?.text,
@@ -388,6 +392,7 @@ export function agentApi(deps: AgentDeps) {
       const sameTopic = r.topic ? db.meetingNotes(r.meeting.id).filter((x) => x.discussionId === r.topic!.id && x.id !== n.id) : [];
       const updates = n.kind === "action" ? db.noteUpdates(n.id) : [];
       const work = n.kind === "action" ? workOn([n]).get(n.id) : undefined;
+      const plan = n.kind === "action" ? db.notePlan(n.id) : null;
       return {
         ref: refOf(r.ref.kind, n.id),
         kind: r.ref.kind,
@@ -396,6 +401,7 @@ export function agentApi(deps: AgentDeps) {
         owner: n.owner ?? undefined,
         status: n.kind === "action" ? stateOf(n, work) : undefined,
         ...workInfo(work),
+        plan: plan ? { text: plan.text, by: plan.by, actor: plan.actor, at: new Date(plan.ts).toISOString(), versions: plan.versions } : undefined,
         done_by: n.doneBy ?? undefined,
         ...(n.kind === "decision" ? decisionInfo(settledView(db, r.room.id).decided.find((x) => x.id === n.id)) : {}),
         why_dropped: n.kind === "action" && n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
@@ -414,7 +420,7 @@ export function agentApi(deps: AgentDeps) {
         url: refUrl(baseUrl, r.ref.kind, n.id),
         next:
           n.kind === "action"
-            ? "When you start, call post_update with this ref and status working so people see you're on it. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR, put this ref in the PR description and call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
+            ? "When you start, call post_update with this ref and status working so people see you're on it. If you write a plan or spec, attach_plan keeps it on this to-do. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR, put this ref in the PR description and call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
             : undefined,
       };
     },
@@ -692,6 +698,33 @@ export function agentApi(deps: AgentDeps) {
               : "The to-do shows as ready to ship, but with no GitHub PR link Stand can't tell when it ships: call complete_action when it does, or post ready again with the PR link."
             : undefined,
       };
+    },
+
+    /** Keeps a plan or spec on a to-do, as a new version. It says nothing about who's on it. */
+    attachPlan(caller: Caller, args: { ref: string; plan: string }, baseUrl = "") {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`);
+      if (!r.note || r.note.kind !== "action") throw new AgentError("Plans go on to-dos (stand:action/...).");
+      const plan = args.plan.trim();
+      if (!plan) throw new AgentError("The plan is empty.");
+      if (plan.length > PLAN_MAX) throw new AgentError(`That plan is ${plan.length} characters. Stand keeps up to ${PLAN_MAX}.`);
+      const actor = actorOf(caller);
+      db.addPlan(r.room.id, r.note.id, plan, byOf(caller), actor);
+      const update = db.addUpdate({
+        roomId: r.room.id,
+        itemId: r.itemId,
+        noteId: r.note.id,
+        noteText: r.note.text,
+        userId: caller.user.id,
+        userName: caller.user.name,
+        client: caller.token?.label ?? null,
+        actor,
+        status: "plan",
+        text: clip(plan.replace(/^[#\s]+/, "").split("\n")[0], 160),
+        links: [],
+      });
+      deps.notify(r.room.id, "updates");
+      return { attached: updateInfo(update, baseUrl), versions: db.notePlan(r.note.id)?.versions, shows_on: "the to-do in Stand, and in get" };
     },
 
     completeAction(caller: Caller, args: { ref: string; note?: string; links?: string[] }, baseUrl = "") {

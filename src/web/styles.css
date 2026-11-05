@@ -2055,6 +2055,10 @@ a.sh-pill:hover { text-decoration: none; }
 .wl-link:hover { color: var(--accent-text); background: var(--accent-soft); text-decoration: none; }
 .wl-text { margin: 4px 0 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
 .followups li.done .wl-text { text-decoration: none; }
+.wl-plan { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.wl-plan summary { cursor: pointer; font-weight: 600; }
+.wl-plan summary .wl-by, .wl-plan summary time { font-weight: 400; color: var(--muted); }
+.wl-plan .wl-text { max-height: 420px; overflow-y: auto; }
 .wl-shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .wl-shots button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; max-width: 220px; height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; font-size: 11.5px; text-align: left; color: var(--muted); cursor: zoom-in; }
 .wl-shots img { display: block; max-width: 220px; max-height: 140px; object-fit: cover; object-position: top left; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }

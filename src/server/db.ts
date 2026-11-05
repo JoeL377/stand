@@ -343,6 +343,17 @@ CREATE TABLE IF NOT EXISTS decision_checks (
   actor_json TEXT,
   findings_json TEXT
 );
+-- Plans and specs attached to a to-do. Each attach adds a version; the newest is the plan.
+CREATE TABLE IF NOT EXISTS task_plans (
+  id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  text TEXT NOT NULL,
+  made_by TEXT NOT NULL,
+  made_at INTEGER NOT NULL,
+  made_actor_json TEXT
+);
+CREATE INDEX IF NOT EXISTS task_plans_note ON task_plans(note_id, made_at);
 -- How a space's tasks, decisions and context relate (docs/mvp-primitives.md).
 CREATE TABLE IF NOT EXISTS links (
   id TEXT PRIMARY KEY,
@@ -1615,6 +1626,38 @@ export function openDb(file?: string) {
         by,
         Date.now(),
         actor ? JSON.stringify(actor) : null,
+      );
+    },
+    /** Keeps a new version of a to-do's plan. */
+    addPlan(roomId: string, noteId: string, text: string, by: string, actor: Actor | null = null) {
+      db.prepare("INSERT INTO task_plans (id, note_id, room_id, text, made_by, made_at, made_actor_json) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        newId(12),
+        noteId,
+        roomId,
+        text,
+        by,
+        Date.now(),
+        actor ? JSON.stringify(actor) : null,
+      );
+    },
+    /** A to-do's latest plan and how many versions it has had. */
+    notePlan(noteId: string) {
+      const rows = db.prepare("SELECT * FROM task_plans WHERE note_id = ? ORDER BY made_at DESC, rowid DESC").all(noteId) as Row[];
+      const r = rows[0];
+      if (!r) return null;
+      return {
+        text: r.text as string,
+        by: r.made_by as string,
+        actor: r.made_actor_json ? (JSON.parse(r.made_actor_json as string) as Actor) : undefined,
+        ts: r.made_at as number,
+        versions: rows.length,
+      };
+    },
+    /** Which of these to-dos have a plan. */
+    plannedNotes(noteIds: string[]): Set<string> {
+      if (!noteIds.length) return new Set();
+      return new Set(
+        (db.prepare(`SELECT DISTINCT note_id FROM task_plans WHERE note_id IN (${noteIds.map(() => "?").join(",")})`).all(...noteIds) as Row[]).map((r) => r.note_id as string),
       );
     },
     /** A space's context, newest first, without what a later line replaced. */
