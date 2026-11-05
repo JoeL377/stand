@@ -70,6 +70,8 @@ export function settledView(db: DB, roomId: string) {
   const byId = new Map(notes.map((n) => [n.id, n]));
   const rows = new Map((db.getSettled(roomId)?.rows ?? []).map((r) => [r.noteId, r]));
   const confirmed = new Map(db.roomLinks(roomId, "replaces").map((l) => [l.toId, l.fromId]));
+  // A check by someone's agent proposes too: later decision first, earlier second.
+  const flagged = new Map(db.roomLinks(roomId, "conflicts").map((l) => [l.toId, l.fromId]));
   const turnedDown = new Set(db.roomLinks(roomId, "not_replaced").map((l) => `${l.fromId}>${l.toId}`));
   const shown = (n?: (typeof notes)[number]): ReplacedBy | undefined =>
     n ? { noteId: n.id, text: n.text, meetingId: n.meetingId, startedAt: n.meetingStartedAt } : undefined;
@@ -78,12 +80,12 @@ export function settledView(db: DB, roomId: string) {
     .map((n) => {
       const replacedBy = shown(byId.get(confirmed.get(n.id) ?? ""));
       const r = rows.get(n.id);
-      const proposed = !replacedBy && r?.how === "replaced" && !turnedDown.has(`${r.byNoteId}>${n.id}`);
+      const later = [flagged.get(n.id), r?.how === "replaced" ? r.byNoteId : undefined].find((id) => id && !turnedDown.has(`${id}>${n.id}`));
       return {
         ...n,
         decisionState: replacedBy ? ("replaced" as const) : ("kept" as const),
         replacedBy,
-        mayBeReplacedBy: proposed ? shown(byId.get(r.byNoteId)) : undefined,
+        mayBeReplacedBy: replacedBy ? undefined : shown(byId.get(later ?? "")),
       };
     });
   return {

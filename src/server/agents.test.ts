@@ -149,6 +149,55 @@ test("a decision says why, from its discussion and quote, for agents catching up
   assert.equal((api.get(caller, `stand:decision/${decision.id}`, "") as { why?: { topic?: string } }).why?.topic, "Where transcription runs");
 });
 
+test("an agent takes a conflict check, and what it finds stays a proposal until someone confirms", () => {
+  const { api, db, joe, andy, room, item, notes } = setup();
+  db.touchMembership(room.id, andy.id);
+  const old = notes[0];
+  const m = db.startMeeting(room.id);
+  db.raw.prepare("UPDATE meetings SET started_at = started_at + 1000 WHERE id = ?").run(m.id);
+  const [later] = db.replaceNotes(m.id, item.id, [{ kind: "decision", text: "Drop LiveKit", owner: null }]);
+  db.endMeeting(m.id, null);
+  const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "gpt-5" };
+
+  const job = api.nextCheck(agent, room.id);
+  assert.equal(job.new_decision?.text, "Drop LiveKit");
+  assert.deepEqual(job.earlier_decisions?.map((d) => d.text), [old.text]);
+  assert.ok(job.instructions?.includes("replaces"));
+  assert.equal(api.nextCheck({ user: andy, token }, room.id).waiting, 0, "a held check isn't handed out twice");
+
+  const ref = `stand:decision/${later.id}`;
+  const done = api.submitCheck(agent, {
+    ref,
+    findings: [
+      { ref: `stand:decision/${old.id}`, relation: "replaces", confidence: 0.9, why: "Reverses it" },
+      { ref: "stand:decision/madeupid", relation: "replaces", confidence: 1 },
+    ],
+  });
+  assert.deepEqual([done.kept, done.dropped, done.shown_as_proposals], [1, 1, 1], "an id it wasn't given is dropped");
+
+  const seen = api.get({ user: joe, token: null }, `stand:decision/${old.id}`, "") as { state?: string; may_be_replaced_by?: { text: string } };
+  assert.equal(seen.state, "kept");
+  assert.equal(seen.may_be_replaced_by?.text, "Drop LiveKit");
+  assert.equal(api.nextCheck(agent, room.id).waiting, 0, "a finished check stays finished");
+  assert.equal(api.submitCheck(agent, { ref, findings: [] }).already_checked, true);
+});
+
+test("a check's low-confidence findings stay on record and don't show", () => {
+  const { api, db, joe, room, item, notes } = setup();
+  const m = db.startMeeting(room.id);
+  db.raw.prepare("UPDATE meetings SET started_at = started_at + 1000 WHERE id = ?").run(m.id);
+  const [later] = db.replaceNotes(m.id, item.id, [{ kind: "decision", text: "Keep LiveKit for now", owner: null }]);
+  db.endMeeting(m.id, null);
+  const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const out = api.submitCheck({ user: joe, token }, {
+    ref: `stand:decision/${later.id}`,
+    findings: [{ ref: `stand:decision/${notes[0].id}`, relation: "replaces", confidence: 0.3 }],
+  });
+  assert.deepEqual([out.kept, out.shown_as_proposals], [1, 0]);
+  assert.equal((api.get({ user: joe, token: null }, `stand:decision/${notes[0].id}`, "") as { may_be_replaced_by?: unknown }).may_be_replaced_by, undefined);
+});
+
 test("a to-do closed by its PR merging keeps the agent that reported it ready", async () => {
   const { api, db, joe, room, action } = setup();
   const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };

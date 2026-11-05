@@ -87,6 +87,20 @@ Each step is a small PR.
 6. **Conflict check when something is kept.** It opens a decide task for the owner and writes a `conflicts` link. Work carries on.
 7. **Live callouts**, last. They reuse step 6 during a call.
 
+## Where the check stands
+
+Nov 5. People's own agents can run it over the MCP: `next_check` hands out the newest unchecked decision, `submit_check` takes the findings back, and Stand pays for no model call. Findings at 0.7 or higher show as proposals. Lower ones stay on record. Nothing tells agents to run it yet.
+
+Blind runs by an agent, one each, so treat them as signals:
+
+| Run | Reversals found at 0.7 | Traps tripped |
+| --- | --- | --- |
+| The brief's set, decisions alone | 0 of 2 | 0 of 3 |
+| The brief's set, with each discussion | 0 of 2 | 0 of 3 |
+| Held-out set, key written first, with each discussion | 3 of 4 | 0 of 7 |
+
+It's reliable on plain reversals and weak on subtle ones. The Oct 17 to Oct 30 port reversal scored 0.40 in one run and 0.35 in the next, so a lower cutoff wouldn't catch it reliably. All of this ran on Claude only.
+
 ## Rules
 
 - **Merge your own PRs when CI is green.** Huy approved that on Nov 4. Check that no meeting is live first. Auto-merge isn't available on this repo.

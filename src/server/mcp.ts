@@ -239,6 +239,44 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
   );
 
   server.registerTool(
+    "next_check",
+    {
+      title: "Take a conflict check from Stand",
+      description:
+        "Hands you the newest decision nobody has checked yet, the earlier decisions it might change, and how to judge them. You do the judging, then call submit_check. Nothing waits on this. It's held for you for ten minutes. waiting: 0 means nothing needs checking.",
+      inputSchema: { space: z.string().describe("The space's id or name (from list_spaces)") },
+      annotations: WRITE,
+    },
+    ({ space }) => run(() => api.nextCheck(caller, space)),
+  );
+
+  server.registerTool(
+    "submit_check",
+    {
+      title: "Give Stand the result of a conflict check",
+      description:
+        "Returns what you found from next_check. Findings are proposals: a decision stays kept until a person confirms. Send an empty list if nothing changed, so it isn't checked again.",
+      inputSchema: {
+        ref: z.string().describe("The decision you checked, stand:decision/<id>"),
+        findings: z
+          .array(
+            z.object({
+              ref: z.string().describe("The earlier decision, stand:decision/<id>"),
+              relation: z.enum(["replaces", "duplicate"]),
+              confidence: z.number().min(0).max(1),
+              why: z.string().optional().describe("The reason, in a short line"),
+            }),
+          )
+          .describe("What the new decision changes or repeats. Empty if nothing"),
+        version: z.string().optional().describe("The version next_check gave you"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ ref, findings, version, model }) => run(() => api.submitCheck(as(model), { ref, findings, version })),
+  );
+
+  server.registerTool(
     "confirm_replaced",
     {
       title: "Confirm a Stand decision was replaced",

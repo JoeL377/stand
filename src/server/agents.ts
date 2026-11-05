@@ -11,6 +11,7 @@ import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
 import { settledView } from "./spaceSettle.ts";
+import { CHECK_INSTRUCTIONS, CHECK_LEASE_MS, CHECK_VERSION, SHOW_FROM } from "./decisionCheck.ts";
 
 /** A position as one line, with the person's own words when the meeting-end run kept them. */
 const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.position}${p.quote ? ` (in their words: "${p.quote.text}")` : ""}`;
@@ -727,6 +728,60 @@ export function agentApi(deps: AgentDeps) {
         log: update ? updateInfo(update, baseUrl) : undefined,
         shows_on: `The space's Tasks tab in Stand, and the next meeting's check-in while it's open.`,
       };
+    },
+
+    /** Hands an agent the newest decision nobody has checked yet, with what it should be checked against. */
+    nextCheck(caller: Caller, spaceQuery: string) {
+      requireWrite(caller);
+      const room = findSpace(caller, spaceQuery);
+      const { decided } = settledView(db, room.id);
+      const standing = decided
+        .filter((n) => n.decisionState === "kept")
+        .sort((a, b) => a.meetingStartedAt - b.meetingStartedAt || a.ts - b.ts);
+      const taken = db.takenChecks(room.id);
+      const waiting = standing.slice(1).filter((n) => !taken.has(n.id));
+      const next = waiting.at(-1);
+      if (!next) return { waiting: 0 };
+      db.claimCheck(room.id, next.id, CHECK_VERSION, Date.now() + CHECK_LEASE_MS, actorOf(caller));
+      const shown = (n: (typeof standing)[number]) => ({ ref: refOf("decision", n.id), on: day(n.meetingStartedAt), text: n.text, why: whyOf(n) });
+      return {
+        waiting: waiting.length,
+        version: CHECK_VERSION,
+        instructions: CHECK_INSTRUCTIONS,
+        new_decision: shown(next),
+        earlier_decisions: standing.slice(0, standing.indexOf(next)).map(shown),
+        then: "Judge it yourself and call submit_check with the ref, even if you found nothing.",
+      };
+    },
+
+    /** Takes back what an agent found. Findings are proposals: nothing changes until a person confirms. */
+    submitCheck(
+      caller: Caller,
+      args: { ref: string; findings: Array<{ ref: string; relation: "replaces" | "duplicate"; confidence: number; why?: string }>; version?: string },
+    ) {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref);
+      if (r.note?.kind !== "decision") throw new AgentError("Give the decision you checked: stand:decision/<id>.");
+      const checked = r.note;
+      const standing = settledView(db, r.room.id).decided;
+      const self = standing.find((n) => n.id === checked.id);
+      const known = (ref: string) => {
+        const id = parseRef(ref)?.id;
+        const n = standing.find((x) => x.id === id);
+        return n && self && n.id !== self.id && n.meetingStartedAt <= self.meetingStartedAt ? n : null;
+      };
+      const findings = args.findings.flatMap((f) => {
+        const n = known(f.ref);
+        const confidence = Math.min(1, Math.max(0, Number(f.confidence) || 0));
+        return n ? [{ id: n.id, relation: f.relation, confidence, why: oneLine(f.why ?? "", 300) }] : [];
+      });
+      // An agent can check a decision without having taken it, so make sure there's a row to finish.
+      db.claimCheck(r.room.id, checked.id, CHECK_VERSION, 0, actorOf(caller));
+      if (!db.finishCheck(checked.id, actorOf(caller), findings, args.version ?? CHECK_VERSION)) return { ref: args.ref, already_checked: true };
+      const shown = findings.filter((f) => f.relation === "replaces" && f.confidence >= SHOW_FROM);
+      for (const f of shown) db.addLink(r.room.id, checked.id, f.id, "conflicts", byOf(caller), actorOf(caller));
+      if (shown.length) deps.notify(r.room.id, "followups");
+      return { ref: args.ref, kept: findings.length, dropped: args.findings.length - findings.length, shown_as_proposals: shown.length };
     },
 
     /** Says a later decision replaced an earlier one, or that both stand. Anyone in the space can. */
