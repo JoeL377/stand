@@ -34,6 +34,7 @@
   color-scheme: light;
 }
 /* Light, dark or following the system: index.html and theme.ts set data-theme. */
+.theme-switching, .theme-switching * { transition: none !important; }
 :root[data-theme="dark"] {
   --bg: #191919;
   --panel: #202020;

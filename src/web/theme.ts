@@ -15,8 +15,13 @@ export function savedTheme(): Theme {
   }
 }
 
+/** Switches all at once: without the pause, anything with a color fade lags behind the rest. */
 const apply = (theme: Theme) => {
-  document.documentElement.dataset.theme = theme === "auto" ? (system.matches ? "dark" : "light") : theme;
+  const root = document.documentElement;
+  root.classList.add("theme-switching");
+  root.dataset.theme = theme === "auto" ? (system.matches ? "dark" : "light") : theme;
+  void getComputedStyle(document.body).color;
+  root.classList.remove("theme-switching");
 };
 
 export function setTheme(theme: Theme) {
