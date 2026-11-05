@@ -15,7 +15,7 @@ Between meetings people also save notes to a space from the Stand bar on their M
 
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:context/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
-"What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
+"What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 Working on a to-do: post_update with its ref and status working when you start, so people see it's being worked on. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
@@ -204,6 +204,21 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     reason: z.string().optional().describe("Dropped only: why, in a line"),
     links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5). A merged PR link on done shows the PR closed it"),
   };
+
+  server.registerTool(
+    "whats_new",
+    {
+      title: "See what changed in a Stand space",
+      description:
+        "Everything that changed in a Stand space since a date, in one call: meetings with their summaries, decisions, open questions, context, to-dos added and closed, and what agents reported. Call it first when catching up. Then use get_meeting_brief for a meeting's detail or transcript.",
+      inputSchema: {
+        space: z.string().describe("The space's id or name (from list_spaces)"),
+        since: z.string().optional().describe("From this date or time, like 2026-10-11. Default: the last 7 days"),
+      },
+      annotations: READ,
+    },
+    ({ space, since }) => run(() => api.whatsNew(caller, { space, since }, baseUrl)),
+  );
 
   server.registerTool(
     "list_context",

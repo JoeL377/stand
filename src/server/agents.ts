@@ -6,7 +6,7 @@
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
 import type { AgentToken, Discussion, Item, ItemUpdate, Jot, Note, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
-import { stateOf } from "../shared/tasks.ts";
+import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import { ownedBy } from "./spaces.ts";
 
@@ -39,6 +39,8 @@ export class AgentError extends Error {}
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const day = (ts: number) => new Date(ts).toISOString().slice(0, 10);
+/** How far back whats_new looks when it isn't told. */
+const WHATS_NEW_DAYS = 7;
 
 export interface Caller {
   user: User;
@@ -698,6 +700,40 @@ export function agentApi(deps: AgentDeps) {
         created: { ref: refOf("context", note.id), text: note.text, by, url: refUrl(baseUrl, "context", note.id) },
         replaced: old?.note ? { ref: refOf("context", old.note.id), text: old.note.text } : undefined,
         shows_on: "The space's Decisions tab in Stand.",
+      };
+    },
+
+    /** What changed in a space since a date, in one call. */
+    whatsNew(caller: Caller, opts: { space: string; since?: string }, baseUrl = "") {
+      const room = findSpace(caller, opts.space);
+      const since = opts.since ? Date.parse(opts.since) : Date.now() - WHATS_NEW_DAYS * 86_400_000;
+      if (Number.isNaN(since)) throw new AgentError(`"${clip(opts.since ?? "", 40)}" isn't a date. Use one like 2026-10-11 or 2026-10-11T08:00.`);
+      const recent = (kind: "decision" | "question" | "context") => db.spaceNotes(room.id, kind, 200).filter((n) => n.ts >= since);
+      const line = (kind: RefKind) => (n: Note) => ({ ref: refOf(kind, n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, kind, n.id) });
+      const actions = db.memberActions(caller.user.id).filter((n) => n.roomId === room.id);
+      return {
+        space: { id: room.id, name: room.name },
+        since: new Date(since).toISOString(),
+        meetings: db
+          .feedMeetings(room.id)
+          .filter((m) => m.startedAt >= since)
+          .map((m) => ({
+            id: m.id,
+            on: day(m.startedAt),
+            minutes: Math.round((m.endedAt - m.startedAt) / 60_000),
+            summary: m.summary ?? undefined,
+            to_dos: m.todos,
+            decided: m.decided,
+            open: m.open,
+          })),
+        decided: recent("decision").map(line("decision")),
+        open_questions: recent("question")
+          .filter((n) => !isClosed(stateOf(n)))
+          .map(line("question")),
+        context: recent("context").map(line("context")),
+        new_to_dos: actions.filter((n) => n.ts >= since && !isClosed(stateOf(n))).map(actionInfo),
+        closed_to_dos: actions.filter((n) => (n.doneAt ?? 0) >= since).map((n) => ({ ...actionInfo(n), closed_by: n.closedBy ?? undefined })),
+        updates: db.roomUpdates(room.id, since, 50).map((u) => updateInfo(u)),
       };
     },
 

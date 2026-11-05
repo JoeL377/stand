@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "stand": {
+      "type": "http",
+      "url": "https://stand-production-3d3f.up.railway.app/mcp"
+    }
+  }
+}
