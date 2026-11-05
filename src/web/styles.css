@@ -2076,6 +2076,7 @@ a.sh-pill:hover { text-decoration: none; }
 .sh-panel .followups.one-line .rc-pill-wrap { margin-left: 8px; }
 .rc-points li.replaced .rc-point-body { color: var(--muted); }
 .rc-points li.replaced > svg { opacity: 0.5; }
+.sh-maybe-replaced { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 13px; color: var(--muted); }
 .sh-panel .sh-list { font-size: 14px; gap: 8px; }
 .sh-tabs .sh-tab:hover, .sh-tabs .sh-tab:focus, .sh-tabs .sh-tab:active { background: none; box-shadow: none; }
 .sh-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px 4px 0 0; }

@@ -560,6 +560,7 @@ export function openDb(file?: string) {
   // Who did it, as fields (shared/actors.ts). Older rows read theirs from done_by and edited_by.
   if (!noteCols.includes("done_actor_json")) db.exec("ALTER TABLE notes ADD COLUMN done_actor_json TEXT; ALTER TABLE notes ADD COLUMN added_actor_json TEXT;");
   if (!(db.prepare("PRAGMA table_info(updates)").all() as Row[]).some((c) => c.name === "actor_json")) db.exec("ALTER TABLE updates ADD COLUMN actor_json TEXT;");
+  if (!(db.prepare("PRAGMA table_info(links)").all() as Row[]).some((c) => c.name === "made_actor_json")) db.exec("ALTER TABLE links ADD COLUMN made_actor_json TEXT;");
   // A decision's words as said (protocol.ts Quote), from the run as the meeting ends.
   if (!noteCols.includes("quote_json")) db.exec("ALTER TABLE notes ADD COLUMN quote_json TEXT;");
   if (!noteCols.includes("done_at")) db.exec("ALTER TABLE notes ADD COLUMN done_at INTEGER; ALTER TABLE notes ADD COLUMN done_by TEXT;");
@@ -1593,8 +1594,8 @@ export function openDb(file?: string) {
     },
     /** Notes of one kind from a space's finished meetings, newest first. */
     /** Says how two things in a space relate; saying it twice changes nothing. */
-    addLink(roomId: string, fromId: string, toId: string, relation: LinkRelation, by: string) {
-      db.prepare("INSERT OR IGNORE INTO links (id, room_id, from_id, to_id, relation, made_by, made_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+    addLink(roomId: string, fromId: string, toId: string, relation: LinkRelation, by: string, actor: Actor | null = null) {
+      db.prepare("INSERT OR IGNORE INTO links (id, room_id, from_id, to_id, relation, made_by, made_at, made_actor_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
         newId(12),
         roomId,
         fromId,
@@ -1602,9 +1603,17 @@ export function openDb(file?: string) {
         relation,
         by,
         Date.now(),
+        actor ? JSON.stringify(actor) : null,
       );
     },
     /** A space's context, newest first, without what a later line replaced. */
+    /** A space's links of one relation, as from and to. */
+    roomLinks(roomId: string, relation: LinkRelation): Array<{ fromId: string; toId: string }> {
+      return (db.prepare("SELECT from_id, to_id FROM links WHERE room_id = ? AND relation = ? ORDER BY made_at").all(roomId, relation) as Row[]).map((r) => ({
+        fromId: r.from_id as string,
+        toId: r.to_id as string,
+      }));
+    },
     spaceContext(roomId: string, limit = 100): Note[] {
       return (
         db

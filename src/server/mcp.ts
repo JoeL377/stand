@@ -239,6 +239,23 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
   );
 
   server.registerTool(
+    "confirm_replaced",
+    {
+      title: "Confirm a Stand decision was replaced",
+      description:
+        "Says a later decision replaced an earlier one, or with replaced false that both still stand. A decision stays kept until someone confirms: may_be_replaced_by in get and whats_new is only what Stand suspects. Use it when the person tells you, not on your own judgment.",
+      inputSchema: {
+        ref: z.string().describe("The earlier decision, stand:decision/<id>"),
+        by: z.string().describe("The later decision, stand:decision/<id>"),
+        replaced: z.boolean().optional().describe("Default true. false: both stand, so Stand stops suggesting it"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ ref, by, replaced, model }) => run(() => api.confirmReplaced(as(model), { ref, by, replaced: replaced ?? true })),
+  );
+
+  server.registerTool(
     "add_context",
     {
       title: "Add context to a Stand space",

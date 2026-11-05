@@ -54,10 +54,24 @@ test("the space page drops answered and repeated questions and marks replaced de
     [role.text, again.text],
   );
   assert.deepEqual(
-    view.decided.map((n) => [n.text, n.replacedBy?.text ?? null]),
+    view.decided.map((n) => [n.text, n.decisionState, n.replacedBy?.text ?? null, n.mayBeReplacedBy?.text ?? null]),
     [
-      [one.text, null],
-      [keep.text, one.text],
+      [one.text, "kept", null, null],
+      [keep.text, "kept", null, one.text],
+    ],
+    "Stand only proposes: the decision stays kept",
+  );
+  // Someone says both stand: the proposal goes, and it stays kept.
+  db.addLink(room.id, one.id, keep.id, "not_replaced", "Joe");
+  assert.equal(settledView(db, room.id).decided[1].mayBeReplacedBy, undefined);
+  // Someone confirms it: replaced, and it moves after what still stands.
+  db.addLink(room.id, one.id, keep.id, "replaces", "Andy");
+  const after = settledView(db, room.id).decided;
+  assert.deepEqual(
+    after.map((n) => [n.text, n.decisionState, n.replacedBy?.noteId ?? null]),
+    [
+      [one.text, "kept", null],
+      [keep.text, "replaced", one.id],
     ],
   );
   // Nothing changed: no second call.

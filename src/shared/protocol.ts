@@ -116,7 +116,8 @@ export type TaskVerb = "do" | "decide" | "answer";
 export type TaskState = "open" | "doing" | "done" | "dropped";
 
 /** How two things in a space relate (docs/mvp-primitives.md). */
-export type LinkRelation = "leaves" | "replaces" | "serves" | "conflicts" | "objects";
+/** not_replaced: someone looked at a replacement Stand proposed and said both stand. */
+export type LinkRelation = "leaves" | "replaces" | "not_replaced" | "serves" | "conflicts" | "objects";
 
 /** A line on the board's running list (server/liveList.ts), in the shape of a note so the board's
  *  tabs read either. Lines are only added, changed by id or closed, never regrouped. */
@@ -849,6 +850,13 @@ export interface ArchivedRow {
   by: string;
 }
 
+export interface ReplacedBy {
+  noteId: string;
+  text: string;
+  meetingId: string;
+  startedAt: number;
+}
+
 export interface SpaceFeed {
   /** Rows archived off the space page, newest first. The page hides them and lists them under Archived. */
   archived: ArchivedRow[];
@@ -871,7 +879,16 @@ export interface SpaceFeed {
   /** What agents and people reported through the MCP, newest first. */
   updates: ItemUpdate[];
   /** Decisions from the space's meetings, newest first, the ones a later decision replaced last. */
-  decided: Array<Note & { from?: NoteFrom; replacedBy?: { text: string; meetingId: string; startedAt: number } }>;
+  decided: Array<
+    Note & {
+      from?: NoteFrom;
+      /** kept until someone confirms a later decision replaced it. */
+      decisionState: "kept" | "replaced";
+      replacedBy?: ReplacedBy;
+      /** What Stand thinks replaced it. It stays kept until someone confirms. */
+      mayBeReplacedBy?: ReplacedBy;
+    }
+  >;
   /** Open questions from all its meetings that no later decision answered, newest first. */
   open: Array<Note & { from?: NoteFrom }>;
   /** What's true in the space that nobody had to choose, newest first, without what a later line replaced. */

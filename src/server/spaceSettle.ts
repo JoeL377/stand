@@ -1,11 +1,12 @@
 // Claude's pass over a space's decisions and open questions across all its meetings, so the space
 // page shows where things stand now: an open question a later decision answered (or a later
-// question asked again) leaves the Open card, and a decision a later one reversed shows as
-// replaced. It runs with the agenda pass (upNextPolish.ts): when a meeting ends and when someone
+// question asked again) leaves the Open card. A decision it thinks a later one reversed is only a
+// proposal: the decision stays kept until someone confirms, because Stand never decides on its own.
+// It runs with the agenda pass (upNextPolish.ts): when a meeting ends and when someone
 // opens the space, and only when the space's decisions or questions changed since the last pass.
 
 import { createHash } from "node:crypto";
-import type { Note } from "../shared/protocol.ts";
+import type { Note, ReplacedBy } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import type { Agent, SettleRow } from "./llm.ts";
 
@@ -15,8 +16,6 @@ export interface Settled {
   basis: string;
   rows: Array<{ noteId: string; byNoteId: string; how: SettleRow["how"] }>;
 }
-
-type Replaced = { text: string; meetingId: string; startedAt: number };
 
 /** How many of each the pass reads, newest first. */
 const LIMIT = 200;
@@ -65,18 +64,27 @@ export async function settleSpace(db: DB, agent: Agent, roomId: string): Promise
   console.log(`[agent] settled ${rows.length} of ${notes.length} decisions and questions in ${roomId} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
 
-/** The space page's Decided and Open cards: decisions with what replaced them, and the questions nothing settled yet. */
+/** The space page's Decided and Open cards: decisions with what replaced them or may have, and the questions nothing settled yet. */
 export function settledView(db: DB, roomId: string) {
   const notes = spaceRecord(db, roomId).reverse();
   const byId = new Map(notes.map((n) => [n.id, n]));
   const rows = new Map((db.getSettled(roomId)?.rows ?? []).map((r) => [r.noteId, r]));
+  const confirmed = new Map(db.roomLinks(roomId, "replaces").map((l) => [l.toId, l.fromId]));
+  const turnedDown = new Set(db.roomLinks(roomId, "not_replaced").map((l) => `${l.fromId}>${l.toId}`));
+  const shown = (n?: (typeof notes)[number]): ReplacedBy | undefined =>
+    n ? { noteId: n.id, text: n.text, meetingId: n.meetingId, startedAt: n.meetingStartedAt } : undefined;
   const decided = notes
     .filter((n) => n.kind === "decision")
     .map((n) => {
+      const replacedBy = shown(byId.get(confirmed.get(n.id) ?? ""));
       const r = rows.get(n.id);
-      const by = r && byId.get(r.byNoteId);
-      const replacedBy: Replaced | undefined = by ? { text: by.text, meetingId: by.meetingId, startedAt: by.meetingStartedAt } : undefined;
-      return { ...n, replacedBy };
+      const proposed = !replacedBy && r?.how === "replaced" && !turnedDown.has(`${r.byNoteId}>${n.id}`);
+      return {
+        ...n,
+        decisionState: replacedBy ? ("replaced" as const) : ("kept" as const),
+        replacedBy,
+        mayBeReplacedBy: proposed ? shown(byId.get(r.byNoteId)) : undefined,
+      };
     });
   return {
     // Standing decisions first, the replaced ones after them.
