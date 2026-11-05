@@ -117,7 +117,8 @@ export type TaskState = "open" | "doing" | "done" | "dropped";
 
 /** How two things in a space relate (docs/mvp-primitives.md). */
 /** not_replaced: someone looked at a replacement Stand proposed and said both stand. */
-export type LinkRelation = "leaves" | "replaces" | "not_replaced" | "serves" | "conflicts" | "objects";
+/** depends_on: this to-do waits on that one. It's a signal for whoever picks either up; it blocks nothing. */
+export type LinkRelation = "leaves" | "replaces" | "not_replaced" | "serves" | "conflicts" | "objects" | "depends_on";
 
 /** A line on the board's running list (server/liveList.ts), in the shape of a note so the board's
  *  tabs read either. Lines are only added, changed by id or closed, never regrouped. */
@@ -296,8 +297,8 @@ export interface Snap {
 /** "working": an agent says it has started on a to-do; it shows as working until it reports again or goes quiet.
  *  "ready": the work is finished and waits to ship, usually as a PR; Stand checks the to-do off when the PR merges. */
 /** "added": the details someone gave with a to-do they added by hand; "note": more about a to-do, not progress (MCP update_action).
- *  "plan": a plan or spec was attached; it says nothing about whether anyone is on the to-do. */
-export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done" | "added" | "note" | "plan";
+ *  "plan": a plan or spec was attached; "linked": a dependency was added or removed. Neither says whether anyone is on the to-do. */
+export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done" | "added" | "note" | "plan" | "linked";
 export interface ItemUpdate {
   id: string;
   roomId: string;

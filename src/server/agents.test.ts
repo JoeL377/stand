@@ -836,3 +836,37 @@ test("a plan lives on the to-do: it keeps versions, and attaching one doesn't ch
   assert.throws(() => api.attachPlan(caller, { ref: `stand:decision/${decision.id}`, plan: "x" }), /to-dos/);
   assert.throws(() => api.attachPlan({ user: joe, token: { ...info, scope: "read" } }, { ref, plan: "x" }), /read only/);
 });
+
+test("to-dos can depend on each other: both sides see it, it never stops anyone, and it can't loop", () => {
+  const { api, db, joe, room, action, notes } = setup();
+  const { info } = db.createToken(joe.id, "Claude Code", "write");
+  const caller = { user: joe, token: info };
+  const first = `stand:action/${action.id}`;
+  const second = `stand:action/${notes.find((n) => n.text.startsWith("Write"))!.id}`;
+  type Dep = { ref: string; status: string; working?: { by: string } };
+  type Got = { waits_on?: Dep[]; waiting_on_this?: Dep[]; status?: string };
+  const row = (ref: string) => api.listActions(caller, { space: room.id }, "").actions.find((a) => a.ref === ref)!;
+
+  api.postUpdate(caller, { ref: second, status: "working" });
+  api.linkTodos(caller, { ref: second, dependsOn: first });
+  assert.equal((api.get(caller, second, "") as Got).status, "doing", "linking doesn't stop the work");
+  assert.deepEqual((api.get(caller, second, "") as Got).waits_on?.map((d) => d.ref), [first]);
+  assert.deepEqual((api.get(caller, first, "") as Got).waiting_on_this?.map((d) => d.ref), [second]);
+  assert.equal((api.get(caller, first, "") as Got).waiting_on_this?.[0].working?.by, "Joe Liang via Claude Code");
+  assert.deepEqual(row(second).waits_on, [first]);
+  assert.equal(db.notesUpdates([action.id]).length, 0, "the log entry goes on the to-do that waits");
+
+  assert.equal((api.linkTodos(caller, { ref: second, dependsOn: first }) as { unchanged?: boolean }).unchanged, true);
+  assert.throws(() => api.linkTodos(caller, { ref: first, dependsOn: first }), /itself/);
+  assert.throws(() => api.linkTodos(caller, { ref: first, dependsOn: second }), /each other/);
+
+  api.postUpdate(caller, { ref: first, status: "working" });
+  assert.equal(row(first).status, "doing", "a to-do that waits on nothing and one that others wait on both start freely");
+  api.completeAction(caller, { ref: first, note: "Done" });
+  assert.equal(row(second).waits_on, undefined, "what's finished stops showing on list rows");
+  assert.equal((api.get(caller, second, "") as Got).waits_on?.[0].status, "done", "get still shows it, as done");
+
+  api.linkTodos(caller, { ref: second, dependsOn: first, remove: true });
+  assert.equal((api.get(caller, second, "") as Got).waits_on, undefined);
+  assert.equal((api.linkTodos(caller, { ref: second, dependsOn: first, remove: true }) as { unchanged?: boolean }).unchanged, true);
+});

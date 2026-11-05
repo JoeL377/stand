@@ -292,12 +292,30 @@ export function agentApi(deps: AgentDeps) {
   };
 
   /** Finds what a reference points to, checking the caller is in its space. */
+  /** What a to-do waits on and what waits on it, with who's on each. A signal only: nothing here stops anyone. */
+  const dependenciesOf = (n: Pick<Note, "id"> & { roomId: string }) => {
+    const links = db.roomLinks(n.roomId, "depends_on");
+    const todos = (ids: string[]) => {
+      const notes = ids.map((id) => db.getNote(id)).filter((x) => x !== null);
+      const work = workOn(notes);
+      return notes.map((x) => ({ ...actionInfo(x, work.get(x.id)), done_by: undefined, done_actor: undefined }));
+    };
+    const waitsOn = todos(links.filter((l) => l.fromId === n.id).map((l) => l.toId));
+    const waitingOnThis = todos(links.filter((l) => l.toId === n.id).map((l) => l.fromId));
+    return { waits_on: waitsOn.length ? waitsOn : undefined, waiting_on_this: waitingOnThis.length ? waitingOnThis : undefined };
+  };
+
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
   function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number; addedByHand?: boolean }>, baseUrl: string) {
     const items = new Map<string, Item | null>();
     const work = workOn(rows);
     const planned = db.plannedNotes(rows.map((n) => n.id));
+    const waits = db.linksFrom(rows.map((n) => n.id), "depends_on").filter((l) => {
+      const dep = db.getNote(l.toId);
+      return dep && !isClosed(stateOf(dep));
+    });
     return rows.map((n) => {
+      const waitsOn = waits.filter((l) => l.fromId === n.id).map((l) => refOf("action", l.toId));
       if (n.itemId && !items.has(n.itemId)) items.set(n.itemId, db.getItem(n.itemId));
       const item = n.itemId ? items.get(n.itemId)! : null;
       const decision = n.discussionId
@@ -306,6 +324,7 @@ export function agentApi(deps: AgentDeps) {
       return {
         ...actionInfo(n, work.get(n.id)),
         has_plan: planned.has(n.id) || undefined,
+        waits_on: waitsOn.length ? waitsOn : undefined,
         space: n.roomName as string | undefined,
         item: item ? { id: item.id, title: item.title, key: item.externalId ?? undefined } : undefined,
         decided: decision?.text,
@@ -402,6 +421,7 @@ export function agentApi(deps: AgentDeps) {
         status: n.kind === "action" ? stateOf(n, work) : undefined,
         ...workInfo(work),
         plan: plan ? { text: plan.text, by: plan.by, actor: plan.actor, at: new Date(plan.ts).toISOString(), versions: plan.versions } : undefined,
+        ...(n.kind === "action" ? dependenciesOf(n) : {}),
         done_by: n.doneBy ?? undefined,
         ...(n.kind === "decision" ? decisionInfo(settledView(db, r.room.id).decided.find((x) => x.id === n.id)) : {}),
         why_dropped: n.kind === "action" && n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
@@ -420,7 +440,7 @@ export function agentApi(deps: AgentDeps) {
         url: refUrl(baseUrl, r.ref.kind, n.id),
         next:
           n.kind === "action"
-            ? "When you start, call post_update with this ref and status working so people see you're on it. If you write a plan or spec, attach_plan keeps it on this to-do. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR, put this ref in the PR description and call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
+            ? "When you start, call post_update with this ref and status working so people see you're on it. If you write a plan or spec, attach_plan keeps it on this to-do. If it needs another to-do done first, link_todos says so. If the change shows on screen, attach screenshots before you report: screenshot_upload_url. When the work is in a PR, put this ref in the PR description and call post_update with status ready, a short summary of what changed and the PR link: Stand checks the to-do off when the PR merges. When it's finished with nothing left to ship, call complete_action with the summary. For progress or a blocker, call post_update."
             : undefined,
       };
     },
@@ -725,6 +745,52 @@ export function agentApi(deps: AgentDeps) {
       });
       deps.notify(r.room.id, "updates");
       return { attached: updateInfo(update, baseUrl), versions: db.notePlan(r.note.id)?.versions, shows_on: "the to-do in Stand, and in get" };
+    },
+
+    /** Says one to-do waits on another, or takes that back. It's a signal: nothing waits because of it. */
+    linkTodos(caller: Caller, args: { ref: string; dependsOn: string; remove?: boolean }, baseUrl = "") {
+      requireWrite(caller);
+      const todo = (ref: string) => {
+        const r = resolve(caller, ref.includes("/") ? ref : `stand:action/${ref}`);
+        if (!r.note || r.note.kind !== "action") throw new AgentError("Only to-dos (stand:action/...) can depend on each other.");
+        return { note: r.note, room: r.room, itemId: r.itemId };
+      };
+      const from = todo(args.ref);
+      const to = todo(args.dependsOn);
+      if (from.note.id === to.note.id) throw new AgentError("A to-do can't depend on itself.");
+      if (from.room.id !== to.room.id) throw new AgentError("Those to-dos are in different spaces. Dependencies stay inside one space.");
+      if (args.remove) {
+        if (!db.removeLink(from.note.id, to.note.id, "depends_on")) return { unchanged: true, ...dependenciesOf(from.note) };
+      } else {
+        const links = db.roomLinks(from.room.id, "depends_on");
+        if (links.some((l) => l.fromId === from.note.id && l.toId === to.note.id)) return { unchanged: true, ...dependenciesOf(from.note) };
+        // Following what the other one waits on must not lead back here.
+        const seen = new Set<string>();
+        const walk = [to.note.id];
+        while (walk.length) {
+          const id = walk.pop()!;
+          if (id === from.note.id) throw new AgentError("That would make the two to-dos wait on each other.");
+          if (seen.has(id)) continue;
+          seen.add(id);
+          walk.push(...links.filter((l) => l.fromId === id).map((l) => l.toId));
+        }
+        db.addLink(from.room.id, from.note.id, to.note.id, "depends_on", byOf(caller), actorOf(caller));
+      }
+      const update = db.addUpdate({
+        roomId: from.room.id,
+        itemId: from.itemId,
+        noteId: from.note.id,
+        noteText: from.note.text,
+        userId: caller.user.id,
+        userName: caller.user.name,
+        client: caller.token?.label ?? null,
+        actor: actorOf(caller),
+        status: "linked",
+        text: `${args.remove ? "No longer waits on" : "Waits on"}: ${clip(to.note.text, 160)}`,
+        links: [],
+      });
+      deps.notify(from.room.id, "updates");
+      return { linked: updateInfo(update, baseUrl), ...dependenciesOf(from.note) };
     },
 
     completeAction(caller: Caller, args: { ref: string; note?: string; links?: string[] }, baseUrl = "") {
