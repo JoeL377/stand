@@ -18,6 +18,7 @@ References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 Working on a to-do: post_update with its ref and status working when you start, so people see it's being worked on. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
+Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
@@ -37,6 +38,9 @@ const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } as const;
 
 export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
+  /** The caller, with the model it says it is. */
+  const as = (model?: string): Caller => (model?.trim() ? { ...caller, model: model.trim().slice(0, 80) } : caller);
+  const modelField = z.string().optional().describe("The model doing this work, like claude-opus-5-5, if you know it. Kept with what you did, as you reported it");
   const server = new McpServer({ name: "stand", version: "0.1.0" }, { instructions: INSTRUCTIONS });
 
   server.registerTool(
@@ -169,10 +173,11 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
           .optional()
           .describe("Default progress. working: you've started on this to-do. ready: finished, waiting to ship (give the PR link)"),
         links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5)"),
+        model: modelField,
       },
       annotations: WRITE,
     },
-    ({ ref, item_id, text, status, links }) => run(() => api.postUpdate(caller, { ref, itemId: item_id, text, status, links }, baseUrl)),
+    ({ ref, item_id, text, status, links, model }) => run(() => api.postUpdate(as(model), { ref, itemId: item_id, text, status, links }, baseUrl)),
   );
 
   server.registerTool(
@@ -185,10 +190,11 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
         ref: z.string().describe("The to-do's reference, stand:action/<id>"),
         note: z.string().optional().describe("What changed, for the people who asked: a short paragraph, or a few lines starting with - "),
         links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5)"),
+        model: modelField,
       },
       annotations: WRITE,
     },
-    ({ ref, note, links }) => run(() => api.completeAction(caller, { ref, note, links }, baseUrl)),
+    ({ ref, note, links, model }) => run(() => api.completeAction(as(model), { ref, note, links }, baseUrl)),
   );
 
   const taskFields = {
@@ -242,10 +248,11 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         text: z.string().describe("What's true, in a line"),
         replaces: z.string().optional().describe("The older line this corrects, stand:context/<id>. It stops being listed"),
+        model: modelField,
       },
       annotations: WRITE,
     },
-    ({ space, text, replaces }) => run(() => api.addContext(caller, { space, text, replaces }, baseUrl)),
+    ({ space, text, replaces, model }) => run(() => api.addContext(as(model), { space, text, replaces }, baseUrl)),
   );
 
   server.registerTool(
@@ -263,11 +270,12 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
         status: taskFields.status.describe(
           "Default open. doing: someone is on it. done: already finished. dropped: not doing it (say why in reason)",
         ),
+        model: modelField,
       },
       annotations: WRITE,
     },
-    ({ space, text, item_id, owner, status, summary, reason, links }) =>
-      run(() => api.createAction(caller, { space, text, itemId: item_id, owner, status, summary, reason, links }, baseUrl)),
+    ({ space, text, item_id, owner, status, summary, reason, links, model }) =>
+      run(() => api.createAction(as(model), { space, text, itemId: item_id, owner, status, summary, reason, links }, baseUrl)),
   );
 
   server.registerTool(
@@ -280,11 +288,12 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
         ref: z.string().describe("The to-do's reference, stand:action/<id>"),
         text: z.string().optional().describe("New wording, in a line"),
         ...taskFields,
+        model: modelField,
       },
       annotations: WRITE,
     },
-    ({ ref, text, owner, status, summary, reason, links }) =>
-      run(() => api.updateAction(caller, { ref, text, owner, status, summary, reason, links }, baseUrl)),
+    ({ ref, text, owner, status, summary, reason, links, model }) =>
+      run(() => api.updateAction(as(model), { ref, text, owner, status, summary, reason, links }, baseUrl)),
   );
 
   server.registerTool(

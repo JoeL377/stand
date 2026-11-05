@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, UploadLinks, WORKING_QUIET_MS, prOf, readyToShip, workLog, workingOn } from "./workLog.ts";
 import { ShipWatch, githubPrState, type PrState } from "./shipWatch.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { openDb } from "./db.ts";
+import { parseActor } from "../shared/actors.ts";
 import { addUpNext } from "./upNext.ts";
 import { upNextView } from "./upNextPolish.ts";
 
@@ -43,6 +47,94 @@ function setup(deps: { readyToShip?: () => void; liveMeeting?: (roomId: string) 
   const action = notes.find((n) => n.text.startsWith("Move"))!;
   return { db, api, joe, andy, room, item, topic, action, notes, notified };
 }
+
+test("writes keep who did them: the person, their agent, its connection and the model it reported", () => {
+  const { api, db, joe, room, action } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const expected = { kind: "agent", person: "Joe Liang", personId: joe.id, agent: "Claude Code", connection: "tok1", model: "claude-opus-5-5" };
+
+  const made = api.createAction(agent, { space: room.id, text: "Write the docs" });
+  const added = db.getNote(made.created.ref.split("/")[1]);
+  assert.deepEqual(added?.addedActor, expected);
+
+  api.completeAction(agent, { ref: `stand:action/${action.id}`, note: "Done" });
+  assert.deepEqual(db.getNote(action.id)?.doneActor, expected);
+  assert.deepEqual(db.noteUpdates(action.id)[0].actor, expected);
+
+  db.setActionDone(room.id, action.id, null);
+  assert.equal(db.getNote(action.id)?.doneActor, null);
+});
+
+test("every way a to-do closes says what kind of actor closed it", () => {
+  const { api, db, joe, room, notes } = setup();
+  const [, first, second] = notes;
+  const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const kindOf = (id: string) => db.getNote(id)?.doneActor?.kind ?? null;
+
+  api.updateAction({ user: joe, token }, { ref: `stand:action/${first.id}`, status: "dropped", reason: "Not needed" });
+  assert.equal(kindOf(first.id), "agent");
+  db.setTaskState(room.id, first.id, { state: "open", by: joe.name });
+  assert.equal(kindOf(first.id), null, "reopening clears it");
+  db.setTaskState(room.id, first.id, { state: "done", by: joe.name });
+  assert.equal(kindOf(first.id), "person", "a later close by hand replaces the agent");
+  db.setActionDone(room.id, second.id, "JoeL377 via GitHub", "pr:https://github.com/a/b/pull/2");
+  assert.equal(kindOf(second.id), "github");
+  db.setActionDone(room.id, second.id, "carry-over to “Next”", "moved");
+  assert.equal(kindOf(second.id), "stand");
+});
+
+test("a redraft of the notes and an undone removal keep who closed a to-do", () => {
+  const { api, db, joe, item, action } = setup();
+  const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  api.completeAction({ user: joe, token, model: "gpt-5" }, { ref: `stand:action/${action.id}` });
+  const [redrafted] = db.replaceNotes(action.meetingId, item.id, [{ kind: "action", text: action.text, owner: "Joe" }]);
+  assert.equal(redrafted.doneActor?.connection, "tok1");
+  const kept = db.getNote(redrafted.id)!;
+  db.removeNote(kept.id);
+  db.restoreNote(kept);
+  assert.equal(db.getNote(kept.id)?.doneActor?.model, "gpt-5");
+});
+
+test("a database from before actors opens, and its rows read their actor from the strings", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stand-actors-"));
+  const file = path.join(dir, "old.db");
+  const first = openDb(file);
+  const joe = first.upsertUser({ googleSub: "g", email: "j@example.com", name: "Joe Liang", picture: null });
+  const room = first.createRoom("Old", joe.id, "");
+  const note = first.addTask(room.id, { text: "Old to-do", owner: null, itemId: null }, "Joe Liang via Claude");
+  first.setActionDone(room.id, note.id, "Joe Liang via Claude", "agent");
+  first.addUpdate({ roomId: room.id, itemId: null, noteId: note.id, noteText: note.text, userId: joe.id, userName: joe.name, client: "Claude", status: "done", text: "Done", links: [] });
+  first.raw.exec("ALTER TABLE notes DROP COLUMN done_actor_json; ALTER TABLE notes DROP COLUMN added_actor_json; ALTER TABLE updates DROP COLUMN actor_json;");
+  first.raw.close();
+  const db = openDb(file);
+  assert.deepEqual(db.getNote(note.id)?.doneActor, { kind: "agent", person: "Joe Liang", agent: "Claude" });
+  assert.equal(db.noteUpdates(note.id)[0].actor?.kind, "agent");
+  db.raw.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a to-do closed by its PR merging keeps the agent that reported it ready", async () => {
+  const { api, db, joe, room, action } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  api.postUpdate({ user: joe, token, model: "gpt-5" }, { ref: `stand:action/${action.id}`, status: "ready", text: "Ready", links: ["https://github.com/a/b/pull/1"] });
+  await new ShipWatch(db, () => {}, async () => "merged").check();
+  const done = db.getNote(action.id);
+  assert.ok(done?.doneAt);
+  assert.equal(done?.doneActor?.connection, "tok1");
+  assert.equal(done?.doneActor?.model, "gpt-5");
+  assert.equal(room.id, done?.roomId);
+});
+
+test("a person's own write and an older row read as what they were", () => {
+  const { api, db, joe, room, action } = setup();
+  api.updateAction({ user: joe, token: null }, { ref: `stand:action/${action.id}`, status: "done" });
+  assert.deepEqual(db.getNote(action.id)?.doneActor, { kind: "person", person: "Joe Liang", personId: joe.id });
+  db.setActionDone(room.id, action.id, "Joe Liang via Claude", "agent");
+  assert.deepEqual(db.getNote(action.id)?.doneActor, { kind: "agent", person: "Joe Liang", agent: "Claude" });
+  assert.deepEqual(parseActor("Joe Liang via GitHub"), { kind: "github", person: "Joe Liang" });
+  assert.deepEqual(parseActor("carry-over to “Conxt”"), { kind: "stand", person: null });
+});
 
 test("list_spaces says which spaces have a meeting running", () => {
   const meeting = { meeting_id: "m1", people: ["Joe Liang", "Andy Li"] };

@@ -147,10 +147,11 @@ export class ShipWatch {
       userId: u.userId,
       userName: u.userName,
       client: u.client,
+      actor: u.actor,
     };
     if (merged) {
       const by = u.client ? `${u.userName} via ${u.client}` : u.userName;
-      if (!this.db.setActionDone(u.roomId, u.noteId, by, `pr:${pr}`)) return;
+      if (!this.db.setActionDone(u.roomId, u.noteId, by, `pr:${pr}`, u.actor)) return;
       this.db.addUpdate({
         ...who,
         status: "done",

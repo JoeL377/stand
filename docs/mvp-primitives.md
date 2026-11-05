@@ -33,6 +33,8 @@ Stand's `notes` table holds all three, so this adds to it and moves nothing.
 
 **All kinds:** text · quote · said by (a person, not a name string) · space · when.
 
+**Every write keeps its actor** (`src/shared/actors.ts`): kind (person, agent, stand or github), whose it is, the agent's name, its connection and the model it reported. Work happens in Stand and in people's own harnesses, so this is how to tell them apart. It says who made the write, not who did the work: in the back test, Joe's agent closed the to-do for Huy's PR #63, and 6 of 22 hand closes were someone else's to-do. For the work, follow `closed_by` to the PR. Rows from before Nov 5 read theirs from the "Joe via Claude" strings, so they have no connection or model.
+
 | Kind | Stand today | Add |
 | --- | --- | --- |
 | Task | `action` and `question` notes; verb, state (open, doing, done, dropped), owner, `done_when`, `parent_id`, `closed_by`, `drop_reason`, `said_done_json` | Nothing new; ask for a done-when when it's empty |

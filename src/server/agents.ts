@@ -5,6 +5,7 @@
 // pinned to them (stand:note/<id>).
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
+import { parseActor, type Actor } from "../shared/actors.ts";
 import type { AgentToken, Discussion, Item, ItemUpdate, Jot, Note, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
@@ -46,6 +47,8 @@ export interface Caller {
   user: User;
   /** The token in use; null when a signed-in person asks from the web app. */
   token: AgentToken | null;
+  /** The model doing this work, if the agent said. */
+  model?: string;
 }
 
 export interface AgentDeps {
@@ -93,6 +96,7 @@ export function agentApi(deps: AgentDeps) {
     const shots = baseUrl && u.noteId ? db.noteWorkShots([u.noteId]).filter((s) => s.updateId === u.id) : [];
     return {
       by: u.client ? `${u.userName} via ${u.client}` : u.userName,
+      actor: u.actor ?? undefined,
       status: u.status,
       text: u.text,
       links: u.links.length ? u.links : undefined,
@@ -108,11 +112,19 @@ export function agentApi(deps: AgentDeps) {
     owner: n.owner ?? undefined,
     status: stateOf(n),
     done_by: n.doneBy ?? undefined,
+    done_actor: n.doneActor ?? undefined,
     why_dropped: n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
   });
 
   /** "joe via Claude Code", or just the name from the web app. */
   const byOf = (caller: Caller) => (caller.token ? `${caller.user.name} via ${caller.token.label}` : caller.user.name);
+  /** The same, as fields: whose agent, which one, through which connection. */
+  const actorOf = (caller: Caller): Actor => {
+    const person = { person: caller.user.name, personId: caller.user.id };
+    return caller.token
+      ? { kind: "agent", ...person, agent: caller.token.label, connection: caller.token.id, model: caller.model }
+      : { kind: "person", ...person };
+  };
   /** "me" is the caller; "unassigned", "none" or nothing leaves it open to anyone. */
   const ownerFor = (caller: Caller, owner: string): string | null => {
     const o = oneLine(owner, 80);
@@ -135,6 +147,7 @@ export function agentApi(deps: AgentDeps) {
         db.setTaskState(roomId, note.id, {
           state,
           by,
+          actor: actorOf(caller),
           closedBy: state === "done" ? (pr ? `pr:${pr}` : caller.token ? "agent" : "confirmed") : null,
           reason: state === "dropped" ? oneLine(change.reason || summary, 200) || null : null,
         }) ?? note;
@@ -149,6 +162,7 @@ export function agentApi(deps: AgentDeps) {
         userId: caller.user.id,
         userName: caller.user.name,
         client: caller.token?.label ?? null,
+        actor: actorOf(caller),
         // Only done and doing read as reports on the work; the rest is more about the to-do, and
         // mustn't show it as being worked on (workLog.ts).
         status: stateOf(now) === "done" ? "done" : stateOf(now) === "doing" ? "progress" : change.adding ? "added" : "note",
@@ -250,7 +264,7 @@ export function agentApi(deps: AgentDeps) {
         item: item ? { id: item.id, title: item.title, key: item.externalId ?? undefined } : undefined,
         decided: decision?.text,
         from_meeting: n.addedByHand ? undefined : day(n.meetingStartedAt),
-        added: n.addedByHand ? { by: n.editedBy ?? undefined, on: day(n.meetingStartedAt) } : undefined,
+        added: n.addedByHand ? { by: n.editedBy ?? undefined, actor: n.addedActor ?? parseActor(n.editedBy) ?? undefined, on: day(n.meetingStartedAt) } : undefined,
         url: refUrl(baseUrl, "action", n.id),
       };
     });
@@ -298,7 +312,9 @@ export function agentApi(deps: AgentDeps) {
         item: itemInfo(item, baseUrl),
         meeting: r.meeting.added ? undefined : { id: r.meeting.id, on: day(r.meeting.startedAt), live: r.meeting.endedAt === null || undefined },
         // A to-do someone added by hand (create_action) rather than one a meeting caught.
-        added: r.meeting.added ? { by: r.note?.editedBy ?? undefined, on: day(r.meeting.startedAt) } : undefined,
+        added: r.meeting.added
+          ? { by: r.note?.editedBy ?? undefined, actor: r.note?.addedActor ?? parseActor(r.note?.editedBy) ?? undefined, on: day(r.meeting.startedAt) }
+          : undefined,
       };
       const topic = r.topic
         ? {
@@ -608,6 +624,7 @@ export function agentApi(deps: AgentDeps) {
         userId: caller.user.id,
         userName: caller.user.name,
         client: caller.token?.label ?? null,
+        actor: actorOf(caller),
         status,
         text,
         links: cleanLinks(args.links),
@@ -639,7 +656,7 @@ export function agentApi(deps: AgentDeps) {
       const by = caller.token ? `${caller.user.name} via ${caller.token.label}` : caller.user.name;
       const already = !!r.note.doneAt;
       const pr = cleanLinks(args.links).find((l) => prOf(l));
-      const done = already ? r.note : db.setActionDone(r.room.id, r.note.id, by, pr ? `pr:${pr}` : "agent");
+      const done = already ? r.note : db.setActionDone(r.room.id, r.note.id, by, pr ? `pr:${pr}` : "agent", actorOf(caller));
       if (!done) throw new AgentError("Couldn't check that to-do off.");
       const update = db.addUpdate({
         roomId: r.room.id,
@@ -649,6 +666,7 @@ export function agentApi(deps: AgentDeps) {
         userId: caller.user.id,
         userName: caller.user.name,
         client: caller.token?.label ?? null,
+        actor: actorOf(caller),
         status: "done",
         text: args.note?.trim().slice(0, 4000) || `Done: ${clip(r.note.text, 200)}`,
         links: cleanLinks(args.links),
@@ -677,6 +695,7 @@ export function agentApi(deps: AgentDeps) {
         itemId = item.id;
       }
       const note = db.addTask(room.id, { text, owner: ownerFor(caller, args.owner ?? "me"), itemId }, byOf(caller));
+      db.setAddedActor(note.id, actorOf(caller));
       const { now, update } = applyChange(caller, room.id, note, { ...args, adding: true });
       deps.notify(room.id, "followups");
       return {
@@ -697,6 +716,7 @@ export function agentApi(deps: AgentDeps) {
         throw new AgentError("replaces takes a line of context from the same space: stand:context/<id>.");
       const by = byOf(caller);
       const note = db.addOutsideMeeting(room.id, { kind: "context", text, owner: null, itemId: null }, by);
+      db.setAddedActor(note.id, actorOf(caller));
       if (old?.note) db.addLink(room.id, note.id, old.note.id, "replaces", by);
       deps.notify(room.id, "followups");
       return {
@@ -751,6 +771,7 @@ export function agentApi(deps: AgentDeps) {
           ref: refOf("context", n.id),
           text: n.text,
           by: n.editedBy ?? undefined,
+          actor: n.addedActor ?? parseActor(n.editedBy) ?? undefined,
           on: day(n.ts),
           url: refUrl(baseUrl, "context", n.id),
         })),
