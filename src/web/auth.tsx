@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Capabilities, User } from "../shared/protocol.ts";
 import { OfflineError, api } from "./api.ts";
-import { Avatar } from "./room/Stage.tsx";
 import { Logo } from "./icons.tsx";
 
 interface Auth {
@@ -159,18 +158,5 @@ function SignIn({ caps, onSignedIn }: { caps: Capabilities; onSignedIn: (u: User
         )}
       </div>
     </div>
-  );
-}
-
-export function UserMenu() {
-  const { user, signOut } = useAuth();
-  return (
-    <span className="user-menu">
-      <Avatar id={user.id} name={user.name} picture={user.picture} size={24} />
-      <span className="user-name">{user.name}</span>
-      <button className="link small" onClick={() => void signOut()}>
-        Sign out
-      </button>
-    </span>
   );
 }

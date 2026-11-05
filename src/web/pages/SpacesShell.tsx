@@ -3,8 +3,8 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { LayoutGrid, Mic, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
-import { UserMenu } from "../auth.tsx";
 import { ConxtLogo } from "../ConxtLogo.tsx";
+import { ProfileMenu } from "../ProfileMenu.tsx";
 import { SelectedTabWeld } from "../SideNavWeld.tsx";
 import { colorFor, initials } from "../util.ts";
 
@@ -152,7 +152,7 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
           </div>
           <nav className="sp-side-nav sp-side-foot">{FOOT_ROWS.map(row)}</nav>
           <div className="sp-side-user">
-            <UserMenu />
+            <ProfileMenu collapsed={collapsed} />
           </div>
           <div className="sp-side-foldrow">
             <button
