@@ -1628,6 +1628,17 @@ export function openDb(file?: string) {
         actor ? JSON.stringify(actor) : null,
       );
     },
+    /** Takes a link back. */
+    removeLink(fromId: string, toId: string, relation: LinkRelation) {
+      return db.prepare("DELETE FROM links WHERE from_id = ? AND to_id = ? AND relation = ?").run(fromId, toId, relation).changes > 0;
+    },
+    /** What these point to through one relation. */
+    linksFrom(fromIds: string[], relation: LinkRelation): Array<{ fromId: string; toId: string }> {
+      if (!fromIds.length) return [];
+      return (
+        db.prepare(`SELECT from_id, to_id FROM links WHERE relation = ? AND from_id IN (${fromIds.map(() => "?").join(",")}) ORDER BY made_at`).all(relation, ...fromIds) as Row[]
+      ).map((r) => ({ fromId: r.from_id as string, toId: r.to_id as string }));
+    },
     /** Keeps a new version of a to-do's plan. */
     addPlan(roomId: string, noteId: string, text: string, by: string, actor: Actor | null = null) {
       db.prepare("INSERT INTO task_plans (id, note_id, room_id, text, made_by, made_at, made_actor_json) VALUES (?, ?, ?, ?, ?, ?, ?)").run(

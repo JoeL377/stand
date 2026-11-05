@@ -16,7 +16,7 @@ Between meetings people also save notes to a space from the Stand bar on their M
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:context/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
-Working on a to-do: check it isn't already being worked on (working on the to-do, or being_worked_on in whats_new), then post_update with its ref and status working when you start, so people and other agents see you're on it. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
+Working on a to-do: check it isn't already being worked on (working on the to-do, or being_worked_on in whats_new), then post_update with its ref and status working when you start, so people and other agents see you're on it. If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
@@ -225,6 +225,23 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: WRITE,
     },
     ({ ref, plan, model }) => run(() => api.attachPlan(as(model), { ref, plan }, baseUrl)),
+  );
+
+  server.registerTool(
+    "link_todos",
+    {
+      title: "Say one Stand to-do depends on another",
+      description:
+        "Records that a to-do waits on another in the same space, so whoever picks up either one can see it. It's a signal and blocks nothing: anyone can still start either to-do. get shows waits_on and waiting_on_this with who's on each; list rows give waits_on for what's still open. Pass remove to take a link back.",
+      inputSchema: {
+        ref: z.string().describe("The to-do that waits, stand:action/<id>"),
+        depends_on: z.string().describe("The to-do it waits on, stand:action/<id>"),
+        remove: z.boolean().optional().describe("Take this link back"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ ref, depends_on, remove, model }) => run(() => api.linkTodos(as(model), { ref, dependsOn: depends_on, remove }, baseUrl)),
   );
 
   server.registerTool(

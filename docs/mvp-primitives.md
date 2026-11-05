@@ -50,6 +50,7 @@ Stand's `notes` table holds all three, so this adds to it and moves nothing.
 | `serves` | This task carries out that decision |
 | `conflicts` | The check thinks these disagree. A decide task stays open for the owner; nothing waits on it |
 | `objects` | This person disagrees, and why. It shows on the decision and blocks nothing |
+| `depends_on` | This task waits on that one. Whoever picks up either can see it, and it blocks nothing |
 
 The strategy doc's rule is why person, space and links go in now: every write carries a person, every rule a scope, and knowledge a lineage edge. They're cheap on day one, and can't be backfilled later.
 

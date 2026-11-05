@@ -81,6 +81,7 @@ const STATUS: Record<ActionWork["log"][number]["status"], string> = {
   added: "Added",
   note: "Note",
   plan: "Plan attached",
+  linked: "Linked",
   shots: "Screenshots",
 };
 

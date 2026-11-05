@@ -19,8 +19,8 @@ export const MAX_SHOT_BYTES = 10 * 1024 * 1024;
 
 const by = (u: { userName: string; client: string | null }) => (u.client ? `${u.userName} via ${u.client}` : u.userName);
 
-/** Attaching a plan doesn't start or stop anything. */
-const aboutTheWork = (u: ItemUpdate) => u.status !== "plan";
+/** Attaching a plan or linking a to-do doesn't start or stop anything. */
+const aboutTheWork = (u: ItemUpdate) => u.status !== "plan" && u.status !== "linked";
 
 /** Who is on the to-do right now, if anyone: an agent whose latest word was "working" or progress,
  *  not long ago, on a to-do that isn't checked off. */
