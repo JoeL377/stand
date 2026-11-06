@@ -7,6 +7,8 @@ import { Avatar } from "./Stage.tsx";
 
 /** How many faces the top bar shows before "+N". */
 const SHOWN = 5;
+/** On a phone the bar has room for fewer; the rest go into "+N" there too. */
+const PHONE_SHOWN = 2;
 /** A talker stays named this long after they stop, so short pauses don't flicker the pill. */
 const LINGER_MS = 1200;
 
@@ -61,6 +63,7 @@ export function People(props: {
             </span>
           ))}
           {everyone.length > SHOWN && <span className="people-more">+{everyone.length - SHOWN}</span>}
+          {everyone.length > PHONE_SHOWN && <span className="people-more phone">+{everyone.length - PHONE_SHOWN}</span>}
         </span>
         {talkers.length > 0 && (
           <span className="people-talking">

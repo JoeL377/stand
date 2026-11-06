@@ -118,6 +118,8 @@ const ANSWER_HOLD_MS = 3 * 60_000;
 const WHEEL_STEP = 120;
 /** After the board steps to another card, the wheel rests this long so one flick moves one card. */
 const WHEEL_REST_MS = 700;
+/** A pause this long between wheel events ends one scroll gesture; the next event starts a new one. */
+const WHEEL_GAP_MS = 200;
 /** How far a finger has to move sideways before a swipe opens the next card. */
 const SWIPE_PX = 60;
 
@@ -201,6 +203,8 @@ export function TopicBoard(props: {
   };
   const [listOpen, setListOpen] = useState(false);
   const paneRef = useRef<HTMLDivElement>(null);
+  // Stepping back up by the wheel lands at the foot of the card before, where you left it, not its top.
+  const landAtEnd = useRef(false);
   const latest = props.segments.at(-1);
   const live = !!latest && now - latest.ts < NOW_MS;
   const speaking = Object.values(props.interims).find((i) => i.text.trim());
@@ -367,9 +371,11 @@ export function TopicBoard(props: {
     window.addEventListener(PILOT_OPEN, go);
     return () => window.removeEventListener(PILOT_OPEN, go);
   }, []);
-  // Each card opens at its top.
+  // Each card opens at its top, or at its foot when the wheel stepped back up into it.
   useEffect(() => {
-    paneRef.current?.scrollTo({ top: 0 });
+    const el = paneRef.current;
+    el?.scrollTo({ top: landAtEnd.current ? el.scrollHeight : 0 });
+    landAtEnd.current = false;
   }, [shownId]);
   // The host's own look back goes out to everyone following them.
   const sent = rewind && rewind.id !== NEW ? { ...rewind, page: rewind.id === KICKOFF || rewind.id === DONE ? kickPage : undefined } : null;
@@ -392,8 +398,9 @@ export function TopicBoard(props: {
     onNotYet: props.onNotYet,
   };
   const acts: TaskActs = rewound ? { start, agent: props.agent && { cards: props.agent.cards } } : liveActs;
-  // The wheel scrolls a long card first; pushed on past its end, it steps to the next card.
-  const wheel = useRef({ push: 0, at: 0 });
+  // The wheel scrolls a long card first; a fresh push past its end steps to the next card. A scroll that
+  // reaches the end (a trackpad's glide included) stops there, so reading to the bottom never skips a card.
+  const wheel = useRef({ push: 0, at: 0, last: 0, fromEnd: false });
   const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     const down = e.deltaY > 0;
     // A card that scrolls inside itself (an answer's chat) scrolls to its end before the board steps on.
@@ -401,11 +408,16 @@ export function TopicBoard(props: {
     const el = inner && inner.scrollHeight > inner.clientHeight + 2 ? inner : e.currentTarget;
     const atEnd = down ? el.scrollTop + el.clientHeight >= el.scrollHeight - 2 : el.scrollTop <= 0;
     const w = wheel.current;
-    if (!atEnd || Date.now() - w.at < WHEEL_REST_MS) return void (w.push = 0);
+    const t = Date.now();
+    if (t - w.last > WHEEL_GAP_MS) w.fromEnd = atEnd;
+    w.last = t;
+    if (!atEnd || !w.fromEnd || t - w.at < WHEEL_REST_MS) return void (w.push = 0);
     w.push += e.deltaY;
     if (Math.abs(w.push) < WHEEL_STEP) return;
     w.push = 0;
-    w.at = Date.now();
+    w.at = t;
+    w.fromEnd = false;
+    landAtEnd.current = !down;
     step(down ? 1 : -1);
   };
   // On a phone a sideways swipe moves between cards, like a deck: left for the next, right for the one
