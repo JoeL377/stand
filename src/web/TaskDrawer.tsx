@@ -2,7 +2,7 @@
 // its spec, what it waits on and what waits on it, and what's been reported on it. The page's
 // ?task=<id> opens it, so a link can land on it.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import { TASK_COMMENT_MAX, type TaskDetail, type TaskLink } from "../shared/protocol.ts";
@@ -187,15 +187,21 @@ export function TaskDrawer({ id, onOpen, onClose }: { id: string; onOpen: (id: s
 
 function PlanViewer({ task, onClose }: { task: TaskDetail | null; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [copyStatus, setCopyStatus] = useState("");
   const plan = task?.work.plan;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = dialog.current!;
     const previous = document.activeElement;
-    element.showModal();
+    // Older mobile webviews may expose <dialog> without the modal API.
+    if (typeof element.showModal === "function") element.showModal();
+    else element.setAttribute("open", "");
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     return () => {
-      element.close();
+      document.body.style.overflow = overflow;
+      if (typeof element.close === "function") element.close();
+      else element.removeAttribute("open");
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
     };
   }, []);
@@ -213,6 +219,8 @@ function PlanViewer({ task, onClose }: { task: TaskDetail | null; onClose: () =>
     <dialog
       ref={dialog}
       className={`td-plan-dialog${expanded ? " expanded" : ""}`}
+      role="dialog"
+      aria-modal="true"
       aria-labelledby="td-plan-title"
       onCancel={(e) => { e.preventDefault(); onClose(); }}
     >
