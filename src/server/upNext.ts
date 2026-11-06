@@ -87,7 +87,7 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
     return !!it && !it.archived && !it.deck;
   };
   // What someone wrote when adding a to-do by hand isn't news on it.
-  const noteActivity = (n: Note) => updates.filter((u) => u.noteId === n.id && u.status !== "added" && u.ts > (started.get(n.meetingId) ?? 0));
+  const noteActivity = (n: Note) => updates.filter((u) => u.noteId === n.id && u.status !== "added" && u.status !== "comment" && u.ts > (started.get(n.meetingId) ?? 0));
   const ago = (carried: number) => (carried <= 1 ? "last meeting" : `${carried} meetings ago`);
   const by = (u: ItemUpdate) => (u.client ? `${u.userName.split(" ")[0]}'s agent` : u.userName);
   const urgent = (u: ItemUpdate) => u.status === "blocked" || u.status === "needs_decision";

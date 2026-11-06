@@ -298,7 +298,8 @@ export interface Snap {
  *  "ready": the work is finished and waits to ship, usually as a PR; Stand checks the to-do off when the PR merges. */
 /** "added": the details someone gave with a to-do they added by hand; "note": more about a to-do, not progress (MCP update_action).
  *  "plan": a plan or spec was attached; "linked": a dependency was added or removed. Neither says whether anyone is on the to-do. */
-export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done" | "added" | "note" | "plan" | "linked";
+export type UpdateStatus = "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done" | "added" | "note" | "plan" | "linked" | "comment";
+export const TASK_COMMENT_MAX = 4000;
 export interface ItemUpdate {
   id: string;
   roomId: string;

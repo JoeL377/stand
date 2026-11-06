@@ -80,6 +80,7 @@ const STATUS: Record<ActionWork["log"][number]["status"], string> = {
   ready: "Ready to ship",
   added: "Added",
   note: "Note",
+  comment: "Comment",
   plan: "Plan attached",
   linked: "Linked",
   shots: "Screenshots",
