@@ -73,7 +73,7 @@ type Work = Pick<ActionWork, "working" | "ready">;
 
 const PLAN_MAX = 100_000;
 
-const UPDATE_STATUSES: UpdateStatus[] = ["working", "progress", "blocked", "needs_decision", "ready", "done"];
+const UPDATE_STATUSES: UpdateStatus[] = ["working", "progress", "blocked", "needs_decision", "ready", "done", "comment"];
 
 export function agentApi(deps: AgentDeps) {
   const { db } = deps;
@@ -675,6 +675,8 @@ export function agentApi(deps: AgentDeps) {
         throw new AgentError("Working is for a to-do: give its ref, stand:action/<id>.");
       if (status === "ready" && !(args.ref && parseRef(args.ref)?.kind === "action"))
         throw new AgentError("Ready is for a to-do: give its ref, stand:action/<id>.");
+      if (status === "comment" && !(args.ref && ["action", "question"].includes(parseRef(args.ref)?.kind ?? "")))
+        throw new AgentError("Give the to-do or question ref to post a comment.");
       const text = (args.text ?? "").trim().slice(0, 4000) || (status === "working" ? "Started on it" : "");
       if (!text) throw new AgentError("An update needs some text.");
       let roomId: string;
@@ -704,7 +706,7 @@ export function agentApi(deps: AgentDeps) {
         text,
         links: cleanLinks(args.links),
       });
-      if (note) db.claimWorkShots(note.id, caller.user.id, update.id);
+      if (note && status !== "comment") db.claimWorkShots(note.id, caller.user.id, update.id);
       deps.notify(roomId, "updates");
       const pr = update.links.find((l) => prOf(l));
       if (status === "ready" && pr) deps.readyToShip?.();

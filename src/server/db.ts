@@ -2230,7 +2230,7 @@ export function openDb(file?: string) {
           .prepare(
             `SELECT u.* FROM updates u JOIN notes n ON n.id = u.note_id
              WHERE n.kind = 'action' AND n.done_at IS NULL AND u.status = 'ready'
-             AND u.rowid = (SELECT rowid FROM updates WHERE note_id = u.note_id ORDER BY ts DESC, rowid DESC LIMIT 1)
+             AND u.rowid = (SELECT rowid FROM updates WHERE note_id = u.note_id AND status NOT IN ('plan', 'linked', 'comment') ORDER BY ts DESC, rowid DESC LIMIT 1)
              ORDER BY u.ts LIMIT 100`,
           )
           .all() as Row[]

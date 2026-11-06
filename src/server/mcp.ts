@@ -173,9 +173,9 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
         item_id: z.string().optional().describe("Or the item it's about"),
         text: z.string().optional().describe("What happened, in a sentence or two. Optional for working"),
         status: z
-          .enum(["working", "progress", "blocked", "needs_decision", "ready"])
+          .enum(["working", "progress", "blocked", "needs_decision", "ready", "comment"])
           .optional()
-          .describe("Default progress. working: you've started on this to-do. ready: finished, waiting to ship (give the PR link)"),
+          .describe("Default progress. working: you've started on this to-do. ready: finished, waiting to ship (give the PR link). comment: add to a to-do or question’s discussion"),
         links: z.array(z.string()).optional().describe("PRs, docs or other links (up to 5)"),
         model: modelField,
       },

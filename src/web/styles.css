@@ -2173,8 +2173,8 @@ a.sh-pill:hover { text-decoration: none; }
 
 /* The task drawer: one to-do beside the list, over the page's right edge. */
 .task-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 45; width: min(520px, 100vw); overflow-y: auto;
-  padding: 14px 20px 24px; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgb(15 15 15 / 0.12);
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 45; width: min(520px, 100vw); display: flex; flex-direction: column;
+  padding: 14px 20px 0; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgb(15 15 15 / 0.12);
   animation: td-in var(--dur-ui) var(--ease-out);
 }
 @keyframes td-in { from { transform: translateX(16px); opacity: 0; } }
@@ -2191,7 +2191,31 @@ a.sh-pill:hover { text-decoration: none; }
 .td-section h3 .count { font-weight: 500; }
 .td-by { font-weight: 400; text-transform: none; letter-spacing: 0; }
 .td-section > .muted { margin: 0; font-size: 13px; }
-.td-spec { font-size: 13.5px; line-height: 1.55; }
+.td-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 20px; }
+.td-compose { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.td-compose textarea { width: 100%; max-height: 25dvh; resize: vertical; }
+.td-compose button { justify-self: end; }
+.td-compose .error { margin: 0; }
+.td-plan-card { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; width: 100%; text-align: left; }
+.td-plan-dialog {
+  width: min(900px, calc(100vw - 48px)); height: min(820px, calc(100dvh - 48px));
+  max-width: none; max-height: none; padding: 0; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--panel); color: var(--text);
+}
+.td-plan-dialog[open] { display: flex; flex-direction: column; }
+.td-plan-dialog::backdrop { background: rgb(0 0 0 / 0.48); }
+.td-plan-dialog.expanded { width: calc(100vw - 32px); height: calc(100dvh - 32px); }
+.td-plan-head, .td-plan-actions { display: flex; align-items: flex-start; gap: 12px; padding: 14px 20px; }
+.td-plan-head { justify-content: space-between; border-bottom: 1px solid var(--line); }
+.td-plan-head h2, .td-plan-head p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.td-plan-head button { flex: none; }
+.td-plan-content { flex: 1; overflow: auto; overscroll-behavior: contain; padding: 20px; }
+.td-plan-document { max-width: 75ch; margin-inline: auto; font-size: 15px; line-height: 1.65; }
+.td-plan-actions { border-top: 1px solid var(--line); align-items: center; flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .td-plan-dialog, .td-plan-dialog.expanded { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
+  .td-plan-actions button:nth-child(2) { display: none; }
+}
 .td-section .fu-log { margin: 0; }
 .td-state { font-weight: 600; }
 .td-state.doing { color: var(--accent-text); }

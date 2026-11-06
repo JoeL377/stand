@@ -7,7 +7,7 @@ import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, GithubStatus, ItemH
 import { stateOf } from "../shared/tasks.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { MAX_SHOT_BYTES, UploadLinks, readyToShip, saveShotFile, shotFile, workLog, workingOn } from "./workLog.ts";
-import { MAX_SYNTHESIS_INSTRUCTIONS } from "../shared/protocol.ts";
+import { MAX_SYNTHESIS_INSTRUCTIONS, TASK_COMMENT_MAX } from "../shared/protocol.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { agentFromRequest, authRoutes, origin, requireUser, userFromRequest } from "./auth.ts";
 import { handleMcp } from "./mcp.ts";
@@ -354,6 +354,32 @@ app.get(
     res.json(detail);
   }),
 );
+app.post(
+  "/api/tasks/:id/comments",
+  route((req, res) => {
+    const user = req.user!;
+    const n = db.getNote(req.params.id);
+    if (!n || (n.kind !== "action" && n.kind !== "question") || !db.isMember(n.roomId, user.id)) return notFound(res);
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text || text.length > TASK_COMMENT_MAX) {
+      return res.status(400).json({ error: `Write a comment of 1 to ${TASK_COMMENT_MAX} characters.` });
+    }
+    const comment = db.addUpdate({
+      roomId: n.roomId,
+      itemId: n.itemId,
+      noteId: n.id,
+      noteText: n.text,
+      userId: user.id,
+      userName: user.name,
+      client: null,
+      status: "comment",
+      text,
+      links: [],
+    });
+    res.status(201).json(workLog([comment], [])[0]);
+  }),
+);
+
 // To-dos an agent finished as a PR get checked off when the PR merges.
 const shipWatch = new ShipWatch(
   db,
