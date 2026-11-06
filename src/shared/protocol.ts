@@ -352,6 +352,27 @@ export interface ActionWork {
   }>;
 }
 
+/** Another to-do a to-do is linked to, as its drawer lists it. */
+export interface TaskLink {
+  id: string;
+  text: string;
+  owner: string | null;
+  state: TaskState;
+}
+
+/** A to-do or open question with everything its drawer shows: its spec, its log and what it waits on. */
+export interface TaskDetail {
+  note: Note;
+  roomId: string;
+  /** The meeting it came out of; null for one someone added by hand. */
+  meeting: { id: string; startedAt: number } | null;
+  /** Agents' work on it, with the latest plan or spec even when nothing's been reported. */
+  work: ActionWork;
+  waitsOn: TaskLink[];
+  /** To-dos that wait on this one. */
+  blocking: TaskLink[];
+}
+
 /** A GitHub account (person or organization) where someone installed the Stand GitHub App. */
 export interface GithubInstallation {
   id: number;

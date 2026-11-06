@@ -113,14 +113,14 @@ const asSnaps = (e: Entry): Snap[] =>
     segmentIds: [],
   }));
 
-/** The to-do's log, newest first, as a bordered card under it. */
-export function WorkCard({ work }: { work: ActionWork }) {
+/** The to-do's log, newest first, as a bordered card under it. noPlan: the plan shows elsewhere. */
+export function WorkCard({ work, noPlan }: { work: ActionWork; noPlan?: boolean }) {
   const [all, setAll] = useState(false);
   const [viewing, setViewing] = useState<{ entry: Entry; at: number } | null>(null);
   const shown = all ? work.log : work.log.slice(0, FIRST);
   return (
     <div className="fu-log">
-      {work.plan && (
+      {work.plan && !noPlan && (
         <details className="wl-plan">
           <summary>
             Plan <span className="wl-by">{work.plan.by}</span> <time title={new Date(work.plan.ts).toLocaleString()}>{fmtAgo(work.plan.ts)}</time>

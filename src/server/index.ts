@@ -3,7 +3,8 @@ import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { type WebSocket, WebSocketServer } from "ws";
-import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, GithubStatus, ItemHistory, Jot, MeetingRecap, SlideLayout } from "../shared/protocol.ts";
+import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, GithubStatus, ItemHistory, Jot, MeetingRecap, SlideLayout, TaskDetail, TaskLink } from "../shared/protocol.ts";
+import { stateOf } from "../shared/tasks.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { MAX_SHOT_BYTES, UploadLinks, readyToShip, saveShotFile, shotFile, workLog, workingOn } from "./workLog.ts";
 import { MAX_SYNTHESIS_INSTRUCTIONS } from "../shared/protocol.ts";
@@ -308,14 +309,49 @@ app.get(
     const shots = db.noteWorkShots(keep);
     const out: Record<string, ActionWork> = {};
     for (const n of notes) {
-      const mine = updates.filter((u) => u.noteId === n.id);
-      const log = workLog(mine, shots.filter((s) => s.noteId === n.id));
-      const working = workingOn(mine, !!n.doneAt);
-      const ready = readyToShip(mine, !!n.doneAt);
-      const plan = log.length ? db.notePlan(n.id) : null;
-      if (log.length || working) out[n.id] = { working, ready, log, plan: plan && { by: plan.by, ts: plan.ts, text: plan.text } };
+      const w = workOf(n, updates, shots);
+      if (w.log.length || w.working) out[n.id] = w;
     }
     res.json(out);
+  }),
+);
+/** A to-do's work as the log shows it. The plan only comes with a log, unless asked for. */
+function workOf(
+  n: { id: string; doneAt: number | null },
+  updates: ReturnType<DB["notesUpdates"]>,
+  shots: ReturnType<DB["noteWorkShots"]>,
+  withPlan = false,
+): ActionWork {
+  const mine = updates.filter((u) => u.noteId === n.id);
+  const log = workLog(mine, shots.filter((s) => s.noteId === n.id));
+  const plan = log.length || withPlan ? db.notePlan(n.id) : null;
+  return { working: workingOn(mine, !!n.doneAt), ready: readyToShip(mine, !!n.doneAt), log, plan: plan && { by: plan.by, ts: plan.ts, text: plan.text } };
+}
+
+// One to-do or open question for its drawer: the note, where it came from, its spec and log, and
+// what it waits on and what waits on it.
+app.get(
+  "/api/tasks/:id",
+  route((req, res) => {
+    const n = db.getNote(req.params.id);
+    if (!n || (n.kind !== "action" && n.kind !== "question") || !db.isMember(n.roomId, req.user!.id)) return notFound(res);
+    const m = db.getMeeting(n.meetingId);
+    const links = db.roomLinks(n.roomId, "depends_on");
+    const linked = (ids: string[]): TaskLink[] =>
+      ids.flatMap((id) => {
+        const x = db.getNote(id);
+        return x ? [{ id: x.id, text: x.text, owner: x.owner ?? null, state: stateOf(x) }] : [];
+      });
+    const { roomId, meetingStartedAt: _s, meetingEndedAt: _e, ...note } = n;
+    const detail: TaskDetail = {
+      note,
+      roomId,
+      meeting: m && !m.added ? { id: m.id, startedAt: m.startedAt } : null,
+      work: workOf(n, db.notesUpdates([n.id]), db.noteWorkShots([n.id]), true),
+      waitsOn: linked(links.filter((l) => l.fromId === n.id).map((l) => l.toId)),
+      blocking: linked(links.filter((l) => l.toId === n.id).map((l) => l.fromId)),
+    };
+    res.json(detail);
   }),
 );
 // To-dos an agent finished as a PR get checked off when the PR merges.

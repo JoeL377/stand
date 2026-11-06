@@ -39,6 +39,10 @@ export function FollowUpList(props: {
   tail?: (n: FollowUpNote) => ReactNode;
   /** Shows inline right after the text, like a small pill. */
   after?: (n: FollowUpNote) => ReactNode;
+  /** Makes the text a button that opens the task. */
+  onOpen?: (n: FollowUpNote) => void;
+  /** The task open beside the list, marked in it. */
+  openId?: string | null;
 }) {
   const [saved, setSaved] = useState<Record<string, Note>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -55,7 +59,7 @@ export function FollowUpList(props: {
         const w = work[n.id];
         const open = opened === n.id && !!w?.log.length;
         return (
-          <li key={n.id} className={[done && "done", dropped && "dropped"].filter(Boolean).join(" ") || undefined}>
+          <li key={n.id} className={[done && "done", dropped && "dropped", props.openId === n.id && "opened"].filter(Boolean).join(" ") || undefined}>
             <button
               className="check"
               role="checkbox"
@@ -81,7 +85,13 @@ export function FollowUpList(props: {
             </button>
             <span className="fu-body">
               <span className="fu-text">
-                {n.text}
+                {props.onOpen ? (
+                  <button type="button" className="fu-open" onClick={() => props.onOpen!(n)}>
+                    {n.text}
+                  </button>
+                ) : (
+                  n.text
+                )}
                 {props.after?.(n)}
                 {w && <WorkPill work={w} open={open} onToggle={() => setOpened(open ? null : n.id)} />}
               </span>
