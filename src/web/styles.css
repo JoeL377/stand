@@ -2142,6 +2142,29 @@ a.sh-pill:hover { text-decoration: none; }
 .wl-more { margin: 2px 0 6px; padding: 0; height: auto; min-height: 0; border: 0; background: none; box-shadow: none; font-size: 12px; color: var(--muted); cursor: pointer; }
 .wl-more:hover { color: var(--accent-text); }
 .followups li:has(.fu-log) { align-items: flex-start; }
+/* Rendered markdown: plans, specs and reports. Compact, to sit inside cards. */
+.md { white-space: normal; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md table { margin: 0 0 8px; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 14px 0 6px; font-size: 14px; line-height: 1.35; font-weight: 600; }
+.md h1 { font-size: 16px; }
+.md h2 { font-size: 15px; }
+.md ul, .md ol { padding-left: 20px; }
+.md li, .followups .md li { display: list-item; padding: 0; gap: 0; }
+.md li + li { margin-top: 2px; }
+.md li > ul, .md li > ol { margin: 2px 0 0; }
+.md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -18px; }
+.md input[type="checkbox"] { width: auto; margin: 0 6px 0 0; padding: 0; vertical-align: -1px; }
+.md code { padding: 1px 4px; border-radius: 4px; background: var(--panel-2); font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace; }
+.md pre { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); overflow-x: auto; }
+.md pre code { padding: 0; background: none; white-space: pre; overflow-wrap: normal; }
+.md blockquote { padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+.md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.md th, .md td { padding: 4px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.md th { background: var(--panel-2); font-weight: 600; }
+.md hr { margin: 12px 0; border: 0; border-top: 1px solid var(--line); }
+.md img { max-width: 100%; border-radius: 6px; }
 
 /* ---- space page: one page, a tab per kind of thing ---- */
 .sh-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }

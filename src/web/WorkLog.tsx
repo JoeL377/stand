@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import type { ActionWork, Snap } from "../shared/protocol.ts";
 import { api } from "./api.ts";
-import { Linkified } from "./Linkified.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { SnapGallery } from "./Snaps.tsx";
 import { fmtAgo, linkLabel } from "./util.ts";
 
@@ -125,9 +125,7 @@ export function WorkCard({ work }: { work: ActionWork }) {
           <summary>
             Plan <span className="wl-by">{work.plan.by}</span> <time title={new Date(work.plan.ts).toLocaleString()}>{fmtAgo(work.plan.ts)}</time>
           </summary>
-          <p className="wl-text">
-            <Linkified text={work.plan.text} />
-          </p>
+          <Markdown className="wl-text" text={work.plan.text} />
         </details>
       )}
       {shown.map((e) => (
@@ -142,11 +140,7 @@ export function WorkCard({ work }: { work: ActionWork }) {
               </a>
             ))}
           </div>
-          {e.text && (
-            <p className="wl-text">
-              <Linkified text={e.text} />
-            </p>
-          )}
+          {e.text && <Markdown className="wl-text" text={e.text} breaks />}
           {e.shots.length > 0 && (
             <div className="wl-shots">
               {e.shots.map((s, k) => (
