@@ -1,3 +1,4 @@
+import { changeReview, reviewFor } from "./planReview.ts";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -379,6 +380,22 @@ app.post(
     res.status(201).json(workLog([comment], [])[0]);
   }),
 );
+
+app.get("/api/tasks/:id/plan-review", route((req, res) => {
+  const task = db.getNote(req.params.id);
+  if (!task || task.kind !== "action" || !db.isMember(task.roomId, req.user!.id)) return notFound(res);
+  const version = typeof req.query.version === "string" ? req.query.version : undefined;
+  const review = reviewFor(db, task.id, version);
+  if (!review) return notFound(res);
+  res.json(review);
+}));
+app.post("/api/tasks/:id/plan-review", route((req, res) => {
+  const task = db.getNote(req.params.id);
+  if (!task || task.kind !== "action" || !db.isMember(task.roomId, req.user!.id)) return notFound(res);
+  const thread = changeReview(db, task.id, req.user!.name, req.body ?? {});
+  if (!thread) return res.status(400).json({ error: "Select a passage or enter a valid comment." });
+  res.json(thread);
+}));
 
 // To-dos an agent finished as a PR get checked off when the PR merges.
 const shipWatch = new ShipWatch(

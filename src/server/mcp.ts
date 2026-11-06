@@ -232,6 +232,32 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
   );
 
   server.registerTool(
+    "get_plan_review",
+    {
+      description: "Read a to-do’s plan version and passage comment threads. Omit version for the latest plan.",
+      inputSchema: { ref: z.string(), version: z.string().optional() },
+      annotations: { readOnlyHint: true },
+    },
+    ({ ref, version }) => run(() => api.planReview(as(), { ref, version })),
+  );
+
+  server.registerTool(
+    "update_plan_review",
+    {
+      description: "Reply to, resolve, or reopen an existing passage comment thread on a to-do.",
+      inputSchema: {
+        ref: z.string(),
+        thread: z.string(),
+        action: z.enum(["reply", "resolve", "reopen"]),
+        text: z.string().optional(),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ model, ...input }) => run(() => api.updatePlanReview(as(model), input)),
+  );
+
+  server.registerTool(
     "attach_plan",
     {
       title: "Attach a plan or spec to a Stand to-do",
