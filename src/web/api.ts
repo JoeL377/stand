@@ -1,3 +1,4 @@
+import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type {
   ActionWork,
@@ -150,6 +151,10 @@ export const api = {
     call<unknown>("POST", `/api/rooms/${roomId}/decisions/${noteId}/replaced`, { by, replaced }),
   setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
+  planReview: (id: string, version?: string) =>
+    call<PlanReview>("GET", `/api/tasks/${id}/plan-review${version ? `?version=${encodeURIComponent(version)}` : ""}`),
+  changePlanReview: (id: string, input: object) =>
+    call<PlanThread>("POST", `/api/tasks/${id}/plan-review`, input),
   commentOnTask: (id: string, text: string) =>
     call<TaskDetail["work"]["log"][number]>("POST", `/api/tasks/${id}/comments`, { text }),
   task: (id: string) => call<TaskDetail>("GET", `/api/tasks/${id}`),

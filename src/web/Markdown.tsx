@@ -1,3 +1,4 @@
+import type { Passage } from "../shared/planReview.ts";
 // Markdown as people and agents write it in plans, specs and reports: GitHub-flavored (tables,
 // task lists, strikethrough, bare links), never raw HTML. Stand refs like stand:action/<id> open
 // the thing they point at.
@@ -61,11 +62,35 @@ const components: Components = {
     ),
 };
 
+type RenderedNode = {
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  position?: { start: { offset?: number }; end: { offset?: number } };
+  children?: RenderedNode[];
+};
+
+type ReviewMarks = { highlight: Passage | null; marked?: (Passage & { id: string })[] };
+const reviewPassages = ({ highlight, marked }: ReviewMarks) => () => (root: RenderedNode) => {
+  function walk(node: RenderedNode, top: boolean) {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (node.properties && (top || node.tagName === "li") && start !== undefined && end !== undefined) {
+      node.properties.dataPlanStart = start;
+      node.properties.dataPlanEnd = end;
+      if (highlight && highlight.start <= start && end <= highlight.end) node.properties.dataPlanHighlight = "true";
+      const thread = marked?.find((range) => range.start <= start && end <= range.end);
+      if (thread) node.properties.dataPlanThread = thread.id;
+    }
+    node.children?.forEach((child) => walk(child, false));
+  }
+  root.children?.forEach((node) => walk(node, true));
+};
+
 /** Renders markdown. breaks: a single newline starts a new line, as in a chat message or a short report. */
-export function Markdown({ text, breaks = false, className }: { text: string; breaks?: boolean; className?: string }) {
+export function Markdown({ text, breaks = false, className, review }: { text: string; breaks?: boolean; className?: string; review?: ReviewMarks }) {
   return (
     <div className={`md${className ? ` ${className}` : ""}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm, refsAndBreaks(breaks)]} components={components} urlTransform={urlTransform}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, refsAndBreaks(breaks)]} rehypePlugins={review ? [reviewPassages(review)] : []} components={components} urlTransform={urlTransform}>
         {text}
       </ReactMarkdown>
     </div>

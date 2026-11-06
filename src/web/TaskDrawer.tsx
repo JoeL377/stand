@@ -10,7 +10,7 @@ import { STATE_LABEL, VERB_LABEL, stateOf, verbOf } from "../shared/tasks.ts";
 import { api } from "./api.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { CloseIcon } from "./icons.tsx";
-import { Markdown } from "./Markdown.tsx";
+import { PlanReviewBody } from "./PlanReview.tsx";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
 
@@ -220,13 +220,11 @@ function PlanViewer({ task, onClose }: { task: TaskDetail | null; onClose: () =>
         <div>
           <h2 id="td-plan-title">Plan</h2>
           {task && <p>{task.note.text}</p>}
-          {plan && <p className="muted">{plan.by} · {fmtAgo(plan.ts)}</p>}
         </div>
         <button type="button" onClick={onClose}>Back to task</button>
       </header>
-      <div className="td-plan-content" tabIndex={0}>
-        {plan ? <Markdown className="td-plan-document" text={plan.text} /> : <p className="muted">{task ? "No plan yet." : "This task couldn’t be loaded."}</p>}
-      </div>
+      {plan && task ? <PlanReviewBody key={task.note.id} task={task.note.id} /> :
+        <div className="td-plan-content"><p className="muted">{task ? "No plan yet." : "This task couldn’t be loaded."}</p></div>}
       {plan && (
         <footer className="td-plan-actions">
           <button type="button" onClick={() => void copyLink()}>Copy link</button>

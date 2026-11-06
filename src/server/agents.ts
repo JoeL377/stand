@@ -1,3 +1,4 @@
+import { changeReview, reviewFor } from "./planReview.ts";
 // What agents see of Stand, shared by the MCP server (mcp.ts) and the
 // "Copy for agent" button: references to single to-dos, decisions, questions
 // and topics, the context to act on them, and the two ways to report back.
@@ -412,6 +413,8 @@ export function agentApi(deps: AgentDeps) {
       const updates = n.kind === "action" ? db.noteUpdates(n.id) : [];
       const work = n.kind === "action" ? workOn([n]).get(n.id) : undefined;
       const plan = n.kind === "action" ? db.notePlan(n.id) : null;
+      const review = plan && reviewFor(db, n.id);
+      const openThreads = review ? review.threads.filter((thread) => !thread.resolved) : [];
       return {
         ref: refOf(r.ref.kind, n.id),
         kind: r.ref.kind,
@@ -421,6 +424,8 @@ export function agentApi(deps: AgentDeps) {
         status: n.kind === "action" ? stateOf(n, work) : undefined,
         ...workInfo(work),
         plan: plan ? { text: plan.text, by: plan.by, actor: plan.actor, at: new Date(plan.ts).toISOString(), versions: plan.versions } : undefined,
+        ...(review ? { plan_version: review.plan.id } : {}),
+        ...(openThreads.length ? { plan_review_threads: openThreads } : {}),
         ...(n.kind === "action" ? dependenciesOf(n) : {}),
         done_by: n.doneBy ?? undefined,
         ...(n.kind === "decision" ? decisionInfo(settledView(db, r.room.id).decided.find((x) => x.id === n.id)) : {}),
@@ -760,6 +765,21 @@ export function agentApi(deps: AgentDeps) {
           .map((x) => ({ ref: refOf("action", x.id), text: clip(x.text, 160), by: othersWork.get(x.id)!.working!.by, doing: clip(othersWork.get(x.id)!.working!.text, 160) })),
         next: "Do the work. attach_plan if you write a plan or spec, link_todos if it needs another to-do done first. When it's in a PR, put this ref in the description and post_update with status ready and the PR link: Stand checks it off when the PR merges. With nothing to ship, complete_action with a summary.",
       };
+    },
+
+    planReview(caller: Caller, args: { ref: string; version?: string }) {
+      const r = resolve(caller, args.ref);
+      const review = r.note?.kind === "action" && reviewFor(db, r.note.id, args.version);
+      if (!review) throw new AgentError("Plan version not found.");
+      return review;
+    },
+
+    updatePlanReview(caller: Caller, args: { ref: string; thread: string; action: "reply" | "resolve" | "reopen"; text?: string }) {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref);
+      const thread = r.note?.kind === "action" && changeReview(db, r.note.id, byOf(caller), args);
+      if (!thread) throw new AgentError("Thread not found or invalid reply.");
+      return thread;
     },
 
     /** Keeps a plan or spec on a to-do, as a new version. It says nothing about who's on it. */

@@ -1,3 +1,4 @@
+import type { PlanThread, PlanVersion } from "../shared/planReview.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -354,6 +355,12 @@ CREATE TABLE IF NOT EXISTS task_plans (
   made_actor_json TEXT
 );
 CREATE INDEX IF NOT EXISTS task_plans_note ON task_plans(note_id, made_at);
+CREATE TABLE IF NOT EXISTS plan_threads (
+  id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL,
+  thread_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plan_threads_note ON plan_threads(note_id);
 -- How a space's tasks, decisions and context relate (docs/mvp-primitives.md).
 CREATE TABLE IF NOT EXISTS links (
   id TEXT PRIMARY KEY,
@@ -1654,6 +1661,19 @@ export function openDb(file?: string) {
         Date.now(),
         actor ? JSON.stringify(actor) : null,
       );
+    },
+    planVersions(noteId: string): PlanVersion[] {
+      return db.prepare("SELECT id, text, made_by AS by, made_at AS ts FROM task_plans WHERE note_id = ? ORDER BY made_at, rowid")
+        .all(noteId) as PlanVersion[];
+    },
+    planThreads(noteId: string): PlanThread[] {
+      return db.prepare("SELECT thread_json FROM plan_threads WHERE note_id = ? ORDER BY rowid")
+        .all(noteId).map((row) => JSON.parse(row.thread_json as string) as PlanThread);
+    },
+    savePlanThread(noteId: string, thread: PlanThread) {
+      db.prepare(`INSERT INTO plan_threads (id, note_id, thread_json) VALUES (?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET thread_json = excluded.thread_json WHERE note_id = excluded.note_id`)
+        .run(thread.id, noteId, JSON.stringify(thread));
     },
     /** A to-do's latest plan and how many versions it has had. */
     notePlan(noteId: string) {
