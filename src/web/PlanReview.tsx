@@ -1,5 +1,5 @@
 import { Check, ChevronDown, MessageSquare, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Passage, PlanReview } from "../shared/planReview.ts";
 import { TASK_COMMENT_MAX } from "../shared/protocol.ts";
 import { api } from "./api.ts";
@@ -21,6 +21,7 @@ export function PlanReviewBody({ task }: { task: string }) {
   const [active, setActive] = useState<string | null>(null);
   const [filter, setFilter] = useState<"open" | "resolved">("open");
   const [notice, setNotice] = useState("");
+  const [mobilePanel, setMobilePanel] = useState<"plan" | "comments">("plan");
   const [composing, setComposing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -54,7 +55,7 @@ export function PlanReviewBody({ task }: { task: string }) {
     return () => { request.current++; clearInterval(timer); };
   }, [task]);
 
-  function captureSelection() {
+  const captureSelection = useCallback(() => {
     const range = window.getSelection();
     const root = document.current;
     if (composing || busy || !root || !range?.rangeCount || range.isCollapsed) return;
@@ -62,7 +63,22 @@ export function PlanReviewBody({ task }: { task: string }) {
     const first = passageAt(dom.startContainer, root);
     const last = passageAt(dom.endContainer, root);
     if (!first || !last) return;
-    setSelection({ start: Number(first.dataset.planStart), end: Number(last.dataset.planEnd) });
+    const start = Number(first.dataset.planStart);
+    const end = Number(last.dataset.planEnd);
+    setSelection((previous) => previous?.start === start && previous.end === end ? previous : { start, end });
+  }, [composing, busy]);
+
+  useEffect(() => {
+    // Touch selection handles can move after touchend (especially in Safari).
+    window.document.addEventListener("selectionchange", captureSelection);
+    return () => window.document.removeEventListener("selectionchange", captureSelection);
+  }, [captureSelection]);
+
+  function startComment() {
+    setActive(null);
+    setComposing(true);
+    setMobilePanel("comments");
+    window.getSelection()?.removeAllRanges();
   }
 
   async function showVersion(id: string) {
@@ -111,6 +127,7 @@ export function PlanReviewBody({ task }: { task: string }) {
 
   function openThread(id: string) {
     if (busy) return;
+    setMobilePanel("comments");
     setFilter("open");
     setNotice("");
     setActive(id);
@@ -123,7 +140,7 @@ export function PlanReviewBody({ task }: { task: string }) {
     ? [{ ...entry.placement, id: entry.id }] : []);
   useEffect(() => {
     if (!selection) document.current?.querySelector("[data-plan-highlight]")?.scrollIntoView({ block: "nearest" });
-  }, [active, plan?.id, thread?.placement?.start, selection]);
+  }, [active, plan?.id, thread?.placement?.start, selection, mobilePanel]);
 
   function composer(isNew: boolean) {
     return (
@@ -141,7 +158,14 @@ export function PlanReviewBody({ task }: { task: string }) {
 
   if (!review || !plan) return <p className="td-plan-content" role="status">{error || "Loading plan…"}</p>;
   return (
-    <div className="td-review">
+    <div className={`td-review mobile-${mobilePanel}`}>
+      <div className="td-review-mobile-nav" role="group" aria-label="Plan view">
+        <button type="button" aria-pressed={mobilePanel === "plan"} onClick={() => setMobilePanel("plan")}>Plan</button>
+        <button type="button" aria-pressed={mobilePanel === "comments"} onClick={() => setMobilePanel("comments")}>
+          Comments · {review.threads.filter((entry) => !entry.resolved).length}
+        </button>
+        {selection && !composing && <button type="button" className="primary" disabled={busy} onClick={startComment}>Add comment</button>}
+      </div>
       <div className="td-plan-content" tabIndex={0}>
         <div ref={document} onMouseUp={captureSelection} onKeyUp={captureSelection} onTouchEnd={captureSelection}
           onClick={(e) => {
@@ -174,7 +198,7 @@ export function PlanReviewBody({ task }: { task: string }) {
             <span className="td-review-label">Selected passage</span>
             <blockquote>{plan.text.slice(selection.start, selection.end)}</blockquote>
             <div className="td-review-controls">
-              <button className="primary" type="button" disabled={busy} onClick={() => { setActive(null); setComposing(true); }}>Add comment</button>
+              <button className="primary" type="button" disabled={busy} onClick={startComment}>Add comment</button>
               <button className="ghost" type="button" disabled={busy} onClick={() => setSelection(null)}>Cancel</button>
             </div>
           </div>
@@ -204,12 +228,11 @@ export function PlanReviewBody({ task }: { task: string }) {
                 </button>
                 {expanded && (
                   <div className="td-review-detail">
-                    <div className="td-review-context">
-                      <span className="td-review-label">On this passage</span>
-                      <blockquote>{entry.original.quote}</blockquote>
+                    {(!entry.placement || entry.original.version !== plan.id) && <div className="td-review-context">
+                      {!entry.placement && <blockquote>{entry.original.quote}</blockquote>}
                       {!entry.placement && <p className="td-review-meta">This passage has changed in this version.</p>}
                       {entry.original.version !== plan.id && <button className="link small" type="button" disabled={busy} onClick={() => showVersion(entry.original.version)}>View original version</button>}
-                    </div>
+                    </div>}
                     <div className="td-review-messages">
                       {entry.messages.map((message, index) => (
                         <div className="td-review-message" key={message.id}>
