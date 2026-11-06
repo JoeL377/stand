@@ -1,3 +1,4 @@
+import { Check, ChevronDown, MessageSquare, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Passage, PlanReview } from "../shared/planReview.ts";
 import { TASK_COMMENT_MAX } from "../shared/protocol.ts";
@@ -18,6 +19,8 @@ export function PlanReviewBody({ task }: { task: string }) {
   const document = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<Passage | null>(null);
   const [active, setActive] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"open" | "resolved">("open");
+  const [notice, setNotice] = useState("");
   const [composing, setComposing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -28,7 +31,7 @@ export function PlanReviewBody({ task }: { task: string }) {
   useEffect(() => {
     try { sessionStorage.setItem(draftStore, JSON.stringify(drafts)); } catch {}
   }, [drafts, draftStore]);
-  const thread = review?.threads.find((entry) => entry.id === active);
+  const thread = review?.threads.find((entry) => entry.id === active && entry.resolved === (filter === "resolved"));
   const plan = review?.plan;
   const draftKey = composing ? `new:${plan?.id}:${selection?.start}:${selection?.end}` : active ?? "";
   const draft = drafts[draftKey] ?? "";
@@ -85,7 +88,19 @@ export function PlanReviewBody({ task }: { task: string }) {
       if (action === "create" || action === "reply") setDrafts((prev) => ({ ...prev, [draftKey]: "" }));
       setComposing(false);
       setSelection(null);
-      setActive(changed.id);
+      // Apply the server result immediately; a delayed refresh must not leave a resolved thread open.
+      request.current++;
+      setReview((prev) => prev ? { ...prev, threads: prev.threads.some((entry) => entry.id === changed.id)
+        ? prev.threads.map((entry) => entry.id === changed.id ? { ...entry, ...changed } : entry)
+        : prev.threads } : prev);
+      if (action === "resolve" || action === "reopen") {
+        setActive(null);
+        setNotice(action === "resolve" ? "Thread moved to Resolved." : "Thread moved to Open.");
+      } else {
+        setFilter("open");
+        setActive(changed.id);
+        setNotice("");
+      }
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -96,6 +111,8 @@ export function PlanReviewBody({ task }: { task: string }) {
 
   function openThread(id: string) {
     if (busy) return;
+    setFilter("open");
+    setNotice("");
     setActive(id);
     setComposing(false);
     setSelection(null);
@@ -107,6 +124,20 @@ export function PlanReviewBody({ task }: { task: string }) {
   useEffect(() => {
     if (!selection) document.current?.querySelector("[data-plan-highlight]")?.scrollIntoView({ block: "nearest" });
   }, [active, plan?.id, thread?.placement?.start, selection]);
+
+  function composer(isNew: boolean) {
+    return (
+      <form className="td-review-form" onSubmit={(e) => { e.preventDefault(); void change(isNew ? "create" : "reply"); }}>
+        <textarea aria-label={isNew ? "Write a comment" : "Write a reply"} placeholder={isNew ? "Write a comment…" : "Write a reply…"} rows={3}
+          autoFocus={isNew} maxLength={TASK_COMMENT_MAX} value={draft} readOnly={busy}
+          onChange={(e) => setDrafts({ ...drafts, [draftKey]: e.target.value })} />
+        <div className="td-review-controls">
+          {isNew && <button className="ghost" type="button" disabled={busy} onClick={() => { setComposing(false); setSelection(null); }}><X size={14} aria-hidden="true" /> Cancel</button>}
+          <button className="primary" type="submit" disabled={busy || !draft.trim()}>{isNew ? "Post comment" : "Reply"}</button>
+        </div>
+      </form>
+    );
+  }
 
   if (!review || !plan) return <p className="td-plan-content" role="status">{error || "Loading plan…"}</p>;
   return (
@@ -123,48 +154,89 @@ export function PlanReviewBody({ task }: { task: string }) {
         </div>
       </div>
       <aside className="td-review-comments" aria-label="Plan comments">
-        <h3>Plan comments</h3>
-        <p className="muted">{plan.by} · {fmtAgo(plan.ts)}</p>
-        {review.latest !== plan.id && <button type="button" disabled={busy} onClick={() => showVersion(review.latest)}>View latest version</button>}
-        <p className="muted">Select text in the plan to comment on the surrounding paragraph or block.</p>
+        <header className="td-review-heading">
+          <h3><MessageSquare size={16} aria-hidden="true" /> Comments</h3>
+          <p>Select text in the plan to leave a comment.</p>
+        </header>
+        {review.latest !== plan.id && <button className="small" type="button" disabled={busy} onClick={() => showVersion(review.latest)}>View latest version</button>}
+        <div className="td-review-filters" role="group" aria-label="Filter comments">
+          {(["open", "resolved"] as const).map((value) => (
+            <button type="button" key={value} aria-pressed={filter === value} disabled={busy}
+              onClick={() => { setFilter(value); setActive(null); setNotice(""); }}>
+              {value === "open" ? "Open" : "Resolved"}
+              <span>{review.threads.filter((entry) => entry.resolved === (value === "resolved")).length}</span>
+            </button>
+          ))}
+        </div>
+        {notice && <p className="td-review-notice" role="status"><Check size={14} aria-hidden="true" />{notice}</p>}
         {selection && !composing && (
-          <div className="td-review-controls">
-            <button type="button" disabled={busy} onClick={() => { setActive(null); setComposing(true); }}>Comment on passage</button>
-            {thread && <button type="button" disabled={busy} onClick={() => void change("reattach")}>Attach thread here</button>}
-            <button type="button" disabled={busy} onClick={() => setSelection(null)}>Clear selection</button>
+          <div className="td-review-selection">
+            <span className="td-review-label">Selected passage</span>
+            <blockquote>{plan.text.slice(selection.start, selection.end)}</blockquote>
+            <div className="td-review-controls">
+              <button className="primary" type="button" disabled={busy} onClick={() => { setActive(null); setComposing(true); }}>Add comment</button>
+              <button className="ghost" type="button" disabled={busy} onClick={() => setSelection(null)}>Cancel</button>
+            </div>
           </div>
         )}
-        {review.threads.map((entry) => (
-          <button type="button" className="td-review-thread" key={entry.id} disabled={busy}
-            aria-pressed={entry.id === active} onClick={() => openThread(entry.id)}>
-            <span>{entry.messages[0].text}</span>
-            <small>{entry.resolved ? "Resolved" : "Open"}{!entry.placement && " · No placement on this version"}</small>
-          </button>
-        ))}
-        {thread && (
-          <section className="td-review-detail" aria-label="Selected thread">
-            <blockquote>{thread.original.quote}</blockquote>
-            {thread.original.version !== plan.id && (
-              <button type="button" disabled={busy} onClick={() => showVersion(thread.original.version)}>View original version</button>
-            )}
-            <button type="button" disabled={busy} onClick={() => void change(thread.resolved ? "reopen" : "resolve")}>
-              {thread.resolved ? "Reopen" : "Resolve"}
-            </button>
-            {thread.messages.map((message) => (
-              <div key={message.id}><small>{message.by} · {fmtAgo(message.ts)}</small><Markdown text={message.text} breaks /></div>
-            ))}
+        {composing && selection && (
+          <section className="td-review-card td-review-compose" aria-label="New comment">
+            <span className="td-review-label">Commenting on</span>
+            <blockquote>{plan.text.slice(selection.start, selection.end)}</blockquote>
+            {composer(true)}
           </section>
         )}
-        {composing && selection && <blockquote>{plan.text.slice(selection.start, selection.end)}</blockquote>}
-        {(composing || thread) && (
-          <form onSubmit={(e) => { e.preventDefault(); void change(composing ? "create" : "reply"); }}>
-            <textarea aria-label={composing ? "Write a passage comment" : "Reply"} rows={3}
-              maxLength={TASK_COMMENT_MAX} value={draft} readOnly={busy}
-              onChange={(e) => setDrafts({ ...drafts, [draftKey]: e.target.value })} />
-            <button type="submit" disabled={busy || !draft.trim()}>{composing ? "Post comment" : "Reply"}</button>
-            {composing && <button type="button" disabled={busy} onClick={() => setComposing(false)}>Cancel</button>}
-          </form>
-        )}
+        <div className="td-review-list">
+          {review.threads.filter((entry) => entry.resolved === (filter === "resolved")).map((entry) => {
+            const expanded = thread?.id === entry.id;
+            const first = entry.messages[0];
+            return (
+              <section className={`td-review-card${expanded ? " is-active" : ""}${entry.resolved ? " is-resolved" : ""}`} key={entry.id}>
+                <button type="button" className="td-review-thread" disabled={busy} aria-expanded={expanded}
+                  onClick={() => { setActive(expanded ? null : entry.id); setComposing(false); setSelection(null); }}>
+                  <span className="td-review-thread-heading">
+                    <span className="td-review-author">{first.by}</span>
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </span>
+                  <span className="td-review-meta">{fmtAgo(first.ts)}{entry.resolved && <span className="td-review-resolved"><Check size={12} aria-hidden="true" /> Resolved</span>}</span>
+                  {!expanded && <span className="td-review-preview">{first.text}</span>}
+                  {!expanded && entry.messages.length > 1 && <span className="td-review-replies">{entry.messages.length - 1} {entry.messages.length === 2 ? "reply" : "replies"}</span>}
+                </button>
+                {expanded && (
+                  <div className="td-review-detail">
+                    <div className="td-review-context">
+                      <span className="td-review-label">On this passage</span>
+                      <blockquote>{entry.original.quote}</blockquote>
+                      {!entry.placement && <p className="td-review-meta">This passage has changed in this version.</p>}
+                      {entry.original.version !== plan.id && <button className="link small" type="button" disabled={busy} onClick={() => showVersion(entry.original.version)}>View original version</button>}
+                    </div>
+                    <div className="td-review-messages">
+                      {entry.messages.map((message, index) => (
+                        <div className="td-review-message" key={message.id}>
+                          {index > 0 && <div className="td-review-meta"><strong>{message.by}</strong><span>{fmtAgo(message.ts)}</span></div>}
+                          <Markdown text={message.text} breaks />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="td-review-controls">
+                      <button className="td-review-resolve" type="button" disabled={busy} onClick={() => void change(entry.resolved ? "reopen" : "resolve")}>
+                        <Check size={14} aria-hidden="true" />{entry.resolved ? "Reopen thread" : "Resolve thread"}
+                      </button>
+                    </div>
+                    {entry.resolved ? <p className="td-review-meta">Reopen this thread to continue the conversation.</p> : composer(false)}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+          {!composing && !review.threads.some((entry) => entry.resolved === (filter === "resolved")) && (
+            <div className="td-review-empty">
+              {filter === "open" ? <MessageSquare size={22} aria-hidden="true" /> : <Check size={22} aria-hidden="true" />}
+              <strong>{filter === "open" ? "No open comments" : "No resolved comments"}</strong>
+              <p>{filter === "open" ? "Select a passage in the plan to start a conversation." : "Threads you resolve will appear here. You can reopen them anytime."}</p>
+            </div>
+          )}
+        </div>
         {error && <p className="error" role="alert">{error}</p>}
       </aside>
     </div>
