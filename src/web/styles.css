@@ -2166,6 +2166,47 @@ a.sh-pill:hover { text-decoration: none; }
 .md hr { margin: 12px 0; border: 0; border-top: 1px solid var(--line); }
 .md img { max-width: 100%; border-radius: 6px; }
 
+/* A task's text opens it in the drawer; it reads as text until hovered. */
+.fu-open { display: inline; height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; color: inherit; text-align: left; text-decoration: inherit; cursor: pointer; }
+.fu-open:hover, .fu-open:focus-visible { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.followups li.opened { background: var(--hover); border-radius: 6px; }
+
+/* The task drawer: one to-do beside the list, over the page's right edge. */
+.task-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 45; width: min(520px, 100vw); overflow-y: auto;
+  padding: 14px 20px 24px; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgb(15 15 15 / 0.12);
+  animation: td-in var(--dur-ui) var(--ease-out);
+}
+@keyframes td-in { from { transform: translateX(16px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .task-drawer { animation: none; } }
+.td-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.td-kind { font-size: 12px; font-weight: 600; color: var(--muted); }
+.td-close { margin-right: -8px; display: grid; place-items: center; }
+.td-title { margin: 6px 0 4px; font-size: 18px; line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
+.td-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
+.td-done-when { margin: 0 0 8px; font-size: 13px; }
+.td-done-when strong { margin-right: 4px; font-weight: 600; }
+.td-section { margin-top: 18px; }
+.td-section h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.td-section h3 .count { font-weight: 500; }
+.td-by { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.td-section > .muted { margin: 0; font-size: 13px; }
+.td-spec { font-size: 13.5px; line-height: 1.55; }
+.td-section .fu-log { margin: 0; }
+.td-state { font-weight: 600; }
+.td-state.doing { color: var(--accent-text); }
+.td-state.done { color: var(--ok-text); }
+.td-state.dropped { color: var(--muted); }
+.td-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.td-links button { display: flex; align-items: baseline; gap: 8px; width: 100%; height: auto; min-height: 0; padding: 6px 8px; border: 0; border-radius: 6px; background: none; box-shadow: none; font: inherit; font-size: 13px; text-align: left; color: var(--text); cursor: pointer; }
+.td-links button:hover, .td-links button:focus-visible { background: var(--hover); }
+.td-links .td-state { flex: none; font-size: 11.5px; color: var(--muted); }
+.td-links .td-state.doing { color: var(--accent-text); }
+.td-links .td-state.done { color: var(--ok-text); }
+.td-link-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.td-links .muted { flex: none; font-size: 12px; }
+.td-foot { margin-top: 20px; }
+
 /* ---- space page: one page, a tab per kind of thing ---- */
 .sh-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .sh-tab { flex: none; display: flex; align-items: center; gap: 6px; height: auto; min-height: 0; margin-bottom: -1px; padding: 8px 10px 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; font-size: 14px; color: var(--muted); cursor: pointer; }

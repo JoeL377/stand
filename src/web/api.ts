@@ -16,6 +16,7 @@ import type {
   Snap,
   SpaceFeed,
   SpaceSummary,
+  TaskDetail,
   UpNext,
   User,
 } from "../shared/protocol.ts";
@@ -149,5 +150,6 @@ export const api = {
     call<unknown>("POST", `/api/rooms/${roomId}/decisions/${noteId}/replaced`, { by, replaced }),
   setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
+  task: (id: string) => call<TaskDetail>("GET", `/api/tasks/${id}`),
   token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };

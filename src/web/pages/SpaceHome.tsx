@@ -4,7 +4,7 @@
 // meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { stateOf } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
@@ -23,6 +23,7 @@ import { colorFor, fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
+import { TaskDrawer } from "../TaskDrawer.tsx";
 import { Opener } from "../room/Opener.tsx";
 
 type Entry =
@@ -41,8 +42,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  // The tab someone last looked at in this space; a new space opens on Tasks.
+  // The task open in the drawer, in the URL so a link can open it.
+  const [params, setParams] = useSearchParams();
+  const openTask = params.get("task");
+  const showTask = useCallback((id: string) => setParams({ task: id }), [setParams]);
+  const closeTask = useCallback(() => setParams({}, { replace: true }), [setParams]);
+  // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [tab, setTab] = useState<TabKey>(() => {
+    if (openTask) return "tasks";
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
       // To do and Questions became one Tasks tab, and Done since moved into it.
@@ -326,6 +333,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               closed={[...done, ...closedQuestions]}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
               reload={load}
+              openId={openTask}
+              onOpen={showTask}
             />
           )}
           {tab === "decisions" && (
@@ -402,6 +411,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             onDeleted={load}
           />
         )}
+        {openTask && <TaskDrawer key={openTask} id={openTask} onOpen={showTask} onClose={closeTask} />}
       </main>
     </SpacesShell>
   );
@@ -622,6 +632,8 @@ function TasksTab(props: {
   closed: TaskNote[];
   onArchive: (n: Note) => void;
   reload: () => void;
+  openId: string | null;
+  onOpen: (id: string) => void;
 }) {
   const [showDeck, setShowDeck] = useState(false);
   const [showDone, setShowDone] = useState(false);
@@ -663,6 +675,8 @@ function TasksTab(props: {
     <FollowUpList
       oneLine
       notes={notes}
+      openId={props.openId}
+      onOpen={(n) => props.onOpen(n.id)}
       onToggle={(n, d) => move(n, d ? "done" : "open")}
       after={(n: TaskNote) => (
         <>
