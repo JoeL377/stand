@@ -1,0 +1,9 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "stand": {
+      "type": "remote",
+      "url": "https://stand-production-3d3f.up.railway.app/mcp"
+    }
+  }
+}
