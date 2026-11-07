@@ -1825,6 +1825,14 @@ a.sh-pill:hover { text-decoration: none; }
 .conxt-panel .conxt-consent input { width: auto; margin-top: 4px; }
 .conxt-delivery { border-top: 1px solid var(--line); padding: 10px 0; }
 .conxt-delivery > span { margin-left: 12px; font-size: 13px; }
+.project-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.project-panel h3 { margin: 0 0 8px; }
+.project-panel select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; background: var(--panel-2); }
+.project-panel .project-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
+.project-panel .project-consent input { width: auto; margin-top: 4px; }
+.project-row { border-top: 1px solid var(--line); padding: 10px 0; }
+.project-row > span { margin-left: 12px; }
+.project-row .error { margin: 6px 0 0; }
 
 /* ---- Topic board: the middle screen while nobody shares ---- */
 .screen > .topic-board, .board-tab > .topic-board { position: relative; flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg); color: var(--text); text-align: left; }

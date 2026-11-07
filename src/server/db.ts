@@ -40,6 +40,7 @@ import { costOf, type UsageRow } from "./usage.ts";
 import type { Settled } from "./spaceSettle.ts";
 import type { ListItem } from "./liveList.ts";
 import { initGithub } from "./github.ts";
+import { initProjects } from "./projects.ts";
 import { initConxt, enqueueConxtMeeting } from "./conxt.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -641,6 +642,7 @@ export function openDb(file?: string) {
 
   initConxt(db);
   initGithub(db);
+  initProjects(db);
 
   return {
     raw: db,
