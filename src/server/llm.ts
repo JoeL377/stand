@@ -11,6 +11,7 @@ import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, Boa
 import { config } from "./config.ts";
 import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
 import { ANSWER_SYSTEM, type Answer, AnswerSchema, OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, readPartial, type RunUsage } from "./meetingAgent.ts";
+import { REPO_TOOL_CALLS, type RepoTools } from "./projects.ts";
 import { findQuote, type Said } from "./quotes.ts";
 import { recordUsage } from "./usage.ts";
 
@@ -137,8 +138,9 @@ const siteOf = (url: string) => {
   }
 };
 
-/** A ✦ Stand run as it streams: the web searches so far, and the structured answer so far (partial JSON). */
-export type OnDraft = (d: { searches: string[]; pages: string[]; partial: unknown }) => void;
+/** A ✦ Stand run as it streams: the web searches so far, what it did in the space's repo, and the structured
+ *  answer so far (partial JSON). */
+export type OnDraft = (d: { searches: string[]; pages: string[]; code?: string[]; partial: unknown }) => void;
 
 export interface Agent {
   /** Groups an item's talk into discussions and writes the notes that came out of each. */
@@ -197,7 +199,7 @@ export interface Agent {
    *  without a model. */
   findOptions?(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
   /** ✦ Stand's answer to a question someone asked it on the call (push-to-talk or @stand). Left out without a model. */
-  answer?(prompt: string, onDraft?: OnDraft): Promise<{ answer: Answer | null; model: string; usage: RunUsage }>;
+  answer?(prompt: string, onDraft?: OnDraft, repo?: RepoTools | null): Promise<{ answer: Answer | null; model: string; usage: RunUsage }>;
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
   settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
@@ -257,6 +259,8 @@ const BOARD_TIMEOUT_MS = 25_000;
 const LIST_TIMEOUT_MS = 15_000;
 /** A run of ✦ Stand's options can search the web a few times; past this, the card says it couldn't. */
 const AGENT_TIMEOUT_MS = 90_000;
+/** How long an answer may spend reading the repo before it has to answer. */
+const REPO_RUN_MS = 45_000;
 /** The board's context (people, earlier threads) changes rarely, so it's cached ahead of the talk. */
 const boardContent = (context: string, talk: string): Anthropic.Beta.BetaContentBlockParam[] => [
   { type: "text", text: context, cache_control: { type: "ephemeral" } },
@@ -908,18 +912,20 @@ Answer for every smaller topic exactly once.`,
     return this.searchRun("options", OptionsAnswerSchema, OPTIONS_SYSTEM, prompt, onDraft);
   }
 
-  async answer(prompt: string, onDraft?: OnDraft): Promise<{ answer: Answer | null; model: string; usage: RunUsage }> {
-    return this.searchRun("answer", AnswerSchema, ANSWER_SYSTEM, prompt, onDraft);
+  async answer(prompt: string, onDraft?: OnDraft, repo?: RepoTools | null): Promise<{ answer: Answer | null; model: string; usage: RunUsage }> {
+    return this.searchRun("answer", AnswerSchema, ANSWER_SYSTEM, prompt, onDraft, repo ?? null);
   }
 
-  /** One ✦ Stand run that may search the web twice, with what it cost. It streams: onDraft hears each web
-   *  search as it starts and the answer as it's written (the JSON so far, read leniently). */
+  /** One ✦ Stand run that may search the web twice, with what it cost. With a space's repo it can also search
+   *  and read the code (projects.ts RepoTools), up to REPO_TOOL_CALLS times. It streams: onDraft hears each web
+   *  search as it starts, each repo step, and the answer as it's written (the JSON so far, read leniently). */
   private async searchRun<T extends z.ZodTypeAny>(
     label: string,
     schema: T,
     system: string,
     prompt: string,
     onDraft?: OnDraft,
+    repo: RepoTools | null = null,
   ): Promise<{ answer: z.infer<T> | null; model: string; usage: RunUsage }> {
     const model = config.agentModel;
     const usage: RunUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0 };
@@ -927,14 +933,21 @@ Answer for every smaller topic exactly once.`,
     // A turn that searches can pause partway; send it back as it stands and the server carries on.
     const searches: string[] = [];
     const pages: string[] = [];
-    for (let turn = 0; turn < 3; turn++) {
+    const code = () => (repo ? [...repo.steps] : []);
+    const tools: Anthropic.Beta.BetaToolUnion[] = [{ type: "web_search_20260209", name: "web_search", max_uses: 2 }, ...((repo?.defs ?? []) as Anthropic.Beta.BetaTool[])];
+    const deadline = Date.now() + REPO_RUN_MS;
+    let calls = 0;
+    for (let turn = 0; turn < (repo ? REPO_TOOL_CALLS + 4 : 3); turn++) {
+      // Out of repo calls or time: this turn has to answer with what it has.
+      const answerNow = repo !== null && (calls >= REPO_TOOL_CALLS || Date.now() > deadline);
       const stream = this.client.beta.messages.stream(
         {
           model,
           max_tokens: 6000,
           system,
           messages,
-          tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 2 }],
+          tools,
+          ...(answerNow ? { tool_choice: { type: "none" as const } } : {}),
           output_config: { effort: "low", format: betaZodOutputFormat(schema) },
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
@@ -946,7 +959,7 @@ Answer for every smaller topic exactly once.`,
           const query = b.type === "server_tool_use" && b.name === "web_search" ? (b.input as { query?: unknown }).query : null;
           if (typeof query === "string" && query.trim()) {
             searches.push(query.trim());
-            onDraft({ searches: [...searches], pages: [...pages], partial: null });
+            onDraft({ searches: [...searches], pages: [...pages], code: code(), partial: null });
           }
           // What a search found comes back before anything is written: the sites, so people see it reading.
           if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
@@ -954,12 +967,12 @@ Answer for every smaller topic exactly once.`,
               const site = r.type === "web_search_result" ? siteOf(r.url) : null;
               if (site && !pages.includes(site)) pages.push(site);
             }
-            onDraft({ searches: [...searches], pages: [...pages], partial: null });
+            onDraft({ searches: [...searches], pages: [...pages], code: code(), partial: null });
           }
         });
         stream.on("text", (_delta, snapshot) => {
           const partial = readPartial(snapshot);
-          if (partial && typeof partial === "object") onDraft({ searches: [...searches], pages: [...pages], partial });
+          if (partial && typeof partial === "object") onDraft({ searches: [...searches], pages: [...pages], code: code(), partial });
         });
       }
       const res = await stream.finalMessage();
@@ -973,6 +986,23 @@ Answer for every smaller topic exactly once.`,
       console.log(`[agent] ${label} ${model} in=${u.input_tokens} out=${u.output_tokens} searches=${u.server_tool_use?.web_search_requests ?? 0} stop=${res.stop_reason}`);
       if (res.stop_reason === "pause_turn") {
         messages.push({ role: "assistant", content: res.content as Anthropic.Beta.BetaContentBlockParam[] });
+        continue;
+      }
+      // A repo tool call: run it on Stand's copy and send back what it found.
+      if (res.stop_reason === "tool_use" && repo) {
+        messages.push({ role: "assistant", content: res.content as Anthropic.Beta.BetaContentBlockParam[] });
+        const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+        for (const b of res.content) {
+          if (b.type !== "tool_use") continue;
+          calls++;
+          const out =
+            calls > REPO_TOOL_CALLS
+              ? { text: "No more repo calls for this answer: answer with what you have.", error: true }
+              : await repo.run(b.name, (b.input ?? {}) as Record<string, unknown>);
+          results.push({ type: "tool_result", tool_use_id: b.id, content: out.text, ...(out.error ? { is_error: true } : {}) });
+          onDraft?.({ searches: [...searches], pages: [...pages], code: code(), partial: null });
+        }
+        messages.push({ role: "user", content: results });
         continue;
       }
       if (res.stop_reason === "refusal") return { answer: null, model, usage };

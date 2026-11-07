@@ -1,6 +1,6 @@
 # Design review: a GitHub repo per space, read only
 
-Draft, Nov 5, 2026 · for review · nothing here is built yet
+Draft, Nov 5, 2026 · for review · phases 1 and 2 built on branch `github-projects` (see Status at the end)
 
 A space can link a GitHub repo as its **project**. Stand reads the repo and never writes to it. Two things use it:
 
@@ -200,3 +200,8 @@ Phases 1 and 3 can ship apart: phase 1 is useful on its own, and phase 3 only ne
 4. **Watch open PRs too?** It would let Stand answer "is someone already on this?" and show *In a PR* on a to-do. Recommendation: list open PRs in the digest now, and leave matching them for later.
 5. **More than one repo per space in v1?** Conxt 1.0 needs two. The model allows it, and the cost is mostly UI.
 6. **Does this overlap Huy's week 4 item?** It is that item, plus Ask. It needs one owner.
+
+## Status
+
+- **Phase 1** (`src/server/projects.ts`, `ProjectPanel.tsx`). Differs from the design: the copy is a full bare repo with no remote rather than a partial clone, so reads never go back to GitHub; repos over 1 GB are refused (no metadata-only mode yet); the digest goes to Ask Stand only, not Find options; settings has a Pull now button.
+- **Phase 2** (`RepoTools` in `projects.ts`, the `tool_use` loop in `llm.ts` `searchRun`). `repo_search`, `repo_read`, `repo_log` and `repo_pr`, up to 8 calls and 45 s of reading per answer, then the model has to answer (`tool_choice: none`). `repo_log` reads git only; merge and squash commits name their PR, and `repo_pr` opens one. Every tool result gives a `Cite:` link pinned to the commit; `toAnswer` keeps a link into a linked repo only when the run saw that file, PR or commit (the digest's PRs and commits count), rewritten to the commit read. The card shows the steps ("Searched “pilotUse”", "Read src/server/room.ts"). Find options doesn't get the tools yet.

@@ -209,6 +209,8 @@ export interface AgentDraft {
   searches: string[];
   /** The pages those searches found, by site, in the order they came (a few). */
   pages?: string[];
+  /** An answer: what it did in the space's repo, oldest first ("Searched “pilotUse”", "Read src/server/room.ts"). */
+  code?: string[];
   /** An answer: its words so far. Options: the note so far, when there are no options. */
   text: string | null;
   /** Options as they come, each one's tradeoff possibly cut off mid-sentence. */

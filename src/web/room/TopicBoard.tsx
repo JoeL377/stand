@@ -661,6 +661,7 @@ function signalOf(e: Entry, now: number): Entry["signal"] {
   if (last.status === "working") {
     const d = last.draft;
     if (d?.text || d?.options.length) return { text: "✦ Writing…", tone: "working" };
+    if (d?.code?.length) return { text: "✦ Reading the repo…", tone: "working" };
     if (d?.pages?.length) return { text: "✦ Reading what it found…", tone: "working" };
     if (d?.searches.length) return { text: "✦ Searching the web…", tone: "working" };
     return { text: e.kind === "options" ? "✦ Finding options…" : "✦ Finding an answer…", tone: "working" };

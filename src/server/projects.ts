@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { LinkableRepo, SpaceProject } from "../shared/protocol.ts";
-import type { MergedPr } from "./github.ts";
+import type { MergedPr, PullRequestDetail } from "./github.ts";
 
 export const PROJECT_PULL_MS = 10 * 60_000;
 /** Most repos one space may link. */
@@ -46,6 +46,7 @@ export interface ProjectGithub {
   linkableRepos(userId: string): Promise<Array<LinkableRepo & { installationId: number; defaultBranch: string; sizeKb: number }>>;
   readToken(installationId: number, repo: string): Promise<string>;
   mergedPrs(owner: string, repo: string, token: string): Promise<MergedPr[]>;
+  pullRequest?(owner: string, repo: string, number: number, token: string): Promise<PullRequestDetail | null>;
 }
 
 /** Runs git and returns what it printed. A token goes in as GitHub's auth header for that one command. */
@@ -66,7 +67,7 @@ export const runGit: Git = (args, opts = {}) =>
       env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${opts.token}`).toString("base64")}`;
     }
     execFile("git", args, { cwd: opts.cwd, env, timeout: 5 * 60_000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(String(stderr).trim().split("\n").at(-1) || err.message));
+      if (err) reject(Object.assign(new Error(String(stderr).trim().split("\n").at(-1) || err.message), { exitCode: typeof err.code === "number" ? err.code : null }));
       else resolve(String(stdout));
     });
   });
@@ -285,6 +286,14 @@ export class Projects {
     }
   }
 
+  /** Ask Stand's tools over the space's pulled repos, for one run; null when it has none. */
+  tools(roomId: string): RepoTools | null {
+    const rows = (this.sql.prepare("SELECT * FROM space_projects WHERE room_id = ? AND head_sha IS NOT NULL ORDER BY linked_at").all(roomId) as Row[])
+      .map((r) => ({ owner: r.owner as string, repo: r.repo as string, sha: r.head_sha as string, installationId: r.installation_id as number, digest: (r.digest as string) ?? "", dir: this.repoDir(roomId, r.owner, r.repo) }))
+      .filter((r) => fs.existsSync(path.join(r.dir, "HEAD")));
+    return rows.length ? new RepoTools(rows, this.git, this.github) : null;
+  }
+
   start() {
     this.timer = setInterval(() => void this.pullAll(), PROJECT_PULL_MS);
     this.timer.unref();
@@ -312,4 +321,304 @@ export class Projects {
       this.busy = false;
     }
   }
+}
+
+// Ask Stand's tools over a space's repos (phase 2 of the design). They only read the local copy, at the
+// commit last pulled, plus GitHub's PR API with the read-only token, so nothing the model reads can lead
+// to a write. Files that hiddenPath catches are never searched, read or listed.
+
+/** Most repo tool calls in one Ask Stand run. */
+export const REPO_TOOL_CALLS = 8;
+const SEARCH_HITS = 40;
+const HIT_CHARS = 200;
+const READ_LINES = 300;
+const LINE_CHARS = 500;
+const LOG_ROWS = 30;
+const PR_BODY = 4000;
+const PR_FILES = 60;
+
+interface LinkedRepo {
+  owner: string;
+  repo: string;
+  sha: string;
+  installationId: number;
+  digest: string;
+  dir: string;
+}
+
+/** A tool as Claude's API takes it. */
+export interface RepoToolDef {
+  name: string;
+  description: string;
+  input_schema: { type: "object"; properties: Record<string, unknown>; required?: string[] };
+}
+
+const seenKey = (r: { owner: string; repo: string }, what: string) => `${r.owner}/${r.repo}/${what}`.toLowerCase();
+const blobUrl = (r: LinkedRepo, p: string) => `https://github.com/${r.owner}/${r.repo}/blob/${r.sha}/${p.split("/").map(encodeURIComponent).join("/")}`;
+
+/** A path as the model gave it, made relative; anything that climbs out or uses git's pathspec magic is refused. */
+function cleanPath(p: string): string {
+  const s = p.trim().replace(/^\.?\/+/, "").replace(/\/+$/, "");
+  if (s === "." || s === "") return "";
+  if (s.startsWith(":") || s.split("/").some((part) => part === ".." || part === "")) throw new ProjectError(`${p} isn't a path in the repo.`);
+  return s;
+}
+
+const str = (v: unknown) => (typeof v === "string" ? v : "");
+const opt = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+const int = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.floor(v) : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v.trim()) : undefined);
+
+/** One Ask Stand run's view of the space's repos: the tools, what it did (for the card), and what it saw
+ *  (so the answer can only cite files, PRs and commits the run was actually shown). */
+export class RepoTools {
+  /** What the run did, oldest first, as the card shows it: "Searched “pilotUse”", "Read src/server/room.ts". */
+  readonly steps: string[] = [];
+  private seen = new Set<string>();
+
+  constructor(
+    private repos: LinkedRepo[],
+    private git: Git,
+    private github: ProjectGithub | null,
+  ) {
+    // The digest is in the prompt, so its PRs and commits count as seen.
+    for (const r of repos) {
+      for (const m of r.digest.matchAll(/^- #(\d+) /gm)) this.seen.add(seenKey(r, `pull/${m[1]}`));
+      for (const m of r.digest.matchAll(/^- \d{4}-\d{2}-\d{2} ([0-9a-f]{7,40}) /gm)) this.seen.add(seenKey(r, `commit/${m[1]}`));
+    }
+  }
+
+  get names() {
+    return this.repos.map((r) => `${r.owner}/${r.repo}`);
+  }
+
+  get defs(): RepoToolDef[] {
+    const many = this.repos.length > 1;
+    const repo = many ? { repo: { type: "string", enum: this.names, description: "Which repo" } } : {};
+    const need = (...k: string[]) => (many ? [...k, "repo"] : k);
+    const where = many ? `the space's repos (${this.names.join(", ")})` : `the space's repo (${this.names[0]})`;
+    const defs: RepoToolDef[] = [
+      {
+        name: "repo_search",
+        description: `Search the code of ${where} at the commit last pulled: git grep, case-insensitive, extended regex. Gives up to ${SEARCH_HITS} matching lines as path:line: text. Use it to find where something is, then read the lines that matter.`,
+        input_schema: {
+          type: "object",
+          properties: { pattern: { type: "string", description: "A word, identifier or regex" }, path: { type: "string", description: "Only under this folder or file, like src/server" }, ...repo },
+          required: ["pattern"],
+        },
+      },
+      {
+        name: "repo_read",
+        description: `Read a file of ${where}: up to ${READ_LINES} numbered lines a call, with the link to cite. A folder lists what's in it.`,
+        input_schema: {
+          type: "object",
+          properties: { path: { type: "string" }, from: { type: "integer", description: "First line, from 1" }, to: { type: "integer", description: "Last line" }, ...repo },
+          required: need("path"),
+        },
+      },
+      {
+        name: "repo_log",
+        description: `Commits on the default branch of ${where}, newest first, ${LOG_ROWS} at most. Merge commits name their PR. Narrow by a path, words in the message, or a start date.`,
+        input_schema: {
+          type: "object",
+          properties: { path: { type: "string" }, query: { type: "string", description: "Words in the commit message" }, since: { type: "string", description: "YYYY-MM-DD" }, ...repo },
+          required: need(),
+        },
+      },
+    ];
+    if (this.github?.pullRequest)
+      defs.push({
+        name: "repo_pr",
+        description: `One pull request in ${where}: its title, state, author, description and changed files.`,
+        input_schema: { type: "object", properties: { number: { type: "integer" }, ...repo }, required: need("number") },
+      });
+    return defs;
+  }
+
+  /** Runs one tool call. Its text goes back to the model; error marks a call that didn't work. */
+  async run(name: string, input: Record<string, unknown>): Promise<{ text: string; error: boolean }> {
+    try {
+      const repo = opt(input.repo);
+      let text: string;
+      if (name === "repo_search") text = await this.search(str(input.pattern), opt(input.path), repo);
+      else if (name === "repo_read") text = await this.read(str(input.path), int(input.from), int(input.to), repo);
+      else if (name === "repo_log") text = await this.log(opt(input.path), opt(input.query), opt(input.since), repo);
+      else if (name === "repo_pr" && this.github?.pullRequest) text = await this.pr(int(input.number), repo);
+      else return { text: `There's no tool called ${name}.`, error: true };
+      return { text, error: false };
+    } catch (e) {
+      return { text: clip((e as Error).message || "That didn't work.", 300), error: true };
+    }
+  }
+
+  private step(s: string) {
+    this.steps.push(s);
+  }
+
+  private pick(name: string | undefined, all: boolean): LinkedRepo[] {
+    if (name) {
+      const r = this.repos.find((x) => `${x.owner}/${x.repo}`.toLowerCase() === name.toLowerCase());
+      if (!r) throw new ProjectError(`No linked repo is called ${name}. Linked: ${this.names.join(", ")}.`);
+      return [r];
+    }
+    if (all) return this.repos;
+    if (this.repos.length === 1) return this.repos;
+    throw new ProjectError(`Say which repo: ${this.names.join(" or ")}.`);
+  }
+
+  private async search(pattern: string, under: string | undefined, repo: string | undefined) {
+    if (!pattern.trim()) throw new ProjectError("Give a pattern to search for.");
+    const p = under ? cleanPath(under) : "";
+    const label = this.repos.length > 1;
+    const out: string[] = [];
+    let total = 0;
+    for (const r of this.pick(repo, true)) {
+      let text: string;
+      try {
+        text = await this.git(["grep", "-n", "-I", "-i", "-E", "--max-count=5", "-e", pattern, r.sha, "--", ...(p ? [p] : [])], { cwd: r.dir });
+      } catch (e) {
+        // git grep exits 1 when nothing matches.
+        if ((e as { exitCode?: number }).exitCode === 1) continue;
+        throw new ProjectError(`The search failed: ${clip((e as Error).message, 200)}`);
+      }
+      for (const line of text.split("\n")) {
+        const m = /^(.*?):(\d+):(.*)$/.exec(line.startsWith(`${r.sha}:`) ? line.slice(r.sha.length + 1) : line);
+        if (!m || hiddenPath(m[1])) continue;
+        total++;
+        if (out.length >= SEARCH_HITS) continue;
+        this.seen.add(seenKey(r, `file/${m[1]}`));
+        out.push(`${label ? `${r.owner}/${r.repo} ` : ""}${m[1]}:${m[2]}: ${clip(m[3].trim(), HIT_CHARS)}`);
+      }
+    }
+    this.step(`Searched “${clip(pattern, 40)}”`);
+    if (!out.length) return `Nothing matches ${pattern}${p ? ` under ${p}` : ""}.`;
+    return `${out.join("\n")}${total > out.length ? `\n(${total - out.length} more not shown: narrow the pattern or the path)` : ""}`;
+  }
+
+  private async read(file: string, from: number | undefined, to: number | undefined, repo: string | undefined) {
+    const [r] = this.pick(repo, false);
+    const p = cleanPath(file);
+    if (p && hiddenPath(p)) throw new ProjectError(`${p} is never shown: it could hold secrets.`);
+    const spec = `${r.sha}:${p}`;
+    const type = await this.git(["cat-file", "-t", spec], { cwd: r.dir }).then(
+      (t) => t.trim(),
+      () => null,
+    );
+    if (!type) throw new ProjectError(`There's no ${p} in ${r.owner}/${r.repo}. Use repo_search to find it.`);
+    if (type === "tree") {
+      const entries = (await this.git(["ls-tree", "-z", spec], { cwd: r.dir }))
+        .split("\0")
+        .filter(Boolean)
+        .map((e) => {
+          const [meta, name] = e.split("\t");
+          return meta.split(" ")[1] === "tree" ? `${name}/` : name;
+        })
+        .filter((n) => !hiddenPath(n));
+      this.step(`Looked in ${p || "the top level"}`);
+      return `${r.owner}/${r.repo} ${p || "(top level)"}:\n${entries.join("\n") || "(empty)"}`;
+    }
+    if (type !== "blob") throw new ProjectError(`${p} isn't a file.`);
+    const text = await this.git(["cat-file", "blob", spec], { cwd: r.dir });
+    this.step(`Read ${p}`);
+    if (text.slice(0, 8000).includes("\0")) return `${p} is a binary file.`;
+    const lines = text.split("\n");
+    if (lines.at(-1) === "") lines.pop();
+    const a = Math.min(Math.max(1, from ?? 1), Math.max(1, lines.length));
+    const b = Math.max(a, Math.min(lines.length, to ?? Infinity, a + READ_LINES - 1));
+    this.seen.add(seenKey(r, `file/${p}`));
+    const body = lines
+      .slice(a - 1, b)
+      .map((l, i) => `${a + i}| ${clip(l, LINE_CHARS)}`)
+      .join("\n");
+    return `${r.owner}/${r.repo} ${p}, lines ${a}-${b} of ${lines.length}. Cite: ${blobUrl(r, p)}#L${a}-L${b}\n${body}${b < lines.length ? `\n(more below: read from ${b + 1})` : ""}`;
+  }
+
+  private async log(under: string | undefined, query: string | undefined, since: string | undefined, repo: string | undefined) {
+    const [r] = this.pick(repo, false);
+    const args = ["log", `-n${LOG_ROWS}`, "--date=short", "--format=%h%x1f%an%x1f%ad%x1f%s", "--regexp-ignore-case", "--fixed-strings"];
+    if (query) args.push(`--grep=${query}`);
+    if (since) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new ProjectError("Give since as YYYY-MM-DD.");
+      args.push(`--since=${since}`);
+    }
+    args.push(r.sha);
+    const p = under ? cleanPath(under) : "";
+    if (p) args.push("--", p);
+    const rows = (await this.git(args, { cwd: r.dir })).split("\n").filter(Boolean);
+    this.step(`Read the history${p ? ` of ${p}` : ""}${query ? ` for “${clip(query, 30)}”` : ""}`);
+    if (!rows.length) return "No commits match.";
+    return rows
+      .map((l) => {
+        const [s, author, date, subject] = l.split("\x1f");
+        this.seen.add(seenKey(r, `commit/${s}`));
+        return `- ${date} ${s} ${author}: ${clip(subject ?? "", 160)}`;
+      })
+      .join("\n");
+  }
+
+  private async pr(n: number | undefined, repo: string | undefined) {
+    const [r] = this.pick(repo, false);
+    if (!n || n < 1) throw new ProjectError("Give the PR's number.");
+    if (!this.github?.pullRequest) throw new ProjectError("Stand can't read PRs here.");
+    const token = await this.github.readToken(r.installationId, r.repo);
+    const pr = await this.github.pullRequest(r.owner, r.repo, n, token);
+    this.step(`Opened PR #${n}`);
+    if (!pr) return `There's no PR #${n} in ${r.owner}/${r.repo}.`;
+    this.seen.add(seenKey(r, `pull/${n}`));
+    const files = pr.files.filter((f) => !hiddenPath(f.path));
+    return [
+      `PR #${n} in ${r.owner}/${r.repo}: ${pr.title}`,
+      `${pr.state}${pr.mergedAt ? ` ${day(pr.mergedAt)}` : ""}, by ${pr.author || "?"}, ${pr.head} into ${pr.base}. Cite: https://github.com/${r.owner}/${r.repo}/pull/${n}`,
+      `Description:\n${clip(pr.body.trim(), PR_BODY) || "(none)"}`,
+      `Changed files (${files.length}):\n${files
+        .slice(0, PR_FILES)
+        .map((f) => `- ${f.path} (${f.status}, +${f.additions} -${f.deletions})`)
+        .join("\n")}${files.length > PR_FILES ? `\n(+${files.length - PR_FILES} more)` : ""}`,
+    ].join("\n\n");
+  }
+
+  /** A link the answer gives as a source, checked against what this run saw. For a linked repo: the
+   *  link pinned to the commit read, or null when the run never saw that file, PR or commit (dropped).
+   *  Undefined for any other link, which isn't the repo's to judge. */
+  cite(url: string): string | null | undefined {
+    let u: URL;
+    try {
+      u = new URL(url.trim());
+    } catch {
+      return undefined;
+    }
+    if (u.hostname !== "github.com") return undefined;
+    let parts: string[];
+    try {
+      parts = u.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    } catch {
+      return null;
+    }
+    const [owner = "", name = "", kind, ...rest] = parts;
+    const r = this.repos.find((x) => x.owner.toLowerCase() === owner.toLowerCase() && x.repo.toLowerCase() === name.replace(/\.git$/i, "").toLowerCase());
+    if (!r) return undefined;
+    const base = `https://github.com/${r.owner}/${r.repo}`;
+    if (!kind) return base;
+    if (kind === "blob" && rest.length >= 2) {
+      const p = rest.slice(1).join("/");
+      if (hiddenPath(p) || !this.seen.has(seenKey(r, `file/${p}`))) return null;
+      return `${blobUrl(r, p)}${/^#L\d+(-L\d+)?$/.test(u.hash) ? u.hash : ""}`;
+    }
+    if (kind === "pull" && /^\d+$/.test(rest[0] ?? "")) return this.seen.has(seenKey(r, `pull/${rest[0]}`)) ? `${base}/pull/${rest[0]}` : null;
+    if (kind === "commit" && /^[0-9a-f]{7,40}$/i.test(rest[0] ?? "")) {
+      const s = rest[0].toLowerCase();
+      const prefix = seenKey(r, "commit/");
+      const known = [...this.seen].some((k) => k.startsWith(prefix) && (s.startsWith(k.slice(prefix.length)) || k.slice(prefix.length).startsWith(s)));
+      return known ? `${base}/commit/${s}` : null;
+    }
+    return null;
+  }
+}
+
+let shared: Projects | null = null;
+/** The server's projects, so a meeting room can hand Ask Stand its space's repo tools. */
+export function setProjects(p: Projects | null) {
+  shared = p;
+}
+export function repoTools(roomId: string): RepoTools | null {
+  return shared?.tools(roomId) ?? null;
 }

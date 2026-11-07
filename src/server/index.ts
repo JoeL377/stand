@@ -46,7 +46,7 @@ import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
 import { ConxtGlossary, refreshRoomVocabulary, roomVocabulary, setConxtGlossary } from "./conxtGlossary.ts";
 import { ConxtOpenItems, refreshRoomOpenItems, setConxtOpenItems } from "./conxtOpenItems.ts";
 import { GithubApp, appReady, readEvent, signedByGithub } from "./github.ts";
-import { ProjectError, Projects } from "./projects.ts";
+import { ProjectError, Projects, setProjects } from "./projects.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 import { DoneDecks } from "./doneDeck.ts";
 import { setUsageSink } from "./usage.ts";
@@ -456,6 +456,7 @@ app.get(
 
 // A space's project: GitHub repos it links, which Stand reads and Ask Stand knows (projects.ts).
 const projects = new Projects(db.raw, path.join(config.dataDir, "repos"), githubApp);
+setProjects(projects);
 projects.start();
 /** Only the space's creator links repos (anyone, for older spaces with no creator), as with renaming it. */
 const managesSpace = (room: { createdBy: string | null }, userId: string) => !room.createdBy || room.createdBy === userId;

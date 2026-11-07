@@ -90,6 +90,18 @@ export interface MergedPr {
   mergedAt: number;
 }
 
+export interface PullRequestDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "merged" | "closed";
+  author: string;
+  mergedAt: number | null;
+  base: string;
+  head: string;
+  files: Array<{ path: string; status: string; additions: number; deletions: number }>;
+}
+
 type Fetch = typeof fetch;
 
 export class GithubApp {
@@ -268,6 +280,30 @@ export class GithubApp {
       .map((p) => ({ number: p.number, title: String(p.title ?? "").trim(), author: p.user?.login ?? "", mergedAt: Date.parse(p.merged_at!) }))
       .sort((a, b) => b.mergedAt - a.mergedAt)
       .slice(0, n);
+  }
+
+  /** One PR with its changed files, for Ask Stand's repo_pr. Null when GitHub has no such PR. */
+  async pullRequest(owner: string, repo: string, number: number, token: string): Promise<PullRequestDetail | null> {
+    const base = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`;
+    const opts = { headers: this.headers(token), signal: AbortSignal.timeout(15_000) };
+    const res = await this.get(base, opts);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error("GitHub didn't answer about that PR.");
+    const p = (await res.json()) as { title?: string; body?: string | null; state?: string; merged_at?: string | null; user?: { login?: string }; base?: { ref?: string }; head?: { ref?: string } };
+    const files = await this.get(`${base}/files?per_page=100`, opts)
+      .then((r) => (r.ok ? (r.json() as Promise<Array<{ filename: string; status?: string; additions?: number; deletions?: number }>>) : []))
+      .catch(() => []);
+    return {
+      number,
+      title: String(p.title ?? "").trim(),
+      body: String(p.body ?? ""),
+      state: p.merged_at ? "merged" : p.state === "open" ? "open" : "closed",
+      author: p.user?.login ?? "",
+      mergedAt: p.merged_at ? Date.parse(p.merged_at) : null,
+      base: p.base?.ref ?? "",
+      head: p.head?.ref ?? "",
+      files: files.map((f) => ({ path: f.filename, status: f.status ?? "", additions: f.additions ?? 0, deletions: f.deletions ?? 0 })),
+    };
   }
 
   /** A PR's state, read as the app when it covers the repo, else with the fallback token. */
