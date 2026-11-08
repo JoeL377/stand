@@ -44,14 +44,16 @@ export function FollowUpList(props: {
   /** The task open beside the list, marked in it. */
   openId?: string | null;
 }) {
-  const [saved, setSaved] = useState<Record<string, Note>>({});
+  const [saved, setSaved] = useState<Record<string, { note: Note; original: FollowUpNote }>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const work = useWork(props.notes.map((n) => n.id));
   const [opened, setOpened] = useState<string | null>(null);
   return (
     <ul className={["followups", props.compact && "compact", props.oneLine && "one-line"].filter(Boolean).join(" ")}>
       {props.notes.map((orig) => {
-        const n = { ...orig, ...saved[orig.id] };
+        // Once fresh server props arrive, an earlier checkbox response must not mask edits.
+        const local = saved[orig.id];
+        const n = local?.original === orig ? { ...orig, ...local.note } : orig;
         const done = Boolean(n.doneAt);
         // A dropped task is closed but not done: its box shows a cross, and clicking it reopens it.
         const dropped = n.state === "dropped";
@@ -71,7 +73,7 @@ export function FollowUpList(props: {
                 setBusy(n.id);
                 try {
                   const next = await props.onToggle(n, !done);
-                  if (next) setSaved((s) => ({ ...s, [n.id]: next }));
+                  if (next) setSaved((s) => ({ ...s, [n.id]: { note: next, original: orig } }));
                 } catch (err) {
                   errorToast(done ? "Couldn't reopen it" : "Couldn't mark it done")(err);
                 } finally {

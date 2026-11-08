@@ -1,3 +1,4 @@
+import { normalizeTopic, TOPIC_MAX } from "../shared/topics.ts";
 import { TaskBriefs } from "./taskPresentation.ts";
 import { changeReview, reviewFor } from "./planReview.ts";
 import fs from "node:fs";
@@ -1337,6 +1338,18 @@ app.post(
     }
   }),
 );
+
+// Topics group outcomes across meetings without changing their source.
+app.patch("/api/rooms/:id/notes/:noteId/topic", route((req, res) => {
+  if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
+  const topic = req.body?.topic;
+  if (topic !== null && (typeof topic !== "string" || normalizeTopic(topic).length > TOPIC_MAX))
+    return void res.status(400).json({ error: "Use a topic of 80 characters or fewer, or null to inherit the agenda item." });
+  const note = db.setNoteTopic(req.params.id, req.params.noteId, topic);
+  if (!note) return notFound(res);
+  sessions.get(req.params.id)?.followUpsChanged();
+  res.json(note);
+}));
 
 // Move a to-do or open question (the space page's Tasks tab): { state: "done" | "dropped" | "open", reason? },
 // or { saidDone: false } to take off a Said done mark Stand heard wrong.

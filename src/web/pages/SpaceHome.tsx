@@ -6,6 +6,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import { matchesTopic, topicKey, topicOf, topicOptions } from "../../shared/topics.ts";
+import { TopicPicker } from "../TopicPicker.tsx";
 import { stateOf } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
@@ -45,8 +47,18 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   // The task open in the drawer, in the URL so a link can open it.
   const [params, setParams] = useSearchParams();
   const openTask = params.get("task");
-  const showTask = useCallback((id: string) => setParams({ task: id }), [setParams]);
-  const closeTask = useCallback(() => setParams({}, { replace: true }), [setParams]);
+  const showTask = useCallback((id: string) => setParams((prev) => {
+    const next = new URLSearchParams(prev); next.set("task", id); next.delete("view"); return next;
+  }), [setParams]);
+  const closeTask = useCallback(() => setParams((prev) => {
+    const next = new URLSearchParams(prev); next.delete("task"); next.delete("view"); return next;
+  }, { replace: true }), [setParams]);
+  const topicFilter = params.get("topic") ?? "";
+  const setTopicFilter = (value: string) => setParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (value) next.set("topic", value); else next.delete("topic");
+    return next;
+  });
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [tab, setTab] = useState<TabKey>(() => {
     if (openTask) return "tasks";
@@ -202,6 +214,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const done = (room.doneFollowUps ?? []).filter((f) => !gone.has(`todo:${f.id}`));
   const closedQuestions = (feed?.closedQuestions ?? []).filter((n) => !gone.has(`question:${n.id}`));
 
+  const allNotes = [...todos, ...questions, ...decisions, ...done, ...closedQuestions];
+  const topics = topicOptions(allNotes, room.items, room.decks);
+  const topic = (n: Note) => topicOf(n, room.items, room.decks);
+  const matching = (n: Note) => matchesTopic(topic(n), topicFilter);
+  const topicPicker = (n: Note) => <TopicPicker note={n} roomId={room.id} topic={topic(n)}
+    inherited={topicOf({ ...n, topic: null }, room.items, room.decks)} options={topics} onSaved={load} />;
+
   const entries: Entry[] = feed
     ? [
         ...feed.captures.filter((x) => !gone.has(`snap:${x.id}`)).map((snap) => ({ kind: "snap" as const, at: snap.ts, snap })),
@@ -324,13 +343,27 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </>
           )}
 
+          {(tab === "tasks" || tab === "decisions") && (
+            <div className="sh-topic-filter">
+              <label htmlFor="space-topic-filter">Topic</label>
+              <select id="space-topic-filter" value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)}>
+                <option value="">All topics</option>
+                <option value="none">No topic</option>
+                {topics.map((t) => <option key={topicKey(t)} value={`topic:${topicKey(t)}`}>{t}</option>)}
+                {topicFilter.startsWith("topic:") && !topics.some((t) => `topic:${topicKey(t)}` === topicFilter) && <option value={topicFilter}>{topicFilter.slice(6)}</option>}
+              </select>
+              {topicFilter && <button type="button" className="link" onClick={() => setTopicFilter("")}>Clear</button>}
+            </div>
+          )}
           {tab === "tasks" && (
             <TasksTab
               roomId={room.id}
               me={user.name}
-              deck={deck}
-              open={[...todos, ...questions]}
-              closed={[...done, ...closedQuestions]}
+              deck={topicFilter ? null : deck}
+              open={[...todos, ...questions].filter(matching)}
+              closed={[...done, ...closedQuestions].filter(matching)}
+              topicPicker={topicPicker}
+              filtered={!!topicFilter}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
               reload={load}
               openId={openTask}
@@ -341,12 +374,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             <>
               <PointList
                 kind="decided"
-                notes={decisions}
-                empty="No decisions yet."
+                notes={decisions.filter(matching)}
+                topicPicker={topicPicker}
+                empty={topicFilter ? "No decisions in this topic." : "No decisions yet."}
                 onArchive={(id) => archive(`decision:${id}`)}
                 onReplaced={(id, by, replaced) => void api.confirmReplaced(room.id, id, by, replaced).then(load, errorToast("Couldn't save that"))}
               />
-              {context.length > 0 && (
+              {!topicFilter && context.length > 0 && (
                 <>
                   <p className="sh-group" title="What's true in this space that nobody had to choose">
                     Context · {context.length}
@@ -394,12 +428,12 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               <p className="sh-card-empty">Nothing on the agenda yet. Suggestions come from meetings and what people save here.</p>
             ))}
 
-          <ArchivedList
+          {(!(tab === "tasks" || tab === "decisions") || !topicFilter) && <ArchivedList
             rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
             open={showArchived}
             onToggle={() => setShowArchived((v) => !v)}
             onRestore={restore}
-          />
+          />}
         </section>
         {viewing && viewing.snaps[viewing.i] && (
           <SnapView
@@ -624,6 +658,8 @@ type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
  * first, then folded Done and Dropped. Anyone can tick a task off, drop it or reopen it, with Undo.
  */
 function TasksTab(props: {
+  topicPicker: (n: Note) => React.ReactNode;
+  filtered: boolean;
   roomId: string;
   me: string;
   /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
@@ -680,6 +716,7 @@ function TasksTab(props: {
       onToggle={(n, d) => move(n, d ? "done" : "open")}
       after={(n: TaskNote) => (
         <>
+          {props.topicPicker(n)}
           {n.kind === "question" && <span className="task-verb">Answer</span>}
           {n.saidDone && !n.doneAt && <SaidDonePill quote={n.saidDone} onUndo={() => notSaid(n)} />}
           {!closed && n.state === "doing" && !work[n.id]?.working && <span className="rc-pill task-doing">Doing</span>}
@@ -742,7 +779,7 @@ function TasksTab(props: {
         </button>
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
-      {!props.open.length && <p className="sh-card-empty">Nothing open. New tasks come from meetings and what people save here.</p>}
+      {!props.open.length && <p className="sh-card-empty">{props.filtered ? "No open tasks in this topic." : "Nothing open. New tasks come from meetings and what people save here."}</p>}
       {waiting.length > 0 && (
         <div className="sh-task-group">
           <p className="sh-group waiting" title="A PR or other work is in and needs someone with a say to look">
@@ -883,6 +920,7 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
 /** Decisions or open questions across the space's meetings, as the recap lists them. A decision a
  *  later one replaced stays, muted and last, so the change of mind is still on record. */
 function PointList(props: {
+  topicPicker?: (n: Note) => React.ReactNode;
   kind: "decided" | "question";
   notes: SpaceFeed["decided"];
   empty: string;
@@ -899,6 +937,7 @@ function PointList(props: {
           <span className="rc-point-body">
             <span>
               {n.text}
+              {props.topicPicker?.(n)}
               {n.quote && <QuoteMark quote={n.quote} />}
               {n.from && <FromChip from={n.from} />}
               {n.replacedBy && <ReplacedChip by={n.replacedBy} />}

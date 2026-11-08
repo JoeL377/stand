@@ -32,6 +32,7 @@ import type {
   WorkShot,
   User,
 } from "../shared/protocol.ts";
+import { normalizeTopic, TOPIC_MAX } from "../shared/topics.ts";
 import { newId } from "./ids.ts";
 import type { SnapRow } from "./snaps.ts";
 import type { Polish, UpNextInput } from "./upNext.ts";
@@ -471,6 +472,7 @@ const toJot = (r: Row): Jot => ({
 });
 
 const toNote = (r: Row): Note => ({
+  ...(r.topic != null ? { topic: r.topic as string } : {}),
   id: r.id as string,
   meetingId: r.meeting_id as string,
   itemId: (r.item_id as string) ?? null,
@@ -584,6 +586,7 @@ export function openDb(file?: string) {
   const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
+  if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
   // Who did it, as fields (shared/actors.ts). Older rows read theirs from done_by and edited_by.
@@ -1180,6 +1183,8 @@ export function openDb(file?: string) {
             .all(meetingId, itemId) as Row[]
         ).map((r) => [`${r.kind}:${r.text}`, r]),
       );
+      // User grouping survives live note redrafts independently of the model's fields.
+      const topics = db.prepare("SELECT id, kind, text, topic FROM notes WHERE meeting_id = ? AND item_id IS ? AND topic IS NOT NULL").all(meetingId, itemId) as Row[];
       db.prepare("DELETE FROM notes WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
       const st = db.prepare(
         "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by, quote_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1239,7 +1244,9 @@ export function openDb(file?: string) {
             note.id,
           );
         }
-        return [t || a ? toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(note.id) as Row) : note];
+        const grouping = topics.find((r) => r.id === note.id) ?? topics.find((r) => r.kind === note.kind && r.text === note.text);
+        if (grouping) db.prepare("UPDATE notes SET topic = ? WHERE id = ?").run(grouping.topic as string, note.id);
+        return [t || a || grouping ? toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(note.id) as Row) : note];
       });
     },
     /** The host's own wording for a note. Edited notes stay as written when the agent redrafts. */
@@ -1280,6 +1287,7 @@ export function openDb(file?: string) {
         n.state ?? null, n.doneWhen ?? null, n.parentId ?? null, n.closedBy ?? null, n.dropReason ?? null,
         n.saidDone ? JSON.stringify(n.saidDone) : null, n.checkedAt ?? null,
       );
+      db.prepare("UPDATE notes SET topic = ? WHERE id = ?").run(n.topic ?? null, n.id);
       db.prepare("UPDATE notes SET done_actor_json = ?, added_actor_json = ? WHERE id = ?").run(
         n.doneAt && n.doneActor ? JSON.stringify(n.doneActor) : null,
         n.addedActor ? JSON.stringify(n.addedActor) : null,
@@ -1434,6 +1442,16 @@ export function openDb(file?: string) {
         .run(by ? Date.now() : null, by, by && actor ? JSON.stringify(actor) : null, by ? "done" : null, by ? closedBy : null, noteId, roomId);
       if (!res.changes) return null;
       return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
+    },
+    /** A user-selected topic, kept apart from source and task state. */
+    setNoteTopic(roomId: string, noteId: string, topic: string | null): Note | null {
+      const value = topic === null ? null : normalizeTopic(topic);
+      if (value !== null && value.length > TOPIC_MAX) throw new Error(`Topics must be ${TOPIC_MAX} characters or fewer`);
+      const result = db.prepare(
+        `UPDATE notes SET topic = ? WHERE id = ? AND kind IN ('action', 'question', 'decision')
+         AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)`,
+      ).run(value, noteId, roomId);
+      return result.changes ? toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row) : null;
     },
     /** Moves a to-do or open question to a state by hand: done (with what closed it), dropped (with
      *  why), doing, or open again. "Still on it" is open with checkedAt, so a check-in counts it answered;

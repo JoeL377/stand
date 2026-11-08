@@ -149,6 +149,8 @@ export const api = {
   setFollowUp: (roomId: string, noteId: string, done: boolean) => call<Note>("PATCH", `/api/rooms/${roomId}/followups/${noteId}`, { done }),
   confirmReplaced: (roomId: string, noteId: string, by: string, replaced: boolean) =>
     call<unknown>("POST", `/api/rooms/${roomId}/decisions/${noteId}/replaced`, { by, replaced }),
+  setNoteTopic: (roomId: string, noteId: string, topic: string | null) =>
+    call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/topic`, { topic }),
   setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
   planReview: (id: string, version?: string) =>

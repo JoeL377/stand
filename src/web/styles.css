@@ -2855,3 +2855,18 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .task-presentation-body h2 { font-size: 18px; margin-top: 26px; }
 .task-presentation-body li { margin: 8px 0; }
 .task-presentation > p { padding: 18px; }
+
+/* Cross-meeting topics stay separate from each outcome's source pill. */
+.sh-topic-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-size: 13px; }
+.sh-topic-filter label { color: var(--muted); }
+.sh-topic-filter select { max-width: min(320px, 65vw); padding: 6px 26px 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: inherit; font: inherit; }
+.topic-picker { display: inline-block; position: relative; margin-left: 6px; vertical-align: baseline; }
+.topic-pill { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; cursor: pointer; }
+.topic-pill.unset { opacity: .65; }
+.topic-pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 9px; width: min(280px, 72vw); padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 8px 32px #0002; font-size: 13px; font-weight: 400; white-space: normal; }
+.topic-pop label { font-weight: 600; }
+.topic-pop input { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: inherit; font: inherit; }
+.topic-actions { display: flex; gap: 8px; }
+.topic-actions button { padding: 4px 9px; }
+.topic-default { text-align: left; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .topic-pop { position: fixed; left: 50%; right: auto; top: 30%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); } }
