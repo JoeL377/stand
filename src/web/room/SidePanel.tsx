@@ -1,8 +1,9 @@
+import { usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useRef, useState } from "react";
 import type { Board, ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { moverText } from "./TopicBoard.tsx";
 import type { Interim } from "./useRoomSocket.ts";
-import { colorFor, fmtTime, keyOf } from "../util.ts";
+import { fmtTime, keyOf } from "../util.ts";
 import { SnapsPill } from "../Snaps.tsx";
 import { ChatIcon, PanelIcon, SendIcon, TranscriptIcon } from "../icons.tsx";
 import { Linkified } from "../Linkified.tsx";
@@ -199,6 +200,7 @@ function Transcript(props: {
   send: (m: ClientMessage) => boolean;
   empty: string;
 }) {
+  const colorFor = usePersonColors();
   const { segments, items, interims, send } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -302,6 +304,7 @@ function ChatBox({ send }: { send: (m: ClientMessage) => boolean }) {
 }
 
 function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => boolean }) {
+  const colorFor = usePersonColors();
   const [moving, setMoving] = useState(false);
   return (
     <div className={s.kind === "chat" ? "seg chat" : "seg"}>

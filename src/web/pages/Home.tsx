@@ -1,3 +1,4 @@
+import { PersonColors, useColorRegistry } from "../PersonColors.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { SpaceSummary } from "../../shared/protocol.ts";
@@ -141,6 +142,7 @@ function EmptyState(props: { q: string; query: string; total: number }) {
 
 function LiveCard({ s }: { s: SpaceSummary }) {
   const live = s.live!;
+  const colorFor = useColorRegistry(s.id, live.people.map((p) => ({ id: p.name, name: p.name })));
   const names = live.people.map((p) => p.name.split(/\s+/)[0]);
   const who =
     names.length === 1
@@ -149,6 +151,7 @@ function LiveCard({ s }: { s: SpaceSummary }) {
         ? `${names[0]} and ${names[1]} are`
         : `${names[0]} and ${names.length - 1} others are`;
   return (
+  <PersonColors.Provider value={colorFor}>
     <div className="sp-card-wrap">
       <Link to={spaceHref(s.id)} className="sp-card live">
         <div className="sp-card-head">
@@ -171,6 +174,7 @@ function LiveCard({ s }: { s: SpaceSummary }) {
       </Link>
       <JoinButton s={s} />
     </div>
+  </PersonColors.Provider>
   );
 }
 

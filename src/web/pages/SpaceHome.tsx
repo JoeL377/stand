@@ -1,3 +1,4 @@
+import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors.tsx";
 // A space's own page, the one people open between meetings: what came into the space since
 // last time (snaps and notes people saved, and meetings), and where the space stands
 // (to-dos, decisions, open questions and the suggested agenda). Start talking turns it into the
@@ -21,7 +22,7 @@ import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
-import { colorFor, fmtDate, fmtTime } from "../util.ts";
+import { fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
@@ -35,6 +36,7 @@ type Entry =
 
 export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: () => void }) {
   const { room, reload } = props;
+  const colorFor = useColorRegistry(room.id, room.people.map((p) => ({ id: p.name, name: p.name })));
   const { user, caps } = useAuth();
   const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
@@ -236,6 +238,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   }
 
   return (
+  <PersonColors.Provider value={colorFor}>
     <SpacesShell spaces={spaces}>
       <main className="sh-main">
         <header className="sh-head">
@@ -448,6 +451,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         {openTask && <TaskDrawer key={openTask} id={openTask} onOpen={showTask} onClose={closeTask} />}
       </main>
     </SpacesShell>
+  </PersonColors.Provider>
   );
 }
 
@@ -671,6 +675,7 @@ function TasksTab(props: {
   openId: string | null;
   onOpen: (id: string) => void;
 }) {
+  const colorFor = usePersonColors();
   const [showDeck, setShowDeck] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);

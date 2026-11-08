@@ -1,3 +1,4 @@
+import { usePersonColors } from "../PersonColors.tsx";
 // The Kickoff card: the meeting's first card on the board. It's built like a topic card: what the space
 // got done since its last meeting, with Claude's opening line and its pages as the card's tabs (written
 // ahead of time, server/doneDeck.ts), and the "Since last time" check-in on what's still open as the last
@@ -12,7 +13,6 @@ import { createPortal } from "react-dom";
 import type { DoneDeck, DoneSlide, FollowUp, Snap } from "../../shared/protocol.ts";
 import { SnapGallery } from "../Snaps.tsx";
 import { CHECKIN_IDLE_MS, CheckIn, type CheckInActs, checkInRows, unanswered } from "./CheckIn.tsx";
-import { colorFor } from "../util.ts";
 import { Face } from "../RecapChapters.tsx";
 
 export interface OpenerActs extends CheckInActs {
@@ -290,6 +290,7 @@ const asSnap = (shot: NonNullable<DoneSlide["shot"]>, at: number): Snap => ({
 
 /** One page of what got done: its lead, its lines, and the screenshot it picked. */
 export function Slide({ s, at }: { s: DoneSlide; at: number }) {
+  const colorFor = usePersonColors();
   const [viewing, setViewing] = useState(false);
   return (
     <div className="done-slide">
@@ -310,7 +311,7 @@ export function Slide({ s, at }: { s: DoneSlide; at: number }) {
                 </a>
               )}
               {/* By first name, like the check-in's groups, so a person has the same face on every page. */}
-              {p.who && <Face name={p.who.split(" ")[0]} color={colorFor(p.who.split(" ")[0])} size={20} />}
+              {p.who && <Face name={p.who.split(" ")[0]} color={colorFor(p.who)} size={20} />}
             </li>
           );
         })}

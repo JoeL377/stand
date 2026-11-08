@@ -1,3 +1,4 @@
+import { usePersonColors } from "../PersonColors.tsx";
 // The topic board: what the middle screen shows while nobody shares or presents. A stack of cards,
 // one in focus at a time: "Done since" (what the space closed since its last meeting, in every meeting
 // after a space's first, even when nothing closed), the check-in on what's still open from earlier, one
@@ -25,7 +26,7 @@
 import { type CSSProperties, Fragment, useEffect, useRef, useState } from "react";
 import type { AgentCard, Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
-import { colorFor, fmtDuration, initials, keyOf } from "../util.ts";
+import { fmtDuration, initials, keyOf } from "../util.ts";
 import { Opener, type OpenerActs, hasKickoff, kickoffEnd, openerPages, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
 import { unanswered } from "./CheckIn.tsx";
@@ -1381,6 +1382,7 @@ function useArrival(id: string | null): Arrival {
 }
 
 function Dot({ id, name, size }: { id: string; name: string; size: number }) {
+  const colorFor = usePersonColors();
   const style = { width: size, height: size, fontSize: Math.max(11, Math.round(size * 0.5)), background: colorFor(id) } as CSSProperties;
   return (
     <span className="topic-dot" style={style} title={name}>

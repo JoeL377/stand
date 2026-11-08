@@ -1,3 +1,4 @@
+import { PersonColors, useColorRegistry } from "../PersonColors.tsx";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { DeckHistory } from "../../shared/protocol.ts";
@@ -5,7 +6,7 @@ import { api } from "../api.ts";
 import { ItemNotes } from "../Discussions.tsx";
 import { Slide } from "../slides.tsx";
 import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
-import { colorFor, fmtDate, fmtTime } from "../util.ts";
+import { fmtDate, fmtTime } from "../util.ts";
 
 /** Every slide of a deck next to what was said and decided about it. */
 export function DeckHistoryPage() {
@@ -13,6 +14,8 @@ export function DeckHistoryPage() {
   const [data, setData] = useState<DeckHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [onlyDiscussed, setOnlyDiscussed] = useState(false);
+
+  const colorFor = useColorRegistry(deckId, (data?.slides ?? []).flatMap((g) => g.segments.map((s) => ({ id: s.speakerId, name: s.speakerName }))));
 
   useEffect(() => {
     api.deckHistory(deckId).then(setData).catch((e) => setError(e.message));
@@ -30,6 +33,7 @@ export function DeckHistoryPage() {
   const decisions = slides.flatMap((s) => s.notes.filter((n) => n.kind === "decision").map((n) => ({ ...n, slide: s.item.slideNo })));
 
   return (
+  <PersonColors.Provider value={colorFor}>
     <div className="doc">
       {room && (
         <nav className="crumbs">
@@ -117,5 +121,6 @@ export function DeckHistoryPage() {
         </section>
       ))}
     </div>
+  </PersonColors.Provider>
   );
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
-import { DoneDecks, doneInput, donePrompt } from "./doneDeck.ts";
+import { DoneDecks, doneBasis, doneInput, donePrompt, plainSlides, slidesFrom } from "./doneDeck.ts";
 import { HeuristicAgent, type DoneDeckDraft } from "./llm.ts";
 
 const tick = () => new Promise((r) => setTimeout(r, 3));
@@ -78,7 +78,7 @@ test("the done pages count from the last meeting more than one person talked in,
   assert.deepEqual(deck.slides[0], {
     title: "Calls",
     lead: "The mic is yours to pick.",
-    points: [{ text: "Pick your mic beside Mute", who: "Joe", pr: "https://github.com/JoeL377/stand/pull/41", dropped: false }],
+    points: [{ text: "Pick your mic beside Mute", who: "Joe Liang", pr: "https://github.com/JoeL377/stand/pull/41", dropped: false }],
     shot: null,
   });
   // What it left out isn't lost.
@@ -97,6 +97,54 @@ test("the done pages count from the last meeting more than one person talked in,
   live = false;
   await decks.run(room.id);
   assert.equal(calls, 2);
+  decks.stop();
+});
+
+test("summary badges use task owners even when the model credits the closer or a reporter", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Stand", null, "");
+  const { notes } = await meeting(db, room.id, ["Joe", "Janesh"], [
+    ["Build task plans", "Janesh Chhabra"],
+    ["Add comments", "Janesh Chhabra"],
+    ["Fix avatars", "Huy Ngo"],
+    ["Check pricing", null],
+  ]);
+  for (const n of notes) db.setActionDone(room.id, n.id, "Joe Liang via Claude");
+  const input = doneInput(db, room.id)!;
+  const points = slidesFrom(input, {
+    opening: null,
+    slides: [{ title: "Done", lead: null, shot: null, points: [
+      { text: "Task plans work", who: "Joe", tasks: ["T1"] },
+      { text: "Plans and comments work", who: "Joe", tasks: ["T1", "T2"] },
+      { text: "Plans and avatars work", who: "Joe", tasks: ["T1", "T3"] },
+      { text: "Pricing checked", who: "Joe", tasks: ["T4"] },
+      { text: "Plans and pricing checked", who: "Joe", tasks: ["T1", "T4"] },
+      { text: "Unsupported claim", who: "Joe", tasks: ["T99"] },
+    ] }],
+  })[0].points;
+  assert.deepEqual(points.map((p) => p.who), ["Janesh Chhabra", "Janesh Chhabra", null, null, null]);
+  assert.deepEqual(plainSlides(input, input.closed)[0].points.map((p) => p.who), ["Janesh Chhabra", "Janesh Chhabra", "Huy Ngo", null]);
+});
+
+test("changing an owner refreshes the cached summary, including work in flight", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Stand", null, "");
+  const { notes } = await meeting(db, room.id, ["Joe", "Janesh"], [
+    ["Build task plans", "Joe Liang"],
+    ["Add comments", "Joe Liang"],
+  ]);
+  db.setActionDone(room.id, notes[0].id, "Joe Liang via Claude");
+  db.addUpdate({ roomId: room.id, itemId: null, noteId: notes[1].id, noteText: notes[1].text,
+    userId: "u1", userName: "Joe Liang", client: "Claude", status: "working", text: "Started comments", links: [] });
+  const decks = new DoneDecks(db, new HeuristicAgent(), () => false, () => {});
+  await decks.run(room.id);
+  assert.equal(db.getDoneDeck(room.id)!.slides[0].points[0].who, "Joe Liang");
+  db.editNote(notes[0].id, { text: notes[0].text, owner: "Janesh Chhabra" }, "Janesh Chhabra");
+  await decks.run(room.id);
+  assert.equal(db.getDoneDeck(room.id)!.slides[0].points[0].who, "Janesh Chhabra");
+  const basis = doneBasis(doneInput(db, room.id)!);
+  db.editNote(notes[1].id, { text: notes[1].text, owner: "Huy Ngo" }, "Janesh Chhabra");
+  assert.notEqual(doneBasis(doneInput(db, room.id)!), basis);
   decks.stop();
 });
 

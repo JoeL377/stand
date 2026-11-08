@@ -1,3 +1,4 @@
+import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ConxtPanel } from "../ConxtPanel.tsx";
@@ -11,7 +12,7 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { Markdown } from "../Synthesis.tsx";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
-import { colorFor, costLines, fmtCost, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
+import { costLines, fmtCost, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
 export function RecapPage() {
   const { meetingId = "" } = useParams();
@@ -26,6 +27,8 @@ export function RecapPage() {
   const here = useSectionInView(["todo", "decided", "open", "chapters"], Boolean(data));
 
   const [attempt, setAttempt] = useState(0);
+  const colorFor = useColorRegistry(meetingId, (data?.items ?? []).flatMap((g) => g.segments.map((s) => ({ id: s.speakerId, name: s.speakerName }))));
+
   useEffect(() => {
     api
       .meeting(meetingId)
@@ -144,6 +147,7 @@ export function RecapPage() {
   const nextCount = upNext && upNext.since === data.startedAt ? upNext.suggestions.length + upNext.parked.length : 0;
 
   return (
+  <PersonColors.Provider value={colorFor}>
     <div className="doc recap">
       <nav className="crumbs">
         <Link to={`/r/${data.roomId}`}>← {data.roomName}</Link>
@@ -324,6 +328,7 @@ export function RecapPage() {
         </a>
       </footer>
     </div>
+  </PersonColors.Provider>
   );
 }
 
@@ -369,6 +374,7 @@ const OUTCOME: Record<DiscussionOutcome, { label: string; Icon: (p: { size?: num
 /** One topic: a single line with its outcome; who said what opens below it.
  *  Screenshots discussed under it show below the line, with what was said around them. */
 function TopicRow({ d, segments, snaps }: { d: Discussion; segments: Segment[]; snaps: Snap[] }) {
+  const colorFor = usePersonColors();
   const [showTurns, setShowTurns] = useState(false);
   const turns = d.segmentIds.flatMap((id) => segments.filter((s) => s.id === id));
   const idOf = (name: string) => turns.find((s) => s.speakerName === name)?.speakerId ?? name;
@@ -419,6 +425,7 @@ function TopicRow({ d, segments, snaps }: { d: Discussion; segments: Segment[]; 
 }
 
 function Turns({ segments }: { segments: Segment[] }) {
+  const colorFor = usePersonColors();
   return (
     <div className="transcript static">
       {segments.map((s) => (
