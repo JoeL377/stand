@@ -1,3 +1,4 @@
+import { PersonColors, useColorRegistry } from "../PersonColors.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Capabilities, ClientMessage, User } from "../../shared/protocol.ts";
 import { useRoomSocket } from "./useRoomSocket.ts";
@@ -32,6 +33,8 @@ export function Meeting(props: {
   const [now, setNow] = useState(Date.now());
   const [ending, setEnding] = useState(false);
   const { send, state } = room;
+
+  const colorFor = useColorRegistry(roomId, [...(state?.participants ?? []), ...room.segments.map((s) => ({ id: s.speakerId, name: s.speakerName })), ...Object.values(room.interims).map((s) => ({ id: s.speakerId, name: s.speakerName }))]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15_000);
@@ -362,6 +365,7 @@ export function Meeting(props: {
   ].filter(Boolean) as string[];
 
   return (
+  <PersonColors.Provider value={colorFor}>
     <div className="meeting">
       <header className="topbar">
         <div className="topbar-left">
@@ -642,6 +646,7 @@ export function Meeting(props: {
         />
       )}
     </div>
+  </PersonColors.Provider>
   );
 }
 

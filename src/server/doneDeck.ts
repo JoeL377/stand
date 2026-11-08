@@ -64,8 +64,8 @@ export function doneInput(db: DB, roomId: string): DoneInput | null {
 }
 
 /** What a pass read, so it reruns only when something changed. */
-/** v2: every page has a description. */
-const DONE_SHAPE = "v2";
+/** v3: attribution comes from task owners, never a model's guess. */
+const DONE_SHAPE = "v3";
 
 export function doneBasis(input: DoneInput): string {
   return createHash("sha1")
@@ -74,7 +74,7 @@ export function doneBasis(input: DoneInput): string {
         // Bumped when the pages' shape changes, so pages written before are written again.
         DONE_SHAPE,
         input.last.endedAt,
-        ...input.closed.map((n) => `${n.id}:${n.state}:${n.closedBy}:${n.text}`),
+        ...[...input.closed, ...input.moving].map((n) => JSON.stringify([n.id, n.state, n.closedBy, n.text, n.owner])),
         ...input.updates.map((u) => u.id),
         ...input.shots.map((s) => s.id),
       ].join("\n"),
@@ -115,7 +115,7 @@ export function donePrompt(input: DoneInput): string {
         } · ${n.kind === "question" ? "question" : "to-do"}: ${n.text}`;
     const extra = [
       n.owner ? `owner ${n.owner}` : "no owner",
-      n.doneBy && !open ? `closed by ${n.doneBy}` : null,
+      n.doneBy && !open ? `marked closed by ${n.doneBy} (records the close, not who did the work)` : null,
       `from the ${day((n as Closed).meetingStartedAt ?? n.ts)} meeting`,
       (n as Closed).itemTitle ? `under "${(n as Closed).itemTitle}"` : null,
       loose(n).length ? `screenshots ${loose(n).join(", ")}` : null,
@@ -145,7 +145,7 @@ Rules:
 - Account for every closed task (T keys), folded into a line with others if it's small. Open tasks (O keys) are optional: use them only for a page like "In flight" when it helps.
 - Never invent anything. Every line must come from the tasks and their logs. Use the logs for what actually changed, in plain words people would say out loud, not the to-do's wording or code names.
 - The opening is one or two short sentences, the headline someone would start the meeting with.
-- A page title is a few words (it's also the tab's label). Every page has a lead: one or two plain sentences (under 40 words) that describe what changed on that page and why it matters, so someone who missed the work gets it from the lead alone; the lines below are the details. A line is under 14 words; name who did it in "who" (a first name, or null), and list the task keys it covers.
+- A page title is a few words (it's also the tab's label). Every page has a lead: one or two plain sentences (under 40 words) that describe what changed on that page and why it matters, so someone who missed the work gets it from the lead alone; the lines below are the details. A line is under 14 words; list the task keys it covers. Set "who" to null: the app supplies the owner from those tasks. Prefer separate lines for tasks with different owners. The person who marked a task closed or posted a report is not necessarily its owner or the person who did the work; never infer credit from those fields.
 - At most ${MAX_SLIDES} pages and ${MAX_POINTS} lines a page.
 - Put a screenshot (S key) on a page only when it shows what that page is about; null otherwise.`;
 
@@ -158,9 +158,9 @@ export function slidesFrom(input: DoneInput, draft: DoneDeckDraft, baseUrl = "")
   for (const s of draft.slides.slice(0, MAX_SLIDES)) {
     const points = s.points.slice(0, MAX_POINTS).flatMap((p) => {
       const keys = p.tasks.filter((k) => tasks.has(k));
-      if (!p.text.trim()) return [];
+      if (!p.text.trim() || !keys.length) return [];
       keys.forEach((k) => used.add(k));
-      return [pointOf(input, keys.map((k) => tasks.get(k)!.note), p.text, p.who)];
+      return [pointOf(input, keys.map((k) => tasks.get(k)!.note), p.text)];
     });
     if (!points.length) continue;
     const shot = s.shot ? shots.get(s.shot) : undefined;
@@ -176,17 +176,20 @@ export function slidesFrom(input: DoneInput, draft: DoneDeckDraft, baseUrl = "")
   return slides;
 }
 
-function pointOf(input: DoneInput, notes: Note[], text: string, who: string | null): DoneSlide["points"][number] {
+function pointOf(input: DoneInput, notes: Note[], text: string): DoneSlide["points"][number] {
   // A PR that closed one of its tasks, or one an agent reported it ready with.
   let pr: string | null = null;
   for (const n of notes) {
     pr ??= closedPr(n.closedBy);
     pr ??= input.updates.filter((u) => u.noteId === n.id).flatMap((u) => u.links).find((l) => prOf(l)) ?? null;
   }
-  const owner = notes.find((n) => n.owner)?.owner ?? null;
+  // A badge denotes the linked tasks' owner. A closer, reporter or model-supplied name
+  // is not evidence of ownership. Mixed or unknown owners cannot share one badge.
+  const owners = new Set(notes.map((n) => n.owner?.trim() || null));
+  const owner = owners.size === 1 ? [...owners][0] : null;
   return {
     text: clip(text.trim(), 160),
-    who: who?.trim() || owner,
+    who: owner,
     pr,
     dropped: notes.length > 0 && notes.every((n) => n.state === "dropped"),
   };
@@ -200,7 +203,7 @@ export function plainSlides(input: DoneInput, notes: Note[], title = "Done"): Do
     out.push({
       title: notes.length > PLAIN_PER_PAGE ? `${title} (${i / PLAIN_PER_PAGE + 1})` : title,
       lead: `${page.length} ${i || title !== "Done" ? "more " : ""}${page.length === 1 ? "task" : "tasks"} closed since ${day(input.last.startedAt)}, as written on the to-dos.`,
-      points: page.map((n) => pointOf(input, [n], n.text, null)),
+      points: page.map((n) => pointOf(input, [n], n.text)),
       shot: null,
     });
   }

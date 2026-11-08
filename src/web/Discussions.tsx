@@ -1,3 +1,4 @@
+import { usePersonColors } from "./PersonColors.tsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Discussion, DiscussionOutcome, Note, Segment, Snap } from "../shared/protocol.ts";
@@ -5,7 +6,7 @@ import { CopyForAgent } from "./CopyForAgent.tsx";
 import { SnapsPill } from "./Snaps.tsx";
 import { NoteList } from "./room/SidePanel.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
-import { colorFor, fmtDate, fmtTime, initials } from "./util.ts";
+import { fmtDate, fmtTime, initials } from "./util.ts";
 import { useDismiss } from "./useDismiss.ts";
 import { toast } from "./Toasts.tsx";
 import { QuoteMark } from "./RecapChapters.tsx";
@@ -61,6 +62,7 @@ function DiscussionBlock(props: {
   /** Live panel: snaps taken while this topic was talked about. */
   snaps?: { list: Snap[]; me: string; isHost: boolean };
 }) {
+  const colorFor = usePersonColors();
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
   const [turnsPop, setTurnsPop] = useState(false);

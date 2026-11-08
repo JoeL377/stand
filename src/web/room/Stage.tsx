@@ -1,9 +1,10 @@
+import { usePersonColors } from "../PersonColors.tsx";
 import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { AgentCard, Board, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
-import { colorFor, initials, keyOf } from "../util.ts";
+import { initials, keyOf } from "../util.ts";
 import { Slide } from "../slides.tsx";
 import { CameraIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
@@ -525,6 +526,7 @@ export function Stage(props: {
 }
 
 export function Avatar({ id, name, picture, size = 44 }: { id: string; name: string; picture?: string | null; size?: number }) {
+  const colorFor = usePersonColors();
   return picture ? (
     <img className="avatar" src={picture} alt="" style={{ width: size, height: size }} referrerPolicy="no-referrer" />
   ) : (

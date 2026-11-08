@@ -1,3 +1,4 @@
+import { usePersonColors } from "../PersonColors.tsx";
 // "Since last time": what the middle shows when a meeting starts with tasks still open from earlier
 // ones. Grouped by owner, oldest first, each with Done, Still on it and Drop. What closed on its own
 // since the last meeting (a merged PR, an agent's report) sits at the top already ticked, for a
@@ -7,7 +8,6 @@
 import type { FollowUp } from "../../shared/protocol.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
-import { colorFor } from "../util.ts";
 import { Face } from "../RecapChapters.tsx";
 
 /** With the topic card up this long and nobody answering, the check-in gives the middle back. */
@@ -46,6 +46,7 @@ export const checkInRows = (followUps: FollowUp[], meetingStartedAt: number) => 
 
 /** embedded: a page of the opening board (Opener.tsx), which has the header and shows what closed since. */
 export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number; acts: CheckInActs | null; embedded?: boolean }) {
+  const colorFor = usePersonColors();
   const start = props.meetingStartedAt;
   const work = useWork(props.followUps.filter((f) => !f.doneAt).map((f) => f.id));
   // Closed between the last meeting and this one: news to glance at.

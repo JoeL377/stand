@@ -1,3 +1,4 @@
+import { usePersonColors } from "./PersonColors.tsx";
 // The recap's chapters: the same chapters people saw on the meeting's chapter bar (shared/chapters.ts),
 // as a bar for the whole meeting under the recap's header, a chip on every to-do, decision and open
 // question that leads to the chapter it came out of, and the Chapters section itself.
@@ -8,7 +9,7 @@ import type { MeetingChapter } from "../shared/chapters.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { SnapFigures } from "./Snaps.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
-import { colorFor, fmtDate, fmtTime, initials, itemLabel } from "./util.ts";
+import { fmtDate, fmtTime, initials, itemLabel } from "./util.ts";
 import type { Item } from "../shared/protocol.ts";
 import { Linkified } from "./Linkified.tsx";
 
@@ -283,6 +284,7 @@ function ChapterRow(props: {
   onToggle: (open: boolean) => void;
   colorOf: (name: string) => string;
 }) {
+  const colorFor = usePersonColors();
   const { c, startedAt } = props;
   const [said, setSaid] = useState(false);
   // A quote mark clicked: the transcript opens at that line.

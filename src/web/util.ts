@@ -38,6 +38,33 @@ export function colorFor(id: string) {
   for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0;
   return palette[Math.abs(h) % palette.length];
 }
+/** A view owns one allocator: collisions take the next unused palette color.
+ * Assignments stay put as people join; extra people receive additional hues. */
+export function createPersonColors() {
+  const assigned = new Map<string, string>();
+  const used = new Set<string>();
+  return (id: string) => {
+    const existing = assigned.get(id);
+    if (existing) return existing;
+    const start = palette.indexOf(colorFor(id));
+    let color: string | undefined;
+    for (let offset = 0; offset < palette.length; offset++) {
+      const candidate = palette[(start + offset) % palette.length];
+      if (!used.has(candidate)) { color = candidate; break; }
+    }
+    if (!color) {
+      // The golden angle spreads additional colors around the color wheel.
+      let extra = assigned.size - palette.length;
+      do {
+        color = `hsl(${((extra++ * 137.508) % 360).toFixed(3)} 65% 42%)`;
+      } while (used.has(color));
+    }
+    assigned.set(id, color);
+    used.add(color);
+    return color;
+  };
+}
+
 export const initials = (name: string) =>
   name
     .split(/\s+/)

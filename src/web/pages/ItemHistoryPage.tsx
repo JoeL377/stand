@@ -1,10 +1,11 @@
+import { PersonColors, useColorRegistry } from "../PersonColors.tsx";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api.ts";
 import { ItemNotes } from "../Discussions.tsx";
 import { Slide } from "../slides.tsx";
 import { FollowUpList, saveFollowUp } from "../FollowUps.tsx";
-import { colorFor, fmtDate, fmtTime, keyOf } from "../util.ts";
+import { fmtDate, fmtTime, keyOf } from "../util.ts";
 
 type Data = Awaited<ReturnType<typeof api.itemHistory>>;
 
@@ -13,6 +14,8 @@ export function ItemHistoryPage() {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  const colorFor = useColorRegistry(itemId, (data?.meetings ?? []).flatMap((m) => m.segments.map((s) => ({ id: s.speakerId, name: s.speakerName }))));
 
   useEffect(() => {
     api.itemHistory(itemId).then(setData).catch((e) => setError(e.message));
@@ -29,6 +32,7 @@ export function ItemHistoryPage() {
   const allDecisions = meetings.flatMap((m) => m.notes.filter((n) => n.kind === "decision").map((n) => ({ ...n, when: m.startedAt })));
 
   return (
+  <PersonColors.Provider value={colorFor}>
     <div className="doc">
       <nav className="crumbs">
         <Link to={`/r/${room.id}`}>← {room.name}</Link>
@@ -114,5 +118,6 @@ export function ItemHistoryPage() {
         </section>
       ))}
     </div>
+  </PersonColors.Provider>
   );
 }
