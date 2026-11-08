@@ -6,7 +6,7 @@ import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { type WebSocket, WebSocketServer } from "ws";
-import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, GithubStatus, ItemHistory, Jot, MeetingRecap, SlideLayout, TaskDetail, TaskLink } from "../shared/protocol.ts";
+import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, GithubStatus, ItemHistory, Jot, MeetingRecap, ProjectsStatus, SlideLayout, TaskDetail, TaskLink } from "../shared/protocol.ts";
 import { stateOf } from "../shared/tasks.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { MAX_SHOT_BYTES, UploadLinks, readyToShip, saveShotFile, shotFile, workLog, workingOn } from "./workLog.ts";
@@ -46,6 +46,7 @@ import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
 import { ConxtGlossary, refreshRoomVocabulary, roomVocabulary, setConxtGlossary } from "./conxtGlossary.ts";
 import { ConxtOpenItems, refreshRoomOpenItems, setConxtOpenItems } from "./conxtOpenItems.ts";
 import { GithubApp, appReady, readEvent, signedByGithub } from "./github.ts";
+import { ProjectError, Projects, setProjects } from "./projects.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
 import { DoneDecks } from "./doneDeck.ts";
 import { setUsageSink } from "./usage.ts";
@@ -450,6 +451,66 @@ app.get(
     const ok = Number.isSafeInteger(id) && id > 0 && (githubApp.takeState(String(req.query.state ?? ""), req.user!.id) || known);
     const saved = ok ? await githubApp.remember(id, req.user!.id).catch(() => null) : null;
     res.redirect(`/agents?github=${saved ? "connected" : "failed"}`);
+  }),
+);
+
+// A space's project: GitHub repos it links, which Stand reads and Ask Stand knows (projects.ts).
+const projects = new Projects(db.raw, path.join(config.dataDir, "repos"), githubApp);
+setProjects(projects);
+projects.start();
+/** Only the space's creator links repos (anyone, for older spaces with no creator), as with renaming it. */
+const managesSpace = (room: { createdBy: string | null }, userId: string) => !room.createdBy || room.createdBy === userId;
+const projectsStatus = async (roomId: string, userId: string, canManage: boolean): Promise<ProjectsStatus> => {
+  let linkable: ProjectsStatus["linkable"] = null;
+  let linkableError: string | null = null;
+  if (canManage && githubApp)
+    linkable = await projects.linkable(userId).catch((e: Error) => {
+      linkableError = e.message;
+      return null;
+    });
+  return { available: !!githubApp, canManage, projects: projects.list(roomId), linkable, linkableError };
+};
+app.get(
+  "/api/rooms/:id/projects",
+  route(async (req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    res.json(await projectsStatus(room.id, req.user!.id, managesSpace(room, req.user!.id)));
+  }),
+);
+app.post(
+  "/api/rooms/:id/projects",
+  route(async (req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    if (!managesSpace(room, req.user!.id)) return void res.status(403).json({ error: "Only the person who created this space can link a repo" });
+    try {
+      await projects.link(room.id, req.user!.id, String(req.body?.repo ?? ""));
+    } catch (e) {
+      if (e instanceof ProjectError) return void res.status(400).json({ error: e.message });
+      throw e;
+    }
+    res.json(await projectsStatus(room.id, req.user!.id, true));
+  }),
+);
+app.post(
+  "/api/rooms/:id/projects/:owner/:repo/pull",
+  route(async (req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    if (!managesSpace(room, req.user!.id)) return void res.status(403).json({ error: "Only the person who created this space can do that" });
+    await projects.pull(room.id, req.params.owner, req.params.repo);
+    res.json(await projectsStatus(room.id, req.user!.id, true));
+  }),
+);
+app.delete(
+  "/api/rooms/:id/projects/:owner/:repo",
+  route(async (req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    if (!managesSpace(room, req.user!.id)) return void res.status(403).json({ error: "Only the person who created this space can unlink a repo" });
+    if (!projects.unlink(room.id, req.params.owner, req.params.repo)) return notFound(res, "That repo isn't linked to this space");
+    res.json(await projectsStatus(room.id, req.user!.id, true));
   }),
 );
 

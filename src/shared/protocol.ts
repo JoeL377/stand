@@ -209,6 +209,8 @@ export interface AgentDraft {
   searches: string[];
   /** The pages those searches found, by site, in the order they came (a few). */
   pages?: string[];
+  /** An answer: what it did in the space's repo, oldest first ("Searched “pilotUse”", "Read src/server/room.ts"). */
+  code?: string[];
   /** An answer: its words so far. Options: the note so far, when there are no options. */
   text: string | null;
   /** Options as they come, each one's tradeoff possibly cut off mid-sentence. */
@@ -394,6 +396,41 @@ export interface GithubStatus {
   /** Whether this server has the app set up at all. */
   available: boolean;
   installations: GithubInstallation[];
+}
+
+/** A GitHub repo linked to a space as its project: Stand keeps a read-only copy and Ask Stand reads it. */
+export interface SpaceProject {
+  owner: string;
+  repo: string;
+  branch: string;
+  /** The last commit pulled; null until the first pull lands. */
+  headSha: string | null;
+  pulledAt: number | null;
+  /** Why the last pull failed, in plain words; null when it worked. */
+  error: string | null;
+  linkedBy: string | null;
+  linkedAt: number;
+  url: string;
+}
+
+/** A repo someone may link: in a GitHub App installation they connected. */
+export interface LinkableRepo {
+  owner: string;
+  repo: string;
+  private: boolean;
+}
+
+/** A space's projects, as its settings show them. */
+export interface ProjectsStatus {
+  /** Whether this server has the Stand GitHub App set up. */
+  available: boolean;
+  /** Only the space's creator links and unlinks repos. */
+  canManage: boolean;
+  projects: SpaceProject[];
+  /** For the creator: repos they can link. Null when they can't, or GitHub couldn't be asked. */
+  linkable: LinkableRepo[] | null;
+  /** Why linkable is null, when it's GitHub's fault. */
+  linkableError: string | null;
 }
 
 /** A personal access token an agent uses to reach the Stand MCP. The secret is only shown once. */

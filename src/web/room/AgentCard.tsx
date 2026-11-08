@@ -278,8 +278,12 @@ function Steps({ draft, working }: { draft: AgentDraft | null | undefined; worki
   const [open, setOpen] = useState(false);
   const searches = draft?.searches ?? [];
   const pages = draft?.pages ?? [];
-  if (!searches.length) return working ? <div className="ask-step"><span className="ask-shimmer">Thinking…</span></div> : null;
-  const what = working ? (pages.length ? `Reading ${pages.length} ${pages.length === 1 ? "page" : "pages"}` : "Searching the web") : `Searched the web${pages.length ? ` · ${pages.length} ${pages.length === 1 ? "page" : "pages"}` : ""}`;
+  const code = draft?.code ?? [];
+  if (!searches.length && !code.length) return working ? <div className="ask-step"><span className="ask-shimmer">Thinking…</span></div> : null;
+  const web = working ? (pages.length ? `Reading ${pages.length} ${pages.length === 1 ? "page" : "pages"}` : "Searching the web") : `Searched the web${pages.length ? ` · ${pages.length} ${pages.length === 1 ? "page" : "pages"}` : ""}`;
+  const repo = working ? `${code.at(-1)}…` : `Looked in the repo · ${code.length} ${code.length === 1 ? "step" : "steps"}`;
+  // While working, the latest step leads; once written, both fold into one line.
+  const what = !code.length ? web : !searches.length ? repo : working ? repo : `${repo} · searched the web`;
   const shown = open || working;
   return (
     <div className="ask-steps">
@@ -296,6 +300,11 @@ function Steps({ draft, working }: { draft: AgentDraft | null | undefined; worki
       </button>
       {shown && (
         <div className="ask-step-detail">
+          {code.map((s, i) => (
+            <div key={`c${i}`} className="ask-step-query">
+              {s}
+            </div>
+          ))}
           {searches.map((q, i) => (
             <div key={i} className="ask-step-query">
               {q}

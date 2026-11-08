@@ -2,11 +2,12 @@
 // GitHub's own install screen, and comes back: no tokens. From then on GitHub tells Stand the moment
 // a pull request in those repos closes (POST /api/github/webhook), so a to-do reported ready with
 // that PR (or whose ref is in the PR's description) is checked off right away, and the two-minute
-// check in shipWatch.ts reads those repos as the app. The app only asks to read pull requests.
+// check in shipWatch.ts reads those repos as the app. The app only asks to read: pull requests, and
+// contents for a repo linked to a space as its project (projects.ts).
 
 import { createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { GithubInstallation } from "../shared/protocol.ts";
+import type { GithubInstallation, LinkableRepo } from "../shared/protocol.ts";
 import { githubPrState, type PrState } from "./shipWatch.ts";
 import { prOf } from "./workLog.ts";
 
@@ -80,6 +81,25 @@ export function readEvent(name: string | undefined, payload: Record<string, any>
   }
   if (name === "installation_repositories" && payload.installation?.id) return { kind: "installed", id: payload.installation.id };
   return { kind: "other" };
+}
+
+export interface MergedPr {
+  number: number;
+  title: string;
+  author: string;
+  mergedAt: number;
+}
+
+export interface PullRequestDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "merged" | "closed";
+  author: string;
+  mergedAt: number | null;
+  base: string;
+  head: string;
+  files: Array<{ path: string; status: string; additions: number; deletions: number }>;
 }
 
 type Fetch = typeof fetch;
@@ -184,17 +204,106 @@ export class GithubApp {
       this.repoInstall.set(key, hit);
     }
     if (hit.id === null) return null;
-    const cached = this.tokens.get(hit.id);
+    return this.installToken(hit.id, now);
+  }
+
+  /** The installation's own token, for listing its repos and reading PRs. */
+  private async installToken(id: number, now = Date.now()): Promise<string | null> {
+    const cached = this.tokens.get(id);
     if (cached && cached.until > now) return cached.token;
-    const res = await this.get(`https://api.github.com/app/installations/${hit.id}/access_tokens`, {
+    const res = await this.get(`https://api.github.com/app/installations/${id}/access_tokens`, {
       method: "POST",
       headers: this.headers(appJwt(this.cfg.id, this.cfg.privateKey, now)),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return null;
     const t = (await res.json()) as { token: string; expires_at: string };
-    this.tokens.set(hit.id, { token: t.token, until: Date.parse(t.expires_at) - 5 * 60_000 });
+    this.tokens.set(id, { token: t.token, until: Date.parse(t.expires_at) - 5 * 60_000 });
     return t.token;
+  }
+
+  /** Repos in the installations this person connected: the ones they may link to a space. */
+  async linkableRepos(userId: string, now = Date.now()): Promise<Array<LinkableRepo & { installationId: number; defaultBranch: string; sizeKb: number }>> {
+    const ids = (this.sql.prepare("SELECT id FROM github_installations WHERE connected_by = ? ORDER BY connected_at").all(userId) as Array<{ id: number }>).map((r) => r.id);
+    const out: Array<LinkableRepo & { installationId: number; defaultBranch: string; sizeKb: number }> = [];
+    for (const id of ids) {
+      const token = await this.installToken(id, now);
+      if (!token) throw new Error("GitHub didn't let Stand list your repos. Check the Stand app on GitHub.");
+      for (let page = 1; page <= 5; page++) {
+        const res = await this.get(`https://api.github.com/installation/repositories?per_page=100&page=${page}`, {
+          headers: this.headers(token),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) throw new Error("GitHub didn't let Stand list your repos. Check the Stand app on GitHub.");
+        const body = (await res.json()) as { repositories?: Array<{ name: string; owner?: { login?: string }; private?: boolean; default_branch?: string; size?: number }> };
+        const repos = body.repositories ?? [];
+        for (const r of repos)
+          out.push({ owner: r.owner?.login ?? "", repo: r.name, private: Boolean(r.private), installationId: id, defaultBranch: r.default_branch || "main", sizeKb: r.size ?? 0 });
+        if (repos.length < 100) break;
+      }
+    }
+    return out.filter((r) => r.owner && r.repo);
+  }
+
+  /** A token that can only read one repo (its code, metadata and PRs), for an hour. A project's
+   *  pulls use only this, so a space can read exactly the repo it linked and nothing else. */
+  async readToken(installationId: number, repo: string, now = Date.now()): Promise<string> {
+    const key = `${installationId}:${repo.toLowerCase()}`;
+    const cached = this.readTokens.get(key);
+    if (cached && cached.until > now) return cached.token;
+    const res = await this.get(`https://api.github.com/app/installations/${installationId}/access_tokens`, {
+      method: "POST",
+      headers: { ...this.headers(appJwt(this.cfg.id, this.cfg.privateKey, now)), "Content-Type": "application/json" },
+      body: JSON.stringify({ repositories: [repo], permissions: { contents: "read", metadata: "read", pull_requests: "read" } }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    // 422: the installation hasn't granted Contents yet (GitHub asks its owner to accept it).
+    if (res.status === 422) throw new Error("Accept Contents access for the Stand app on GitHub, then pull again.");
+    if (!res.ok) throw new Error("Stand lost access to this repo on GitHub.");
+    const t = (await res.json()) as { token: string; expires_at: string };
+    this.readTokens.set(key, { token: t.token, until: Date.parse(t.expires_at) - 5 * 60_000 });
+    return t.token;
+  }
+
+  private readTokens = new Map<string, { token: string; until: number }>();
+
+  /** The repo's most recently merged PRs, newest first. */
+  async mergedPrs(owner: string, repo: string, token: string, n = 15): Promise<MergedPr[]> {
+    const res = await this.get(`https://api.github.com/repos/${owner}/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=50`, {
+      headers: this.headers(token),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return [];
+    const prs = (await res.json()) as Array<{ number: number; title?: string; merged_at?: string | null; user?: { login?: string } }>;
+    return prs
+      .filter((p) => p.merged_at)
+      .map((p) => ({ number: p.number, title: String(p.title ?? "").trim(), author: p.user?.login ?? "", mergedAt: Date.parse(p.merged_at!) }))
+      .sort((a, b) => b.mergedAt - a.mergedAt)
+      .slice(0, n);
+  }
+
+  /** One PR with its changed files, for Ask Stand's repo_pr. Null when GitHub has no such PR. */
+  async pullRequest(owner: string, repo: string, number: number, token: string): Promise<PullRequestDetail | null> {
+    const base = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`;
+    const opts = { headers: this.headers(token), signal: AbortSignal.timeout(15_000) };
+    const res = await this.get(base, opts);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error("GitHub didn't answer about that PR.");
+    const p = (await res.json()) as { title?: string; body?: string | null; state?: string; merged_at?: string | null; user?: { login?: string }; base?: { ref?: string }; head?: { ref?: string } };
+    const files = await this.get(`${base}/files?per_page=100`, opts)
+      .then((r) => (r.ok ? (r.json() as Promise<Array<{ filename: string; status?: string; additions?: number; deletions?: number }>>) : []))
+      .catch(() => []);
+    return {
+      number,
+      title: String(p.title ?? "").trim(),
+      body: String(p.body ?? ""),
+      state: p.merged_at ? "merged" : p.state === "open" ? "open" : "closed",
+      author: p.user?.login ?? "",
+      mergedAt: p.merged_at ? Date.parse(p.merged_at) : null,
+      base: p.base?.ref ?? "",
+      head: p.head?.ref ?? "",
+      files: files.map((f) => ({ path: f.filename, status: f.status ?? "", additions: f.additions ?? 0, deletions: f.deletions ?? 0 })),
+    };
   }
 
   /** A PR's state, read as the app when it covers the repo, else with the fallback token. */
