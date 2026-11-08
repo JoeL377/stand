@@ -2870,3 +2870,11 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .topic-actions button { padding: 4px 9px; }
 .topic-default { text-align: left; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .topic-pop { position: fixed; left: 50%; right: auto; top: 30%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); } }
+
+/* Captured meeting items, inline with the spoken transcript. */
+.seg.capture-event { margin: 8px 0; padding: 10px 12px; border-left: 3px solid var(--ok); border-radius: 6px; background: color-mix(in srgb, var(--ok) 9%, var(--panel)); }
+.capture-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--ok-text); }
+.capture-head strong { flex: 1; }
+.capture-head .seg-time { flex: none; }
+.capture-text { margin-top: 5px; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.capture-owner { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }

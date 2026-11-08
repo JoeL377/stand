@@ -1,6 +1,6 @@
 import { usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useRef, useState } from "react";
-import type { Board, ClientMessage, Item, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import type { Board, ClientMessage, Item, ListNote, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { moverText } from "./TopicBoard.tsx";
 import type { Interim } from "./useRoomSocket.ts";
 import { fmtTime, keyOf } from "../util.ts";
@@ -15,6 +15,8 @@ export function SidePanel(props: {
   state: RoomState;
   segments: Segment[];
   notesBusy: string[];
+  notes: Note[];
+  list: ListNote[] | null;
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => boolean;
   participantId: string;
@@ -32,6 +34,10 @@ export function SidePanel(props: {
   const shut = !!props.folded && !props.peeking;
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   const shown = segments.filter((s) => s.itemId === state.focusItemId && s.kind !== "chat");
+  const captures = (props.list ?? props.notes).filter(
+    (n) => n.meetingId === state.meetingId && n.itemId === state.focusItemId && n.kind !== "summary" && !("closed" in n && (n as ListNote).closed?.how === "wrong"),
+  );
+  const transcriptCount = shown.length + captures.length;
   // Each time the board moved to another topic on this item, and who moved it (Stand by itself, or a person).
   const threads = props.board?.threads ?? [];
   const moves = (props.board?.moves ?? []).flatMap((m) => {
@@ -46,10 +52,10 @@ export function SidePanel(props: {
   // New remarks for this item while the Transcript tab isn't open.
   const [seen, setSeen] = useState(0);
   useEffect(() => {
-    if (tab === "transcript" && !shut) setSeen(shown.length);
-  }, [tab, shown.length, shut]);
-  useEffect(() => setSeen(shown.length), [state.focusItemId]);
-  const unseen = Math.max(0, shown.length - seen);
+    if (tab === "transcript" && !shut) setSeen(transcriptCount);
+  }, [tab, transcriptCount, shut]);
+  useEffect(() => setSeen(transcriptCount), [state.focusItemId]);
+  const unseen = Math.max(0, transcriptCount - seen);
   // Messages from others since the Chat tab was last open; your own don't count.
   const othersChats = chats.filter((s) => s.speakerId !== props.participantId).length;
   const [chatSeen, setChatSeen] = useState(othersChats);
@@ -83,7 +89,7 @@ export function SidePanel(props: {
           <PanelIcon open={false} right />
         </button>
         {(["chat", "transcript"] as const).map((t) => {
-          const n = t === "chat" ? chatUnseen : 0;
+          const n = t === "chat" ? chatUnseen : unseen;
           return (
             <button
               key={t}
@@ -168,7 +174,7 @@ export function SidePanel(props: {
         </p>
       )}
       {tab === "transcript" ? (
-        <Transcript segments={shown} moves={moves} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." />
+        <Transcript segments={shown} captures={captures} moves={moves} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." />
       ) : (
         <>
           <Transcript segments={chats} items={state.items} interims={{}} send={send} empty="No messages yet." />
@@ -195,6 +201,7 @@ type MoveRow = { key: string; ts: number; by: string | null; text: string; title
 function Transcript(props: {
   segments: Segment[];
   moves?: MoveRow[];
+  captures?: Note[];
   items: Item[];
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => boolean;
@@ -209,7 +216,7 @@ function Transcript(props: {
   useEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [segments.length, props.moves?.length, interimList.length, interimList.map((i) => i.text).join("")]);
+  }, [segments.length, props.moves?.length, props.captures?.length, interimList.length, interimList.map((i) => i.text).join("")]);
 
   return (
     <div
@@ -220,14 +227,16 @@ function Transcript(props: {
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {segments.length === 0 && !props.moves?.length && interimList.length === 0 && (
+      {segments.length === 0 && !props.moves?.length && !props.captures?.length && interimList.length === 0 && (
         <p className="muted empty">{props.empty}</p>
       )}
-      {[...segments.map((s) => ({ ts: s.ts, seg: s, move: null })), ...(props.moves ?? []).map((m) => ({ ts: m.ts, seg: null, move: m }))]
+      {[...segments.map((s) => ({ ts: s.ts, seg: s, move: null, capture: null })), ...(props.moves ?? []).map((m) => ({ ts: m.ts, seg: null, move: m, capture: null })), ...(props.captures ?? []).map((n) => ({ ts: n.ts, seg: null, move: null, capture: n }))]
         .sort((a, b) => a.ts - b.ts)
         .map((r) =>
           r.seg ? (
             <SegmentRow key={r.seg.id} segment={r.seg} items={items} send={send} />
+          ) : r.capture ? (
+            <CaptureRow key={`capture-${r.capture.id}`} note={r.capture} />
           ) : (
             <div key={r.move!.key} className="seg board-move" role="note" title={`${r.move!.text}: ${r.move!.title}`}>
               <span className="board-move-text">
@@ -250,6 +259,26 @@ function Transcript(props: {
           <span className="seg-text">{i.text}…</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Capture confirmations stay alongside the words they came from, including after reconnecting. */
+function CaptureRow({ note }: { note: Note }) {
+  const heard = note.kind === "decision" && "heard" in note && !!note.heard;
+  const label = note.kind === "action" ? "Added to Todo!"
+    : note.kind === "decision" ? heard ? "Decision heard" : "Added to Decided!"
+    : note.kind === "question" ? "Added to Open questions!" : "Added to Context!";
+  return (
+    <div className={`seg capture-event capture-${note.kind}`} role="note">
+      <div className="capture-head">
+        <span className="agent-mark" aria-hidden>✦</span>
+        <strong>{label}</strong>
+        <span className="seg-time">{fmtTime(note.ts)}</span>
+      </div>
+      <div className="capture-text"><Linkified text={note.text} /></div>
+      {note.owner && <span className="capture-owner">{note.owner}</span>}
+      {heard && <span className="capture-owner">Awaiting confirmation</span>}
     </div>
   );
 }
