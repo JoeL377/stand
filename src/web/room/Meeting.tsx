@@ -513,6 +513,8 @@ export function Meeting(props: {
           snapRef={stageSnap}
         />
         <SidePanel
+          notes={room.notes}
+          list={room.list}
           state={state}
           segments={room.segments}
           notesBusy={room.notesBusy}
