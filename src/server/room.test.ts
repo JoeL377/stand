@@ -1212,3 +1212,27 @@ test("Pilot: only the pilot asks Stand; a typed follow-up lands on its card; ask
   assert.equal(cardsOf(joe).at(-1)?.by, "Andy");
   await session.end();
 });
+
+test("task presentation is shared, host-controlled and restricted to the meeting's space", async () => {
+  const { db, session, meetingId, items } = setup();
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  const task = db.addNote(meetingId, items[0].id, { kind: "action", text: "Review rollout", owner: "Joe" }, null);
+  const view = { tab: "main" as const, rewind: null, task: { id: task.id, mode: "brief" as const } };
+  await say(joe, { type: "host.view", view });
+  assert.deepEqual(session.state().hostView, view);
+  await say(ann, { type: "host.view", view: { ...view, task: null } });
+  assert.deepEqual(session.state().hostView, view);
+  const otherRoom = db.createRoom("Private");
+  const otherMeeting = db.startMeeting(otherRoom.id);
+  const privateTask = db.addNote(otherMeeting.id, null, { kind: "action", text: "Private task", owner: null }, null);
+  await say(joe, { type: "host.view", view: { ...view, task: { id: privateTask.id, mode: "spec" } } });
+  assert.deepEqual(session.state().hostView, view);
+  await say(joe, { type: "host.view", view: { ...view, task: { id: task.id, mode: "bad" as never } } });
+  assert.deepEqual(session.state().hostView, view);
+  await say(joe, { type: "host.view", view: { ...view, task: { id: task.id, mode: "spec" } } });
+  assert.equal(session.state().hostView?.task?.mode, "spec");
+  await say(joe, { type: "host.view", view: { tab: "main", rewind: null } });
+  assert.equal(session.state().hostView?.task, undefined);
+  await session.end();
+});

@@ -544,7 +544,15 @@ export interface DoneSlide {
 }
 
 /** The host's middle screen: the board's tab beside a share or deck, and a chapter they opened on the bar. */
+export interface TaskBrief {
+  summary: string;
+  takeaways: string[];
+  questions: string[];
+}
+
 export interface HostView {
+  /** Task on the meeting stage; the host chooses the brief or full spec. */
+  task?: { id: string; mode: "brief" | "spec" } | null;
   tab: "main" | "board";
   /** A chapter (or the Kickoff, id "kickoff") as it stood at `at`; live: the thread on screen when it was opened. */
   rewind: { id: string; key: string; at: number; live: string | null; page?: number } | null;

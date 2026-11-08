@@ -1,3 +1,4 @@
+import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { AgentCard, Board, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
@@ -110,7 +111,7 @@ export function Stage(props: {
   };
   const flipRef = useRef(flip);
   flipRef.current = flip;
-  const presenting = canSteer && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
+  const presenting = !state.hostView?.task && canSteer && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
   useEffect(() => {
     if (!presenting) return;
     const onKey = (e: KeyboardEvent) => {
@@ -139,10 +140,10 @@ export function Stage(props: {
   const [tabs, setTabs] = useState<string[]>([]);
   const [ownTab, setTab] = useState<string | null>(null);
   // A share or a deck has the middle, so the board waits behind a tab of its own.
-  const middleTaken = showingScreen || Boolean(sharer) || deckUp;
   // Everyone's middle screen follows the host's: the board's tab, and a chapter they open on the bar.
   // Opening anything yourself goes your own way, until Follow, or until the host comes to where you are.
   const hostView = state.hostView ?? null;
+  const [ownTask, setOwnTask] = useState<HostView["task"]>(hostView?.task ?? null);
   const [own, setOwn] = useState(false);
   const following = !canSteer && !!host && !own;
   const tab = following ? (hostView?.tab === "board" ? "board" : null) : ownTab;
@@ -152,12 +153,18 @@ export function Stage(props: {
   };
   // What this screen's board has open on its bar (null: live), as it last said.
   const [myRewind, setMyRewind] = useState<Rewind | null>(null);
-  const myView: HostView = { tab: middleTaken && tab === "board" ? "board" : "main", rewind: myRewind };
-  const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
+  const shownTask = following ? hostView?.task : ownTask;
+  const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask);
+  const myView: HostView = { ...(ownTask && { task: ownTask }), tab: middleTaken && tab === "board" ? "board" : "main", rewind: myRewind };
+  const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind) && JSON.stringify(a?.task ?? null) === JSON.stringify(b.task ?? null);
   const hostKey = JSON.stringify(hostView);
   useEffect(() => {
     if (own && sameView(hostView, myView)) setOwn(false);
   }, [hostKey]);
+  // Keep a local copy of the presentation while following the host.
+  useEffect(() => {
+    if (!canSteer) setOwnTask(hostView?.task ?? null);
+  }, [canSteer, hostKey]);
   const myKey = JSON.stringify(myView);
   useEffect(() => {
     if (canSteer && !props.offline) send({ type: "host.view", view: myView });
@@ -247,7 +254,7 @@ export function Stage(props: {
     setTabs((t) => t.filter((x) => x !== id));
     setTab((t) => (t === id ? null : t));
   };
-  const mainLabel = localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : deckUp ? "Slides" : "Main screen";
+  const mainLabel = shownTask ? "Task & spec" : localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : deckUp ? "Slides" : "Main screen";
   // The latest snap, small in the corner of everyone's middle screen. Each person can expand
   // it for themselves; the host or whoever took it can take it down for everyone.
   const stageSnap = state.stageSnapId ? state.snaps.find((s) => s.id === state.stageSnapId) : undefined;
@@ -314,6 +321,7 @@ export function Stage(props: {
   return (
     <main className="stage">
       <div className="now">
+        {canSteer && <TaskPicker roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { setOwnTask(task); pickTab(null); }} />}
         <span className="now-label">Now discussing</span>
         <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && <span className="key">{keyOf(focusItem)}</span>}
@@ -451,7 +459,9 @@ export function Stage(props: {
             {board}
           </div>
         )}
-        {localScreen ? (
+        {shownTask && !boardOpen && !openSnap ? (
+          <TaskPresentation key={shownTask.id} presentation={shownTask} canSteer={canSteer} disabled={props.offline || props.ending} onChange={setOwnTask} />
+        ) : localScreen ? (
           <Video
             stream={localScreen}
             label={`You're sharing your screen${macApp ? ` · ${SNAP_KEYS_WORDS} snaps it` : ""}${canSteer ? "" : " · The agent reads only the host's screen"}`}

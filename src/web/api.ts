@@ -157,6 +157,8 @@ export const api = {
     call<PlanThread>("POST", `/api/tasks/${id}/plan-review`, input),
   commentOnTask: (id: string, text: string) =>
     call<TaskDetail["work"]["log"][number]>("POST", `/api/tasks/${id}/comments`, { text }),
+  presentationTasks: (roomId: string) => call<Note[]>("GET", `/api/rooms/${roomId}/presentation-tasks`),
+  taskBrief: (id: string) => call<import("../shared/protocol.ts").TaskBrief>("POST", `/api/tasks/${id}/presentation-brief`, {}, SLOW_REQUEST_MS),
   task: (id: string) => call<TaskDetail>("GET", `/api/tasks/${id}`),
   token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };
