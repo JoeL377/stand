@@ -2838,3 +2838,20 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
   .td-plan-content { padding: 16px; }
 }
 .td-plan-document [data-plan-thread] { box-shadow: -3px 0 rgb(235 176 45 / 65%); }
+
+/* A task and its attached spec on the shared meeting stage. */
+.task-picker { position: relative; flex: none; }
+.task-picker-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(420px, 80vw); padding: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 36px #0003; }
+.task-picker-menu input { min-width: 0; flex: 1; }
+.task-picker-list { max-height: 350px; overflow-y: auto; margin-top: 8px; }
+.task-picker-list > button { display: flex; flex-direction: column; gap: 5px; width: 100%; text-align: left; padding: 12px; background: transparent; border: 0; border-bottom: 1px solid var(--line); }
+.task-picker-list > button:hover { background: var(--hover); }
+.task-presentation { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); overflow: hidden; }
+.task-presentation-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.task-presentation-toolbar button { font-size: 12px; }
+.task-presentation-toolbar button[aria-pressed="true"] { background: var(--hover); border-color: var(--accent); }
+.task-presentation-body { width: 100%; max-width: 920px; margin: 0 auto; padding: clamp(18px, 4vw, 48px); overflow-y: auto; line-height: 1.65; }
+.task-presentation-body h1 { font-size: clamp(22px, 2.4vw, 34px); line-height: 1.2; margin: 8px 0 24px; }
+.task-presentation-body h2 { font-size: 18px; margin-top: 26px; }
+.task-presentation-body li { margin: 8px 0; }
+.task-presentation > p { padding: 18px; }

@@ -1,3 +1,4 @@
+import { TaskBriefs } from "./taskPresentation.ts";
 import { changeReview, reviewFor } from "./planReview.ts";
 import fs from "node:fs";
 import http from "node:http";
@@ -53,6 +54,7 @@ const db = openDb(path.join(config.dataDir, "standup.db"));
 setUsageSink((row) => db.addUsage(row));
 configureAppDefault(db.raw, conxtDestinations, process.env.CONXT_DEFAULT_DESTINATION, process.env.CONXT_DEFAULT_OPERATOR_EMAIL);
 const agent = createAgent();
+const taskBriefs = new TaskBriefs(agent);
 const sessions = new Map<string, RoomSession>();
 const live = (roomId: string) => {
   const s = sessions.get(roomId);
@@ -355,6 +357,22 @@ app.get(
     res.json(detail);
   }),
 );
+app.get("/api/rooms/:id/presentation-tasks", route((req, res) => {
+  if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
+  res.json([...db.roomFollowUps(req.params.id), ...db.spaceNotes(req.params.id, "question", 100)]);
+}));
+
+app.post("/api/tasks/:id/presentation-brief", route(async (req, res) => {
+  const task = db.getNote(req.params.id);
+  if (!task || !["action", "question"].includes(task.kind) || !db.isMember(task.roomId, req.user!.id)) return notFound(res);
+  const plan = db.notePlan(task.id);
+  try {
+    res.json(await taskBriefs.get(task.id, task.text, plan?.text ?? ""));
+  } catch (error) {
+    res.status(422).json({ error: (error as Error).message });
+  }
+}));
+
 app.post(
   "/api/tasks/:id/comments",
   route((req, res) => {
