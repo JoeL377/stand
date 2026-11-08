@@ -72,6 +72,8 @@ export interface Segment {
 export type NoteKind = "summary" | "decision" | "action" | "question" | "context";
 
 export interface Note {
+  /** Optional cross-meeting topic. null inherits the agenda item; "" means no topic. */
+  topic?: string | null;
   id: string;
   meetingId: string;
   itemId: string | null;
