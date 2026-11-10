@@ -25,6 +25,8 @@ import type {
   LinkRelation,
   NoteKind,
   Quote,
+  ReviewOutcome,
+  SlideContent,
   Segment,
   SegmentKind,
   TaskState,
@@ -224,6 +226,36 @@ CREATE TABLE IF NOT EXISTS space_done (
   basis TEXT NOT NULL,
   deck_json TEXT NOT NULL
 );
+-- Product reviews (reviews.ts): a space has one being put together (draft) at a time; agents and people
+-- add slides to it, and starting it turns them into a deck whose slides are agenda items.
+CREATE TABLE IF NOT EXISTS reviews (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  status TEXT NOT NULL,
+  deck_id TEXT,
+  meeting_id TEXT,
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  ended_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS reviews_room ON reviews(room_id, created_at);
+CREATE TABLE IF NOT EXISTS review_slides (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL REFERENCES reviews(id),
+  position INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  note_id TEXT,
+  owner TEXT,
+  added_by TEXT,
+  pr TEXT,
+  item_id TEXT,
+  outcome TEXT,
+  outcome_by TEXT,
+  outcome_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS review_slides_review ON review_slides(review_id, position);
 -- Token use of every Claude call (usage.ts), with the meeting it was for (null outside a meeting).
 CREATE TABLE IF NOT EXISTS llm_usage (
   meeting_id TEXT,
@@ -422,6 +454,61 @@ const toDeck = (r: Row): Deck => ({
   kind: ((r.kind as string) ?? "pdf") as Deck["kind"],
   theme: ((r.theme as string) ?? "paper") as DeckTheme,
   parentItemId: (r.parent_item_id as string) ?? null,
+  reviewId: (r.review_id as string) ?? null,
+});
+
+/** A product review and one of its slides, as stored (reviews.ts turns them into what people see). */
+export interface ReviewRow {
+  id: string;
+  roomId: string;
+  status: "draft" | "live" | "done";
+  deckId: string | null;
+  meetingId: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  endedAt: number | null;
+}
+export interface ReviewSlideRow {
+  id: string;
+  reviewId: string;
+  position: number;
+  title: string;
+  body: string;
+  noteId: string | null;
+  owner: string | null;
+  addedBy: string | null;
+  pr: string | null;
+  itemId: string | null;
+  outcome: ReviewOutcome | null;
+  outcomeBy: string | null;
+  outcomeAt: number | null;
+  createdAt: number;
+}
+const toReview = (r: Row): ReviewRow => ({
+  id: r.id as string,
+  roomId: r.room_id as string,
+  status: r.status as ReviewRow["status"],
+  deckId: (r.deck_id as string) ?? null,
+  meetingId: (r.meeting_id as string) ?? null,
+  createdAt: r.created_at as number,
+  startedAt: (r.started_at as number) ?? null,
+  endedAt: (r.ended_at as number) ?? null,
+});
+const toReviewSlide = (r: Row): ReviewSlideRow => ({
+  id: r.id as string,
+  reviewId: r.review_id as string,
+  position: r.position as number,
+  title: r.title as string,
+  body: r.body as string,
+  noteId: (r.note_id as string) ?? null,
+  owner: (r.owner as string) ?? null,
+  addedBy: (r.added_by as string) ?? null,
+  pr: (r.pr as string) ?? null,
+  itemId: (r.item_id as string) ?? null,
+  outcome: ((r.outcome as string) ?? null) as ReviewOutcome | null,
+  outcomeBy: (r.outcome_by as string) ?? null,
+  outcomeAt: (r.outcome_at as number) ?? null,
+  createdAt: r.created_at as number,
 });
 
 type NewItem = Pick<Item, "source" | "externalId" | "title" | "url" | "description"> & { deckId?: string; slideNo?: number };
@@ -586,6 +673,8 @@ export function openDb(file?: string) {
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
   const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
+  // A product review's deck (reviews.ts).
+  if (!deckCols.includes("review_id")) db.exec("ALTER TABLE decks ADD COLUMN review_id TEXT;");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
@@ -1929,6 +2018,68 @@ export function openDb(file?: string) {
           )
           .all(since) as Row[]
       ).map((r) => r.room_id as string);
+    },
+    // ---- product reviews (reviews.ts) ----
+    /** The space's review in one of these states, newest first. */
+    reviewIn(roomId: string, statuses: Array<ReviewRow["status"]>): ReviewRow | null {
+      const r = db
+        .prepare(`SELECT * FROM reviews WHERE room_id = ? AND status IN (${statuses.map(() => "?").join(",")}) ORDER BY created_at DESC, rowid DESC LIMIT 1`)
+        .get(roomId, ...statuses) as Row | undefined;
+      return r ? toReview(r) : null;
+    },
+    getReview(id: string): ReviewRow | null {
+      const r = db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
+      return r ? toReview(r) : null;
+    },
+    createReview(roomId: string): ReviewRow {
+      const id = newId();
+      db.prepare("INSERT INTO reviews (id, room_id, status, created_at) VALUES (?, ?, 'draft', ?)").run(id, roomId, Date.now());
+      return this.getReview(id)!;
+    },
+    setReview(id: string, patch: Partial<Pick<ReviewRow, "status" | "deckId" | "meetingId" | "startedAt" | "endedAt">>) {
+      const cols: Record<string, string> = { status: "status", deckId: "deck_id", meetingId: "meeting_id", startedAt: "started_at", endedAt: "ended_at" };
+      for (const [k, v] of Object.entries(patch)) db.prepare(`UPDATE reviews SET ${cols[k]} = ? WHERE id = ?`).run(v ?? null, id);
+    },
+    reviewSlides(reviewId: string): ReviewSlideRow[] {
+      return (db.prepare("SELECT * FROM review_slides WHERE review_id = ? ORDER BY position, rowid").all(reviewId) as Row[]).map(toReviewSlide);
+    },
+    getReviewSlide(id: string): ReviewSlideRow | null {
+      const r = db.prepare("SELECT * FROM review_slides WHERE id = ?").get(id) as Row | undefined;
+      return r ? toReviewSlide(r) : null;
+    },
+    /** To-dos a review of this space has already shown (one that ran, or is running). */
+    reviewedNoteIds(roomId: string): string[] {
+      return (
+        db
+          .prepare("SELECT s.note_id FROM review_slides s JOIN reviews r ON r.id = s.review_id WHERE r.room_id = ? AND r.status != 'draft' AND s.note_id IS NOT NULL")
+          .all(roomId) as Row[]
+      ).map((r) => r.note_id as string);
+    },
+    reviewSlideByItem(itemId: string): ReviewSlideRow | null {
+      const r = db.prepare("SELECT * FROM review_slides WHERE item_id = ?").get(itemId) as Row | undefined;
+      return r ? toReviewSlide(r) : null;
+    },
+    addReviewSlide(reviewId: string, s: Pick<ReviewSlideRow, "title" | "body" | "noteId" | "owner" | "addedBy" | "pr">): ReviewSlideRow {
+      const id = newId();
+      const pos = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM review_slides WHERE review_id = ?").get(reviewId) as Row).p as number;
+      db.prepare(
+        "INSERT INTO review_slides (id, review_id, position, title, body, note_id, owner, added_by, pr, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(id, reviewId, pos + 1, s.title, s.body, s.noteId, s.owner, s.addedBy, s.pr, Date.now());
+      return this.getReviewSlide(id)!;
+    },
+    updateReviewSlide(id: string, patch: Partial<Pick<ReviewSlideRow, "title" | "body" | "owner" | "addedBy" | "pr" | "itemId" | "outcome" | "outcomeBy" | "outcomeAt">>) {
+      const cols: Record<string, string> = { title: "title", body: "body", owner: "owner", addedBy: "added_by", pr: "pr", itemId: "item_id", outcome: "outcome", outcomeBy: "outcome_by", outcomeAt: "outcome_at" };
+      for (const [k, v] of Object.entries(patch)) db.prepare(`UPDATE review_slides SET ${cols[k]} = ? WHERE id = ?`).run(v ?? null, id);
+    },
+    removeReviewSlide(id: string) {
+      db.prepare("DELETE FROM review_slides WHERE id = ?").run(id);
+    },
+    setDeckReview(deckId: string, reviewId: string) {
+      db.prepare("UPDATE decks SET review_id = ? WHERE id = ?").run(reviewId, deckId);
+    },
+    /** A slide's content, rewritten in place (a review slide's outcome). */
+    setSlideContent(itemId: string, slide: SlideContent) {
+      db.prepare("UPDATE items SET slide_json = ? WHERE id = ?").run(JSON.stringify(slide), itemId);
     },
     getDoneDeck(roomId: string): (DoneDeck & { basis: string }) | null {
       const r = db.prepare("SELECT basis, deck_json FROM space_done WHERE room_id = ?").get(roomId) as Row | undefined;

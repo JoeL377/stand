@@ -22,6 +22,7 @@ import type {
   ServerMessage,
   Suggestion,
 } from "../shared/protocol.ts";
+import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
 import { PilotSeat } from "./pilot.ts";
@@ -38,6 +39,7 @@ import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
 import { applyMerges, mergePrompt, planMerge, stickyMerges, type TopicMerge } from "./topicMerge.ts";
 import { newId } from "./ids.ts";
+import { finishReview, isReviewSlide, setOutcome } from "./reviews.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
 import { metered } from "./usage.ts";
@@ -689,6 +691,11 @@ export class RoomSession implements SpeechSink {
         break;
       case "board.accept":
         if (!this.ended) void this.acceptBoardMove(msg.title, conn.name);
+        break;
+      // How a review slide ended. Anyone in the call can say, and take it back.
+      case "review.outcome":
+        if (this.ended) return;
+        if (setOutcome(this.db, msg.itemId, REVIEW_OUTCOMES.some((o) => o.id === msg.outcome) ? msg.outcome : null, conn.name)) this.broadcastState();
         break;
       case "pin":
         if (!isHost || this.ended) return;
@@ -1391,9 +1398,15 @@ export class RoomSession implements SpeechSink {
 
   /** The next list pass: LIST_DEBOUNCE_MS after the latest talk, never more than LIST_MAX_WAIT_MS after
    *  the oldest line no pass has read. One pass at a time; talk during a pass gets the next one. */
+  /** A product review slide is on screen: what's said belongs to the slide, so the notes agent
+   *  files it there and the passes that work out topics by themselves sit out. */
+  private inReview() {
+    return isReviewSlide(this.focusItemId ? this.db.getItem(this.focusItemId) : null);
+  }
+
   private scheduleList() {
     const list = this.list;
-    if (this.ended || !list || this.listRun) return;
+    if (this.ended || !list || this.listRun || this.inReview()) return;
     const since = list.unreadSince(this.db.meetingSegments(this.meetingId));
     if (since === null) return;
     const wait = Math.max(0, Math.min(LIST_DEBOUNCE_MS, since + LIST_MAX_WAIT_MS - Date.now()));
@@ -1595,7 +1608,7 @@ export class RoomSession implements SpeechSink {
 
   /** The next board pass: BOARD_EVERY_MS after the last one, or soon after an agenda move. */
   private scheduleBoard(agendaMoved = false) {
-    if (this.ended || !this.board || this.boardRun) return;
+    if (this.ended || !this.board || this.boardRun || this.inReview()) return;
     const wait = agendaMoved ? BOARD_AFTER_FOCUS_MS : Math.max(BOARD_FIRST_MS, this.boardRanAt + BOARD_EVERY_MS - Date.now());
     if (this.boardTimer) {
       // A pass already waiting keeps its time unless this one is due sooner.
@@ -1949,6 +1962,8 @@ export class RoomSession implements SpeechSink {
     this.db.meetingEnding(this.meetingId);
     this.broadcastState();
     await this.transcriber?.stop().catch(() => {});
+    // A product review that ran in this meeting is over: its slides leave the agenda with what was said on them.
+    finishReview(this.db, this.roomId, this.meetingId);
 
     let summary = "";
     let synthesizing: Promise<string | null> = Promise.resolve(null);
@@ -2145,10 +2160,11 @@ function asHostView(v: unknown): HostView | null {
   const t = o.task;
   if (t != null && (typeof t.id !== "string" || !/^[a-z0-9]{4,24}$/.test(t.id) || !["brief", "spec"].includes(t.mode))) return null;
   const task = t ? { id: t.id, mode: t.mode } : null;
+  const shot = Number.isInteger(o.shot) && o.shot! > 0 && o.shot! < 50 ? { shot: o.shot } : null;
   const r = o.rewind;
-  if (r === null) return { tab: o.tab, rewind: null, ...(task && { task }) };
+  if (r === null) return { tab: o.tab, rewind: null, ...(task && { task }), ...shot };
   const str = (x: unknown, max = 200) => typeof x === "string" && x.length <= max;
   if (!r || !str(r.id) || !str(r.key) || !Number.isFinite(r.at) || !(r.live === null || str(r.live))) return null;
   const page = Number.isInteger(r.page) && r.page! >= 0 && r.page! <= 50 ? r.page : undefined;
-  return { tab: o.tab, ...(task && { task }), rewind: { id: r.id, key: r.key, at: r.at, live: r.live, ...(page !== undefined && { page }) } };
+  return { tab: o.tab, ...(task && { task }), ...shot, rewind: { id: r.id, key: r.key, at: r.at, live: r.live, ...(page !== undefined && { page }) } };
 }

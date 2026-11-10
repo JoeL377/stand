@@ -7,9 +7,11 @@ import { changeReview, reviewFor } from "./planReview.ts";
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
 import { parseActor, type Actor } from "../shared/actors.ts";
-import type { ActionWork, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
+import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
+import type { ActionWork, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
+import { ReviewError, addSlide, lastReview, reviewView, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
 import { settledView } from "./spaceSettle.ts";
 import { CHECK_INSTRUCTIONS, CHECK_LEASE_MS, CHECK_VERSION, SHOW_FROM } from "./decisionCheck.ts";
@@ -1108,6 +1110,86 @@ export function agentApi(deps: AgentDeps) {
       return {
         updated: { ...actionInfo(now), url: refUrl(baseUrl, "action", now.id) },
         log: update ? updateInfo(update, baseUrl) : undefined,
+      };
+    },
+
+    /** A slide on the space's next product review: a feature to show, with pictures. One slide per
+     *  to-do, so adding again for the same to-do rewrites it. */
+    addReviewSlide(caller: Caller, args: { space?: string; title: string; summary?: string; ref?: string; pr?: string }, baseUrl: string) {
+      requireWrite(caller);
+      const r = args.ref ? resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`) : null;
+      if (r && r.note?.kind !== "action") throw new AgentError("A slide can show a to-do (stand:action/...), or nothing: leave ref out.");
+      if (!r && !args.space) throw new AgentError("Say which space the slide is for, or give the to-do it shows.");
+      const room = r?.room ?? findSpace(caller, args.space!);
+      try {
+        const { slide, review, updated } = addSlide(db, room.id, {
+          title: args.title,
+          summary: args.summary ?? "",
+          note: r?.note ?? null,
+          owner: r?.note?.owner ?? caller.user.name,
+          addedBy: byOf(caller),
+          pr: args.pr?.trim() || null,
+        });
+        const secret = deps.uploads.create({
+          roomId: room.id,
+          noteId: slideShotKey(slide.id),
+          userId: caller.user.id,
+          userName: caller.user.name,
+          client: caller.token?.label ?? null,
+        });
+        const url = `${baseUrl}/api/work-uploads/${secret}`;
+        deps.notify(room.id, "followups");
+        const view = reviewView(db, room.id, baseUrl);
+        const mine = view?.slides.find((x) => x.id === slide.id);
+        return {
+          [updated ? "updated" : "added"]: { slide: slide.id, title: slide.title, summary: slide.body, shows: slide.noteId ? `stand:action/${slide.noteId}` : undefined, pr: slide.pr ?? undefined },
+          pictures: mine?.shots.length ?? 0,
+          space: room.name,
+          review: { slides: view?.slides.length ?? 1, started: review.status !== "draft" },
+          upload_url: url,
+          how: `curl -sS --data-binary @screenshot.png -H "Content-Type: image/png" "${url}?caption=What%20it%20shows"`,
+          rules: `A slide is mostly its pictures, so upload at least one: PNG, JPEG, WebP or GIF, up to 10 MB each, up to ${UPLOAD_LINK_MAX} images, for ${UPLOAD_LINK_MS / 60_000} minutes. The link is the permission, so don't share it.${slide.noteId ? " Screenshots already on the to-do's log show on the slide too." : ""}`,
+          shows_on: "The space's next product review: the slide is on screen while the team talks about it, and what they say is filed under it.",
+        };
+      } catch (err) {
+        if (err instanceof ReviewError) throw new AgentError(err.message);
+        throw err;
+      }
+    },
+
+    /** The space's product review: the next one being put together, and how the last one went. */
+    getReview(caller: Caller, args: { space: string }, baseUrl: string) {
+      const room = findSpace(caller, args.space);
+      const slideInfo = (v: ReviewView, withCaught: boolean) => {
+        const caught = withCaught && v.meetingId ? db.meetingNotes(v.meetingId) : [];
+        const itemOf = new Map(v.id ? db.reviewSlides(v.id).map((s) => [s.id, s.itemId]) : []);
+        return v.slides.map((s) => {
+          const itemId = itemOf.get(s.id);
+          const here = itemId ? caught.filter((n) => n.itemId === itemId) : [];
+          const of = (kind: Note["kind"]) => here.filter((n) => n.kind === kind);
+          return {
+            title: s.title,
+            summary: s.body || undefined,
+            shows: s.taskId ? `stand:action/${s.taskId}` : undefined,
+            owner: s.owner ?? undefined,
+            added_by: s.addedBy,
+            pr: s.pr ?? undefined,
+            pictures: s.shots.map((x) => x.url),
+            outcome: s.outcome ? REVIEW_OUTCOMES.find((o) => o.id === s.outcome)?.label : undefined,
+            outcome_by: s.outcomeBy ?? undefined,
+            todos: withCaught ? of("action").map((n) => ({ ref: `stand:action/${n.id}`, text: n.text, owner: n.owner ?? undefined, done: !!n.doneAt })) : undefined,
+            decisions: withCaught ? of("decision").map((n) => ({ ref: `stand:decision/${n.id}`, text: n.text })) : undefined,
+            questions: withCaught ? of("question").map((n) => ({ ref: `stand:question/${n.id}`, text: n.text })) : undefined,
+          };
+        });
+      };
+      const next = reviewView(db, room.id, baseUrl);
+      const last = lastReview(db, room.id, baseUrl);
+      return {
+        space: room.name,
+        next: next ? { status: next.status === "live" ? "in a call now" : "not started", slides: slideInfo(next, next.status === "live") } : null,
+        last: last ? { started_at: last.startedAt ? new Date(last.startedAt).toISOString() : undefined, meeting: last.meetingId ?? undefined, slides: slideInfo(last, true) } : null,
+        how: "add_review_slide puts a feature on the next review. Finished to-dos nobody made a slide for are added when the review starts.",
       };
     },
 

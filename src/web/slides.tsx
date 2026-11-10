@@ -183,6 +183,23 @@ export function NativeSlide(props: {
         </div>
       );
       break;
+    // A product review slide: the feature's first picture, or its words when it has none.
+    case "review": {
+      const shot = slide.review?.shots[0];
+      content = shot ? (
+        <div className="ns-review">
+          <img src={shot.url} alt="" />
+          <h2 className="ns-review-title">{title}</h2>
+        </div>
+      ) : (
+        <div className="ns-col">
+          <h2 className="ns-title">{title}</h2>
+          {bullets}
+          {slide.review?.owner && <p className="ns-cite">{slide.review.owner}</p>}
+        </div>
+      );
+      break;
+    }
     case "image":
       content = (
         <div className="ns-split">
