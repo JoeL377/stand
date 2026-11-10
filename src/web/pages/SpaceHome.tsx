@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewView, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { matchesTopic, topicKey, topicOf, topicOptions } from "../../shared/topics.ts";
 import { TopicPicker } from "../TopicPicker.tsx";
 import { stateOf } from "../../shared/tasks.ts";
@@ -363,6 +363,23 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               roomId={room.id}
               me={user.name}
               deck={topicFilter ? null : deck}
+              review={topicFilter ? null : (feed?.review ?? null)}
+              onStartReview={async () => {
+                try {
+                  await api.startReview(room.id);
+                  props.onJoin();
+                } catch (err) {
+                  errorToast("Couldn't start the review")(err);
+                }
+              }}
+              onRemoveSlide={async (slideId) => {
+                try {
+                  await api.removeReviewSlide(room.id, slideId);
+                  load();
+                } catch (err) {
+                  errorToast("Couldn't take the slide off")(err);
+                }
+              }}
               open={[...todos, ...questions].filter(matching)}
               closed={[...done, ...closedQuestions].filter(matching)}
               topicPicker={topicPicker}
@@ -668,6 +685,10 @@ function TasksTab(props: {
   me: string;
   /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
   deck: DoneDeck | null;
+  /** The next product review: the features there are to show. */
+  review: ReviewView | null;
+  onStartReview: () => Promise<void>;
+  onRemoveSlide: (slideId: string) => void;
   open: TaskNote[];
   closed: TaskNote[];
   onArchive: (n: Note) => void;
@@ -677,6 +698,7 @@ function TasksTab(props: {
 }) {
   const colorFor = usePersonColors();
   const [showDeck, setShowDeck] = useState(false);
+  const [showReview, setShowReview] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
   const work = useWork(props.open.filter((n) => n.kind === "action").map((n) => n.id));
@@ -784,6 +806,17 @@ function TasksTab(props: {
         </button>
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
+      {props.review && props.review.slides.length > 0 && (
+        <button type="button" className="sh-done-since sh-review" onClick={() => setShowReview(true)}>
+          <strong>{props.review.status === "live" ? "Product review, on now" : "Product review"}</strong>
+          <span className="sh-done-since-summary">{props.review.slides.map((s) => s.title).join(" · ")}</span>
+          <span className="count">{props.review.slides.length}</span>
+          <ChevronIcon />
+        </button>
+      )}
+      {showReview && props.review && (
+        <ReviewPop review={props.review} onStart={props.onStartReview} onRemove={props.onRemoveSlide} onClose={() => setShowReview(false)} />
+      )}
       {!props.open.length && <p className="sh-card-empty">{props.filtered ? "No open tasks in this topic." : "Nothing open. New tasks come from meetings and what people save here."}</p>}
       {waiting.length > 0 && (
         <div className="sh-task-group">
@@ -844,6 +877,55 @@ function DonePop({ deck, onClose }: { deck: DoneDeck; onClose: () => void }) {
           rewound
           label="Done"
         />
+      </div>
+    </div>
+  );
+}
+
+/** The next product review's slides, and the button that starts the call on the first one. */
+function ReviewPop(props: { review: ReviewView; onStart: () => Promise<void>; onRemove: (slideId: string) => void; onClose: () => void }) {
+  const { review } = props;
+  const [starting, setStarting] = useState(false);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [props.onClose]);
+  const live = review.status === "live";
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
+      <div className="dialog review-pop" role="dialog" aria-modal="true" aria-label="Product review">
+        <button className="icon-btn done-pop-close" aria-label="Close" title="Close" onClick={props.onClose}>
+          <CloseIcon size={16} />
+        </button>
+        <div className="review-pop-head">
+          <h2>Product review</h2>
+          <button
+            className="primary"
+            disabled={starting}
+            onClick={async () => {
+              setStarting(true);
+              await props.onStart();
+              setStarting(false);
+            }}
+          >
+            {live ? "Join the review" : starting ? "Starting…" : "Start review"}
+          </button>
+        </div>
+        <div className="review-grid">
+          {review.slides.map((s) => (
+            <div key={s.id} className="review-card">
+              <div className="review-card-pic">{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : "No picture yet"}</div>
+              <strong dir="auto">{s.title}</strong>
+              <span className="muted">{[s.owner, !s.addedBy || s.addedBy === "Stand" ? null : `added by ${s.addedBy.split(" via ").at(-1)}`].filter(Boolean).join(" · ")}</span>
+              {!live && !s.id.startsWith("task:") && (
+                <button className="icon-btn review-card-x" aria-label={`Take "${s.title}" off the review`} title="Take off the review" onClick={() => props.onRemove(s.id)}>
+                  <CloseIcon size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

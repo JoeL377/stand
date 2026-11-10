@@ -1,6 +1,7 @@
 import { usePersonColors } from "../PersonColors.tsx";
 import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { ReviewStage } from "./ReviewStage.tsx";
 import type { AgentCard, Board, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
@@ -156,7 +157,14 @@ export function Stage(props: {
   const [myRewind, setMyRewind] = useState<Rewind | null>(null);
   const shownTask = following ? hostView?.task : ownTask;
   const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask);
-  const myView: HostView = { ...(ownTask && { task: ownTask }), tab: middleTaken && tab === "board" ? "board" : "main", rewind: myRewind };
+  // A review slide's pictures: the host's choice is everyone's, and a look of your own lasts until the host moves.
+  const reviewUp = deckUp && focusItem?.slide?.layout === "review";
+  const [myShot, setMyShot] = useState(0);
+  useEffect(() => setMyShot(0), [focusItem?.id]);
+  useEffect(() => {
+    if (!canSteer) setMyShot(hostView?.shot ?? 0);
+  }, [canSteer, hostView?.shot]);
+  const myView: HostView = { ...(ownTask && { task: ownTask }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind };
   const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind) && JSON.stringify(a?.task ?? null) === JSON.stringify(b.task ?? null);
   const hostKey = JSON.stringify(hostView);
   useEffect(() => {
@@ -442,7 +450,7 @@ export function Stage(props: {
         )}
         {!props.ending && <ConxtNudges cards={state.conxt ?? []} me={props.participantId} offline={props.offline} send={send} />}
         {/* A share or a deck has the middle: the topic stays in view as one line over it. */}
-        {middleTaken && !boardOpen && !openSnap && (
+        {middleTaken && !boardOpen && !openSnap && !(reviewUp && !showingScreen && !sharer && !shownTask) && (
           <BoardStrip board={props.board} focusItemId={state.focusItemId} onOpen={() => pickTab("board")} />
         )}
         </div>
@@ -480,6 +488,25 @@ export function Stage(props: {
               <strong>{sharer.name}</strong> is sharing. In mock mode only they can see it
               {sharer.isHost ? "; the agent still reads it." : ". The agent follows only the host's screen."}
             </p>
+          </div>
+        ) : reviewUp && focusItem ? (
+          <div className="screen-empty">
+            <ReviewStage
+              key={focusItem.deckId}
+              className={`slide-stage${arrive}`}
+              item={focusItem}
+              deck={deck}
+              index={slideIdx}
+              count={deckSlides.length}
+              notes={props.notes}
+              busy={props.notesBusy.includes(focusItem.id)}
+              canSteer={canSteer}
+              disabled={Boolean(props.offline || props.ending)}
+              shot={myShot}
+              onShot={setMyShot}
+              onFlip={flip}
+              onOutcome={(outcome) => send({ type: "review.outcome", itemId: focusItem.id, outcome })}
+            />
           </div>
         ) : focusItem?.deckId && (focusItem.slideNo || focusItem.slide) ? (
           <div className="screen-empty">

@@ -38,6 +38,7 @@ import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
+import { ReviewError, removeSlide, reviewView, startReview } from "./reviews.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { ownedBy, toSpaceSummary } from "./spaces.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
@@ -276,7 +277,9 @@ app.post(
     const shot = db.addWorkShot({ ...grant, caption, ext });
     saveShotFile(shot.id, ext, buf);
     live(grant.roomId)?.updatesChanged();
-    res.json({ ok: true, id: shot.id, joins: "your next post_update or complete_action on this to-do" });
+    const onSlide = grant.noteId.startsWith("review:");
+    if (onSlide) live(grant.roomId)?.followUpsChanged();
+    res.json({ ok: true, id: shot.id, joins: onSlide ? "the slide on the next product review" : "your next post_update or complete_action on this to-do" });
   }),
 );
 
@@ -1016,6 +1019,48 @@ app.post(
   }),
 );
 
+// ---- product reviews: a call that goes through what was built, one slide per feature ----
+
+// The space's next review, as its page shows it.
+app.get(
+  "/api/rooms/:id/review",
+  route((req, res) => {
+    if (!db.isMember(req.params.id, req.user!.id)) return notFound(res, "Space not found");
+    res.json({ review: reviewView(db, req.params.id) });
+  }),
+);
+
+// Starts it: the slides become a deck at the top of the agenda, and a call that's running goes to the first one.
+app.post(
+  "/api/rooms/:id/review/start",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    try {
+      const started = startReview(db, room.id);
+      const s = sessions.get(room.id);
+      if (s) {
+        s.itemsChanged();
+        s.setFocus(started.firstItemId, req.user!.name, "manual");
+      }
+      res.json({ review: reviewView(db, room.id), firstItemId: started.firstItemId });
+    } catch (err) {
+      if (err instanceof ReviewError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+  }),
+);
+
+// Takes a slide off a review that hasn't started.
+app.delete(
+  "/api/rooms/:id/review/slides/:slideId",
+  route((req, res) => {
+    if (!db.isMember(req.params.id, req.user!.id)) return notFound(res, "Space not found");
+    if (!removeSlide(db, req.params.id, req.params.slideId)) return notFound(res);
+    res.json({ review: reviewView(db, req.params.id) });
+  }),
+);
+
 const THEMES: DeckTheme[] = ["paper", "night", "ocean", "sunset"];
 const LAYOUTS: SlideLayout[] = ["title", "bullets", "section", "image", "quote"];
 const text = (v: unknown, max: number) => String(v ?? "").slice(0, max);
@@ -1083,6 +1128,7 @@ app.put(
   route((req, res) => {
     const deck = db.getDeck(req.params.deckId);
     if (!deck || deck.kind !== "native") return notFound(res);
+    if (deck.reviewId) return res.status(400).json({ error: "A product review's slides come from the work they show, so they aren't edited here." });
     const draft = readDraft(req.body);
     if (!draft) return res.status(400).json({ error: "A deck needs at least one slide." });
     const saved = db.saveDeck(deck, draft);

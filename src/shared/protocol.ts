@@ -21,7 +21,48 @@ export interface Item {
   slide: SlideContent | null;
 }
 
-export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote";
+export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote" | "review";
+
+/** How a slide of a product review ended: anyone's one click. */
+export type ReviewOutcome = "ship" | "fixes" | "not_yet";
+export const REVIEW_OUTCOMES: Array<{ id: ReviewOutcome; label: string }> = [
+  { id: "ship", label: "Ship" },
+  { id: "fixes", label: "Ship with fixes" },
+  { id: "not_yet", label: "Not yet" },
+];
+
+/** A picture on a review slide: a screenshot an agent or a person attached. */
+export interface ReviewShot {
+  url: string;
+  caption: string | null;
+}
+
+/** What a product review slide carries besides its title and summary (server/reviews.ts). */
+export interface ReviewSlideInfo {
+  /** The review_slides row this slide was made from. */
+  slideId: string;
+  /** The to-do it shows, when it came from one. */
+  taskId: string | null;
+  /** Whose work it is, and who or what added the slide ("Priya Shah via Claude Code", "Stand"). */
+  owner: string | null;
+  addedBy: string | null;
+  pr: string | null;
+  shots: ReviewShot[];
+  outcome: ReviewOutcome | null;
+  outcomeBy: string | null;
+}
+
+/** A space's product review as the space page shows it: the next one being put together, or the one in a call. */
+export interface ReviewView {
+  id: string;
+  status: "draft" | "live" | "done";
+  /** Its deck once the review has started. */
+  deckId: string | null;
+  meetingId: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  slides: Array<{ id: string; title: string; body: string } & Omit<ReviewSlideInfo, "slideId">>;
+}
 
 export interface SlideContent {
   layout: SlideLayout;
@@ -31,6 +72,8 @@ export interface SlideContent {
   image: string | null;
   /** Speaker notes, shown only to the host. */
   notes: string;
+  /** A product review's slide (layout "review"): its pictures, the to-do behind it and how it ended. */
+  review?: ReviewSlideInfo | null;
 }
 
 export type DeckTheme = "paper" | "night" | "ocean" | "sunset";
@@ -46,6 +89,8 @@ export interface Deck {
   theme: DeckTheme;
   /** The agenda item this deck is presented under, or null when it stands on its own. */
   parentItemId: string | null;
+  /** A product review's deck: the review it belongs to. Its slides are made by reviews.ts, not the editor. */
+  reviewId?: string | null;
 }
 
 /** What the editor saves: the whole deck, in order. */
@@ -593,6 +638,8 @@ export interface HostView {
   /** Task on the meeting stage; the host chooses the brief or full spec. */
   task?: { id: string; mode: "brief" | "spec" } | null;
   tab: "main" | "board";
+  /** Which picture of the review slide in focus is up, from 0. */
+  shot?: number;
   /** A chapter (or the Kickoff, id "kickoff") as it stood at `at`; live: the thread on screen when it was opened. */
   rewind: { id: string; key: string; at: number; live: string | null; page?: number } | null;
 }
@@ -723,6 +770,8 @@ export type ClientMessage = (
   | { type: "host.view"; view: HostView }
   /** Anyone: turn the opening board to a page, for everyone. */
   | { type: "checkin.page"; page: number }
+  /** Anyone: how the review slide on screen ended (null takes it back). */
+  | { type: "review.outcome"; itemId: string; outcome: ReviewOutcome | null }
   // Host only: fix what the agent wrote down for the item in focus.
   | { type: "note.edit"; noteId: string; text: string; owner?: string | null }
   | { type: "note.remove"; noteId: string }
@@ -935,6 +984,8 @@ export interface SpaceFeed {
   archived: ArchivedRow[];
   /** What the space got done since its last meeting, as the next meeting will open on it. */
   doneDeck?: DoneDeck | null;
+  /** The space's next product review, with what a start would add to it; or the one running now. */
+  review?: ReviewView | null;
   /** Snaps saved straight to the space, newest first. */
   captures: Snap[];
   /** Notes saved straight to the space, newest first. */
