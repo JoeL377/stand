@@ -2,8 +2,9 @@
 // how the slide ended (Ship, Ship with fixes, Not yet) and what the team said about it so far.
 // The host flips slides and everyone follows; anyone can set the outcome.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { REVIEW_OUTCOMES, type Deck, type Item, type Note, type ReviewOutcome } from "../../shared/protocol.ts";
+import { CloseIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { NativeSlide } from "../slides.tsx";
 
@@ -41,7 +42,8 @@ export function ReviewStage(props: {
   const review = item.slide?.review;
   const shots = review?.shots ?? [];
   const shot = shots[Math.min(props.shot, shots.length - 1)] ?? null;
-  const caught = props.notes.filter((n) => n.itemId === item.id);
+  // To-dos, decisions and open questions: the notes agent's other lines aren't something to act on.
+  const caught = props.notes.filter((n) => n.itemId === item.id && KINDS.some((k) => k.kind === n.kind));
   const [open, setOpen] = useState<Note["kind"] | null>(null);
   useEffect(() => setOpen(null), [item.id]);
   useEffect(() => {
@@ -50,6 +52,8 @@ export function ReviewStage(props: {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [open]);
+  const [zoomed, setZoomed] = useState(false);
+  useEffect(() => setZoomed(false), [item.id]);
   const latest = caught.at(-1);
   const listed = open ? caught.filter((n) => n.kind === open) : [];
 
@@ -57,7 +61,9 @@ export function ReviewStage(props: {
     <div className={`review-stage ${props.className ?? ""}`}>
       <div className="rv-pic">
         {shot ? (
-          <img key={shot.url} src={shot.url} alt={shot.caption ?? item.title} />
+          <button type="button" className="rv-shot" title="See it bigger" onClick={() => setZoomed(true)}>
+            <img key={shot.url} src={shot.url} alt={shot.caption ?? item.title} />
+          </button>
         ) : (
           <NativeSlide deckId={item.deckId!} theme={deck?.theme ?? "paper"} title={item.title} slide={item.slide!} className="slide-main" />
         )}
@@ -146,7 +152,16 @@ export function ReviewStage(props: {
                 title={on && review?.outcomeBy ? `${review.outcomeBy} said so. Click to take it back` : undefined}
                 onClick={() => props.onOutcome(on ? null : o.id)}
               >
-                {o.label}
+                {o.id === "fixes" ? (
+                  <>
+                    <span className="rv-wide">{o.label}</span>
+                    <span className="rv-narrow" aria-hidden>
+                      Fixes
+                    </span>
+                  </>
+                ) : (
+                  o.label
+                )}
               </button>
             );
           })}
@@ -157,6 +172,73 @@ export function ReviewStage(props: {
           </button>
         )}
       </div>
+      {/* On a phone there's room under the picture, so what was caught is simply listed. */}
+      <div className="rv-list">
+        {caught.map((n) => {
+          const Icon = KINDS.find((k) => k.kind === n.kind)?.Icon ?? TodoIcon;
+          return (
+            <p key={n.id} className={`${n.kind}${n.doneAt ? " done" : ""}`}>
+              <Icon />
+              <span dir="auto">{n.text}</span>
+              {n.owner && <span className="rv-who">{n.owner.split(" ")[0]}</span>}
+            </p>
+          );
+        })}
+        {props.busy && (
+          <p className="muted">
+            <span className="agent-mark">✦</span> Writing
+          </p>
+        )}
+      </div>
+      {zoomed && shot && <ShotZoom url={shot.url} alt={shot.caption ?? item.title} onClose={() => setZoomed(false)} />}
+    </div>
+  );
+}
+
+const MAX_ZOOM = 5;
+
+/** A slide's picture over the whole screen. Pinch or double tap to zoom, drag to move around. Yours alone. */
+function ShotZoom({ url, alt, onClose }: { url: string; alt: string; onClose: () => void }) {
+  const [zoom, setZoom] = useState(1);
+  const box = useRef<HTMLDivElement>(null);
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onClose]);
+  const dist = (t: React.TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  // Zooming keeps the middle of what's in view in the middle.
+  const zoomTo = (next: number) => {
+    const el = box.current;
+    const z = Math.min(MAX_ZOOM, Math.max(1, next));
+    if (el) {
+      const cx = (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth;
+      const cy = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight;
+      requestAnimationFrame(() => el.scrollTo(cx * el.scrollWidth - el.clientWidth / 2, cy * el.scrollHeight - el.clientHeight / 2));
+    }
+    setZoom(z);
+  };
+  return (
+    <div className="rv-zoom" role="dialog" aria-modal="true" aria-label={alt}>
+      <div
+        ref={box}
+        className="rv-zoom-box"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+        onDoubleClick={() => zoomTo(zoom > 1 ? 1 : 2.5)}
+        onTouchStart={(e) => {
+          if (e.touches.length === 2) pinch.current = { dist: dist(e.touches), zoom };
+        }}
+        onTouchMove={(e) => {
+          if (e.touches.length === 2 && pinch.current) zoomTo(pinch.current.zoom * (dist(e.touches) / pinch.current.dist));
+        }}
+        onTouchEnd={() => (pinch.current = null)}
+      >
+        <img src={url} alt={alt} style={zoom > 1 ? { width: `${zoom * 100}%`, maxWidth: "none", maxHeight: "none" } : undefined} draggable={false} />
+      </div>
+      <button className="rv-zoom-close" aria-label="Close" onClick={onClose}>
+        <CloseIcon size={18} />
+      </button>
     </div>
   );
 }
