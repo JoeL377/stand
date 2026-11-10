@@ -36,6 +36,9 @@ export function ReviewStage(props: {
   onShot: (i: number) => void;
   onFlip: (delta: number) => void;
   onOutcome: (outcome: ReviewOutcome | null) => void;
+  /** The host takes a line off that Stand got wrong, or adds one it missed. */
+  onRemove?: (note: Note) => void;
+  onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
   className?: string;
 }) {
   const { item, deck, index, count, canSteer, disabled } = props;
@@ -54,6 +57,38 @@ export function ReviewStage(props: {
   }, [open]);
   const [zoomed, setZoomed] = useState(false);
   useEffect(() => setZoomed(false), [item.id]);
+  // A capture that just arrived shows over the foot of the picture for a few seconds, so people
+  // see Stand heard it without looking away from the slide. Not the ones already there on arrival.
+  const seen = useRef<{ item: string; ids: Set<string> } | null>(null);
+  const [landed, setLanded] = useState<Note[]>([]);
+  const caughtKey = caught.map((n) => n.id).join(",");
+  useEffect(() => {
+    const ids = new Set(caught.map((n) => n.id));
+    const before = seen.current;
+    seen.current = { item: item.id, ids };
+    if (!before || before.item !== item.id) return setLanded([]);
+    const fresh = caught.filter((n) => !before.ids.has(n.id));
+    if (!fresh.length) return;
+    setLanded((l) => [...l, ...fresh].slice(-LANDED_MAX));
+    const gone = new Set(fresh.map((n) => n.id));
+    setTimeout(() => setLanded((l) => l.filter((n) => !gone.has(n.id))), LANDED_MS);
+  }, [item.id, caughtKey]);
+  // Setting how a slide ended opens what was caught on it, for everyone: the moment to fix the list before moving on.
+  const outcomeSeen = useRef<{ item: string; outcome: ReviewOutcome | null } | null>(null);
+  const [wrap, setWrap] = useState(false);
+  const outcome = review?.outcome ?? null;
+  useEffect(() => {
+    const before = outcomeSeen.current;
+    outcomeSeen.current = { item: item.id, outcome };
+    if (!before || before.item !== item.id) return setWrap(false);
+    if (before.outcome !== outcome) setWrap(Boolean(outcome));
+  }, [item.id, outcome]);
+  useEffect(() => {
+    if (!wrap) return;
+    const key = (e: KeyboardEvent) => e.key === "Escape" && setWrap(false);
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [wrap]);
   const latest = caught.at(-1);
   const listed = open ? caught.filter((n) => n.kind === open) : [];
 
@@ -83,6 +118,31 @@ export function ReviewStage(props: {
               </button>
             ))}
           </div>
+        )}
+        {!wrap && !open && landed.length > 0 && (
+          <div className="rv-landed" aria-live="polite">
+            {landed.map((n) => {
+              const k = KINDS.find((x) => x.kind === n.kind)!;
+              return (
+                <p key={n.id} className={n.kind}>
+                  <k.Icon />
+                  <span className="rv-landed-kind">{k.label}</span>
+                  <span dir="auto">{n.text}</span>
+                  {n.owner && <span className="rv-who">{n.owner.split(" ")[0]}</span>}
+                </p>
+              );
+            })}
+          </div>
+        )}
+        {wrap && outcome && (
+          <Wrap
+            outcome={outcome}
+            by={review?.outcomeBy ?? null}
+            caught={caught}
+            onRemove={disabled ? undefined : props.onRemove}
+            onAdd={disabled ? undefined : props.onAdd}
+            onClose={() => setWrap(false)}
+          />
         )}
         {open && (
           <div className="rv-caught-pop" role="dialog" aria-label={KINDS.find((k) => k.kind === open)?.label}>
@@ -191,6 +251,80 @@ export function ReviewStage(props: {
         )}
       </div>
       {zoomed && shot && <ShotZoom url={shot.url} alt={shot.caption ?? item.title} onClose={() => setZoomed(false)} />}
+    </div>
+  );
+}
+
+const LANDED_MS = 4500;
+const LANDED_MAX = 3;
+
+/** What was caught on a slide, opened when its outcome is set: the outcome, then every line by kind. */
+function Wrap(props: {
+  outcome: ReviewOutcome;
+  by: string | null;
+  caught: Note[];
+  onRemove?: (note: Note) => void;
+  onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
+  onClose: () => void;
+}) {
+  const [kind, setKind] = useState<"action" | "decision" | "question">("action");
+  const [text, setText] = useState("");
+  const label = REVIEW_OUTCOMES.find((o) => o.id === props.outcome)?.label;
+  const add = () => {
+    if (!text.trim() || !props.onAdd) return;
+    props.onAdd(kind, text.trim());
+    setText("");
+  };
+  return (
+    <div className="rv-wrap" role="dialog" aria-label={`${label}: what was caught on this slide`}>
+      <div className="rv-wrap-head">
+        <span className={`rv-wrap-outcome ${props.outcome}`}>{label}</span>
+        {props.by && <span className="rv-who">{props.by.split(" ")[0]}</span>}
+        <button className="rv-wrap-x" aria-label="Close" onClick={props.onClose}>
+          <CloseIcon size={14} />
+        </button>
+      </div>
+      {KINDS.map(({ kind: k, label: name, Icon }) => {
+        const lines = props.caught.filter((n) => n.kind === k);
+        if (!lines.length) return null;
+        return (
+          <div key={k} className={`rv-wrap-group ${k}`}>
+            <h3>
+              <Icon /> {name} <span className="count">{lines.length}</span>
+            </h3>
+            {lines.map((n) => (
+              <p key={n.id} className={n.doneAt ? "done" : undefined}>
+                <span dir="auto">{n.text}</span>
+                {n.owner && <span className="rv-who">{n.owner.split(" ")[0]}</span>}
+                {props.onRemove && (
+                  <button className="rv-wrap-x" aria-label={`Remove "${n.text}"`} title="Remove" onClick={() => props.onRemove!(n)}>
+                    <CloseIcon size={12} />
+                  </button>
+                )}
+              </p>
+            ))}
+          </div>
+        );
+      })}
+      {!props.caught.length && !props.onAdd && <p className="rv-wrap-none">Nothing caught on this slide</p>}
+      {props.onAdd && (
+        <form
+          className="rv-wrap-add"
+          onSubmit={(e) => {
+            e.preventDefault();
+            add();
+          }}
+        >
+          <div role="group" aria-label="What to add">
+            {KINDS.map(({ kind: k, label: name, Icon }) => (
+              <button key={k} type="button" className={kind === k ? "on" : undefined} aria-pressed={kind === k} title={name} aria-label={name} onClick={() => setKind(k)}>
+                <Icon />
+              </button>
+            ))}
+          </div>
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder={kind === "action" ? "Add a to-do" : kind === "decision" ? "Add a decision" : "Add an open question"} maxLength={500} />
+        </form>
+      )}
     </div>
   );
 }
