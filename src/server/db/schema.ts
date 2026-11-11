@@ -386,6 +386,35 @@ CREATE TABLE IF NOT EXISTS links (
   UNIQUE (from_id, to_id, relation)
 );
 CREATE INDEX IF NOT EXISTS links_to ON links(to_id, relation);
+-- Chat (chat.ts). A channel is a place text comes from, tied to one space; the space's own chat is
+-- one (source 'stand'). Its talk is kept as sessions: meetings rows of kind 'chat'.
+CREATE TABLE IF NOT EXISTS channels (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  source TEXT NOT NULL,
+  -- The source's id for it; null for 'stand'.
+  external_id TEXT,
+  name TEXT NOT NULL,
+  -- The session messages go to now. A session's ended_at is always set, so this is what says it is open.
+  open_session_id TEXT,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS channels_room ON channels(room_id);
+CREATE UNIQUE INDEX IF NOT EXISTS channels_external ON channels(source, external_id) WHERE external_id IS NOT NULL;
+-- What chat adds to a message, beside its segments row. seq orders them. external_id is the key a
+-- message was sent with (the source's message id, for an outside source): a channel takes it once.
+CREATE TABLE IF NOT EXISTS chat_messages (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  segment_id TEXT NOT NULL UNIQUE REFERENCES segments(id),
+  channel_id TEXT NOT NULL REFERENCES channels(id),
+  external_id TEXT,
+  reply_to TEXT,
+  edited_at INTEGER,
+  deleted_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS chat_messages_channel ON chat_messages(channel_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS chat_messages_external ON chat_messages(channel_id, external_id) WHERE external_id IS NOT NULL;
 `;
 
 /** Makes the tables a new database needs, and adds what later versions added to an older one.
@@ -409,6 +438,9 @@ export function migrate(db: DatabaseSync) {
   // "added": not a meeting but where a to-do someone added by hand (MCP create_action) lives, since
   // every note sits in a meeting. Lists of meetings leave these out (see addTask).
   if (!meetingCols.includes("kind")) db.exec("ALTER TABLE meetings ADD COLUMN kind TEXT");
+  // "chat": a session of a chat channel (chat.ts), which is the channel in channel_id.
+  if (!meetingCols.includes("channel_id")) db.exec("ALTER TABLE meetings ADD COLUMN channel_id TEXT");
+  db.exec("CREATE INDEX IF NOT EXISTS meetings_channel ON meetings(channel_id, started_at) WHERE channel_id IS NOT NULL;");
   // A design session (designSession.ts) is a brainstorm whose board is a diagram of boxes and arrows.
   const brainCols = (db.prepare("PRAGMA table_info(brainstorms)").all() as Row[]).map((c) => c.name);
   if (!brainCols.includes("kind"))

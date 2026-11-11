@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Note } from "../shared/protocol.ts";
 import { agentApi } from "./agents.ts";
 import { buildBrief } from "./brief.ts";
+import { Chat } from "./chat.ts";
 import { capabilities, config } from "./config.ts";
 import { ConxtDelivery, parseDestinations } from "./conxt.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
@@ -235,6 +236,10 @@ export function startServices() {
   setProjects(projects);
   projects.start();
 
+  // Chat between meetings (chat.ts). Sessions left open by the last run close here if they went quiet.
+  const chat = new Chat(db);
+  chat.start();
+
   new ConxtDelivery(db, conxtDestinations).start();
   setConxtGlossary(new ConxtGlossary(db.raw, conxtDestinations));
   setConxtOpenItems(new ConxtOpenItems(db.raw, conxtDestinations));
@@ -252,6 +257,7 @@ export function startServices() {
     githubApp,
     shipWatch,
     projects,
+    chat,
     agents,
     uploadLinks,
     specTouched,

@@ -14,7 +14,8 @@ export function upNextStore(db: DatabaseSync, { updates, captures }: { updates: 
         id: m.id as string,
         startedAt: m.started_at as number,
         endedAt: (m.ended_at as number) ?? null,
-        added: m.kind === "added" || undefined,
+        // A chat session (chat.ts) is no meeting that passed either: like a to-do added by hand, it places its notes in time.
+        added: m.kind === "added" || m.kind === "chat" || undefined,
       }));
       const notes = (
         db
