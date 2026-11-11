@@ -31,7 +31,9 @@ export function layout(nodes: BrainNode[], w: number, h: number): Placed[] {
   if (!dirs.length || !w || !h) return [];
   const ideasOf = (id: string) => nodes.filter((n) => n.parent === id);
   // Fewer ideas per direction show as the map fills, so labels never pile up.
-  const room = Math.max(8, Math.floor((w * h) / 34_000));
+  // A phone's canvas is taller than wide and draws larger type, so each circle needs more of it.
+  const big = h > w ? 1.35 : 1;
+  const room = Math.max(8, Math.floor((w * h) / (34_000 * big * big)));
   const cap = [12, 8, 6, 5, 4, 3, 2].find((c) => dirs.reduce((n, d) => n + Math.min(c, ideasOf(d.id).length), 0) <= room) ?? 2;
   const shown = dirs.map((d) => {
     const all = ideasOf(d.id);
@@ -64,7 +66,68 @@ export function layout(nodes: BrainNode[], w: number, h: number): Placed[] {
     }
     a += span;
   }
-  return out;
+  return spread(out, w, h, big);
+}
+
+/** Room kept clear between two circles. */
+const GAP = 22;
+
+/** How big a circle draws, near enough to keep its neighbours off it. */
+function boxOf(p: Placed): { w: number; h: number } {
+  if (p.more) return { w: 84, h: 32 };
+  const dir = !p.node?.parent;
+  const text = p.node?.label ?? "";
+  const max = dir ? 170 : 158;
+  const pad = dir ? 36 : 26;
+  const per = dir ? 8 : 6.9;
+  const extra = 24; // the count or the speaker's face beside the words
+  const inner = max - pad - extra;
+  const lines = Math.max(1, Math.ceil((text.length * per) / inner));
+  return { w: lines > 1 ? max : Math.min(max, text.length * per + pad + extra), h: (dir ? 20 : 12) + lines * (dir ? 17 : 16) };
+}
+
+/** Nudges circles apart until none touch: each keeps GAP clear of the others and of the sentence
+ *  in the middle, and stays on the canvas. Directions give way less than ideas, so the shape holds. */
+export function spread(placed: Placed[], w: number, h: number, big = 1): Placed[] {
+  const root = { x: w / 2, y: h / 2, w: Math.min(290, Math.max(180, w * 0.24)) * big, h: 104 * big, fixed: true, heavy: 1 };
+  const boxes = placed.map((p) => {
+    const b = boxOf(p);
+    return { x: p.x, y: p.y, w: b.w * big, h: b.h * big, fixed: false, heavy: p.from === "root" ? 3 : 1 };
+  });
+  const all = [root, ...boxes];
+  const edge = 8;
+  for (let pass = 0; pass < 240; pass++) {
+    let moved = false;
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const A = all[i]!;
+        const B = all[j]!;
+        const dx = B.x - A.x;
+        const dy = B.y - A.y;
+        const ox = (A.w + B.w) / 2 + GAP - Math.abs(dx);
+        const oy = (A.h + B.h) / 2 + GAP - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+        moved = true;
+        // Out along whichever way is shorter; the heavier one moves less.
+        const share = A.fixed ? 1 : B.fixed ? 0 : A.heavy / (A.heavy + B.heavy);
+        if (ox < oy) {
+          const s = dx >= 0 ? 1 : -1;
+          if (!B.fixed) B.x += s * ox * share * 0.6;
+          if (!A.fixed) A.x -= s * ox * (1 - share) * 0.6;
+        } else {
+          const s = dy >= 0 ? 1 : -1;
+          if (!B.fixed) B.y += s * oy * share * 0.6;
+          if (!A.fixed) A.y -= s * oy * (1 - share) * 0.6;
+        }
+      }
+    }
+    for (const b of boxes) {
+      b.x = Math.min(w - b.w / 2 - edge, Math.max(b.w / 2 + edge, b.x));
+      b.y = Math.min(h - b.h / 2 - edge, Math.max(b.h / 2 + edge, b.y));
+    }
+    if (!moved) break;
+  }
+  return placed.map((p, i) => ({ ...p, x: boxes[i]!.x, y: boxes[i]!.y }));
 }
 
 export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: string) => void; className?: string }) {
@@ -83,7 +146,7 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
   }, []);
   const narrow = size.w > 0 && size.w < 620;
   // A phone draws the whole map on a canvas bigger than its screen, fitted to it, and you drag and pinch.
-  const cw = narrow ? Math.max(860, size.w * 2.2) : size.w;
+  const cw = narrow ? Math.max(1000, size.w * 2.6) : size.w;
   const ch = narrow ? cw * (size.h / Math.max(1, size.w)) : size.h;
   const fit = narrow ? size.w / cw : 1;
   /** Where you've dragged and pinched to; null is the whole map fitted to the screen. */

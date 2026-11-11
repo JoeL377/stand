@@ -3207,7 +3207,8 @@ a.sh-review { text-decoration: none; color: inherit; }
 .brain-lines line { stroke: var(--line); stroke-width: 1.5; transition: all 0.5s ease; }
 .brain-lines line.trunk { stroke: color-mix(in srgb, var(--accent) 45%, var(--line)); stroke-width: 2; }
 .brain-node { all: unset; box-sizing: border-box; position: absolute; translate: -50% -50%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-align: center; cursor: pointer; transition: left 0.5s ease, top 0.5s ease, box-shadow 0.3s, border-color 0.3s, background 0.3s; animation: brain-in 0.45s ease both; }
-.brain-node > span { overflow-wrap: anywhere; }
+.brain-node > span { overflow-wrap: break-word; min-width: 0; }
+.brain-node.dir, .brain-node.idea { width: max-content; }
 .brain-node.root { cursor: default; flex-direction: column; gap: 4px; width: clamp(180px, 24%, 290px); min-height: 84px; padding: 14px 20px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 16px; font-weight: 600; line-height: 1.25; box-shadow: 0 6px 22px color-mix(in srgb, var(--accent) 30%, transparent); z-index: 2; animation: none; }
 .brain-node.root small { font-size: 11.5px; font-weight: 400; opacity: 0.85; }
 .brain-node.root.busy { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent), 0 6px 22px color-mix(in srgb, var(--accent) 30%, transparent); }
