@@ -3,7 +3,8 @@
 // worth keeping. A star marks one for the whole space, and Starred shows only those.
 
 import { useMemo, useState } from "react";
-import type { BrainNode, BrainstormView } from "../../shared/protocol.ts";
+import { Link } from "react-router-dom";
+import { IDEA_OUTCOMES, type BrainNode, type BrainstormView } from "../../shared/protocol.ts";
 import { StarIcon } from "../icons.tsx";
 import { KIND } from "../room/BrainMap.tsx";
 
@@ -37,7 +38,8 @@ export function BrainIdeas(props: { brainstorm: BrainstormView; onStar: (idea: s
         {shown.map((n) => {
           const on = starred.has(n.id);
           const open = openId === n.id;
-          const more = n.points.length > 0 || n.caught.length > 0;
+          const more = n.points.length > 0 || n.caught.length > 0 || !!props.brainstorm.reviewed?.[n.id]?.became;
+          const reviewed = props.brainstorm.reviewed?.[n.id];
           return (
             <div key={n.id} className={`bi-row${open ? " open" : ""}`}>
               <button type="button" className={`bi-star${on ? " on" : ""}`} aria-pressed={on} aria-label={on ? `Take the star off ${n.label}` : `Star ${n.label}`} onClick={() => props.onStar(n.id, !on)}>
@@ -48,6 +50,7 @@ export function BrainIdeas(props: { brainstorm: BrainstormView; onStar: (idea: s
                   <strong dir="auto">{n.label}</strong>
                   <span className="bi-dir" dir="auto">{dirOf(n)}</span>
                   {n.by && <span className="bi-by muted">{n.by}</span>}
+                  {reviewed && <span className={`rv-wrap-outcome bi-outcome ${reviewed.outcome}`}>{IDEA_OUTCOMES.find((o) => o.id === reviewed.outcome)?.label}</span>}
                   <span className="bi-marks">
                     {n.points.length > 0 && (
                       <i className="brain-badge" title={n.points.length === 1 ? "1 remark built on it" : `${n.points.length} remarks built on it`}>
@@ -70,6 +73,11 @@ export function BrainIdeas(props: { brainstorm: BrainstormView; onStar: (idea: s
               </button>
               {open && (
                 <ul className="bi-more">
+                  {reviewed?.became && (
+                    <li className="bi-became">
+                      <Link to={`/ref/${reviewed.became.kind}/${reviewed.became.id}`}>{reviewed.became.kind === "action" ? "The to-do it became" : "The open question it became"}</Link>
+                    </li>
+                  )}
                   {n.caught.map((c) => {
                     const { Icon } = KIND[c.kind];
                     return (

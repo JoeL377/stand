@@ -12,10 +12,11 @@ import type { PlanBriefs } from "./planBrief.ts";
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
 import { parseActor, type Actor } from "../shared/actors.ts";
-import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
+import { IDEA_OUTCOMES, REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import type { ActionWork, BrainCaught, BrainNode, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
+import { IDEA_SLIDES_MAX, ideaReviewView, reviewedIdeas, setUpIdeaReview } from "./ideaReview.ts";
 import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
 import { recordMentions } from "./mentions.ts";
@@ -1289,6 +1290,36 @@ export function agentApi(deps: AgentDeps) {
       }
     },
 
+    /** Sets up the idea review of a brainstorm: a review call with one slide per idea, the starred
+     *  ones first, where the team says Pursue, Explore or Not now on each. It waits in the space. */
+    startIdeaReview(caller: Caller, args: { space: string; brainstorm?: string; ideas?: string[] }, baseUrl: string) {
+      requireWrite(caller);
+      const room = findSpace(caller, args.space);
+      const all = db.brainstorms(room.id).filter((x) => x.kind === "map");
+      const wanted = args.brainstorm?.trim().split(/[/?#]/).filter(Boolean).at(-1);
+      const b = wanted ? all.find((x) => x.id === wanted) : all.find((x) => x.status === "done" && x.nodes.some((n) => n.parent && !n.removed));
+      if (!b) throw new AgentError(wanted ? `No brainstorm ${wanted} in ${room.name}. get_brainstorm lists the space's brainstorms.` : `No finished brainstorm with ideas in ${room.name} yet.`);
+      try {
+        const made = setUpIdeaReview(db, room.id, b.id, byOf(caller), args.ideas);
+        deps.notify(room.id, "followups");
+        const view = ideaReviewView(db, made.review.id, baseUrl);
+        return {
+          [made.updated ? "rebuilt" : "set_up"]: {
+            review: made.review.id,
+            url: `${baseUrl}/s/${room.id}/review/${made.review.id}`,
+            from: { brainstorm: b.id, topic: b.prompt },
+            slides: view?.slides.map((s) => ({ idea: s.title, direction: s.idea?.direction ?? undefined, by: s.idea?.by ?? undefined, starred: s.idea?.starred || undefined })),
+            left_out: made.left ? `${made.left} more ideas are on the map; a review holds ${IDEA_SLIDES_MAX}. Name the ones to review in ideas.` : undefined,
+          },
+          space: room.name,
+          how: "It waits in the space: people start it from its page (the url), or from Start inside a call. Starred ideas come first; a star only orders the slides. On each slide the team says Pursue, Explore or Not now. When the review ends, Pursue leaves a to-do and Explore an open question on the idea, and get_brainstorm shows what each idea became.",
+        };
+      } catch (err) {
+        if (err instanceof ReviewError) throw new AgentError(err.message);
+        throw err;
+      }
+    },
+
     /** The space's product review: the next one being put together, and how the last one went. The
      *  design review comes with it: the specs waiting, and what the last one decided on each. */
     getReview(caller: Caller, args: { space: string }, baseUrl: string) {
@@ -1423,7 +1454,9 @@ export function agentApi(deps: AgentDeps) {
       // What was caught may have been reworded or ticked off since the map was saved.
       const now = new Map((b.meetingId ? db.meetingNotes(b.meetingId) : []).map((n) => [n.id, n]));
       const nodes = b.nodes.filter((n) => !n.removed);
+      const ideaReview = reviewedIdeas(db, b.id);
       const circle = (n: BrainNode): Record<string, unknown> => {
+        const reviewed = ideaReview.reviewed?.[n.id];
         const caught = n.caught.map((c) => {
           const note = now.get(c.id);
           return note ? { ...c, text: note.text, owner: note.owner ?? null, done: !!note.doneAt } : c;
@@ -1435,6 +1468,8 @@ export function agentApi(deps: AgentDeps) {
           detail: n.detail ?? undefined,
           by: n.by ?? undefined,
           starred: b.starred.includes(n.id) || undefined,
+          reviewed: reviewed ? IDEA_OUTCOMES.find((o) => o.id === reviewed.outcome)?.label : undefined,
+          became: reviewed?.became ? `stand:${reviewed.became.kind}/${reviewed.became.id}` : undefined,
           said: n.quote ? `${n.quote.speaker}: ${n.quote.text}` : undefined,
           built_on: list(n.points.map((p) => ({ text: p.text, by: p.by ?? undefined }))),
           todos: list(of("action").map((c) => ({ ref: `stand:action/${c.id}`, text: c.text, owner: c.owner ?? undefined, done: c.done }))),
@@ -1467,6 +1502,9 @@ export function agentApi(deps: AgentDeps) {
           started_by: b.startedBy ?? undefined,
           meeting: b.meetingId ?? undefined,
           counts: { directions: nodes.filter((n) => !n.parent).length, ideas: nodes.filter((n) => n.parent).length, todos: count("action"), decisions: count("decision"), questions: count("question") },
+          idea_review: ideaReview.ideaReview
+            ? { url: `${baseUrl}/s/${room.id}/review/${ideaReview.ideaReview.id}`, status: ideaReview.ideaReview.status === "draft" ? "waiting to start" : ideaReview.ideaReview.status === "live" ? "in a call now" : "finished" }
+            : undefined,
           directions: nodes.filter((n) => !n.parent).map(circle),
           // A design session: its board is a diagram of parts and how they relate, and it has no directions.
           ...(b.kind === "design" ? { design_session: designInfo(b) } : {}),

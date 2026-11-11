@@ -556,6 +556,9 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 .rv-wrap-outcome.ship { background: #15803d; }
 .rv-wrap-outcome.fixes { background: #b45309; }
 .rv-wrap-outcome.not_yet { background: #b91c1c; }
+.rv-wrap-outcome.pursue { background: #15803d; }
+.rv-wrap-outcome.explore { background: #b45309; }
+.rv-wrap-outcome.not_now { background: #6b7280; }
 .rv-wrap-group h3 { display: flex; align-items: center; gap: 6px; margin: 12px 0 2px; font-size: 12px; font-weight: 600; }
 .rv-wrap-group h3 .count { font-weight: 400; opacity: 0.8; }
 .rv-wrap-group p { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 6px 0 6px 22px; }
@@ -611,6 +614,21 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 .rv-outcome.ship.on { background: #15803d; }
 .rv-outcome.fixes.on { background: #b45309; }
 .rv-outcome.not_yet.on { background: #b91c1c; }
+.rv-outcome.pursue.on { background: #15803d; }
+.rv-outcome.explore.on { background: #b45309; }
+.rv-outcome.not_now.on { background: #6b7280; }
+/* An idea on an idea review's slide (room/IdeaCard.tsx). */
+.idea-card { box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 12px; width: 100%; max-width: 860px; max-height: 100%; overflow-y: auto; margin: 0 auto; padding: clamp(20px, 4vw, 48px); border-radius: 12px; background: var(--panel); color: var(--text); text-align: left; }
+.rv-pic > .idea-card.slide-main { align-self: center; }
+.idea-from { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.idea-star { display: inline-flex; color: #e0a100; }
+.idea-card h2 { margin: 0; font-size: clamp(22px, 3.2vw, 36px); line-height: 1.15; font-weight: 650; overflow-wrap: anywhere; }
+.idea-detail { margin: 0; font-size: clamp(15px, 1.6vw, 19px); line-height: 1.45; color: var(--muted); }
+.idea-more { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; font-size: clamp(13.5px, 1.3vw, 15.5px); line-height: 1.4; }
+.idea-more li { padding-left: 12px; border-left: 2px solid var(--line); }
+.idea-more li.idea-caught { display: flex; align-items: baseline; gap: 7px; padding-left: 0; border-left: 0; font-weight: 500; }
+.idea-more li.idea-caught .brain-kind { translate: 0 2px; }
+.xp-idea { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 720px) {
   /* Phones: the picture at its own height, the bar on one line, then what was caught as a plain list.
      The whole slide scrolls, so nothing is boxed in. */
@@ -3061,6 +3079,10 @@ a.rp-pill:hover, button.rp-pill:hover { background: var(--panel-2); text-decorat
 .rp-count.ship { color: #15803d; }
 .rp-count.fixes { color: #b45309; }
 .rp-count.not_yet { color: #b91c1c; }
+.rp-count.pursue { color: #15803d; }
+.rp-count.explore { color: #b45309; }
+.rp-count.not_now { color: var(--muted); }
+.rp-from { max-width: 320px; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 22px; }
 .rp-picker { position: relative; }
 .rp-menu { position: absolute; z-index: 20; top: 30px; left: 0; min-width: 240px; max-height: 60vh; overflow-y: auto; padding: 4px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 8px 28px rgb(0 0 0 / 0.16); display: flex; flex-direction: column; }
 .rp-menu a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; color: var(--text); font-size: 13px; white-space: nowrap; }
@@ -3108,6 +3130,9 @@ a.rp-pill:hover, button.rp-pill:hover { background: var(--panel-2); text-decorat
 .rp-dot.ship { background: #15803d; }
 .rp-dot.fixes { background: #b45309; }
 .rp-dot.not_yet { background: #b91c1c; }
+.rp-dot.pursue { background: #15803d; }
+.rp-dot.explore { background: #b45309; }
+.rp-dot.not_now { background: #6b7280; }
 .review-earlier { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
 a.review-card-pic { color: var(--muted); }
 a.sh-review { text-decoration: none; color: inherit; }
@@ -3331,6 +3356,8 @@ button.ds-q:focus-visible { outline: 2px solid var(--accent); }
 .bi-top > strong { font-size: 14.5px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .bi-dir { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 20px; line-height: 18px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
 .bi-by { flex: none; font-size: 12px; }
+.bi-outcome { flex: none; padding: 1px 9px; font-size: 11.5px; }
+.bi-more li.bi-became { padding-left: 0; border-left: 0; }
 .bi-marks { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 7px; }
 .bi-detail { font-size: 13.5px; line-height: 1.4; color: var(--muted); }
 .bi-more { grid-column: 2; list-style: none; margin: 0; padding: 0 8px 12px 4px; display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; line-height: 1.4; }

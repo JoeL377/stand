@@ -13,6 +13,7 @@ import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
 /** What is on the call's board now, in the words people use for it. */
 export function runningExperience(items: Item[], brainstorm: BrainstormView | null | undefined): string | null {
   if (brainstorm?.status === "live") return brainstorm.design ? "design session" : "brainstorm";
+  if (items.some((i) => i.slide?.layout === "review" && i.slide.review?.idea)) return "idea review";
   if (items.some((i) => i.slide?.layout === "review")) return "product review";
   if (items.some((i) => i.slide?.layout === "design")) return "design review";
   return null;
@@ -64,6 +65,7 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
 
   const slides = feed?.review?.slides.length ?? 0;
   const specs = feed?.designReview?.specs ?? 0;
+  const ideas = feed?.ideaReviews?.filter((r) => r.status === "draft") ?? [];
   return (
     <div className="xp" ref={box}>
       <button className="control" disabled={props.disabled || busy} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="Put a review, a brainstorm or a design session on the board">
@@ -81,6 +83,14 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
             <strong>Design review</strong>
             <span className="muted">{!feed ? "…" : specs ? `${specs} ${specs === 1 ? "spec" : "specs"}` : "no spec waiting"}</span>
           </button>
+          {ideas.slice(0, 3).map((r) => (
+            <button key={r.id} type="button" role="menuitem" onClick={run("idea review", () => api.startIdeaReview(roomId, r.id))}>
+              <strong>Idea review</strong>
+              <span className="muted xp-idea" dir="auto">
+                {r.slides} {r.slides === 1 ? "idea" : "ideas"} · {r.title}
+              </span>
+            </button>
+          ))}
           <span className="xp-group">Working sessions</span>
           <button type="button" role="menuitem" onClick={() => (setOpen(false), setPop("brainstorm"))}>
             <strong>Brainstorm</strong>

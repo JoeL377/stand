@@ -3,7 +3,8 @@
 // The host flips slides and everyone follows; anyone can set the outcome.
 
 import { useEffect, useRef, useState } from "react";
-import { REVIEW_OUTCOMES, type Deck, type Item, type Note, type ReviewOutcome } from "../../shared/protocol.ts";
+import { IDEA_OUTCOMES, REVIEW_OUTCOMES, type Deck, type IdeaOutcome, type Item, type Note, type ReviewOutcome } from "../../shared/protocol.ts";
+import { IdeaCard } from "./IdeaCard.tsx";
 import { CloseIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { NativeSlide } from "../slides.tsx";
@@ -35,7 +36,7 @@ export function ReviewStage(props: {
   shot: number;
   onShot: (i: number) => void;
   onFlip: (delta: number) => void;
-  onOutcome: (outcome: ReviewOutcome | null) => void;
+  onOutcome: (outcome: ReviewOutcome | IdeaOutcome | null) => void;
   /** The host takes a line off that Stand got wrong, or adds one it missed. */
   onRemove?: (note: Note) => void;
   onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
@@ -43,6 +44,10 @@ export function ReviewStage(props: {
 }) {
   const { item, deck, index, count, canSteer, disabled } = props;
   const review = item.slide?.review;
+  // An idea review's slide is an idea from a brainstorm, and ends in its own words.
+  const idea = review?.idea ?? null;
+  const outcomes: Array<{ id: ReviewOutcome | IdeaOutcome; label: string }> = idea ? IDEA_OUTCOMES : REVIEW_OUTCOMES;
+  const outcomeBy = (idea ? idea.outcomeBy : review?.outcomeBy) ?? null;
   const shots = review?.shots ?? [];
   const shot = shots[Math.min(props.shot, shots.length - 1)] ?? null;
   // To-dos, decisions and open questions: the notes agent's other lines aren't something to act on.
@@ -74,9 +79,9 @@ export function ReviewStage(props: {
     setTimeout(() => setLanded((l) => l.filter((n) => !gone.has(saidKey(n)))), LANDED_MS);
   }, [item.id, caughtKey]);
   // Setting how a slide ended opens what was caught on it, for everyone: the moment to fix the list before moving on.
-  const outcomeSeen = useRef<{ item: string; outcome: ReviewOutcome | null } | null>(null);
+  const outcomeSeen = useRef<{ item: string; outcome: ReviewOutcome | IdeaOutcome | null } | null>(null);
   const [wrap, setWrap] = useState(false);
-  const outcome = review?.outcome ?? null;
+  const outcome = (idea ? idea.outcome : review?.outcome) ?? null;
   useEffect(() => {
     const before = outcomeSeen.current;
     outcomeSeen.current = { item: item.id, outcome };
@@ -99,6 +104,8 @@ export function ReviewStage(props: {
           <button type="button" className="rv-shot" title="See it bigger" onClick={() => setZoomed(true)}>
             <img key={shot.url} src={shot.url} alt={shot.caption ?? item.title} />
           </button>
+        ) : idea ? (
+          <IdeaCard title={item.title} detail={item.slide?.body ?? ""} idea={idea} className="slide-main" />
         ) : (
           <NativeSlide deckId={item.deckId!} theme={deck?.theme ?? "paper"} title={item.title} slide={item.slide!} className="slide-main" />
         )}
@@ -137,7 +144,7 @@ export function ReviewStage(props: {
         {wrap && outcome && (
           <Wrap
             outcome={outcome}
-            by={review?.outcomeBy ?? null}
+            by={outcomeBy}
             caught={caught}
             onRemove={disabled ? undefined : props.onRemove}
             onAdd={disabled ? undefined : props.onAdd}
@@ -200,8 +207,8 @@ export function ReviewStage(props: {
           {index + 1} of {count}
         </span>
         <div className="rv-outcomes" role="group" aria-label="How this slide ended">
-          {REVIEW_OUTCOMES.map((o) => {
-            const on = review?.outcome === o.id;
+          {outcomes.map((o) => {
+            const on = outcome === o.id;
             return (
               <button
                 key={o.id}
@@ -209,7 +216,7 @@ export function ReviewStage(props: {
                 className={`rv-outcome ${o.id}${on ? " on" : ""}`}
                 aria-pressed={on}
                 disabled={disabled}
-                title={on && review?.outcomeBy ? `${review.outcomeBy} said so. Click to take it back` : undefined}
+                title={on && outcomeBy ? `${outcomeBy} said so. Click to take it back` : undefined}
                 onClick={() => props.onOutcome(on ? null : o.id)}
               >
                 {o.id === "fixes" ? (
@@ -267,14 +274,14 @@ const LANDED_MAX = 3;
 
 /** What was caught on a slide, opened when its outcome is set: the outcome, then every line by kind. */
 function Wrap(props: {
-  outcome: ReviewOutcome;
+  outcome: ReviewOutcome | IdeaOutcome;
   by: string | null;
   caught: Note[];
   onRemove?: (note: Note) => void;
   onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
   onClose: () => void;
 }) {
-  const label = REVIEW_OUTCOMES.find((o) => o.id === props.outcome)?.label;
+  const label = [...REVIEW_OUTCOMES, ...IDEA_OUTCOMES].find((o) => o.id === props.outcome)?.label;
   return (
     <div className="rv-wrap" role="dialog" aria-label={`${label}: what was caught on this slide`}>
       <div className="rv-wrap-head">

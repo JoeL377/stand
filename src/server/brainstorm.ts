@@ -10,6 +10,7 @@
 import { z } from "zod";
 import type { BrainCaught, BrainNode, BrainstormSummary, BrainstormView, DesignContext, DesignDiagram, Segment } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
+import { reviewedIdeas } from "./ideaReview.ts";
 import { similar } from "./notesMerge.ts";
 
 export const MAP_DEBOUNCE_MS = 4_000;
@@ -316,7 +317,7 @@ export const brainstormLive = (db: DB, roomId: string): BrainstormView | null =>
 /** One brainstorm's page; null when it isn't this space's. */
 export function brainstormPage(db: DB, roomId: string, id: string): BrainstormView | null {
   const b = db.getBrainstorm(id);
-  return b && b.roomId === roomId ? toBrainstormView(b) : null;
+  return b && b.roomId === roomId ? { ...toBrainstormView(b), ...reviewedIdeas(db, b.id) } : null;
 }
 
 /** Stars an idea on a brainstorm's page, or takes the star off. The star is the space's, not one
@@ -327,7 +328,7 @@ export function starIdea(db: DB, roomId: string, id: string, nodeId: string, on:
   const starred = b.starred.filter((x) => x !== nodeId);
   if (on) starred.push(nodeId);
   db.saveBrainstormStars(id, starred);
-  return toBrainstormView({ ...b, starred });
+  return { ...toBrainstormView({ ...b, starred }), ...reviewedIdeas(db, b.id) };
 }
 
 /** The space's brainstorms, newest first, the one running included. */

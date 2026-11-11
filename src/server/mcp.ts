@@ -24,6 +24,7 @@ A to-do that never came up in a meeting -> create_action, with a summary and a s
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
 When your person wants to design something with the team in a call -> start_design_session, with the context they should have to hand.
+When your person wants to go back through a brainstorm's ideas and pick which to pursue -> start_idea_review sets up a review call with one slide per idea.
 What a brainstorm came up with -> get_brainstorm: the map as an outline, with the ideas under each direction and the to-dos, decisions and open questions caught on them.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
 
@@ -490,6 +491,23 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: READ,
     },
     ({ space }) => run(() => api.getReview(caller, { space }, baseUrl)),
+  );
+
+  server.registerTool(
+    "start_idea_review",
+    {
+      title: "Set up a review of a brainstorm's ideas",
+      description:
+        "Sets up an idea review in a space: a review call that goes back through what a brainstorm came up with, one idea per slide, so the team can say which are worth doing. Every idea on the brainstorm's map becomes a slide, the starred ones first (a star only orders the slides), then the ones the talk built on most. Each slide shows the idea, who raised it, what others built on it and what was caught on it; the team ends it Pursue, Explore or Not now. When the review ends, Pursue leaves a to-do and Explore an open question, and get_brainstorm shows what each idea became. The review waits until someone starts it from its page or from Start inside a call. Calling again before it has started rebuilds it from the map as it is now. Use it when your person asks to review a brainstorm's ideas; don't set one up on your own.",
+      inputSchema: {
+        space: z.string().describe("A space id, or part of its name"),
+        brainstorm: z.string().optional().describe("The brainstorm's id or its Stand link (get_brainstorm lists them). Left out, the latest finished brainstorm"),
+        ideas: z.array(z.string()).max(40).optional().describe("Only these ideas, by their label on the map. Left out, every idea"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ space, brainstorm, ideas, model }) => run(() => api.startIdeaReview(as(model), { space, brainstorm, ideas }, baseUrl)),
   );
 
   server.registerTool(

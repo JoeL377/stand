@@ -2,7 +2,7 @@
 // It stays here after the call, so anyone can come back, click through the circles and send the link.
 
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
@@ -10,6 +10,7 @@ import { BrainMap } from "../room/BrainMap.tsx";
 import { DesignBoard } from "../room/DesignBoard.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { BrainIdeas } from "./BrainIdeas.tsx";
+import { errorToast } from "../Toasts.tsx";
 import { joinHref, spaceHref } from "./SpacesShell.tsx";
 
 export const brainstormHref = (roomId: string, id: string) => `/s/${roomId}/brainstorm/${id}`;
@@ -23,6 +24,8 @@ export function BrainstormPage() {
   const [data, setData] = useState<{ roomName: string; brainstorm: BrainstormView; brainstorms: BrainstormSummary[] } | null>(null);
   const [failed, setFailed] = useState(false);
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [settingUp, setSettingUp] = useState(false);
   const ideas = params.get("view") === "ideas";
   useEffect(() => {
     setData(null);
@@ -71,6 +74,28 @@ export function BrainstormPage() {
           </span>
         )}
         <span className="rp-grow" />
+        {!b.design && !live && b.nodes.some((n) => n.parent) && (
+          <button
+            type="button"
+            className="rp-link"
+            disabled={settingUp}
+            title={b.ideaReview?.status === "done" ? "How the review ended each idea" : "A review call with one slide per idea, the starred ones first"}
+            onClick={async () => {
+              // A review that ran or is running is opened; one that hasn't started is rebuilt from the map as it is now.
+              const reviewUrl = (id: string) => `/s/${roomId}/review/${id}`;
+              if (b.ideaReview && b.ideaReview.status !== "draft") return navigate(reviewUrl(b.ideaReview.id));
+              setSettingUp(true);
+              try {
+                navigate(reviewUrl((await api.setUpIdeaReview(roomId, b.id)).reviewId));
+              } catch (err) {
+                errorToast("Couldn't set up the idea review")(err);
+                setSettingUp(false);
+              }
+            }}
+          >
+            {b.ideaReview?.status === "done" ? "Idea review" : b.ideaReview?.status === "live" ? "Idea review on now" : "Review ideas"}
+          </button>
+        )}
         {live ? (
           <Link className="rp-link" to={joinHref(roomId)}>
             {b.design ? "Join the session" : "Join the brainstorm"}

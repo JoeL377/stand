@@ -34,6 +34,8 @@ import type {
   UpdateStatus,
   WorkShot,
   User,
+  IdeaOutcome,
+  IdeaSlideInfo,
 } from "../shared/protocol.ts";
 import { normalizeTopic, TOPIC_MAX } from "../shared/topics.ts";
 import { newId } from "./ids.ts";
@@ -499,7 +501,7 @@ const toDeck = (r: Row): Deck => ({
 
 /** A product review and one of its slides, as stored (reviews.ts turns them into what people see).
  *  A design review (designReviews.ts) is kept the same way, with a spec where a feature would be. */
-export type ReviewKind = "product" | "design";
+export type ReviewKind = "product" | "design" | "ideas";
 export interface ReviewRow {
   id: string;
   roomId: string;
@@ -510,6 +512,9 @@ export interface ReviewRow {
   createdAt: number;
   startedAt: number | null;
   endedAt: number | null;
+  /** Idea reviews (ideaReview.ts): what it is called, and the brainstorm its ideas come from. */
+  title: string | null;
+  sourceId: string | null;
 }
 export interface ReviewSlideRow {
   id: string;
@@ -525,7 +530,7 @@ export interface ReviewSlideRow {
   pr: string | null;
   itemId: string | null;
   /** A product review's slide ends Ship, Ship with fixes or Not yet; a design review's point and verdict have their own. */
-  outcome: ReviewOutcome | DesignOutcome | null;
+  outcome: ReviewOutcome | DesignOutcome | IdeaOutcome | null;
   outcomeBy: string | null;
   outcomeAt: number | null;
   createdAt: number;
@@ -538,7 +543,11 @@ export interface ReviewSlideRow {
   section: string | null;
   /** Design reviews: the comment thread a point slide is about. */
   threadId: string | null;
+  /** Idea reviews: the idea the slide shows, as the brainstorm left it. */
+  idea: IdeaSlideSaved | null;
 }
+/** An idea on a slide, as stored: its outcome is the slide's own. */
+export type IdeaSlideSaved = Omit<IdeaSlideInfo, "outcome" | "outcomeBy">;
 const toReview = (r: Row): ReviewRow => ({
   id: r.id as string,
   roomId: r.room_id as string,
@@ -549,6 +558,8 @@ const toReview = (r: Row): ReviewRow => ({
   createdAt: r.created_at as number,
   startedAt: (r.started_at as number) ?? null,
   endedAt: (r.ended_at as number) ?? null,
+  title: (r.title as string) ?? null,
+  sourceId: (r.source_id as string) ?? null,
 });
 const toBrainstorm = (r: Row): BrainstormRow => ({
   id: r.id as string,
@@ -588,6 +599,7 @@ const toReviewSlide = (r: Row): ReviewSlideRow => ({
   planVersion: (r.plan_version as string) ?? null,
   section: (r.section as string) ?? null,
   threadId: (r.thread_id as string) ?? null,
+  idea: r.idea_json ? (JSON.parse(r.idea_json as string) as IdeaSlideSaved) : null,
 });
 
 type NewItem = Pick<Item, "source" | "externalId" | "title" | "url" | "description"> & { deckId?: string; slideNo?: number };
@@ -770,6 +782,9 @@ export function openDb(file?: string) {
   if (!reviewSlideCols.includes("role")) db.exec("ALTER TABLE review_slides ADD COLUMN role TEXT; ALTER TABLE review_slides ADD COLUMN plan_version TEXT;");
   if (!reviewSlideCols.includes("section")) db.exec("ALTER TABLE review_slides ADD COLUMN section TEXT; ALTER TABLE review_slides ADD COLUMN thread_id TEXT;");
   if (!(db.prepare("PRAGMA table_info(reviews)").all() as Row[]).some((c) => c.name === "kind")) db.exec("ALTER TABLE reviews ADD COLUMN kind TEXT NOT NULL DEFAULT 'product';");
+  // Idea reviews (ideaReview.ts): a review named for a brainstorm, whose slides are its ideas.
+  if (!(db.prepare("PRAGMA table_info(reviews)").all() as Row[]).some((c) => c.name === "source_id")) db.exec("ALTER TABLE reviews ADD COLUMN title TEXT; ALTER TABLE reviews ADD COLUMN source_id TEXT;");
+  if (!(db.prepare("PRAGMA table_info(review_slides)").all() as Row[]).some((c) => c.name === "idea_json")) db.exec("ALTER TABLE review_slides ADD COLUMN idea_json TEXT;");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
@@ -2212,10 +2227,24 @@ export function openDb(file?: string) {
       const r = db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
       return r ? toReview(r) : null;
     },
-    createReview(roomId: string, kind: ReviewKind = "product"): ReviewRow {
+    createReview(roomId: string, kind: ReviewKind = "product", named?: { title: string; sourceId: string }): ReviewRow {
       const id = newId();
-      db.prepare("INSERT INTO reviews (id, room_id, status, created_at, kind) VALUES (?, ?, 'draft', ?, ?)").run(id, roomId, Date.now(), kind);
+      db.prepare("INSERT INTO reviews (id, room_id, status, created_at, kind, title, source_id) VALUES (?, ?, 'draft', ?, ?, ?, ?)").run(id, roomId, Date.now(), kind, named?.title ?? null, named?.sourceId ?? null);
       return this.getReview(id)!;
+    },
+    /** A space's idea reviews, newest first. */
+    ideaReviews(roomId: string, limit = 30): ReviewRow[] {
+      return (db.prepare("SELECT * FROM reviews WHERE room_id = ? AND kind = 'ideas' ORDER BY created_at DESC, rowid DESC LIMIT ?").all(roomId, limit) as Row[]).map(toReview);
+    },
+    /** The idea reviews set up on one brainstorm, newest first. */
+    ideaReviewsOf(brainstormId: string): ReviewRow[] {
+      return (db.prepare("SELECT * FROM reviews WHERE source_id = ? AND kind = 'ideas' ORDER BY created_at DESC, rowid DESC").all(brainstormId) as Row[]).map(toReview);
+    },
+    clearReviewSlides(reviewId: string) {
+      db.prepare("DELETE FROM review_slides WHERE review_id = ?").run(reviewId);
+    },
+    setSlideIdea(id: string, idea: IdeaSlideSaved) {
+      db.prepare("UPDATE review_slides SET idea_json = ? WHERE id = ?").run(JSON.stringify(idea), id);
     },
     /** Removes a review with no slides left (one that went back to waiting). */
     deleteReview(id: string) {

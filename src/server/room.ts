@@ -23,7 +23,6 @@ import type {
   ServerMessage,
   Suggestion,
 } from "../shared/protocol.ts";
-import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
 import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, finishBrainstorm, toBrainstormView } from "./brainstorm.ts";
@@ -42,6 +41,7 @@ import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
 import { applyMerges, mergePrompt, planMerge, stickyMerges, type TopicMerge } from "./topicMerge.ts";
 import { newId } from "./ids.ts";
+import { finishIdeaReview } from "./ideaReview.ts";
 import { finishReview, isReviewDeck, refileReview, setOutcome } from "./reviews.ts";
 import { DesignReviewError, authorMay, finishDesignReview, setDesignOutcome, startDesignReview, whenBriefed, writeBackReview } from "./designReviews.ts";
 import type { PlanBriefs } from "./planBrief.ts";
@@ -338,6 +338,7 @@ export class RoomSession implements SpeechSink {
     if (this.ended) return [];
     const done: Array<"review" | "design-review" | "brainstorm" | "design-session"> = [];
     if (finishReview(this.db, this.roomId, this.meetingId)) done.push("review");
+    if (finishIdeaReview(this.db, this.roomId, this.meetingId)) done.push("review");
     if (finishDesignReview(this.db, this.roomId, this.meetingId)) done.push("design-review");
     if (this.brain) {
       if (this.brainTimer) clearTimeout(this.brainTimer);
@@ -847,7 +848,7 @@ export class RoomSession implements SpeechSink {
       // How a review slide ended. Anyone in the call can say, and take it back.
       case "review.outcome":
         if (this.ended) return;
-        if (setOutcome(this.db, msg.itemId, REVIEW_OUTCOMES.some((o) => o.id === msg.outcome) ? msg.outcome : null, conn.name)) this.broadcastState();
+        if (setOutcome(this.db, msg.itemId, typeof msg.outcome === "string" ? msg.outcome : null, conn.name)) this.broadcastState();
         break;
       // How a point of a design review ended, or the verdict on its spec. Anyone can say, and take it back.
       case "design.outcome":
@@ -2190,6 +2191,7 @@ export class RoomSession implements SpeechSink {
     await this.transcriber?.stop().catch(() => {});
     // A product review that ran in this meeting is over: its slides leave the agenda with what was said on them.
     finishReview(this.db, this.roomId, this.meetingId);
+    finishIdeaReview(this.db, this.roomId, this.meetingId);
     finishDesignReview(this.db, this.roomId, this.meetingId);
     this.db.archiveTaskItems(this.roomId);
     // So is a brainstorm: one last look at the talk no pass has read, then its map is the record.
