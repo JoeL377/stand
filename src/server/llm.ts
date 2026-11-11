@@ -809,7 +809,7 @@ This is the record people will read after the meeting, and a position put in oth
       `Make a slide deck from this brief:\n\n${brief.slice(0, 20000)}`,
       "You write slide decks for team meetings. If the brief is already an outline, keep its structure and wording and only tidy it into slides. Otherwise write a tight deck: a title slide, then one idea per slide, few words per bullet, no filler slides. Every slide will be discussed in the meeting, so make each one something people can react to.",
       "medium",
-      config.writerModel,
+      config.deckModel,
     );
     if (!out) return outlineToSlides(brief);
     return out.slides.slice(0, 60).map((s) => ({ ...s, image: null }));
