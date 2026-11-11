@@ -5,7 +5,7 @@
 // becomes a to-do or decision by itself.
 
 import type { SpaceFeed } from "../shared/protocol.ts";
-import { reviewView } from "./reviews.ts";
+import { reviewView, reviewsDone } from "./reviews.ts";
 import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
 import { newId } from "./ids.ts";
@@ -161,6 +161,7 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
     doneDeck: currentDoneDeck(db, roomId),
     // The next product review: slides agents added, and finished work that will join it.
     review: reviewView(db, roomId, baseUrl),
+    reviews: reviewsDone(db, roomId),
     captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES).filter(keep("snap")), [], [], baseUrl),
     jots: db
       .spaceJots(roomId, 0, FEED_CAPTURES)

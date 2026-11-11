@@ -10,6 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ChapterRecap, DiscussionOutcome, Item, Note, NoteKind, Position, Quote, User } from "../src/shared/protocol.ts";
 import { agentApi } from "../src/server/agents.ts";
 import { openDb } from "../src/server/db.ts";
+import { addSlide, finishReview, setOutcome, startReview } from "../src/server/reviews.ts";
 import { upNextView } from "../src/server/upNextPolish.ts";
 import { UploadLinks } from "../src/server/workLog.ts";
 
@@ -231,6 +232,26 @@ const fraud = earlier.note("Pull fraud numbers");
 const summaryBar = latest.note("Build the sticky order summary");
 const promo = earlier.note("Try a promo code");
 
+// A product review that ran five days ago, so its page shows how slides ended and what was raised.
+addSlide(db, room.id, { title: "One-page checkout, first cut", summary: "Address, shipping and payment on one page.\nLook at: does the order summary stay in view?", addedBy: "Priya Shah via Claude Code", owner: priya.name, pr: "https://github.com/acme-demo/checkout/pull/31" });
+addSlide(db, room.id, { title: "Saved cards at checkout", summary: "Returning shoppers pick a saved card in one tap.", addedBy: "Leo Park via Codex", owner: leo.name, pr: "https://github.com/acme-demo/checkout/pull/33" });
+addSlide(db, room.id, { title: "Order confirmation email", summary: "New layout with the delivery date at the top.", addedBy: "Maya Chen via Cursor", owner: maya.name });
+const pastReview = startReview(db, room.id);
+const reviewStarted = now - 5 * DAY;
+const reviewCall = db.startMeeting(room.id);
+const slideItems = db.listItems(room.id).slice(0, 3);
+slideItems.forEach((it, i) => db.addSegment({ meetingId: reviewCall.id, itemId: it.id, speakerId: team[i].id, speakerName: team[i].name, kind: "speech", text: `Here's ${it.title.toLowerCase()}.`, ts: reviewStarted + (i + 1) * 4 * MIN }));
+db.addNote(reviewCall.id, slideItems[0].id, { kind: "action", text: "Keep the order summary pinned while the page scrolls", owner: maya.name }, null);
+db.addNote(reviewCall.id, slideItems[0].id, { kind: "question", text: "Does the one-page layout work with long addresses?", owner: null }, null);
+db.addNote(reviewCall.id, slideItems[1].id, { kind: "decision", text: "Saved cards ship to everyone this week", owner: null }, null);
+db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Put the order number in the subject line", owner: maya.name }, null);
+db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Test the email in Outlook", owner: leo.name }, null);
+setOutcome(db, slideItems[0].id, "fixes", sam.name);
+setOutcome(db, slideItems[1].id, "ship", priya.name);
+setOutcome(db, slideItems[2].id, "not_yet", sam.name);
+db.endMeeting(reviewCall.id, "The team reviewed three checkout features. Saved cards ship now, one-page checkout ships with a fix to the summary, and the confirmation email needs another pass.", null, reviewStarted + 18 * MIN, []);
+finishReview(db, room.id, reviewCall.id, reviewStarted + 18 * MIN);
+
 // Done, closed by the PR that shipped it, with a summary in its log.
 api.postUpdate(leosAgent, { ref: ref(key), status: "working", text: "Adding the key to the charge call" });
 api.completeAction(leosAgent, {
@@ -284,6 +305,8 @@ db.addJot({ id: "previewjot2", roomId: room.id, itemId: null, text: "Legal is fi
 // startMeeting always says now, so the dates go back afterwards.
 const raw = new DatabaseSync(file);
 for (const m of [earlier, latest]) raw.prepare("UPDATE meetings SET started_at = ?, ended_at = ? WHERE id = ?").run(m.started, m.ended, m.id);
+raw.prepare("UPDATE meetings SET started_at = ?, ended_at = ? WHERE id = ?").run(reviewStarted, reviewStarted + 18 * MIN, reviewCall.id);
+raw.prepare("UPDATE reviews SET started_at = ? WHERE id = ?").run(reviewStarted, pastReview.review.id);
 const hoursAgo = (h: number) => now - h * 3_600_000;
 raw.prepare("UPDATE updates SET ts = ? WHERE note_id = ?").run(hoursAgo(30), key.id);
 raw.prepare("UPDATE notes SET done_at = ? WHERE id = ?").run(hoursAgo(30), key.id);

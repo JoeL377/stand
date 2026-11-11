@@ -10,7 +10,7 @@
 // notes agent writes that slide's to-dos, decisions and open questions as it does for any item. A
 // slide ends with an outcome anyone can click: Ship, Ship with fixes, or Not yet.
 
-import type { ItemUpdate, Note, ReviewOutcome, ReviewShot, ReviewSlideInfo, ReviewView, SlideContent } from "../shared/protocol.ts";
+import type { ItemUpdate, Note, ReviewCaught, ReviewOutcome, ReviewShot, ReviewSlideInfo, ReviewSummary, ReviewView, SlideContent } from "../shared/protocol.ts";
 import type { DB, ReviewRow, ReviewSlideRow } from "./db.ts";
 import { newId } from "./ids.ts";
 import { prOf, shotUrl } from "./workLog.ts";
@@ -88,6 +88,7 @@ const toView = (db: DB, review: ReviewRow, slides: ReviewSlideRow[], pending: Pe
   meetingId: review.meetingId,
   createdAt: review.createdAt,
   startedAt: review.startedAt,
+  endedAt: review.endedAt,
   slides: [
     ...slides.map((s) => {
       const { slideId: _s, ...info } = infoOf(db, s, baseUrl);
@@ -124,6 +125,43 @@ export function reviewView(db: DB, roomId: string, baseUrl = "", now = Date.now(
 export function lastReview(db: DB, roomId: string, baseUrl = ""): ReviewView | null {
   const done = db.reviewIn(roomId, ["done"]);
   return done ? toView(db, done, db.reviewSlides(done.id), [], baseUrl) : null;
+}
+
+const CAUGHT = ["action", "decision", "question"];
+
+/** One review as its own page shows it: "next" is the one being put together (or in a call), an id is
+ *  one that ran, with what the team raised on each slide. Null when it isn't this space's. */
+export function reviewPage(db: DB, roomId: string, idOrNext: string, baseUrl = "", now = Date.now()): ReviewView | null {
+  if (idOrNext === "next") return reviewView(db, roomId, baseUrl, now);
+  const review = db.getReview(idOrNext);
+  if (!review || review.roomId !== roomId) return null;
+  if (review.status !== "done") return reviewView(db, roomId, baseUrl, now);
+  const rows = db.reviewSlides(review.id);
+  const view = toView(db, review, rows, [], baseUrl);
+  const notes = review.meetingId ? db.meetingNotes(review.meetingId).filter((n) => CAUGHT.includes(n.kind)) : [];
+  view.slides.forEach((s, i) => {
+    const itemId = rows[i].itemId;
+    s.caught = itemId
+      ? notes.filter((n) => n.itemId === itemId).map((n): ReviewCaught => ({ id: n.id, kind: n.kind as ReviewCaught["kind"], text: n.text, owner: n.owner ?? null, done: !!n.doneAt }))
+      : [];
+  });
+  return view;
+}
+
+export function summaryOfReview(db: DB, review: ReviewRow): ReviewSummary {
+  const slides = db.reviewSlides(review.id);
+  const outcomes = { ship: 0, fixes: 0, not_yet: 0 };
+  for (const s of slides) if (s.outcome) outcomes[s.outcome]++;
+  return { id: review.id, startedAt: review.startedAt, endedAt: review.endedAt, meetingId: review.meetingId, slides: slides.length, outcomes };
+}
+
+/** The space's reviews that ran, newest first. */
+export const reviewsDone = (db: DB, roomId: string): ReviewSummary[] => db.reviewsDone(roomId).map((r) => summaryOfReview(db, r));
+
+/** The review that ran in a meeting, if one did. */
+export function reviewOfMeeting(db: DB, meetingId: string): ReviewSummary | null {
+  const r = db.reviewByMeeting(meetingId);
+  return r ? summaryOfReview(db, r) : null;
 }
 
 export interface NewSlide {

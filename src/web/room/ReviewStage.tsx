@@ -341,7 +341,7 @@ function AddLine({ onAdd }: { onAdd: (kind: "action" | "decision" | "question", 
 const MAX_ZOOM = 5;
 
 /** A slide's picture over the whole screen. Pinch or double tap to zoom, drag to move around. Yours alone. */
-function ShotZoom({ url, alt, onClose }: { url: string; alt: string; onClose: () => void }) {
+export function ShotZoom({ url, alt, onClose }: { url: string; alt: string; onClose: () => void }) {
   const [zoom, setZoom] = useState(1);
   const box = useRef<HTMLDivElement>(null);
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);

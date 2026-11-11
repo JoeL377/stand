@@ -2027,6 +2027,14 @@ export function openDb(file?: string) {
         .get(roomId, ...statuses) as Row | undefined;
       return r ? toReview(r) : null;
     },
+    /** The space's reviews that ran, newest first. */
+    reviewsDone(roomId: string, limit = 30): ReviewRow[] {
+      return (db.prepare("SELECT * FROM reviews WHERE room_id = ? AND status = 'done' ORDER BY started_at DESC, rowid DESC LIMIT ?").all(roomId, limit) as Row[]).map(toReview);
+    },
+    reviewByMeeting(meetingId: string): ReviewRow | null {
+      const r = db.prepare("SELECT * FROM reviews WHERE meeting_id = ? ORDER BY rowid DESC LIMIT 1").get(meetingId) as Row | undefined;
+      return r ? toReview(r) : null;
+    },
     getReview(id: string): ReviewRow | null {
       const r = db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
       return r ? toReview(r) : null;

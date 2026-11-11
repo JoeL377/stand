@@ -1,6 +1,7 @@
 import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
@@ -179,6 +180,12 @@ export function RecapPage() {
             </>
           )}
         </p>
+        {data.review && (
+          <Link className="rp-pill rc-review" to={reviewHref(data.roomId, data.review.id)}>
+            Product review · {data.review.slides} slides
+            <OutcomeCounts outcomes={data.review.outcomes} />
+          </Link>
+        )}
         {data.summary && <p className="lede">{data.summary}</p>}
         {(actions.length > 0 || decided.length > 0 || questions.length > 0 || chapters.length > 0) && (
           <nav className="glance" aria-label="Jump to">
