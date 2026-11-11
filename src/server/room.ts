@@ -49,6 +49,7 @@ import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
 import { metered } from "./usage.ts";
 import { type UpNextPolisher, upNextView } from "./upNextPolish.ts";
+import { PassRunner } from "./passRunner.ts";
 
 /** Below this the agent keeps its guess to itself. */
 const SUGGEST_MIN_CONFIDENCE = 0.55;
@@ -106,10 +107,6 @@ const HANDLED_CIDS = 2_000;
 const UNDO_KEEP_MS = 60_000;
 /** Talk that keeps naming another agenda item adds up to this before the host is nudged to switch. */
 const DRIFT_NUDGE_SCORE = 3;
-/** A list or map pass that failed waits this long before the next, doubling to PASS_RETRY_MAX_MS while it keeps failing. */
-const PASS_RETRY_MS = 5_000;
-const PASS_RETRY_MAX_MS = 60_000;
-const retryWait = (failures: number) => (failures ? Math.min(PASS_RETRY_MAX_MS, PASS_RETRY_MS * 2 ** (failures - 1)) : 0);
 
 interface Conn {
   participantId: string;
@@ -223,10 +220,7 @@ export class RoomSession implements SpeechSink {
   private demoRunning = false;
   /** The middle board (board.ts): one pass at a time, every BOARD_EVERY_MS while people talk. */
   private board: BoardKeeper | null = null;
-  private boardTimer: NodeJS.Timeout | null = null;
-  private boardRun: Promise<void> | null = null;
   private boardRanAt = 0;
-  private boardDueAt = 0;
   /** The board's running list (liveList.ts): one pass at a time, after each pause in the talk. Null without a model. */
   private list: ListKeeper | null = null;
   /** What ✦ Stand put on the board (meetingAgent.ts); null without a model to run it. */
@@ -237,15 +231,19 @@ export class RoomSession implements SpeechSink {
   /** Who drives ✦ Stand right now, and who's asking to (pilot.ts). */
   private pilot = new PilotSeat();
   private pilotTimer: ReturnType<typeof setTimeout> | null = null;
-  private listTimer: NodeJS.Timeout | null = null;
   /** The brainstorm running in this space, if one is (brainstorm.ts): its map, one pass at a time. */
   private brain: { id: string; itemId: string | null; map: MapKeeper | DiagramKeeper } | null = null;
-  private brainTimer: NodeJS.Timeout | null = null;
-  private brainRun: Promise<void> | null = null;
-  private listRun: Promise<void> | null = null;
-  /** Passes that failed in a row: the next one waits longer (retryWait), so an API outage isn't hit in a loop. */
-  private listFailures = 0;
-  private mapFailures = 0;
+  /** The passes that keep the list, the map and the board up to date while people talk (passRunner.ts). */
+  private listPasses = new PassRunner(() => this.listPass(), { label: "list", about: () => this.meetingId, settled: () => this.scheduleList() });
+  private mapPasses = new PassRunner(() => this.mapPass(), { label: "brainstorm", about: () => this.meetingId, settled: () => this.scheduleMap() });
+  private boardPasses = new PassRunner(() => this.boardPass(), {
+    label: "board",
+    about: () => this.meetingId,
+    // A pass already waiting keeps its time unless the new one is due sooner.
+    keepEarlier: true,
+    // Talk that came in during the pass gets the next one.
+    settled: () => this.board && !this.ended && this.board.due(this.db.meetingSegments(this.meetingId)) && this.scheduleBoard(this.board.waitingOnItem),
+  });
   /** The check-in at the start ("Since last time"): someone moved on from it, and the last answer anyone gave. */
   private checkInClosed = false;
   private checkInAnsweredAt: number | null = null;
@@ -348,11 +346,11 @@ export class RoomSession implements SpeechSink {
     if (finishIdeaReview(this.db, this.roomId, this.meetingId)) done.push("review");
     if (finishDesignReview(this.db, this.roomId, this.meetingId)) done.push("design-review");
     if (this.brain) {
-      if (this.brainTimer) clearTimeout(this.brainTimer);
-      this.brainTimer = null;
       // One last look at the talk no pass has read, then its map is the record.
-      await this.brainRun?.catch(() => {});
-      await Promise.race([this.runMap(true), new Promise((r) => setTimeout(r, 15_000))]).catch(() => {});
+      await this.mapPasses.idle();
+      let wait: NodeJS.Timeout | undefined;
+      await Promise.race([this.mapPasses.run(), new Promise((r) => (wait = setTimeout(r, 15_000)))]);
+      clearTimeout(wait);
       if (this.ended) return done;
       const row = finishBrainstorm(this.db, this.roomId, this.meetingId);
       if (row?.kind === "design") {
@@ -410,46 +408,31 @@ export class RoomSession implements SpeechSink {
    *  the oldest line no pass has read. */
   private scheduleMap() {
     const brain = this.brain;
-    if (this.ended || !brain || this.brainRun) return;
+    if (this.ended || !brain) return;
     const since = brain.map.unreadSince(this.db.meetingSegments(this.meetingId));
-    if (since === null) return;
-    const wait = Math.max(0, Math.min(MAP_DEBOUNCE_MS, since + MAP_MAX_WAIT_MS - Date.now()), retryWait(this.mapFailures));
-    if (this.brainTimer) clearTimeout(this.brainTimer);
-    this.brainTimer = setTimeout(() => {
-      this.brainTimer = null;
-      void this.runMap();
-    }, wait);
+    if (since !== null) this.mapPasses.schedule(Math.min(MAP_DEBOUNCE_MS, since + MAP_MAX_WAIT_MS - Date.now()));
   }
 
-  private runMap(final = false): Promise<void> {
+  /** One map pass over the talk no pass has read. As the meeting ends it still runs, once, for the record. */
+  private async mapPass() {
     const brain = this.brain;
-    if (!brain || (this.ended && !final)) return Promise.resolve();
-    if (this.brainRun) return this.brainRun;
+    if (!brain) return;
     const segments = this.db.meetingSegments(this.meetingId);
-    if (brain.map.unreadSince(segments) === null) return Promise.resolve();
-    const people = [...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName)])];
-    if (!final) this.broadcastBrainstorm(true);
-    this.brainRun = brain.map
-      .run(segments, people, this.brainCaught(), this.meetingStartedAt, Date.now())
-      .then(
-        () => {
-          this.mapFailures = 0;
-        },
-        (e) => {
-          this.mapFailures++;
-          console.error(`[brainstorm] ${this.meetingId}: ${(e as Error).message}`);
-        },
-      )
-      .then(() => {
-        if (this.brain !== brain) return;
+    if (brain.map.unreadSince(segments) === null) return;
+    if (!this.ended) this.broadcastBrainstorm(true);
+    try {
+      await brain.map.run(segments, this.people(segments), this.brainCaught(), this.meetingStartedAt, Date.now());
+    } finally {
+      if (this.brain === brain) {
         brain.map.refresh(this.brainCaught());
         this.saveBrainstorm();
-      })
-      .finally(() => {
-        this.brainRun = null;
-        if (!final) this.scheduleMap();
-      });
-    return this.brainRun;
+      }
+    }
+  }
+
+  /** Everyone in the call now, and everyone who has spoken in it. */
+  private people(segments: Segment[]) {
+    return [...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName)])];
   }
 
   // ---- connections ---------------------------------------------------------
@@ -460,12 +443,14 @@ export class RoomSession implements SpeechSink {
     this.conns.set(ws, null);
     this.pendingUser.set(ws, user);
     ws.on("message", (raw) => {
-      let msg: ClientMessage;
+      let msg: unknown;
       try {
         msg = JSON.parse(String(raw));
       } catch {
         return;
       }
+      // Each handler checks the fields it uses; this keeps out what isn't a message at all.
+      if (!isMessage(msg)) return;
       this.handle(ws, msg).catch((err) => {
         console.error("[room]", err);
         this.send(ws, { type: "error", message: "Something went wrong with that. Try again." });
@@ -932,7 +917,7 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "chat": {
-        const text = msg.text.trim().slice(0, 2000);
+        const text = clean(msg.text, 2000);
         if (!text) return;
         this.addSegment(conn.participantId, conn.name, "chat", text, Date.now());
         const q = typedAsk(text);
@@ -983,7 +968,8 @@ export class RoomSession implements SpeechSink {
         break;
       case "segment.move": {
         const before = this.db.meetingSegments(this.meetingId).find((s) => s.id === msg.segmentId);
-        if (!before) return;
+        // A remark moves to an item on this agenda, or to General.
+        if (!before || (msg.itemId !== null && !this.items().some((i) => i.id === msg.itemId))) return;
         const seg = this.db.moveSegment(msg.segmentId, msg.itemId);
         if (this.lastSpeech?.segmentId === msg.segmentId) this.lastSpeech = null;
         if (seg) {
@@ -1624,8 +1610,6 @@ export class RoomSession implements SpeechSink {
 
   // ---- running list ---------------------------------------------------------
 
-  /** The next list pass: LIST_DEBOUNCE_MS after the latest talk, never more than LIST_MAX_WAIT_MS after
-   *  the oldest line no pass has read. One pass at a time; talk during a pass gets the next one. */
   /** A product review slide is on screen: what's said belongs to the slide, so the notes agent
    *  files it there and the passes that work out topics by themselves sit out. */
   private inReview() {
@@ -1637,52 +1621,29 @@ export class RoomSession implements SpeechSink {
     return !!this.brain?.itemId && this.focusItemId === this.brain.itemId;
   }
 
+  /** The next list pass: LIST_DEBOUNCE_MS after the latest talk, never more than LIST_MAX_WAIT_MS after
+   *  the oldest line no pass has read. Talk during a pass gets the next one. */
   private scheduleList() {
     const list = this.list;
-    if (this.ended || !list || this.listRun || this.inReview()) return;
+    if (this.ended || !list || this.inReview()) return;
     const since = list.unreadSince(this.db.meetingSegments(this.meetingId));
-    if (since === null) return;
-    const wait = Math.max(0, Math.min(LIST_DEBOUNCE_MS, since + LIST_MAX_WAIT_MS - Date.now()), retryWait(this.listFailures));
-    if (this.listTimer) clearTimeout(this.listTimer);
-    this.listTimer = setTimeout(() => {
-      this.listTimer = null;
-      void this.runList();
-    }, wait);
+    if (since !== null) this.listPasses.schedule(Math.min(LIST_DEBOUNCE_MS, since + LIST_MAX_WAIT_MS - Date.now()));
   }
 
-  private runList(): Promise<void> {
+  private async listPass() {
     const list = this.list;
-    if (this.ended || !list || this.listRun) return this.listRun ?? Promise.resolve();
+    if (this.ended || !list) return;
     const segments = this.db.meetingSegments(this.meetingId);
-    if (!list.due(segments)) return Promise.resolve();
-    const people = [...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName)])];
+    if (!list.due(segments)) return;
     const carried = this.carried().filter((f) => !f.saidDone);
-    this.listRun = list
-      .run(segments, people, (ts) => this.focusAt(ts), Date.now(), carried.map((f) => ({ id: f.id, who: f.owner, text: f.text })))
-      .then(
-        (changed) => {
-          this.listFailures = 0;
-          return changed;
-        },
-        (e) => {
-          this.listFailures++;
-          console.error(`[list] ${this.meetingId}: ${(e as Error).message}`);
-          return false;
-        },
-      )
-      .then((changed) => {
-        if (changed && !this.ended) this.listChanged();
-        if (this.ended || !list.heardDone.length) return;
-        // A carried task someone said is finished: marked Said done, still open until evidence or a click.
-        for (const h of list.heardDone)
-          this.db.setSaidDone(this.roomId, h.id, { segmentId: h.segment.id, ts: h.segment.ts, speaker: h.segment.speakerName, text: h.segment.text.slice(0, 500) });
-        this.broadcastState();
-      })
-      .finally(() => {
-        this.listRun = null;
-        this.scheduleList();
-      });
-    return this.listRun;
+    const changed = await list.run(segments, this.people(segments), (ts) => this.focusAt(ts), Date.now(), carried.map((f) => ({ id: f.id, who: f.owner, text: f.text })));
+    if (this.ended) return;
+    if (changed) this.listChanged();
+    if (!list.heardDone.length) return;
+    // A carried task someone said is finished: marked Said done, still open until evidence or a click.
+    for (const h of list.heardDone)
+      this.db.setSaidDone(this.roomId, h.id, { segmentId: h.segment.id, ts: h.segment.ts, speaker: h.segment.speakerName, text: h.segment.text.slice(0, 500) });
+    this.broadcastState();
   }
 
   /** ✦ Stand's options for an open question: the space's history and the talk so far, then the card. */
@@ -1853,51 +1814,29 @@ export class RoomSession implements SpeechSink {
 
   /** The next board pass: BOARD_EVERY_MS after the last one, or soon after an agenda move. */
   private scheduleBoard(agendaMoved = false) {
-    if (this.ended || !this.board || this.boardRun || this.inReview() || this.inBrainstorm()) return;
-    const wait = agendaMoved ? BOARD_AFTER_FOCUS_MS : Math.max(BOARD_FIRST_MS, this.boardRanAt + BOARD_EVERY_MS - Date.now());
-    if (this.boardTimer) {
-      // A pass already waiting keeps its time unless this one is due sooner.
-      if (this.boardDueAt <= Date.now() + wait) return;
-      clearTimeout(this.boardTimer);
-    }
-    this.boardDueAt = Date.now() + wait;
-    this.boardTimer = setTimeout(() => {
-      this.boardTimer = null;
-      void this.runBoard();
-    }, wait);
+    if (this.ended || !this.board || this.inReview() || this.inBrainstorm()) return;
+    this.boardPasses.schedule(agendaMoved ? BOARD_AFTER_FOCUS_MS : Math.max(BOARD_FIRST_MS, this.boardRanAt + BOARD_EVERY_MS - Date.now()));
   }
 
-  private runBoard(): Promise<void> {
+  private async boardPass() {
     const board = this.board;
-    if (this.ended || !board || this.boardRun) return this.boardRun ?? Promise.resolve();
+    if (this.ended || !board) return;
     const segments = this.db.meetingSegments(this.meetingId);
-    if (!board.due(segments)) return Promise.resolve();
+    if (!board.due(segments)) return;
     this.boardRanAt = Date.now();
     board.busy = true;
     this.broadcast({ type: "board", board: board.board() });
-    const people = [...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName)])];
-    this.boardRun = board
-      .run(segments, this.items(), people, this.focusItemId, Date.now())
-      .catch((e) => {
-        console.error(`[board] ${this.meetingId}: ${(e as Error).message}`);
-        return false;
-      })
-      .then((changed) => {
-        board.busy = false;
-        if (changed && !this.ended) this.db.saveBoard(this.meetingId, board.board());
-        this.broadcast({ type: "board", board: board.board() });
-      })
-      .finally(() => {
-        this.boardRun = null;
-        // Talk that came in during the pass gets the next one.
-        if (!this.ended && board.due(this.db.meetingSegments(this.meetingId))) this.scheduleBoard(board.waitingOnItem);
-      });
-    return this.boardRun;
+    try {
+      if ((await board.run(segments, this.items(), this.people(segments), this.focusItemId, Date.now())) && !this.ended) this.db.saveBoard(this.meetingId, board.board());
+    } finally {
+      board.busy = false;
+      this.broadcast({ type: "board", board: board.board() });
+    }
   }
 
   /** Someone clicked "Looks like you've moved to …": switch the board now, after any pass in flight. */
   private async acceptBoardMove(title: string, by: string) {
-    await this.boardRun;
+    await this.boardPasses.idle();
     const board = this.board;
     if (this.ended || !board || !board.accept(title, Date.now(), by)) return;
     this.db.saveBoard(this.meetingId, board.board());
@@ -2202,9 +2141,7 @@ export class RoomSession implements SpeechSink {
     if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
     if (this.pilotTimer) clearTimeout(this.pilotTimer);
     for (const t of this.noteTimers.values()) clearTimeout(t);
-    if (this.boardTimer) clearTimeout(this.boardTimer);
-    if (this.listTimer) clearTimeout(this.listTimer);
-    if (this.brainTimer) clearTimeout(this.brainTimer);
+    for (const passes of [this.boardPasses, this.listPasses, this.mapPasses]) passes.stop();
     this.noteTimers.clear();
     if (this.mergeTimer) clearTimeout(this.mergeTimer);
     this.mergeTimer = null;
@@ -2227,9 +2164,9 @@ export class RoomSession implements SpeechSink {
     step("archiving task items", () => this.db.archiveTaskItems(this.roomId));
     // So is a brainstorm: one last look at the talk no pass has read, then its map is the record.
     if (this.brain) {
-      await this.brainRun?.catch(() => {});
+      await this.mapPasses.idle();
       let wait: NodeJS.Timeout | undefined;
-      await Promise.race([this.runMap(true), new Promise((r) => (wait = setTimeout(r, 25_000)))]).catch(() => {});
+      await Promise.race([this.mapPasses.run(), new Promise((r) => (wait = setTimeout(r, 25_000)))]);
       clearTimeout(wait);
       let done: ReturnType<typeof finishBrainstorm> | undefined;
       step("finishing the brainstorm", () => (done = finishBrainstorm(this.db, this.roomId, this.meetingId)));
@@ -2447,6 +2384,12 @@ export function keepLeftOut(before: Discussion[], drafts: DraftDiscussion[], win
     for (const id of lost) placed.add(id);
   }
   return revived;
+}
+
+/** Something a client sent that has the shape of a message: an object with a type, and a cid if any as a string. */
+function isMessage(v: unknown): v is ClientMessage {
+  const o = v as { type?: unknown; cid?: unknown } | null;
+  return typeof o === "object" && o !== null && typeof o.type === "string" && (o.cid === undefined || typeof o.cid === "string");
 }
 
 /** A host view as sent, or null when it isn't one. */
