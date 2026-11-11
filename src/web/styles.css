@@ -3119,6 +3119,7 @@ a.rp-pill:hover, button.rp-pill:hover { background: var(--panel-2); text-decorat
 .rp-flip:focus-visible { outline: 2px solid var(--accent); }
 .rp-about { display: flex; flex-direction: column; gap: 6px; max-height: 34%; overflow-y: auto; min-width: 0; }
 .rp-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.rp-title:empty, .rp-thumb-foot:empty { display: none; }
 .rp-title h1 { font-size: 17px; font-weight: 600; line-height: 1.3; margin: 0; }
 .rp-body { font-size: 13.5px; line-height: 1.45; color: var(--muted); white-space: pre-line; max-width: 900px; }
 .rp-caught { display: flex; flex-direction: column; gap: 2px; }
