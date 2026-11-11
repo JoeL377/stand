@@ -84,6 +84,8 @@ export function ReviewPage() {
   // The slide you're on stays in view in the strip.
   const strip = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    // On a phone an idea review's strip is a list under the slide: a pick brings the slide back up.
+    if (strip.current && getComputedStyle(strip.current).flexDirection === "column") return void window.scrollTo({ top: 0 });
     strip.current?.querySelector(".on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [at, count]);
 
@@ -239,9 +241,10 @@ export function ReviewPage() {
               )}
             </div>
           </main>
-          <div className="rp-strip" ref={strip} role="tablist" aria-label="Slides">
+          <div className={ideas ? "rp-strip ideas" : "rp-strip"} ref={strip} role="tablist" aria-label="Slides">
             {review.slides.map((s, i) => (
               <button key={s.id} type="button" role="tab" aria-selected={i === at} className={i === at ? "on" : undefined} title={s.title} onClick={() => go(i)}>
+                <span className="rp-num">{i + 1}</span>
                 <span className={s.shots[0] ? "rp-thumb" : "rp-thumb text"}>{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
                 <span className="rp-thumb-foot">
                   {s.shots[0] && <span className="rp-n">{s.name ?? i + 1}</span>}
