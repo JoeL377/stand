@@ -3455,3 +3455,8 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .xp-what { font-style: normal; }
 /* A phone's control row has no room for the kind: "Finish" alone, the board says which. */
 @media (max-width: 760px) { .xp-what { display: none; } }
+/* A card's caught lines sit under their kind, marked as on the pills and the circles. */
+.brain-card h4.brain-caught-h { display: flex; align-items: center; gap: 5px; }
+.brain-caught-h.action svg { color: var(--accent); }
+.brain-caught-h.decision svg { color: var(--ok); }
+.brain-caught-h.question svg { color: var(--warn); }
