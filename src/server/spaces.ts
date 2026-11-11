@@ -15,7 +15,7 @@ export function ownedBy(owner: string | null, userName: string): boolean {
   return o === full || o === full.split(/\s+/)[0];
 }
 
-export function toSpaceSummary(row: Row, user: { id: string; name: string }, live: Live, waiting = 0, mentions = 0): SpaceSummary {
+export function toSpaceSummary(row: Row, user: { id: string; name: string }, live: Live, waiting = 0, mentions = 0, unread = 0): SpaceSummary {
   // To-dos can be added by hand between meetings; questions only come from meetings.
   const latestMeeting = row.notes.find((n) => n.kind !== "action")?.meetingId;
   const open = row.notes.filter((n) => n.kind === "action" && !n.done);
@@ -34,6 +34,7 @@ export function toSpaceSummary(row: Row, user: { id: string; name: string }, liv
     forYou: open.filter((n) => ownedBy(n.owner, user.name)).length,
     waiting,
     mentions,
+    unread,
     last: last && { kind: last.kind, text: last.text, ts: last.ts },
     people: row.people,
     search: [row.name, row.purpose, ...row.people, ...row.notes.map((n) => `${n.text} ${n.owner ?? ""}`)]

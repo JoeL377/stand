@@ -89,7 +89,8 @@ function SpaceRow(props: { space: SpaceSummary; collapsed: boolean }) {
               {initials(s.name)}
               {s.live && <span className="sp-side-dot live" />}
             </span>
-            <span className="sp-side-text">{s.name}</span>
+            <span className={s.unread ? "sp-side-text unread" : "sp-side-text"}>{s.name}</span>
+            {!!s.unread && <span className="sr-only">({s.unread} unread in chat)</span>}
             {s.live && <span className="sr-only">(talking now)</span>}
             <WaitingCount count={(s.waiting ?? 0) + (s.mentions ?? 0)} collapsed={collapsed} />
           </>
