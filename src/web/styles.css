@@ -2825,9 +2825,10 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .task-presentation-spec { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
 
 /* Cross-meeting topics stay separate from each outcome's source pill. */
-.sh-topic-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-size: 13px; }
-.sh-topic-filter label { color: var(--muted); }
-.sh-topic-filter select { max-width: min(320px, 65vw); padding: 6px 26px 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: inherit; font: inherit; }
+.sh-topic-filter { flex: 0 1 auto; min-width: 64px; display: flex; align-self: center; margin-left: auto; padding-left: 10px; }
+@media (max-width: 760px) { .sh-topic-filter { padding-left: 2px; } .sh-topic-filter select { width: 100%; padding: 0 18px 0 8px; font-size: 12px; } }
+.sh-topic-filter select { max-width: min(200px, 40vw); height: 26px; padding: 0 22px 0 10px; border: 1px solid var(--line); border-radius: 999px; background-color: var(--panel); color: var(--muted); font: inherit; font-size: 12.5px; text-overflow: ellipsis; }
+.sh-topic-filter.on select { color: var(--text); border-color: var(--text); font-weight: 500; }
 .topic-picker { display: inline-block; position: relative; margin-left: 6px; vertical-align: baseline; }
 .topic-pill { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; cursor: pointer; }
 .topic-pill.unset { opacity: .65; }
@@ -3319,11 +3320,20 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .xp-what { font-style: normal; }
 /* A phone's control row has no room for the kind: "Finish" alone, the board says which. */
 @media (max-width: 760px) { .xp-what { display: none; } }
-/* A card's caught lines sit under their kind, marked as on the pills and the circles. */
-.brain-card h4.brain-caught-h { display: flex; align-items: center; gap: 5px; }
-.brain-caught-h.action svg { color: var(--accent); }
-.brain-caught-h.decision svg { color: var(--ok); }
-.brain-caught-h.question svg { color: var(--warn); }
+/* A card's caught lines stay behind their marks: one mark and a count per kind, lines on hover, focus or tap. */
+.brain-got-row { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.brain-card .brain-got-row h4 { margin: 0 0 0 4px; }
+.brain-got-mark { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.brain-got-mark:hover, .brain-got-mark.on { background: var(--panel-2); }
+.brain-got-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.brain-got-mark.action svg { color: var(--accent); }
+.brain-got-mark.decision svg { color: var(--ok); }
+.brain-got-mark.question svg { color: var(--warn); }
+
+/* What's being discussed sits in the call's top bar (Stage.tsx portals it into this slot). */
+.topbar-now { flex: 1; min-width: 0; display: flex; }
+.now.in-bar { flex: 1; min-width: 0; padding: 0 8px; }
+.now.in-bar .task-picker > button { height: 28px; padding: 0 10px; font-size: 12.5px; }
 
 /* ---- The space's chat (SpaceChat.tsx): the thread scrolls, and the box to write in stays at its foot ---- */
 .sh-body.chat { overflow: hidden; padding-bottom: 16px; }
