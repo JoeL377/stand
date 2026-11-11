@@ -179,8 +179,8 @@ export function agentApi(deps: AgentDeps) {
       ? { kind: "agent", ...person, agent: caller.token.label, connection: caller.token.id, model: caller.model }
       : { kind: "person", ...person };
   };
-  /** The space's design reviews for an agent: the specs waiting on the next one with their points, and
-   *  the last one that ran with each spec's verdict, how its points ended and what came out of it. */
+  /** The space's design reviews for an agent: the specs waiting on the next one with their questions, and
+   *  the last one that ran with each spec's verdict, how its questions ended and what came out of it. */
   const designReviewInfo = (roomId: string, baseUrl: string) => {
     const next = designReviewView(db, deps.briefs ?? null, roomId, null);
     const ran = designReviewsRan(db, roomId)[0];
@@ -196,7 +196,8 @@ export function agentApi(deps: AgentDeps) {
               title: s.title,
               owner: s.owner ?? undefined,
               requested_by: s.requestedBy ?? undefined,
-              points: pointsOnDeck(s.points).map((p) => ({ thread: p.threadId, about: clip(p.quote, 200), question: p.text, by: p.by })),
+              section_slides: s.groups.length,
+              questions: pointsOnDeck(s.points).map((p) => ({ thread: p.threadId, about: clip(p.quote, 200), question: p.text, by: p.by })),
             })),
           }
         : null,
@@ -210,13 +211,13 @@ export function agentApi(deps: AgentDeps) {
               title: s.title,
               verdict: s.verdict ? designOutcomeLabel(s.verdict) : "no verdict",
               verdict_by: s.verdictBy ?? undefined,
-              points: s.slides.filter((x) => x.role === "point").map((x) => ({
+              questions: s.slides.filter((x) => x.role === "point").map((x) => ({
                 question: x.body,
                 about: x.quote ? clip(x.quote, 200) : undefined,
                 outcome: x.outcome ? designOutcomeLabel(x.outcome) : "not called",
                 decisions: x.caught.filter((c) => c.kind === "decision").map(ref),
                 todos: x.caught.filter((c) => c.kind === "action").map(ref),
-                questions: x.caught.filter((c) => c.kind === "question").map(ref),
+                open_questions: x.caught.filter((c) => c.kind === "question").map(ref),
               })),
               todos: s.slides.flatMap((x) => x.caught.filter((c) => c.kind === "action")).map(ref),
             })),
@@ -895,10 +896,10 @@ export function agentApi(deps: AgentDeps) {
         return {
           [out.added ? "requested" : "already_requested"]: refOf("action", r.note.id),
           questions_added: out.questions,
-          points: designReviewState(db, r.note).points,
+          questions_open: designReviewState(db, r.note).points,
           space: r.room.name,
           review_url: `${baseUrl}/s/${r.room.id}/design-review`,
-          shows_on: "The space's next design review. Each open comment thread on the plan is a point with a slide of its own; the author can take one off the call on the review page.",
+          shows_on: "The space's next design review. The plan's sections go on at most eight slides, and each open comment thread on the plan is a question on the slide of its section; the author can take one off the call on the review page.",
         };
       } catch (err) {
         if (err instanceof DesignReviewError) throw new AgentError(err.message);

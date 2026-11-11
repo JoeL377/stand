@@ -202,10 +202,10 @@ app.use(oauthRoutes(db));
 
 const uploadLinks = new UploadLinks();
 /** A plan in a running design review changed (a comment, a new version, the author's edit): its
- *  slides are laid out again for the people in the call. A new point follows the slide on screen. */
+ *  slides are laid out again for the people in the call. */
 function specTouched(task: Note & { roomId: string }) {
   const s = sessions.get(task.roomId);
-  if (specChanged(db, planBriefs, task, s?.state().focusItemId)) s?.itemsChanged();
+  if (specChanged(db, planBriefs, task)) s?.itemsChanged();
 }
 
 const agents = agentApi({

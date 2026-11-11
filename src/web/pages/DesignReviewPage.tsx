@@ -1,11 +1,12 @@
 // The space's next design review, before the call: each spec waiting on it, laid out as the slides
-// the call will go through. The spec's author prepares it here: rewrites what Stand wrote, takes
-// sections and points off the call, asks the questions the team has to decide.
+// the call will go through. The spec's author prepares it here: rewrites what Stand wrote, chooses
+// which sections share a slide, takes sections and questions off the call, and asks the questions
+// the team has to decide.
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  BRIEF_LINES_MAX, BRIEF_LINE_MAX, BRIEF_SUMMARY_MAX, VERDICTS, designOutcomeLabel, pointsOnDeck,
+  BRIEF_LINES_MAX, BRIEF_LINE_MAX, BRIEF_SUMMARY_MAX, SECTION_SLIDES_MAX, VERDICTS, designOutcomeLabel, linesShown, pointsOnDeck,
   type BriefChange, type BriefSection, type DesignCaught, type DesignOutcome, type DesignPoint, type DesignReviewRan, type DesignReviewRecord, type DesignReviewView, type DesignSpec,
   type LastDesignReview,
 } from "../../shared/designReview.ts";
@@ -51,8 +52,8 @@ export function LastReview({ roomId, last }: { roomId: string; last: LastDesignR
 const planHref = (roomId: string, taskId: string) => `/s/${roomId}?task=${taskId}&view=plan`;
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
-/** How many slides the call goes through for a spec: the overview, its sections and points, and the verdict. */
-const slidesOf = (spec: DesignSpec) => 2 + spec.brief.sections.filter((s) => !s.off).length + pointsOnDeck(spec.points).length;
+/** How many slides the call goes through for a spec: the overview, its section slides and the verdict. */
+const slidesOf = (spec: DesignSpec) => 2 + spec.groups.length;
 
 export function DesignReviewPage() {
   const { reviewId } = useParams();
@@ -114,7 +115,7 @@ function NextPage() {
         <Picker roomId={roomId} label={live ? "On now" : "Next"} reviews={data.reviews} />
         {specs.length > 0 && (
           <span className="muted small">
-            {plural(specs.length, "spec")} · {plural(points, "point")}
+            {plural(specs.length, "spec")} · {plural(points, "question")}
           </span>
         )}
         <span className="rp-grow" />
@@ -150,7 +151,7 @@ function NextPage() {
                 <button key={s.taskId} type="button" aria-current={s === spec} onClick={() => setParams({ spec: s.taskId }, { replace: true })}>
                   <strong dir="auto">{s.title}</strong>
                   <span className="muted small">
-                    {s.owner ?? "Unassigned"} · {plural(pointsOnDeck(s.points).length, "point")}
+                    {s.owner ?? "Unassigned"} · {plural(pointsOnDeck(s.points).length, "question")}
                   </span>
                 </button>
               ))}
@@ -182,6 +183,14 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
   const whole = spec.points.filter((p) => p.placed && !p.section);
   const lost = spec.points.filter((p) => !p.placed);
   const open = brief.suggestions.filter((s) => s.state === "open");
+  const on = brief.sections.filter((s) => !s.off).length;
+  // The sections in the spec's order: a section slide where its first section is, and each section off the call in its place.
+  const groupOf = new Map(spec.groups.flatMap((g, i) => g.map((h) => [h, i] as const)));
+  const rows = brief.sections.flatMap((s): Array<{ off: BriefSection } | { at: number; sections: BriefSection[] }> => {
+    const at = groupOf.get(s.heading);
+    if (at === undefined) return s.off ? [{ off: s }] : [];
+    return spec.groups[at][0] === s.heading ? [{ at, sections: spec.groups[at].flatMap((h) => brief.sections.find((x) => x.heading === h) ?? []) }] : [];
+  });
   return (
     <main className="dr-spec">
       <div className="rp-title">
@@ -201,7 +210,7 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
       </div>
       <p className="muted small">
         {spec.requestedBy ? `Review requested by ${spec.requestedBy}. ` : ""}
-        {mine ? "You prepare this spec: what each slide says, and which sections and points go to the call." : "Comment on a passage of the spec to add a point. Its author prepares the slides."}
+        {mine ? "You prepare this spec: what each slide says, and which sections and questions go to the call." : "Comment on a passage of the spec to add a question. Its author prepares the slides."}
       </p>
       {brief.status === "writing" && <p className="dr-note" role="status">✦ Stand is writing the slides from the spec…</p>}
       {brief.status === "failed" && (
@@ -216,10 +225,28 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
       )}
       {brief.status === "none" && <p className="dr-note">Stand can't write the slides on this server. The sections come from the spec{mine ? "; write their lines yourself" : ""}.</p>}
 
+      {brief.grouped ? (
+        <p className="dr-note">
+          {mine ? "You chose which sections share a slide." : "The author chose which sections share a slide."}{" "}
+          {mine && (
+            <button type="button" className="link" onClick={() => void change({ regroup: true })}>
+              Let Stand group them
+            </button>
+          )}
+        </p>
+      ) : (
+        on > spec.groups.length && (
+          <p className="dr-note">
+            Stand put the {on} sections on {spec.groups.length} slides: a spec gets at most {SECTION_SLIDES_MAX} section slides, so short sections that follow each other share one.
+            {mine && " You can change which sections share a slide."}
+          </p>
+        )
+      )}
+
       <ol className="dr-slides">
         <li className="dr-slide">
           <header>
-            <span className="dr-kind">Overview</span>
+            <span className="dr-kind">Slide 1 · Overview</span>
             {brief.summary && !brief.summaryEdited && <Stand />}
             {brief.summaryChanged && <span className="dr-changed">The spec changed after this was written</span>}
           </header>
@@ -235,17 +262,39 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
           <Points points={whole} mine={mine} change={change} />
           {mine && <Ask label="Ask the team a question about the whole spec" onAsk={(question) => change({ question })} />}
         </li>
-        {brief.sections.map((s) => (
-          <SectionSlide key={s.heading} section={s} points={spec.points.filter((p) => p.placed && p.section === s.heading)} mine={mine} change={change} />
-        ))}
+        {rows.map((row) => {
+          const of = (s: BriefSection) => spec.points.filter((p) => p.placed && p.section === s.heading);
+          if ("off" in row) {
+            return (
+              <li key={row.off.heading} className="dr-slide off">
+                <SectionPart section={row.off} points={of(row.off)} mine={mine} change={change} shares={1} />
+              </li>
+            );
+          }
+          return (
+            <li key={row.sections[0].heading} className="dr-slide">
+              <header>
+                <span className="dr-kind">Slide {row.at + 2}</span>
+                {row.sections.length > 1 && (
+                  <span className="muted small">
+                    {row.sections.length} sections share this slide. It shows {plural(linesShown(row.sections.length), "line")} of each.
+                  </span>
+                )}
+              </header>
+              {row.sections.map((s, i) => (
+                <SectionPart key={s.heading} section={s} points={of(s)} mine={mine} change={change} shares={row.sections.length} join={i > 0 ? "split" : row.at > 0 ? "join" : undefined} />
+              ))}
+            </li>
+          );
+        })}
         <li className="dr-slide">
           <header>
-            <span className="dr-kind">Verdict</span>
+            <span className="dr-kind">Slide {spec.groups.length + 2} · Verdict</span>
           </header>
-          <p className="muted">Each point with how it ended, then the team's call: Approve, Approve with changes, or Not yet.</p>
+          <p className="muted">Each question with how it ended, then the team's call: Approve, Approve with changes, or Not yet.</p>
           {lost.length > 0 && (
             <>
-              <p className="muted small">These comments are on a passage this version of the spec no longer has. They have no slide and show here.</p>
+              <p className="muted small">These comments are on a passage this version of the spec no longer has. They are on no slide and show here.</p>
               <Points points={lost} mine={false} change={change} />
             </>
           )}
@@ -286,16 +335,32 @@ const Stand = () => (
   </span>
 );
 
-function SectionSlide({ section: s, points, mine, change }: { section: BriefSection; points: DesignPoint[]; mine: boolean; change: (c: BriefChange) => Promise<void> }) {
+/** One section of the spec on its slide: its lines, its questions, and the author's ways to move it. */
+function SectionPart(props: {
+  section: BriefSection;
+  points: DesignPoint[];
+  mine: boolean;
+  change: (c: BriefChange) => Promise<void>;
+  /** How many sections are on the slide. */
+  shares: number;
+  /** What the author can do with its place: join the slide above, or leave the one it shares. */
+  join?: "join" | "split";
+}) {
+  const { section: s, points, mine, change } = props;
+  const shown = linesShown(props.shares);
   return (
-    <li className={`dr-slide${s.off ? " off" : ""}`}>
+    <section className="dr-part" aria-label={s.heading}>
       <header>
-        <span className="dr-kind">Section</span>
         <h2 dir="auto">{s.heading}</h2>
         {!s.off && s.lines.length > 0 && !s.edited && <Stand />}
         {!s.off && s.changed && <span className="dr-changed">The spec changed after this was written</span>}
         <span className="rp-grow" />
         {s.off && <span className="muted small">Off the call</span>}
+        {mine && !s.off && props.join && (
+          <button type="button" className="ghost small" onClick={() => void change({ section: s.heading, join: props.join === "join" })}>
+            {props.join === "join" ? "Combine with the slide above" : "Give it its own slide"}
+          </button>
+        )}
         {mine && (
           <button type="button" className="ghost small" onClick={() => void change({ section: s.heading, off: !s.off })}>
             {s.off ? "Put back" : "Take off the call"}
@@ -307,11 +372,12 @@ function SectionSlide({ section: s, points, mine, change }: { section: BriefSect
           <Editable
             mine={mine}
             label={`Lines for ${s.heading}`}
-            value={s.lines.join("\n")}
+            value={s.lines.slice(0, shown).join("\n")}
+            edit={s.lines.join("\n")}
             max={BRIEF_LINES_MAX * (BRIEF_LINE_MAX + 1)}
             rows={BRIEF_LINES_MAX}
             list
-            hint={`Up to ${BRIEF_LINES_MAX} lines, one on each row`}
+            hint={shown < BRIEF_LINES_MAX ? `Up to ${BRIEF_LINES_MAX} lines, one on each row. This slide shows the first ${shown === 1 ? "one" : shown}` : `Up to ${BRIEF_LINES_MAX} lines, one on each row`}
             empty="No lines: the slide shows the heading."
             onSave={(text) => change({ section: s.heading, lines: text.split("\n") })}
           />
@@ -320,12 +386,24 @@ function SectionSlide({ section: s, points, mine, change }: { section: BriefSect
         </>
       )}
       {s.off && points.length > 0 && <Points points={points} mine={mine} change={change} />}
-    </li>
+    </section>
   );
 }
 
 /** What a slide says, with the author's way to rewrite it. */
-function Editable(props: { mine: boolean; label: string; value: string; max: number; rows: number; list?: boolean; hint?: string; empty: string; onSave: (text: string) => Promise<void> }) {
+function Editable(props: {
+  mine: boolean;
+  label: string;
+  value: string;
+  /** What the author edits, when the slide shows less than there is. */
+  edit?: string;
+  max: number;
+  rows: number;
+  list?: boolean;
+  hint?: string;
+  empty: string;
+  onSave: (text: string) => Promise<void>;
+}) {
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (draft === null) {
@@ -334,7 +412,7 @@ function Editable(props: { mine: boolean; label: string; value: string; max: num
       <div className="dr-text">
         {!lines.length ? <p className="muted">{props.empty}</p> : props.list ? <ul>{lines.map((l, i) => <li key={i} dir="auto">{l}</li>)}</ul> : <p dir="auto">{props.value}</p>}
         {props.mine && (
-          <button type="button" className="link small" onClick={() => setDraft(props.value)}>
+          <button type="button" className="link small" onClick={() => setDraft(props.edit ?? props.value)}>
             Edit
           </button>
         )}
@@ -366,14 +444,14 @@ function Editable(props: { mine: boolean; label: string; value: string; max: num
   );
 }
 
-/** The points under a slide: each gets a slide of its own after it, unless the author takes it off the call. */
+/** The questions on a slide: the call opens each one in turn there, unless the author takes it off the call. */
 function Points({ points, mine, change }: { points: DesignPoint[]; mine: boolean; change: (c: BriefChange) => Promise<void> }) {
   if (!points.length) return null;
   return (
     <div className="dr-points">
       {points.map((p) => (
         <div key={p.threadId} className={`dr-point${p.off ? " off" : ""}`}>
-          <span className="dr-kind">Point</span>
+          <span className="dr-kind">Question</span>
           <blockquote dir="auto">{p.quote}</blockquote>
           <p dir="auto">
             {p.text} <span className="muted small">{p.by}</span>
@@ -407,7 +485,7 @@ function Ask({ label, onAsk }: { label: string; onAsk: (question: string) => Pro
     >
       <input aria-label={label} placeholder="Ask the team a question here…" maxLength={TASK_COMMENT_MAX} value={text} readOnly={busy} onChange={(e) => setText(e.target.value)} dir="auto" />
       <button type="submit" className="small" disabled={busy || !text.trim()}>
-        Add point
+        Add question
       </button>
     </form>
   );
@@ -465,7 +543,7 @@ function Caught({ caught }: { caught: DesignCaught[] }) {
   );
 }
 
-/** A design review that ran: the verdict on each spec, how its points ended, and what the team raised. */
+/** A design review that ran: the verdict on each spec, how its questions ended, and what the team raised. */
 function RecordPage({ reviewId }: { reviewId: string }) {
   const { roomId = "" } = useParams();
   const [data, setData] = useState<{ roomName: string; review: DesignReviewRecord; reviews: DesignReviewRan[] } | null>(null);
@@ -539,7 +617,7 @@ function RecordPage({ reviewId }: { reviewId: string }) {
                     Open the spec
                   </Link>
                 </div>
-                {points.length === 0 && <p className="muted">No points were on this spec.</p>}
+                {points.length === 0 && <p className="muted">No questions were on this spec.</p>}
                 {points.map((p) => (
                   <div key={p.id} className="dr-slide">
                     <header>
@@ -556,7 +634,7 @@ function RecordPage({ reviewId }: { reviewId: string }) {
                         {p.by && <span className="muted small">Asked by {p.by}</span>}
                       </div>
                     )}
-                    {p.caught.length ? <Caught caught={p.caught} /> : <p className="muted small">Nothing was raised on this point.</p>}
+                    {p.caught.length ? <Caught caught={p.caught} /> : <p className="muted small">Nothing was raised on this question.</p>}
                   </div>
                 ))}
                 {others.map((s) => (

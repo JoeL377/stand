@@ -1,10 +1,12 @@
 // A design review slide on the middle screen: a part of the spec the team is going through. The
-// Overview and each section say what the spec decides; a point shows the passage with the question
-// about it and ends Settled or Still open; the Verdict lists how the points ended and takes the
-// team's call on the spec. Full spec opens the plan at that part, for one person or, by the host,
-// for everyone. The host flips slides, and so does the spec's author within their spec.
+// Overview and each section slide say what the spec decides; a section slide can hold several
+// sections. A question about a passage is a step on the slide of its section: the slide stays up,
+// the question opens with its passage, and it ends Settled or Still open. The Verdict lists how the
+// questions ended and takes the team's call on the spec. Full spec opens the plan at that part, for
+// one person or, by the host, for everyone. The host flips slides, and so does the spec's author
+// within their spec.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { POINT_OUTCOMES, VERDICTS, designOutcomeLabel, type DesignOutcome, type DesignSlideInfo } from "../../shared/designReview.ts";
 import type { PlanThread } from "../../shared/planReview.ts";
 import type { Item, Note } from "../../shared/protocol.ts";
@@ -22,13 +24,16 @@ const KINDS = [
   { kind: "question", label: "Open", Icon: QuestionIcon },
 ] as const;
 
-const ROLE_LABEL: Record<DesignSlideInfo["role"], string> = { overview: "Overview", section: "Section", point: "Point", verdict: "Verdict" };
+const ROLE_LABEL: Record<DesignSlideInfo["role"], string> = { overview: "Overview", section: "Section", point: "Question", verdict: "Verdict" };
 /** The colors the product review's outcomes already have: went well, went with a caveat, didn't. */
 const TONE: Record<DesignOutcome, string> = { settled: "ship", open: "fixes", approve: "ship", changes: "fixes", not_yet: "not_yet" };
+const isQuestion = (s: Item) => s.slide?.design?.role === "point";
+const questions = (slides: Item[]) => slides.filter(isQuestion);
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 export function DesignStage(props: {
   item: Item;
-  /** Every slide of the review's deck, in order. */
+  /** Every item of the review's deck, in order: the slides, and each question after its slide. */
   slides: Item[];
   /** What the meeting has caught so far, on any item. */
   notes: Note[];
@@ -42,6 +47,8 @@ export function DesignStage(props: {
   specOpen: boolean;
   onSpec: (open: boolean) => void;
   onFlip: (delta: number) => void;
+  /** The host or the author opens a question of the slide, for everyone. */
+  onGo: (itemId: string) => void;
   onOutcome: (outcome: DesignOutcome | null) => void;
   /** The host takes a line off that Stand got wrong, or adds one it missed. */
   onRemove?: (note: Note) => void;
@@ -50,22 +57,31 @@ export function DesignStage(props: {
 }) {
   const { item, slides, disabled } = props;
   const design = item.slide!.design!;
-  // The slides of this spec: the ones its author can move between, and what the Verdict sums up.
+  // The items of this spec: the ones its author can move between, and what the Verdict sums up.
   const mine = slides.filter((s) => s.slide?.design?.taskId === design.taskId);
   const at = mine.findIndex((s) => s.id === item.id);
+  // A question is a step on the slide before it: that slide stays on screen with the question open.
+  const asked = isQuestion(item) ? item : null;
+  const pageAt = asked ? mine.slice(0, at).findLastIndex((s) => !isQuestion(s)) : at;
+  const page = mine[pageAt] ?? item;
+  const shown = page.slide!.design!;
+  const steps: Item[] = [];
+  for (let i = pageAt + 1; pageAt >= 0 && i < mine.length && isQuestion(mine[i]); i++) steps.push(mine[i]);
+  const pages = slides.filter((s) => !isQuestion(s));
   const mayFlip = props.canSteer || props.author;
   const deckAt = slides.findIndex((s) => s.id === item.id);
   const [first, last] = props.canSteer ? [deckAt <= 0, deckAt >= slides.length - 1] : [at <= 0, at >= mine.length - 1];
-  const ids = new Set(design.role === "verdict" ? mine.map((s) => s.id) : [item.id]);
+  // What was caught on the slide and on its questions shows together; the Verdict shows the whole spec's.
+  const ids = new Set((shown.role === "verdict" ? mine : [page, ...steps]).map((s) => s.id));
   const caught = props.notes.filter((n) => n.itemId && ids.has(n.itemId) && KINDS.some((k) => k.kind === n.kind));
-  const outcomes = design.role === "point" ? POINT_OUTCOMES : design.role === "verdict" ? VERDICTS : [];
-  const lines = (item.slide?.body ?? "").split("\n").filter((l) => l.trim());
+  const outcomes = asked ? POINT_OUTCOMES : design.role === "verdict" ? VERDICTS : [];
+  const parts = shown.parts ?? [];
 
   return (
     <div className={`design-stage ${props.className ?? ""}`}>
       <div className="ds-card">
         <header className="ds-head">
-          <span className="dr-kind">{design.role === "point" ? design.name : ROLE_LABEL[design.role]}</span>
+          <span className="dr-kind">{ROLE_LABEL[shown.role]}</span>
           <span className="ds-spec" dir="auto" title={design.spec}>
             {design.spec}
           </span>
@@ -76,22 +92,22 @@ export function DesignStage(props: {
           </button>
         </header>
         <div className="ds-body">
-          <div className="ds-main">
-            {design.role === "overview" && (
+          <div className={`ds-main${asked ? " asking" : ""}`}>
+            {shown.role === "overview" && (
               <>
-                <h1 dir="auto">{item.title}</h1>
-                {item.slide?.body ? (
+                <h1 dir="auto">{page.title}</h1>
+                {page.slide?.body ? (
                   <p className="ds-summary" dir="auto">
-                    {item.slide.body} {design.stand && <Stand />}
+                    {page.slide.body} {shown.stand && <Stand />}
                   </p>
                 ) : (
                   <p className="muted">No summary yet.</p>
                 )}
-                {!!design.sections?.length && (
+                {!asked && !!shown.sections?.length && (
                   <>
-                    <h2>Sections</h2>
+                    <h2>Slides</h2>
                     <ol className="ds-sections">
-                      {design.sections.map((s) => (
+                      {shown.sections.map((s) => (
                         <li key={s} dir="auto">
                           {s}
                         </li>
@@ -99,61 +115,80 @@ export function DesignStage(props: {
                     </ol>
                   </>
                 )}
-                <p className="muted small">
-                  {points(mine).length === 1 ? "1 point" : `${points(mine).length} points`} to go through
-                </p>
-                {!!design.suggestions?.length && <Suggestions design={design} author={props.author && !disabled} />}
+                {!asked && <p className="muted small">{plural(questions(mine).length, "question")} to go through</p>}
+                {!asked && !!shown.suggestions?.length && <Suggestions design={shown} author={props.author && !disabled} />}
               </>
             )}
-            {design.role === "section" && (
-              <>
-                <h1 dir="auto">
-                  {item.title} {design.stand && <Stand />}
-                </h1>
-                {lines.length > 0 ? (
-                  <ul className="ds-lines">
-                    {lines.map((l, i) => (
-                      <li key={i} dir="auto">
-                        {l}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="muted">Open Full spec to go through this section.</p>
-                )}
-                {points(mine).filter((p) => p.slide!.design!.section === design.section).length > 0 && (
-                  <p className="muted small">
-                    Points in this section: {points(mine).filter((p) => p.slide!.design!.section === design.section).map((p) => p.slide!.design!.name.replace("Point ", "")).join(", ")}
-                  </p>
-                )}
-              </>
-            )}
-            {design.role === "point" && (
-              <>
-                <blockquote className="ds-passage" dir="auto">
-                  <Markdown text={design.quote ?? ""} />
-                </blockquote>
-                <Thread taskId={design.taskId} threadId={design.threadId!} question={item.slide?.body ?? ""} by={design.by ?? ""} />
-              </>
+            {shown.role === "section" &&
+              (parts.length > 1 ? (
+                <div className="ds-parts">
+                  {parts.map((p) => (
+                    <section key={p.heading}>
+                      <h1 dir="auto">
+                        {p.heading} {p.stand && <Stand />}
+                      </h1>
+                      {p.lines.length > 0 && (
+                        <ul className="ds-lines">
+                          {p.lines.map((l, i) => (
+                            <li key={i} dir="auto">
+                              {l}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <h1 dir="auto">
+                    {page.title} {shown.stand && <Stand />}
+                  </h1>
+                  {parts[0]?.lines.length ? (
+                    <ul className="ds-lines">
+                      {parts[0].lines.map((l, i) => (
+                        <li key={i} dir="auto">
+                          {l}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">Open Full spec to go through this section.</p>
+                  )}
+                </>
+              ))}
+            {shown.role !== "verdict" && steps.length > 0 && (
+              <div className="ds-questions" aria-label="Questions on this slide">
+                <h2>{steps.length === 1 ? "Question" : "Questions"}</h2>
+                {steps.map((q) => (
+                  <Question key={q.id} item={q} open={q.id === asked?.id} onOpen={mayFlip && !disabled ? () => props.onGo(q.id) : undefined} />
+                ))}
+              </div>
             )}
             {design.role === "verdict" && (
               <>
                 <h1 dir="auto">{design.spec}</h1>
-                {points(mine).length > 0 ? (
+                {questions(mine).length > 0 ? (
                   <ul className="ds-results">
-                    {points(mine).map((p) => {
+                    {questions(mine).map((p) => {
                       const o = p.slide!.design!.outcome;
                       return (
                         <li key={p.id}>
                           <span className="dr-kind">{p.slide!.design!.name}</span>
-                          <span dir="auto">{p.title}</span>
+                          {mayFlip && !disabled ? (
+                            <button type="button" className="link" dir="auto" title="Go back to this question, for everyone" onClick={() => props.onGo(p.id)}>
+                              {p.title}
+                            </button>
+                          ) : (
+                            <span dir="auto">{p.title}</span>
+                          )}
                           <span className={`ds-result ${o ? TONE[o] : ""}`}>{o ? designOutcomeLabel(o) : "Not called"}</span>
                         </li>
                       );
                     })}
                   </ul>
                 ) : (
-                  <p className="muted">No points on this spec.</p>
+                  <p className="muted">No questions on this spec.</p>
                 )}
                 {!!design.lost?.length && (
                   <>
@@ -198,7 +233,9 @@ export function DesignStage(props: {
                 <span className="agent-mark">✦</span> Writing
               </p>
             ) : (
-              !caught.length && <p className="muted small">What the team says here is filed under this {design.role === "verdict" ? "spec" : "slide"}.</p>
+              !caught.length && (
+                <p className="muted small">What the team says here is filed under this {design.role === "verdict" ? "spec" : asked ? "question" : "slide"}.</p>
+              )
             )}
             {props.onAdd && !disabled && <AddLine onAdd={props.onAdd} />}
           </aside>
@@ -207,7 +244,7 @@ export function DesignStage(props: {
           <div className="ds-spec-pane" role="dialog" aria-label="Full spec">
             <header>
               <strong dir="auto">{design.spec}</strong>
-              <span className="muted small">Select a passage and comment to add a point to the call</span>
+              <span className="muted small">Select a passage and comment to add a question to the call</span>
               <span className="rp-grow" />
               <button type="button" className="small" onClick={() => props.onSpec(false)}>
                 Back to the slide
@@ -224,10 +261,11 @@ export function DesignStage(props: {
           </button>
         )}
         <span className="muted small rv-pos">
-          {deckAt + 1} of {slides.length}
+          Slide {pages.findIndex((s) => s.id === page.id) + 1} of {pages.length}
+          {asked && ` · Question ${steps.findIndex((q) => q.id === asked.id) + 1} of ${steps.length}`}
         </span>
         {outcomes.length > 0 && (
-          <div className="rv-outcomes" role="group" aria-label={design.role === "verdict" ? "The verdict on this spec" : "How this point ended"}>
+          <div className="rv-outcomes" role="group" aria-label={design.role === "verdict" ? "The verdict on this spec" : "How this question ended"}>
             {outcomes.map((o) => {
               const on = design.outcome === o.id;
               return (
@@ -256,7 +294,44 @@ export function DesignStage(props: {
   );
 }
 
-const points = (slides: Item[]) => slides.filter((s) => s.slide?.design?.role === "point");
+/** A question on the slide. Closed, it is one line with how it ended; open, it shows the passage it
+ *  is about and its thread. */
+function Question({ item, open, onOpen }: { item: Item; open: boolean; onOpen?: () => void }) {
+  const design = item.slide!.design!;
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open) box.current?.scrollIntoView({ block: "nearest" });
+  }, [open]);
+  const result = design.outcome && <span className={`ds-result ${TONE[design.outcome]}`}>{designOutcomeLabel(design.outcome)}</span>;
+  if (!open) {
+    const line = (
+      <>
+        <span className="dr-kind">{design.name}</span>
+        <span dir="auto">{item.title}</span>
+        {result}
+      </>
+    );
+    return onOpen ? (
+      <button type="button" className="ds-q" onClick={onOpen} title="Open this question for everyone">
+        {line}
+      </button>
+    ) : (
+      <div className="ds-q">{line}</div>
+    );
+  }
+  return (
+    <div className="ds-q open" ref={box} aria-current="step">
+      <div className="ds-q-head">
+        <span className="dr-kind">{design.name}</span>
+        {result}
+      </div>
+      <blockquote className="ds-passage" dir="auto">
+        <Markdown text={design.quote ?? ""} />
+      </blockquote>
+      <Thread taskId={design.taskId} threadId={design.threadId!} question={item.slide?.body ?? ""} by={design.by ?? ""} />
+    </div>
+  );
+}
 
 const Stand = () => (
   <span className="dr-stand" title="Written by Stand from the spec. The author can rewrite it.">
@@ -264,7 +339,7 @@ const Stand = () => (
   </span>
 );
 
-/** The question a point is about, and what people have answered on its thread since. */
+/** The question as it was asked, and what people have answered on its thread since. */
 function Thread({ taskId, threadId, question, by }: { taskId: string; threadId: string; question: string; by: string }) {
   const [thread, setThread] = useState<PlanThread | null>(null);
   useEffect(() => {
@@ -313,7 +388,7 @@ function Suggestions({ design, author }: { design: DesignSlideInfo; author: bool
           {author && (
             <div className="dr-row">
               <button type="button" className="small primary" disabled={busy} onClick={() => void answer(s.id, true)}>
-                Make it a point
+                Ask the team
               </button>
               <button type="button" className="small ghost" disabled={busy} onClick={() => void answer(s.id, false)}>
                 Dismiss

@@ -8,7 +8,7 @@ import {
   planChanged, prepare, removeSpec, requestReview, setDesignOutcome, specChanged, startDesignReview, writeBackReview,
 } from "./designReviews.ts";
 import type { Agent } from "./llm.ts";
-import { PlanBriefs } from "./planBrief.ts";
+import { PlanBriefs, slideGroups } from "./planBrief.ts";
 import { changeReview, planSections, reviewFor } from "./planReview.ts";
 import { addSlide, reviewView, startReview } from "./reviews.ts";
 
@@ -308,7 +308,7 @@ test("starting a design review lays each spec out as slides: overview, sections 
   assert.equal(why.slide!.body, "Tabs that sleep drop words");
   assert.match(why.description ?? "", /People lose what was said while the tab slept/);
   assert.equal(steps.slide!.design!.name, "Steps");
-  assert.deepEqual([point.slide!.design!.name, point.slide!.design!.quote, point.slide!.design!.section], ["Point 2", "- Keep the browser fallback for a week", "Steps"]);
+  assert.deepEqual([point.slide!.design!.name, point.slide!.design!.quote, point.slide!.design!.section], ["Question 2", "- Keep the browser fallback for a week", "Steps"]);
   assert.match(point.description ?? "", /Is a week enough\?[\s\S]*Keep the browser fallback for a week/);
   // Starting again joins the one running, and the page shows it as on now.
   assert.deepEqual(startDesignReview(db, briefs, room.id), { review: started.review, firstItemId: started.firstItemId, started: false });
@@ -333,7 +333,7 @@ test("starting a design review lays each spec out as slides: overview, sections 
   assert.equal(setDesignOutcome(db, briefs, point.id, "settled", "Ann Lee"), null);
 });
 
-test("in the call a new comment gets a slide after the one on screen, and the author's changes re-lay the deck", () => {
+test("in the call a new comment is a question on the slide of its section, and the author's changes re-lay the deck", () => {
   const { db, sam, ann, room, task, by } = space();
   const briefs = new PlanBriefs(db, {});
   const capture = task("Move capture to the server");
@@ -346,14 +346,13 @@ test("in the call a new comment gets a slide after the one on screen, and the au
   assert.ok(db.noteUpdates(capture.id).some((u) => u.text.startsWith("Review requested")));
   assert.deepEqual(db.reviewSlides(db.reviewIn(room.id, ["draft"], "design")!.id).map((r) => r.noteId), [other.id]);
 
-  // A comment on a passage of Steps, made while the Why slide is on screen: its slide follows Why.
+  // A comment on a passage of Steps, whatever slide is on screen: it is a question on the Steps slide.
   const plan = reviewFor(db, capture.id)!.plan;
   const why = db.listItems(room.id)[1];
   const at = (s: string) => ({ start: plan.text.indexOf(s), end: plan.text.indexOf(s) + s.length });
   const thread = changeReview(db, capture.id, "Ann Lee", { action: "create", version: plan.id, text: "Why ten percent?", ...at("- Run capture on the server for ten percent of meetings") })!;
-  assert.equal(specChanged(db, briefs, capture, why.id), true);
-  assert.deepEqual(deckOf(db, room.id).slice(1, 4), ["section: Why", "point: Why ten percent?", "section: Steps"]);
-  // With nothing of this spec on screen, a new point goes under its section.
+  assert.equal(specChanged(db, briefs, capture), true);
+  assert.deepEqual(deckOf(db, room.id).slice(1, 5), ["section: Why", "section: Steps", "point: Why ten percent?", "section: How to verify"]);
   changeReview(db, capture.id, "Ann Lee", { action: "create", version: plan.id, text: "How do we compare?", ...at("Compare the two transcripts.") });
   specChanged(db, briefs, capture);
   assert.deepEqual(deckOf(db, room.id).slice(-3), ["section: How to verify", "point: How do we compare?", "verdict: Verdict: Move capture to the server"]);
@@ -364,14 +363,14 @@ test("in the call a new comment gets a slide after the one on screen, and the au
   // The author takes a section off mid-call: its slide goes, its point stays, after the section before it.
   prepare(db, briefs, capture, by(sam), { section: "How to verify", off: true });
   specChanged(db, briefs, capture);
-  assert.deepEqual(deckOf(db, room.id).slice(-3), ["section: Steps", "point: How do we compare?", "verdict: Verdict: Move capture to the server"]);
+  assert.deepEqual(deckOf(db, room.id).slice(-4), ["section: Steps", "point: Why ten percent?", "point: How do we compare?", "verdict: Verdict: Move capture to the server"]);
   // A point the team called keeps its slide when the author takes it off; one nobody called goes.
   const point = db.listItems(room.id).find((it) => it.title === "Why ten percent?")!;
   setDesignOutcome(db, briefs, point.id, "open", "Ann Lee");
   prepare(db, briefs, capture, by(sam), { point: thread.id, off: true });
   prepare(db, briefs, capture, by(sam), { point: db.planThreads(capture.id)[1].id, off: true });
   specChanged(db, briefs, capture);
-  assert.deepEqual(deckOf(db, room.id), ["overview: Move capture to the server", "section: Why", "point: Why ten percent?", "section: Steps", "verdict: Verdict: Move capture to the server"]);
+  assert.deepEqual(deckOf(db, room.id), ["overview: Move capture to the server", "section: Why", "section: Steps", "point: Why ten percent?", "verdict: Verdict: Move capture to the server"]);
 
   // Presenting the other spec while this review runs: it joins after it.
   const joined = startDesignReview(db, briefs, room.id, { only: other, by: by(ann) });
@@ -452,7 +451,7 @@ test("what the review decides goes back: onto each point's thread, the spec's to
   assert.equal(t.resolved, true);
   // The spec's to-do: one line with the verdict, and it waits on the to-dos from its slides only.
   const log = db.noteUpdates(capture.id).map((u) => u.text);
-  assert.ok(log.some((l) => /^Design review, \d+ \w+: Approve with changes\. 1 point settled, 1 open\. 2 to-dos came out of it; this to-do waits on them\.$/.test(l)), log.join(" | "));
+  assert.ok(log.some((l) => /^Design review, \d+ \w+: Approve with changes\. 1 question settled, 1 open\. 2 to-dos came out of it; this to-do waits on them\.$/.test(l)), log.join(" | "));
   const todos = db.meetingNotes(m.id).filter((n) => n.kind === "action");
   const waits = db.roomLinks(room.id, "depends_on").filter((l) => l.fromId === capture.id).map((l) => todos.find((n) => n.id === l.toId)?.text).sort();
   assert.deepEqual(waits, ["Change the plan to two weeks", "Write the flag removal checklist"]);
@@ -480,6 +479,96 @@ test("what the review decides goes back: onto each point's thread, the spec's to
   assert.equal(designReviewView(db, briefs, room.id, sam)!.specs[0].last!.reviewId, record.id);
   // The point settled last time is resolved, so it isn't a point again; the open one is.
   assert.deepEqual(designReviewView(db, briefs, room.id, sam)!.specs[0].points.map((p) => p.text), ["Why ten percent?"]);
+});
+
+/** A spec of twelve sections, some long and some short. Section 4's text can be quoted. */
+const SIZES = [10, 500, 20, 30, 400, 15, 600, 25, 35, 700, 12, 18];
+const BIG = ["# Big spec", "", "Why this is big.", "", ...SIZES.flatMap((n, i) => [`## S${i + 1}`, "", `Body ${i + 1}: ${"x".repeat(n)}`, ""])].join("\n");
+
+test("a spec gets at most eight section slides: short sections that follow each other share one, and the author can regroup", async () => {
+  const { db, task } = space();
+  const note = task("Big spec", "Sam", BIG);
+  const briefs = new PlanBriefs(db, {});
+  let brief = (await briefs.ensure(note))!;
+  // The two adjacent slides with the least text join, until eight are left. The order is the spec's.
+  const stand = [["S1"], ["S2"], ["S3", "S4"], ["S5", "S6"], ["S7"], ["S8", "S9"], ["S10"], ["S11", "S12"]];
+  assert.deepEqual(slideGroups(brief, BIG), stand);
+  // A spec of few sections keeps one slide for each.
+  const small = task("Small spec");
+  assert.deepEqual(slideGroups((await briefs.ensure(small))!, SPEC), [["Why"], ["Steps"], ["How to verify"]]);
+  // A section off the call leaves room: the deck is regrouped around what is left.
+  brief = briefs.setSection(note, "S2", { off: true }, "Sam Hill")!;
+  assert.deepEqual(slideGroups(brief, BIG), [["S1", "S3"], ["S4"], ["S5"], ["S6"], ["S7"], ["S8", "S9"], ["S10"], ["S11", "S12"]]);
+  brief = briefs.setSection(note, "S2", { off: false }, "Sam Hill")!;
+
+  // The author gives S4 its own slide: the slides Stand made become the author's, with that one change.
+  brief = briefs.setSection(note, "S4", { join: false }, "Sam Hill")!;
+  assert.equal(brief.grouped, true);
+  assert.deepEqual(slideGroups(brief, BIG), [["S1"], ["S2"], ["S3"], ["S4"], ["S5", "S6"], ["S7"], ["S8", "S9"], ["S10"], ["S11", "S12"]]);
+  brief = briefs.setSection(note, "S2", { join: true }, "Sam Hill")!;
+  assert.deepEqual(slideGroups(brief, BIG).slice(0, 2), [["S1", "S2"], ["S3"]]);
+  // The first section has no slide above it to join.
+  assert.deepEqual(slideGroups(briefs.setSection(note, "S1", { join: true }, "Sam Hill")!, BIG)[0], ["S1", "S2"]);
+  // Taking the first section of a shared slide off the call leaves the rest of that slide together.
+  brief = briefs.setSection(note, "S5", { off: true }, "Sam Hill")!;
+  brief = briefs.setSection(note, "S8", { off: true }, "Sam Hill")!;
+  assert.deepEqual(slideGroups(brief, BIG).slice(2), [["S4"], ["S6"], ["S7"], ["S9"], ["S10"], ["S11", "S12"]]);
+
+  // A new version of the plan keeps the author's grouping; a section that is new has its own slide.
+  db.addPlan(note.roomId, note.id, BIG.replace("## S7", "## S6b\n\nNew.\n\n## S7"), "Sam Hill");
+  const next = (await briefs.ensure(note))!;
+  assert.equal(next.grouped, true);
+  assert.deepEqual(slideGroups(next, db.planVersions(note.id).at(-1)!.text), [["S1", "S2"], ["S3"], ["S4"], ["S6"], ["S6b"], ["S7"], ["S9"], ["S10"], ["S11", "S12"]]);
+  // Handing it back to Stand: eight slides again, of the sections on the call.
+  brief = briefs.regroup(note, "Sam Hill")!;
+  assert.equal(brief.grouped, undefined);
+  assert.equal(slideGroups(brief, db.planVersions(note.id).at(-1)!.text).length, 8);
+});
+
+test("in the call sections that share a slide are one slide, and a question is a step after the slide of its section", async () => {
+  const { db, sam, room, task, by } = space();
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `Line ${i + 1}`);
+  const briefs = new PlanBriefs(db, { taskBrief: async () => ({ summary: "A big spec.", sections: SIZES.map((_, i) => ({ heading: `S${i + 1}`, lines: lines(4) })), questions: [] }) });
+  const note = task("Big spec", "Sam", BIG);
+  requestReview(db, briefs, note, by(sam), [{ quote: "Body 4:", text: "Is section four right?" }]);
+  await briefs.ensure(note);
+  assert.deepEqual(designReviewView(db, briefs, room.id, sam)!.specs[0].groups.length, 8);
+  startDesignReview(db, briefs, room.id);
+  assert.deepEqual(deckOf(db, room.id), [
+    "overview: Big spec",
+    "section: S1",
+    "section: S2",
+    "section: S3 · S4",
+    "point: Is section four right?",
+    "section: S5 · S6",
+    "section: S7",
+    "section: S8 · S9",
+    "section: S10",
+    "section: S11 · S12",
+    "verdict: Verdict: Big spec",
+  ]);
+  const items = db.listItems(room.id);
+  assert.deepEqual(items[0].slide!.design!.sections, ["S1", "S2", "S3 · S4", "S5 · S6", "S7", "S8 · S9", "S10", "S11 · S12"]);
+  // A slide of one section shows its four lines; one that two share shows three of each.
+  assert.deepEqual(items[1].slide!.design!.parts, [{ heading: "S1", lines: lines(4), stand: true }]);
+  const shared = items[3].slide!.design!;
+  assert.deepEqual([shared.name, shared.section, shared.parts!.map((p) => [p.heading, p.lines.length])], ["S3 +1", "S3", [["S3", 3], ["S4", 3]]]);
+  assert.match(items[3].description ?? "", /These sections of the spec:\nS3\nBody 3: x+\n\nS4\nBody 4: x+/);
+  assert.deepEqual([items[4].slide!.design!.name, items[4].slide!.design!.section], ["Question 1", "S4"]);
+
+  // The author gives S4 its own slide mid-call: the question goes with it, and the slides that stay keep their items.
+  prepare(db, briefs, note, by(sam), { section: "S4", join: false });
+  specChanged(db, briefs, note);
+  assert.deepEqual(deckOf(db, room.id).slice(3, 7), ["section: S3", "section: S4", "point: Is section four right?", "section: S5 · S6"]);
+  assert.deepEqual([db.listItems(room.id)[3].id, db.listItems(room.id)[5].id], [items[3].id, items[4].id]);
+  // Joined again, S4's slide goes and the question is a step on the shared slide.
+  prepare(db, briefs, note, by(sam), { section: "S4", join: true });
+  specChanged(db, briefs, note);
+  assert.deepEqual(deckOf(db, room.id).slice(3, 6), ["section: S3 · S4", "point: Is section four right?", "section: S5 · S6"]);
+  // Stand groups again when the author asks.
+  prepare(db, briefs, note, by(sam), { regroup: true });
+  specChanged(db, briefs, note);
+  assert.equal(deckOf(db, room.id).filter((t) => t.startsWith("section:")).length, 8);
 });
 
 test("a design review that ends with nothing called goes back to waiting and can start again", () => {

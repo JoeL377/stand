@@ -5,7 +5,7 @@
 // The brief is saved with the plan version, so a call opens on it without a wait and a deploy
 // doesn't lose it. A new version gets a new brief; what the author wrote carries over.
 
-import { BRIEF_LINES_MAX, BRIEF_LINE_MAX, BRIEF_SUMMARY_MAX, type BriefSuggestion, type PlanBrief } from "../shared/designReview.ts";
+import { BRIEF_LINES_MAX, BRIEF_LINE_MAX, BRIEF_SUMMARY_MAX, SECTION_SLIDES_MAX, type BriefSuggestion, type PlanBrief } from "../shared/designReview.ts";
 import type { PlanVersion } from "../shared/planReview.ts";
 import type { DB } from "./db.ts";
 import { newId } from "./ids.ts";
@@ -23,6 +23,33 @@ const cleanLines = (lines: string[]) =>
   lines.map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, BRIEF_LINES_MAX).map((l) => clip(l, BRIEF_LINE_MAX));
 
 type Draft = NonNullable<Awaited<ReturnType<NonNullable<Agent["taskBrief"]>>>>;
+
+/** The section slides of a spec: the headings on each, in the spec's order. Each section on the call
+ *  has a slide of its own until there are more than SECTION_SLIDES_MAX; then the two adjacent slides
+ *  with the least text under them join, until the deck fits. Once the author has grouped them
+ *  (brief.grouped), a slide is a run of sections that each join the one before. */
+export function slideGroups(brief: PlanBrief, spec: string): string[][] {
+  if (brief.grouped) {
+    const groups: string[][] = [];
+    let open = false;
+    for (const s of brief.sections) {
+      if (!s.join) open = false;
+      if (s.off) continue;
+      if (open) groups.at(-1)!.push(s.heading);
+      else groups.push([s.heading]);
+      open = true;
+    }
+    return groups;
+  }
+  const size = new Map(planSections(spec).map((s) => [key(s.heading), s.end - s.headingEnd]));
+  const groups = brief.sections.filter((s) => !s.off).map((s) => ({ headings: [s.heading], size: size.get(key(s.heading)) ?? 0 }));
+  while (groups.length > SECTION_SLIDES_MAX) {
+    let at = 0;
+    for (let i = 1; i < groups.length - 1; i++) if (groups[i].size + groups[i + 1].size < groups[at].size + groups[at + 1].size) at = i;
+    groups.splice(at, 2, { headings: [...groups[at].headings, ...groups[at + 1].headings], size: groups[at].size + groups[at + 1].size });
+  }
+  return groups.map((g) => g.headings);
+}
 
 /** The brief of a version before Stand has written anything: the spec's sections, with what the
  *  author wrote for an earlier version carried over. */
@@ -45,8 +72,9 @@ function skeleton(db: DB, noteId: string, versions: PlanVersion[], plan: PlanVer
       const was = old.get(key(s.heading));
       const kept = !!was?.edited;
       const changed = kept && (was!.changed || before.get(key(s.heading)) !== now.get(key(s.heading)));
-      return { heading: s.heading, lines: kept ? was!.lines : [], edited: kept, off: !!was?.off, ...(changed && { changed: true }) };
+      return { heading: s.heading, lines: kept ? was!.lines : [], edited: kept, off: !!was?.off, ...(changed && { changed: true }), ...(prev?.grouped && was?.join && { join: true }) };
     }),
+    ...(prev?.grouped && { grouped: true }),
     suggestions: [],
     editedBy: prev?.editedBy ?? null,
     at: Date.now(),
@@ -143,23 +171,39 @@ export class PlanBriefs {
     return next;
   }
 
-  /** The author's lines for a section, or the section taken off the call (or put back). Null when
-   *  the plan has no such section. */
-  setSection(note: { id: string; text: string }, heading: string, change: { lines?: string[]; off?: boolean }, by: string): PlanBrief | null {
-    const brief = this.open(note);
+  /** The author's lines for a section, the section taken off the call (or put back), or the section
+   *  joined to the slide before it (or given its own). Null when the plan has no such section. */
+  setSection(note: { id: string; text: string }, heading: string, change: { lines?: string[]; off?: boolean; join?: boolean }, by: string): PlanBrief | null {
+    let brief = this.open(note);
     if (!brief?.sections.some((s) => key(s.heading) === key(heading))) return null;
+    // The first time the author groups, the slides Stand made become theirs to change.
+    if (change.join !== undefined && !brief.grouped) {
+      const leads = new Set(slideGroups(brief, this.db.planVersions(note.id).at(-1)?.text ?? "").map((g) => g[0]));
+      brief = { ...brief, grouped: true, sections: brief.sections.map((s, i) => ({ ...s, join: i > 0 && !leads.has(s.heading) })) };
+    }
     const next: PlanBrief = {
       ...brief,
       editedBy: by,
-      sections: brief.sections.map((s) => {
+      sections: brief.sections.map((s, i) => {
         if (key(s.heading) !== key(heading)) return s;
         const { changed: _c, ...rest } = s;
         return {
           ...(change.lines ? { ...rest, lines: cleanLines(change.lines), edited: true } : s),
           ...(change.off !== undefined && { off: change.off }),
+          ...(change.join !== undefined && { join: change.join && i > 0 }),
         };
       }),
     };
+    this.db.savePlanBrief(note.id, next);
+    return next;
+  }
+
+  /** Hands the grouping of sections into slides back to Stand. */
+  regroup(note: { id: string; text: string }, by: string): PlanBrief | null {
+    const brief = this.open(note);
+    if (!brief) return null;
+    const { grouped: _g, ...rest } = brief;
+    const next: PlanBrief = { ...rest, editedBy: by, sections: brief.sections.map(({ join: _j, ...s }) => s) };
     this.db.savePlanBrief(note.id, next);
     return next;
   }

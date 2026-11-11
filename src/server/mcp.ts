@@ -22,7 +22,7 @@ Before starting on a to-do, call start_work with its ref: one call marks it as y
 If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. When your person asks for a review of that plan, or it has a question the team must decide, request_design_review puts it on the space's next design review with your questions; don't ask for one otherwise. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
-When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its points ended.
+When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
@@ -280,7 +280,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Ask the team to review a to-do's plan",
       description:
-        "Puts a to-do's plan on the space's next design review: a call where the team goes through the spec, one slide per section and one per open comment thread, and ends with a verdict. Call it after attach_plan, and only when your person asks for a review or the plan has a question the team must decide. Give those questions: each one becomes a comment thread on the passage it quotes, and a slide in the call. Calling it again for the same to-do adds questions and changes nothing else.",
+        "Puts a to-do's plan on the space's next design review: a call where the team goes through the spec on a few slides (its sections, with each open comment thread as a question on the slide of its section) and ends with a verdict. Call it after attach_plan, and only when your person asks for a review or the plan has a question the team must decide. Give those questions: each one becomes a comment thread on the passage it quotes, and a question the team settles in the call. Calling it again for the same to-do adds questions and changes nothing else.",
       inputSchema: {
         ref: z.string().describe("The to-do's reference, stand:action/<id>"),
         questions: z
@@ -483,7 +483,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Read a space's product review and design review",
       description:
-        "The space's next product review (its slides so far, plus finished work that will join when it starts) and how the last one went: each slide's outcome (Ship, Ship with fixes, Not yet) and the to-dos, decisions and open questions the team raised while that slide was on screen. Under design_review: the specs waiting on the next design review with their points, and the last one that ran, with each spec's verdict (Approve, Approve with changes, Not yet), how each point ended and the to-dos that came out of it.",
+        "The space's next product review (its slides so far, plus finished work that will join when it starts) and how the last one went: each slide's outcome (Ship, Ship with fixes, Not yet) and the to-dos, decisions and open questions the team raised while that slide was on screen. Under design_review: the specs waiting on the next design review with their questions, and the last one that ran, with each spec's verdict (Approve, Approve with changes, Not yet), how each question ended (Settled, Still open) and the to-dos that came out of it.",
       inputSchema: { space: z.string().describe("A space id, or part of its name") },
       annotations: READ,
     },

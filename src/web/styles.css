@@ -3111,6 +3111,9 @@ a.sh-review { text-decoration: none; color: inherit; }
 .dr-slide.off h2 { color: var(--muted); }
 .dr-slide > header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .dr-slide h2, .dr-suggest h2 { font-size: 15px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; }
+.dr-part { display: flex; flex-direction: column; gap: 8px; }
+.dr-part + .dr-part { border-top: 1px dashed var(--line); padding-top: 10px; }
+.dr-part > header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .dr-kind { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .dr-stand { font-size: 11px; color: var(--accent); white-space: nowrap; font-weight: 500; }
 .dr-changed { font-size: 12px; color: #b45309; }
@@ -3152,9 +3155,25 @@ a.sh-review { text-decoration: none; color: inherit; }
 .ds-thread { display: flex; flex-direction: column; gap: 6px; }
 .ds-question { font-size: clamp(18px, 2vw, 26px); line-height: 1.3; font-weight: 550; margin: 0; white-space: pre-line; }
 .ds-reply { border-top: 1px solid var(--line); padding-top: 6px; font-size: 14px; }
+/* Sections that share a slide, and the questions on a slide: one is open at a time. */
+.ds-parts { display: flex; flex-direction: column; gap: 14px; }
+.ds-parts section { display: flex; flex-direction: column; gap: 6px; }
+.ds-parts h1 { font-size: clamp(16px, 1.7vw, 21px); }
+.ds-parts .ds-lines { font-size: clamp(14px, 1.35vw, 17px); gap: 4px; }
+.ds-main.asking > h1, .ds-main.asking .ds-parts h1 { font-size: 16px; }
+.ds-main.asking .ds-lines, .ds-main.asking .ds-summary { font-size: 14px; color: var(--muted); gap: 2px; }
+.ds-questions { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.ds-q { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+.ds-q > span:nth-child(2) { flex: 1; min-width: 0; }
+button.ds-q { cursor: pointer; }
+button.ds-q:hover { background: var(--panel-2); }
+button.ds-q:focus-visible { outline: 2px solid var(--accent); }
+.ds-q.open { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 14px; border-color: var(--accent); }
+.ds-q-head { display: flex; align-items: center; gap: 10px; }
+.ds-q.open .ds-passage { max-height: 30vh; }
 .ds-results, .ds-lost { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
 .ds-results li { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
-.ds-results li > span:nth-child(2) { flex: 1; min-width: 0; }
+.ds-results li > :nth-child(2) { flex: 1; min-width: 0; text-align: left; font: inherit; }
 .ds-result { flex: none; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
 .ds-result.ship { background: #15803d; color: #fff; }
 .ds-result.fixes { background: #b45309; color: #fff; }
