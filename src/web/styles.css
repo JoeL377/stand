@@ -624,10 +624,27 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
 .idea-star { display: inline-flex; color: #e0a100; }
 .idea-card h2 { margin: 0; font-size: clamp(22px, 3.2vw, 36px); line-height: 1.15; font-weight: 650; overflow-wrap: anywhere; }
 .idea-detail { margin: 0; font-size: clamp(15px, 1.6vw, 19px); line-height: 1.45; color: var(--muted); }
-.idea-more { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; font-size: clamp(13.5px, 1.3vw, 15.5px); line-height: 1.4; }
-.idea-more li { padding-left: 12px; border-left: 2px solid var(--line); }
-.idea-more li.idea-caught { display: flex; align-items: baseline; gap: 7px; padding-left: 0; border-left: 0; font-weight: 500; }
-.idea-more li.idea-caught .brain-kind { translate: 0 2px; }
+.idea-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.idea-pills .rp-pill { height: 30px; padding: 0 12px; font-size: 13px; cursor: pointer; }
+.idea-pills .rp-pill .count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.idea-pills .rp-pill.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+/* One list of an idea's, opened from its pill: a card over the slide, a sheet at the foot of a phone. */
+.idea-pop-back { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / 0.35); }
+.idea-pop { box-sizing: border-box; width: min(560px, 100%); max-height: min(70dvh, 560px); display: flex; flex-direction: column; border-radius: 14px; background: var(--panel); color: var(--text); box-shadow: 0 16px 48px rgb(0 0 0 / 0.35); text-align: left; }
+.idea-pop-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px 18px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.idea-pop-head > strong { flex: none; }
+.idea-pop-head > .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.idea-pop-x { all: unset; box-sizing: border-box; flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); cursor: pointer; }
+.idea-pop-x:hover { background: var(--panel-2); color: var(--text); }
+.idea-pop-x:focus-visible { outline: 2px solid var(--accent); }
+.idea-pop ul { list-style: none; margin: 0; padding: 4px 18px 10px; overflow-y: auto; font-size: 15px; line-height: 1.4; }
+.idea-pop li { padding: 10px 0; }
+.idea-pop li + li { border-top: 1px solid var(--line); }
+.idea-pop li.done > span:first-child { text-decoration: line-through; opacity: 0.6; }
+@media (max-width: 720px) {
+  .idea-pop-back { place-items: end stretch; padding: 0; }
+  .idea-pop { width: 100%; max-height: 72dvh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+}
 .xp-idea { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 720px) {
   /* Phones: the picture at its own height, the bar on one line, then what was caught as a plain list.
