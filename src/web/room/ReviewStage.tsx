@@ -59,19 +59,19 @@ export function ReviewStage(props: {
   useEffect(() => setZoomed(false), [item.id]);
   // A capture that just arrived shows over the foot of the picture for a few seconds, so people
   // see Stand heard it without looking away from the slide. Not the ones already there on arrival.
-  const seen = useRef<{ item: string; ids: Set<string> } | null>(null);
+  // A line is known by what it says, not its id: a notes run can hand the same line back under a new one.
+  const seen = useRef<{ item: string; said: Set<string> } | null>(null);
   const [landed, setLanded] = useState<Note[]>([]);
-  const caughtKey = caught.map((n) => n.id).join(",");
+  const caughtKey = caught.map(saidKey).join("\n");
   useEffect(() => {
-    const ids = new Set(caught.map((n) => n.id));
     const before = seen.current;
-    seen.current = { item: item.id, ids };
+    seen.current = { item: item.id, said: new Set([...(before?.item === item.id ? before.said : []), ...caught.map(saidKey)]) };
     if (!before || before.item !== item.id) return setLanded([]);
-    const fresh = caught.filter((n) => !before.ids.has(n.id));
+    const fresh = caught.filter((n, i) => !before.said.has(saidKey(n)) && caught.findIndex((x) => saidKey(x) === saidKey(n)) === i);
     if (!fresh.length) return;
     setLanded((l) => [...l, ...fresh].slice(-LANDED_MAX));
-    const gone = new Set(fresh.map((n) => n.id));
-    setTimeout(() => setLanded((l) => l.filter((n) => !gone.has(n.id))), LANDED_MS);
+    const gone = new Set(fresh.map(saidKey));
+    setTimeout(() => setLanded((l) => l.filter((n) => !gone.has(saidKey(n)))), LANDED_MS);
   }, [item.id, caughtKey]);
   // Setting how a slide ended opens what was caught on it, for everyone: the moment to fix the list before moving on.
   const outcomeSeen = useRef<{ item: string; outcome: ReviewOutcome | null } | null>(null);
@@ -124,7 +124,7 @@ export function ReviewStage(props: {
             {landed.map((n) => {
               const k = KINDS.find((x) => x.kind === n.kind)!;
               return (
-                <p key={n.id} className={n.kind}>
+                <p key={saidKey(n)} className={n.kind}>
                   <k.Icon />
                   <span className="rv-landed-kind">{k.label}</span>
                   <span dir="auto">{n.text}</span>
@@ -241,6 +241,11 @@ export function ReviewStage(props: {
               <Icon />
               <span dir="auto">{n.text}</span>
               {n.owner && <span className="rv-who">{n.owner.split(" ")[0]}</span>}
+              {props.onRemove && !disabled && (
+                <button className="rv-wrap-x" aria-label={`Remove "${n.text}"`} onClick={() => props.onRemove!(n)}>
+                  <CloseIcon size={12} />
+                </button>
+              )}
             </p>
           );
         })}
@@ -249,12 +254,14 @@ export function ReviewStage(props: {
             <span className="agent-mark">✦</span> Writing
           </p>
         )}
+        {props.onAdd && !disabled && <AddLine onAdd={props.onAdd} />}
       </div>
       {zoomed && shot && <ShotZoom url={shot.url} alt={shot.caption ?? item.title} onClose={() => setZoomed(false)} />}
     </div>
   );
 }
 
+const saidKey = (n: Note) => `${n.kind}:${n.text.trim().toLowerCase()}`;
 const LANDED_MS = 4500;
 const LANDED_MAX = 3;
 
@@ -267,14 +274,7 @@ function Wrap(props: {
   onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
   onClose: () => void;
 }) {
-  const [kind, setKind] = useState<"action" | "decision" | "question">("action");
-  const [text, setText] = useState("");
   const label = REVIEW_OUTCOMES.find((o) => o.id === props.outcome)?.label;
-  const add = () => {
-    if (!text.trim() || !props.onAdd) return;
-    props.onAdd(kind, text.trim());
-    setText("");
-  };
   return (
     <div className="rv-wrap" role="dialog" aria-label={`${label}: what was caught on this slide`}>
       <div className="rv-wrap-head">
@@ -307,25 +307,34 @@ function Wrap(props: {
         );
       })}
       {!props.caught.length && !props.onAdd && <p className="rv-wrap-none">Nothing caught on this slide</p>}
-      {props.onAdd && (
-        <form
-          className="rv-wrap-add"
-          onSubmit={(e) => {
-            e.preventDefault();
-            add();
-          }}
-        >
-          <div role="group" aria-label="What to add">
-            {KINDS.map(({ kind: k, label: name, Icon }) => (
-              <button key={k} type="button" className={kind === k ? "on" : undefined} aria-pressed={kind === k} title={name} aria-label={name} onClick={() => setKind(k)}>
-                <Icon />
-              </button>
-            ))}
-          </div>
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder={kind === "action" ? "Add a to-do" : kind === "decision" ? "Add a decision" : "Add an open question"} maxLength={500} />
-        </form>
-      )}
+      {props.onAdd && <AddLine onAdd={props.onAdd} />}
     </div>
+  );
+}
+
+/** The host writes in a line Stand missed: pick its kind, type, Enter. */
+function AddLine({ onAdd }: { onAdd: (kind: "action" | "decision" | "question", text: string) => void }) {
+  const [kind, setKind] = useState<"action" | "decision" | "question">("action");
+  const [text, setText] = useState("");
+  return (
+    <form
+      className="rv-wrap-add"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!text.trim()) return;
+        onAdd(kind, text.trim());
+        setText("");
+      }}
+    >
+      <div role="group" aria-label="What to add">
+        {KINDS.map(({ kind: k, label: name, Icon }) => (
+          <button key={k} type="button" className={kind === k ? "on" : undefined} aria-pressed={kind === k} title={name} aria-label={name} onClick={() => setKind(k)}>
+            <Icon />
+          </button>
+        ))}
+      </div>
+      <input value={text} onChange={(e) => setText(e.target.value)} placeholder={kind === "action" ? "Add a to-do" : kind === "decision" ? "Add a decision" : "Add an open question"} maxLength={500} enterKeyHint="done" />
+    </form>
   );
 }
 

@@ -622,7 +622,8 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
   .rv-strip { position: static; translate: none; align-self: center; margin: 0; }
   .rv-pic { flex-direction: column; gap: 8px; }
   .rv-caught, .rv-caught-pop, .rv-wide, .rv-wrap { display: none; }
-  .rv-landed, .rv-strip ~ .rv-landed { bottom: 8px; translate: -50% 0; width: calc(100% - 16px); }
+  .rv-landed { bottom: 8px; width: calc(100% - 16px); }
+  .rv-strip ~ .rv-landed { bottom: 54px; }
   .rv-landed p { font-size: 14px; padding: 8px 12px; }
   .rv-narrow { display: inline; }
   .rv-bar { flex-wrap: nowrap; gap: 6px; justify-content: space-between; }
@@ -637,6 +638,10 @@ a.conn-pill:hover { background: rgb(194 65 12 / 0.2); }
   .rv-list p.decision > svg { color: #5ecb8a; }
   .rv-list p.question > svg { color: #f0a35e; }
   .rv-list p > span[dir] { flex: 1; min-width: 0; }
+  .rv-list .rv-wrap-x { width: 30px; height: 30px; margin: -4px -6px -4px 0; }
+  .rv-list .rv-wrap-add { border-top-color: rgb(255 255 255 / 0.08); margin-top: 4px; }
+  .rv-list .rv-wrap-add input { height: 38px; font-size: 16px; }
+  .rv-list .rv-wrap-add > div button { width: 34px; height: 34px; }
   .rv-list p.done > span[dir] { text-decoration: line-through; opacity: 0.6; }
   .rv-strip button { width: 44px; height: 30px; }
 }
