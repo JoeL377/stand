@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { BrainCaught, Segment } from "../shared/protocol.ts";
-import { type MapAnswer, MapKeeper, brainstormOfMeeting, brainstormPage, brainstormsOf, finishBrainstorm, startBrainstorm } from "./brainstorm.ts";
+import { type MapAnswer, MapKeeper, brainstormOfMeeting, brainstormPage, brainstormsOf, finishBrainstorm, starIdea, startBrainstorm } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
 
 const T0 = 1_000_000;
@@ -123,5 +123,13 @@ test("a brainstorm leads the agenda while it runs, and keeps its page after the 
   // Its page shows what's on the map, to its own space only.
   assert.deepEqual(brainstormPage(db, room.id, next.id)!.nodes.map((n) => n.label), ["Plans", "Free tier"]);
   assert.equal(brainstormPage(db, other.id, next.id), null);
+  // An idea can be starred from the page: only an idea, only one on the map, only in its own space.
+  assert.deepEqual(starIdea(db, room.id, next.id, "i1", true)!.starred, ["i1"]);
+  assert.deepEqual(starIdea(db, room.id, next.id, "i1", true)!.starred, ["i1"]);
+  assert.equal(starIdea(db, room.id, next.id, "d1", true), null);
+  assert.equal(starIdea(db, room.id, next.id, "i2", true), null);
+  assert.equal(starIdea(db, other.id, next.id, "i1", true), null);
+  assert.deepEqual(brainstormPage(db, room.id, next.id)!.starred, ["i1"]);
+  assert.equal(starIdea(db, room.id, next.id, "i1", false)!.starred, undefined);
   assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, directions: 1, ideas: 1 });
 });

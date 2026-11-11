@@ -7,6 +7,7 @@
 import { brainstormsOf } from "./brainstorm.ts";
 import type { SpaceFeed } from "../shared/protocol.ts";
 import { designReviewSummary, designReviewsRan } from "./designReviews.ts";
+import { ideaReviewsOf } from "./ideaReview.ts";
 import { reviewView, reviewsDone } from "./reviews.ts";
 import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
@@ -166,6 +167,7 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
     reviews: reviewsDone(db, roomId),
     designReview: designReviewSummary(db, roomId),
     designReviews: designReviewsRan(db, roomId),
+    ideaReviews: ideaReviewsOf(db, roomId),
     brainstorms: brainstormsOf(db, roomId),
     captures: linkSnaps(db.spaceSnaps(roomId, 0, FEED_CAPTURES).filter(keep("snap")), [], [], baseUrl),
     jots: db

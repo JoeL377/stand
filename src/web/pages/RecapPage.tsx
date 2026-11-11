@@ -193,6 +193,11 @@ export function RecapPage() {
             <VerdictCounts verdicts={data.designReview.verdicts} />
           </Link>
         )}
+        {data.ideaReview && (
+          <Link className="rp-pill rc-review" to={reviewHref(data.roomId, data.ideaReview.id)}>
+            Idea review · {data.ideaReview.slides} {data.ideaReview.slides === 1 ? "idea" : "ideas"}
+          </Link>
+        )}
         {data.review && (
           <Link className="rp-pill rc-review" to={reviewHref(data.roomId, data.review.id)}>
             Product review · {data.review.slides} slides

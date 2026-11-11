@@ -34,6 +34,34 @@ export const REVIEW_OUTCOMES: Array<{ id: ReviewOutcome; label: string }> = [
   { id: "not_yet", label: "Not yet" },
 ];
 
+/** How a slide of an idea review ended: what the team does with the idea. */
+export type IdeaOutcome = "pursue" | "explore" | "not_now";
+export const IDEA_OUTCOMES: Array<{ id: IdeaOutcome; label: string }> = [
+  { id: "pursue", label: "Pursue" },
+  { id: "explore", label: "Explore" },
+  { id: "not_now", label: "Not now" },
+];
+
+/** What an idea review's slide carries (server/ideaReview.ts): the idea as the brainstorm left it,
+ *  and what the review made of it. */
+export interface IdeaSlideInfo {
+  brainstormId: string;
+  /** The idea's circle on that brainstorm's map. */
+  nodeId: string;
+  /** The direction it sat under. */
+  direction: string | null;
+  by: string | null;
+  starred: boolean;
+  /** What others built on it in the brainstorm. */
+  points: Array<{ text: string; by: string | null }>;
+  /** What the brainstorm caught on it. */
+  caught: BrainCaught[];
+  outcome: IdeaOutcome | null;
+  outcomeBy: string | null;
+  /** The to-do (Pursue) or open question (Explore) it became when the review ended. */
+  became?: { kind: "action" | "question"; id: string } | null;
+}
+
 /** A picture on a review slide: a screenshot an agent or a person attached. */
 export interface ReviewShot {
   url: string;
@@ -55,11 +83,19 @@ export interface ReviewSlideInfo {
   shots: ReviewShot[];
   outcome: ReviewOutcome | null;
   outcomeBy: string | null;
+  /** Set on an idea review's slide: the slide is an idea from a brainstorm, and ends Pursue, Explore or Not now. */
+  idea?: IdeaSlideInfo | null;
 }
 
 /** A space's product review as the space page shows it: the next one being put together, or the one in a call. */
 export interface ReviewView {
   id: string;
+  /** "ideas": an idea review, whose slides are a brainstorm's ideas. Left out on a product review. */
+  kind?: "ideas";
+  /** An idea review's name: the sentence its brainstorm started from. */
+  title?: string | null;
+  /** An idea review's brainstorm. */
+  brainstormId?: string | null;
   status: "draft" | "live" | "done";
   /** Its deck once the review has started. */
   deckId: string | null;
@@ -90,6 +126,18 @@ export interface ReviewSummary {
   meetingId: string | null;
   slides: number;
   outcomes: Record<ReviewOutcome, number>;
+}
+
+/** An idea review in a line: for the menus that start one and the lists that link to one. */
+export interface IdeaReviewSummary {
+  id: string;
+  title: string;
+  brainstormId: string | null;
+  status: "draft" | "live" | "done";
+  startedAt: number | null;
+  meetingId: string | null;
+  slides: number;
+  outcomes: Record<IdeaOutcome, number>;
 }
 
 export interface SlideContent {
@@ -294,6 +342,12 @@ export interface BrainstormView {
   startedAt: number;
   endedAt: number | null;
   nodes: BrainNode[];
+  /** Ids of the ideas someone in the space starred as worth coming back to. */
+  starred?: string[];
+  /** Its idea review, once one is set up: where the team decides which ideas to pursue. */
+  ideaReview?: { id: string; status: "draft" | "live" | "done" } | null;
+  /** What an idea review made of each idea, by the idea's id. */
+  reviewed?: Record<string, { outcome: IdeaOutcome; became?: { kind: "action" | "question"; id: string } | null }>;
   /** Set when this is a design session: the sentence says what is being designed, and the board is
    *  this diagram instead of the map. */
   design?: DesignDiagram;
@@ -932,7 +986,7 @@ export type ClientMessage = (
   /** Anyone: turn the opening board to a page, for everyone. */
   | { type: "checkin.page"; page: number }
   /** Anyone: how the review slide on screen ended (null takes it back). */
-  | { type: "review.outcome"; itemId: string; outcome: ReviewOutcome | null }
+  | { type: "review.outcome"; itemId: string; outcome: ReviewOutcome | IdeaOutcome | null }
   /** Anyone: how the point on screen ended, or the verdict on its spec (null takes it back). */
   | { type: "design.outcome"; itemId: string; outcome: DesignOutcome | null }
   /** A spec's author: go to another slide of their spec, for everyone. */
@@ -1093,6 +1147,8 @@ export interface MeetingRecap {
   cost?: MeetingCost | null;
   /** The product review that ran in this meeting, if one did. */
   review?: ReviewSummary | null;
+  /** The idea review that ran in it, if one did. */
+  ideaReview?: IdeaReviewSummary | null;
   /** The design review that ran in it, if one did. */
   designReview?: DesignReviewRan | null;
   /** The brainstorm that ran in it, if one did. */
@@ -1169,6 +1225,8 @@ export interface SpaceFeed {
   designReview?: DesignReviewSummary | null;
   /** Design reviews that ran, newest first: each keeps its page. */
   designReviews?: DesignReviewRan[];
+  /** Idea reviews: the ones waiting or in a call first, then the ones that ran, newest first. */
+  ideaReviews?: IdeaReviewSummary[];
   /** The space's brainstorms, newest first, the one running now included. */
   brainstorms?: BrainstormSummary[];
   /** Snaps saved straight to the space, newest first. */
