@@ -10,6 +10,7 @@ import type { ChapterRecap, Discussion, DiscussionOutcome, Item, Note, NoteKind,
 import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, BoardDriftSchema, DRIFT_SYSTEM } from "./board.ts";
 import { config } from "./config.ts";
 import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
+import { MAP_SYSTEM, type MapAnswer, MapAnswerSchema } from "./brainstorm.ts";
 import { ANSWER_SYSTEM, type Answer, AnswerSchema, OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, readPartial, type RunUsage } from "./meetingAgent.ts";
 import { REPO_TOOL_CALLS, type RepoTools } from "./projects.ts";
 import { findQuote, type Said } from "./quotes.ts";
@@ -197,6 +198,8 @@ export interface Agent {
   /** The board's running list (liveList.ts): what the newest talk adds, changes or closes. Left out
    *  without a model; the board's tabs then read the live notes. */
   liveList?(context: string, talk: string): Promise<ListAnswer | null>;
+  /** A brainstorm's map (brainstorm.ts): what the newest talk adds to it. Left out by agents that can't. */
+  brainstormMap?(context: string, talk: string): Promise<MapAnswer | null>;
   /** ✦ Stand's options for an open question (meetingAgent.ts), searching the web as it needs. Left out
    *  without a model. */
   findOptions?(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
@@ -259,6 +262,7 @@ export interface AgendaPolishRow {
 const BOARD_TIMEOUT_MS = 25_000;
 /** The running list answers in about 2 s; past this the next pause tries again. */
 const LIST_TIMEOUT_MS = 15_000;
+const MAP_TIMEOUT_MS = 20_000;
 /** A run of ✦ Stand's options can search the web a few times; past this, the card says it couldn't. */
 const AGENT_TIMEOUT_MS = 90_000;
 /** How long an answer may spend reading the repo before it has to answer. */
@@ -929,6 +933,10 @@ When a capture fits the slide it is already under, answer with that slide. When 
 
   async liveList(context: string, talk: string): Promise<ListAnswer | null> {
     return this.parse(ListAnswerSchema, boardContent(context, talk), LIST_SYSTEM, "low", config.listModel, { timeout: LIST_TIMEOUT_MS, maxTokens: 2000, thinking: false });
+  }
+
+  async brainstormMap(context: string, talk: string): Promise<MapAnswer | null> {
+    return this.parse(MapAnswerSchema, boardContent(context, talk), MAP_SYSTEM, "low", config.mapModel, { timeout: MAP_TIMEOUT_MS, maxTokens: 2500, thinking: false });
   }
 
   async findOptions(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }> {

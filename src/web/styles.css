@@ -3113,3 +3113,81 @@ a.sh-review { text-decoration: none; color: inherit; }
   .rp-pic { flex-direction: column; }
   .rp-pic .rv-strip { position: static; translate: none; margin: 0 0 8px; }
 }
+
+/* ---- brainstorm: the map (room/BrainMap.tsx) ---- */
+.brain { position: relative; flex: 1; min-width: 0; min-height: 0; width: 100%; overflow: hidden; background: var(--bg); color: var(--text); text-align: left; }
+.brain-lines { position: absolute; inset: 0; pointer-events: none; }
+.brain-lines line { stroke: var(--line); stroke-width: 1.5; transition: all 0.5s ease; }
+.brain-lines line.trunk { stroke: color-mix(in srgb, var(--accent) 45%, var(--line)); stroke-width: 2; }
+.brain-node { all: unset; box-sizing: border-box; position: absolute; translate: -50% -50%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-align: center; cursor: pointer; transition: left 0.5s ease, top 0.5s ease, box-shadow 0.3s, border-color 0.3s, background 0.3s; animation: brain-in 0.45s ease both; }
+.brain-node > span { overflow-wrap: anywhere; }
+.brain-node.root { cursor: default; flex-direction: column; gap: 4px; width: clamp(180px, 24%, 290px); min-height: 84px; padding: 14px 20px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 16px; font-weight: 600; line-height: 1.25; box-shadow: 0 6px 22px color-mix(in srgb, var(--accent) 30%, transparent); z-index: 2; animation: none; }
+.brain-node.root small { font-size: 11.5px; font-weight: 400; opacity: 0.85; }
+.brain-node.root.busy { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent), 0 6px 22px color-mix(in srgb, var(--accent) 30%, transparent); }
+.brain-node.dir { max-width: 170px; min-height: 40px; padding: 8px 16px; border-radius: 999px; background: var(--panel); border: 2px solid color-mix(in srgb, var(--accent) 55%, var(--line)); font-size: 14px; font-weight: 600; line-height: 1.2; z-index: 2; }
+.brain-node.idea { max-width: 158px; min-height: 30px; padding: 5px 12px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.25; z-index: 1; }
+.brain-node.idea.more { color: var(--muted); border-style: dashed; white-space: nowrap; }
+.brain-node.dir:hover, .brain-node.idea:hover, .brain-node.dir:focus-visible, .brain-node.idea:focus-visible { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); z-index: 3; }
+.brain-node.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); z-index: 3; }
+.brain-node.fresh { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); z-index: 3; }
+.brain-badge { font-style: normal; flex: none; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-size: 10.5px; font-weight: 600; line-height: 16px; text-align: center; }
+.brain-face { flex: none; width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; font-size: 8.5px; font-weight: 600; letter-spacing: 0; }
+@keyframes brain-in { from { opacity: 0; scale: 0.6; } to { opacity: 1; scale: 1; } }
+@media (prefers-reduced-motion: reduce) { .brain-node { animation: none; transition: none; } .brain-lines line { transition: none; } }
+
+.brain-card { position: absolute; top: 14px; bottom: auto; width: min(340px, calc(100% - 28px)); max-height: calc(100% - 28px); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 10px 34px rgb(0 0 0 / 0.22); z-index: 5; font-size: 13.5px; line-height: 1.45; animation: brain-in 0.18s ease both; }
+.brain-card.right { right: 14px; }
+.brain-card.left { left: 14px; }
+.brain-card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.brain-crumb { all: unset; cursor: pointer; font-size: 11.5px; font-weight: 600; color: var(--accent); letter-spacing: 0.02em; }
+.brain-crumb.plain { cursor: default; color: var(--muted); }
+.brain-crumb:not(.plain):hover { text-decoration: underline; }
+.brain-x { all: unset; cursor: pointer; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.brain-x:hover { background: var(--panel-2); color: var(--text); }
+.brain-card h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3; }
+.brain-card p { margin: 0; }
+.brain-card blockquote { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.brain-card cite { display: flex; align-items: center; gap: 6px; font-style: normal; font-size: 11.5px; color: var(--muted); }
+.brain-card section { display: flex; flex-direction: column; gap: 4px; }
+.brain-card h4 { margin: 4px 0 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.brain-point { all: unset; box-sizing: border-box; display: flex; align-items: flex-start; gap: 7px; font-size: 13px; line-height: 1.4; }
+.brain-point > svg, .brain-point > .brain-face { flex: none; margin-top: 1px; }
+.brain-point > span { flex: 1; min-width: 0; }
+.brain-point > small { flex: none; color: var(--muted); font-size: 11.5px; }
+.brain-point.done > span { text-decoration: line-through; color: var(--muted); }
+.brain-point.link { cursor: pointer; padding: 3px 6px; margin: 0 -6px; border-radius: 6px; width: calc(100% + 12px); }
+.brain-point.link:hover { background: var(--panel-2); }
+.brain-card footer { margin-top: 4px; font-size: 12px; }
+
+/* A phone gets the whole map on a canvas bigger than its screen: fitted at first, then drag and pinch. */
+.brain-canvas { position: absolute; inset: 0; }
+.brain.narrow { touch-action: none; user-select: none; -webkit-user-select: none; }
+.brain.narrow .brain-canvas { inset: auto; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+.brain.narrow .brain-node { transition: box-shadow 0.3s, border-color 0.3s, background 0.3s; }
+.brain.narrow .brain-node.root { width: 270px; font-size: 19px; }
+.brain.narrow .brain-node.dir { font-size: 17px; max-width: 200px; min-height: 48px; padding: 10px 18px; }
+.brain.narrow .brain-node.idea { font-size: 15px; max-width: 180px; min-height: 40px; padding: 8px 14px; }
+.brain-fit { all: unset; box-sizing: border-box; position: absolute; top: 8px; right: 8px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; cursor: pointer; z-index: 4; box-shadow: 0 2px 8px rgb(0 0 0 / 0.12); }
+/* The card sits at the bottom of the graph, above the call's own controls. */
+.brain.narrow .brain-card { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; max-height: 62%; }
+
+.bp-map { flex: 1; }
+.bp-count { font-size: 12.5px; white-space: nowrap; }
+.bp-menu { min-width: 300px; }
+.bp-menu-prompt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sh-panel form.sh-brain, .sh-panel div.sh-brain { cursor: default; padding: 5px 6px 5px 12px; }
+.sh-panel .sh-brain:hover { background: none; border-color: var(--line); }
+.sh-brain input { flex: 1 1 auto; min-width: 0; height: 30px; border: 0; background: none; box-shadow: none; padding: 0 4px; font-size: 14px; color: var(--text); outline: none; }
+.sh-brain button.primary { flex: none; height: 30px; padding: 0 14px; font-size: 13px; }
+.sh-brain a.sh-done-since-summary:hover { color: var(--text); }
+@media (max-width: 720px) {
+  .bp-count { display: none; }
+  /* The outline scrolls inside the page, so a tapped circle's card stays at the bottom of the screen. */
+  .rp.bp { height: 100dvh; }
+  /* The row takes two lines: its name and earlier ones, then the sentence and Start. */
+  .sh-panel form.sh-brain { flex-wrap: wrap; row-gap: 4px; padding: 8px 8px 8px 12px; }
+  form.sh-brain strong { flex: 1; }
+  div.sh-brain strong { white-space: nowrap; }
+  .sh-brain input { order: 2; flex-basis: 60%; padding: 0; font-size: 16px; }
+  .sh-brain button.primary { order: 3; }
+}

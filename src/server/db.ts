@@ -41,6 +41,8 @@ import type { Polish, UpNextInput } from "./upNext.ts";
 import { costOf, type UsageRow } from "./usage.ts";
 import type { Settled } from "./spaceSettle.ts";
 import type { ListItem } from "./liveList.ts";
+import type { BrainstormRow } from "./brainstorm.ts";
+import type { BrainNode } from "../shared/protocol.ts";
 import { initGithub } from "./github.ts";
 import { initProjects } from "./projects.ts";
 import { initConxt, enqueueConxtMeeting } from "./conxt.ts";
@@ -257,6 +259,20 @@ CREATE TABLE IF NOT EXISTS review_slides (
   name TEXT
 );
 CREATE INDEX IF NOT EXISTS review_slides_review ON review_slides(review_id, position);
+-- Brainstorms (brainstorm.ts): one sentence and the map the talk drew around it.
+CREATE TABLE IF NOT EXISTS brainstorms (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  prompt TEXT NOT NULL,
+  status TEXT NOT NULL,
+  item_id TEXT,
+  meeting_id TEXT,
+  started_by TEXT,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  map_json TEXT
+);
+CREATE INDEX IF NOT EXISTS brainstorms_room ON brainstorms(room_id, started_at);
 -- Token use of every Claude call (usage.ts), with the meeting it was for (null outside a meeting).
 CREATE TABLE IF NOT EXISTS llm_usage (
   meeting_id TEXT,
@@ -496,6 +512,18 @@ const toReview = (r: Row): ReviewRow => ({
   createdAt: r.created_at as number,
   startedAt: (r.started_at as number) ?? null,
   endedAt: (r.ended_at as number) ?? null,
+});
+const toBrainstorm = (r: Row): BrainstormRow => ({
+  id: r.id as string,
+  roomId: r.room_id as string,
+  prompt: r.prompt as string,
+  status: r.status as BrainstormRow["status"],
+  itemId: (r.item_id as string) ?? null,
+  meetingId: (r.meeting_id as string) ?? null,
+  startedBy: (r.started_by as string) ?? null,
+  startedAt: r.started_at as number,
+  endedAt: (r.ended_at as number) ?? null,
+  nodes: r.map_json ? (JSON.parse(r.map_json as string) as BrainNode[]) : [],
 });
 const toReviewSlide = (r: Row): ReviewSlideRow => ({
   id: r.id as string,
@@ -2024,6 +2052,34 @@ export function openDb(file?: string) {
           )
           .all(since) as Row[]
       ).map((r) => r.room_id as string);
+    },
+    // ---- brainstorms (brainstorm.ts) ----
+    brainstormLive(roomId: string): BrainstormRow | null {
+      const r = db.prepare("SELECT * FROM brainstorms WHERE room_id = ? AND status = 'live' ORDER BY started_at DESC, rowid DESC LIMIT 1").get(roomId) as Row | undefined;
+      return r ? toBrainstorm(r) : null;
+    },
+    getBrainstorm(id: string): BrainstormRow | null {
+      const r = db.prepare("SELECT * FROM brainstorms WHERE id = ?").get(id) as Row | undefined;
+      return r ? toBrainstorm(r) : null;
+    },
+    brainstorms(roomId: string, limit = 30): BrainstormRow[] {
+      return (db.prepare("SELECT * FROM brainstorms WHERE room_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?").all(roomId, limit) as Row[]).map(toBrainstorm);
+    },
+    brainstormByMeeting(meetingId: string): BrainstormRow | null {
+      const r = db.prepare("SELECT * FROM brainstorms WHERE meeting_id = ? ORDER BY rowid DESC LIMIT 1").get(meetingId) as Row | undefined;
+      return r ? toBrainstorm(r) : null;
+    },
+    createBrainstorm(b: { roomId: string; prompt: string; itemId: string | null; startedBy: string | null; startedAt: number }): BrainstormRow {
+      const id = newId();
+      db.prepare("INSERT INTO brainstorms (id, room_id, prompt, status, item_id, started_by, started_at) VALUES (?, ?, ?, 'live', ?, ?, ?)").run(id, b.roomId, b.prompt, b.itemId, b.startedBy, b.startedAt);
+      return this.getBrainstorm(id)!;
+    },
+    setBrainstorm(id: string, patch: Partial<Pick<BrainstormRow, "status" | "meetingId" | "endedAt">>) {
+      const cols: Record<string, string> = { status: "status", meetingId: "meeting_id", endedAt: "ended_at" };
+      for (const [k, v] of Object.entries(patch)) db.prepare(`UPDATE brainstorms SET ${cols[k]} = ? WHERE id = ?`).run(v ?? null, id);
+    },
+    saveBrainstormMap(id: string, nodes: BrainNode[]) {
+      db.prepare("UPDATE brainstorms SET map_json = ? WHERE id = ?").run(JSON.stringify(nodes), id);
     },
     // ---- product reviews (reviews.ts) ----
     /** The space's review in one of these states, newest first. */

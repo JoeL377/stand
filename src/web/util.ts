@@ -19,6 +19,7 @@ const TASK_NAMES: Record<string, string> = {
   notesFor: "Live notes",
   mergeTopics: "Topic merge",
   refileReview: "Review filing",
+  brainstormMap: "Brainstorm map",
   recapMeeting: "Recap",
   summarizeMeeting: "Summary",
   synthesizeMeeting: "Synthesis",

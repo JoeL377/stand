@@ -2,6 +2,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
+import { brainCount, brainstormHref } from "./BrainstormPage.tsx";
 import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
@@ -180,6 +181,11 @@ export function RecapPage() {
             </>
           )}
         </p>
+        {data.brainstorm && (
+          <Link className="rp-pill rc-review" to={brainstormHref(data.roomId, data.brainstorm.id)}>
+            Brainstorm · {brainCount(data.brainstorm)}
+          </Link>
+        )}
         {data.review && (
           <Link className="rp-pill rc-review" to={reviewHref(data.roomId, data.review.id)}>
             Product review · {data.review.slides} slides

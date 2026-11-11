@@ -7,6 +7,7 @@ import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
   User,
+  BrainCaught,
   AgentCard,
   AgentDraft,
   ChapterRecap,
@@ -25,6 +26,7 @@ import type {
 import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
+import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, finishBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { PilotSeat } from "./pilot.ts";
 import { projectDigest, repoTools } from "./projects.ts";
 import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, draftOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
@@ -227,6 +229,10 @@ export class RoomSession implements SpeechSink {
   private pilot = new PilotSeat();
   private pilotTimer: ReturnType<typeof setTimeout> | null = null;
   private listTimer: NodeJS.Timeout | null = null;
+  /** The brainstorm running in this space, if one is (brainstorm.ts): its map, one pass at a time. */
+  private brain: { id: string; itemId: string | null; map: MapKeeper } | null = null;
+  private brainTimer: NodeJS.Timeout | null = null;
+  private brainRun: Promise<void> | null = null;
   private listRun: Promise<void> | null = null;
   /** The check-in at the start ("Since last time"): someone moved on from it, and the last answer anyone gave. */
   private checkInClosed = false;
@@ -284,8 +290,91 @@ export class RoomSession implements SpeechSink {
     this.board = new BoardKeeper(agent, this.meetingStartedAt, resume ? db.meetingBoard(resume.id) : null);
     if (agent.liveList) this.list = new ListKeeper({ liveList: agent.liveList.bind(agent) }, this.meetingStartedAt, resume ? db.meetingList(resume.id) : null);
     if (agent.findOptions && this.list) this.agentCards = new AgentKeeper(resume ? db.meetingAgentCards(resume.id) : null);
+    this.loadBrainstorm();
     // Tidy the suggested agenda now, before anyone has started talking.
     polisher?.schedule(room.id, 0);
+  }
+
+  // ---- brainstorm -----------------------------------------------------------
+
+  /** Picks up the brainstorm running in this space: at the start of the call, and when one is started during it. */
+  private loadBrainstorm() {
+    const b = this.db.brainstormLive(this.roomId);
+    if (!b) return void (this.brain = null);
+    if (this.brain?.id === b.id) return;
+    const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };
+    // Only talk from this call, after the brainstorm began, belongs on its map.
+    this.brain = { id: b.id, itemId: b.itemId, map: new MapKeeper(model, b.prompt, Math.max(b.startedAt, this.meetingStartedAt) - 1, b.nodes) };
+  }
+
+  /** A brainstorm was started (or replaced) from outside the call's own messages. */
+  brainstormChanged() {
+    this.loadBrainstorm();
+    this.broadcastBrainstorm();
+    this.scheduleMap();
+  }
+
+  private brainstormView(busy = false) {
+    const b = this.brain && this.db.getBrainstorm(this.brain.id);
+    return b ? toBrainstormView({ ...b, nodes: this.brain!.map.all() }, busy) : null;
+  }
+
+  private broadcastBrainstorm(busy = false) {
+    this.broadcast({ type: "brainstorm", brainstorm: this.brainstormView(busy) });
+  }
+
+  /** The meeting's to-dos, decisions and open questions, for linking to circles. */
+  private brainCaught(): BrainCaught[] {
+    const KIND = ["action", "decision", "question"];
+    const lines: Note[] = this.list ? this.list.notes(this.meetingId).filter((n) => !n.closed) : this.db.meetingNotes(this.meetingId);
+    return lines.filter((n) => KIND.includes(n.kind)).map((n) => ({ id: n.id, kind: n.kind as BrainCaught["kind"], text: n.text, owner: n.owner ?? null, done: !!n.doneAt }));
+  }
+
+  private saveBrainstorm() {
+    if (!this.brain) return;
+    this.db.saveBrainstormMap(this.brain.id, this.brain.map.all());
+    this.broadcastBrainstorm();
+  }
+
+  /** The next map pass: MAP_DEBOUNCE_MS after the latest talk, never more than MAP_MAX_WAIT_MS after
+   *  the oldest line no pass has read. */
+  private scheduleMap() {
+    const brain = this.brain;
+    if (this.ended || !brain || this.brainRun) return;
+    const since = brain.map.unreadSince(this.db.meetingSegments(this.meetingId));
+    if (since === null) return;
+    const wait = Math.max(0, Math.min(MAP_DEBOUNCE_MS, since + MAP_MAX_WAIT_MS - Date.now()));
+    if (this.brainTimer) clearTimeout(this.brainTimer);
+    this.brainTimer = setTimeout(() => {
+      this.brainTimer = null;
+      void this.runMap();
+    }, wait);
+  }
+
+  private runMap(final = false): Promise<void> {
+    const brain = this.brain;
+    if (!brain || (this.ended && !final)) return Promise.resolve();
+    if (this.brainRun) return this.brainRun;
+    const segments = this.db.meetingSegments(this.meetingId);
+    if (brain.map.unreadSince(segments) === null) return Promise.resolve();
+    const people = [...new Set([...[...this.participants.values()].map((p) => p.name), ...segments.map((s) => s.speakerName)])];
+    if (!final) this.broadcastBrainstorm(true);
+    this.brainRun = brain.map
+      .run(segments, people, this.brainCaught(), this.meetingStartedAt, Date.now())
+      .catch((e) => {
+        console.error(`[brainstorm] ${this.meetingId}: ${(e as Error).message}`);
+        return false;
+      })
+      .then(() => {
+        if (this.brain !== brain) return;
+        brain.map.refresh(this.brainCaught());
+        this.saveBrainstorm();
+      })
+      .finally(() => {
+        this.brainRun = null;
+        if (!final) this.scheduleMap();
+      });
+    return this.brainRun;
   }
 
   // ---- connections ---------------------------------------------------------
@@ -662,6 +751,7 @@ export class RoomSession implements SpeechSink {
       const cost = this.db.meetingCost(this.meetingId);
       if (cost) this.send(ws, { type: "cost", cost });
       this.send(ws, { type: "list", items: this.list?.notes(this.meetingId) ?? null });
+      this.send(ws, { type: "brainstorm", brainstorm: this.brainstormView() });
       if (this.agentCards) this.send(ws, { type: "agent", cards: this.agentCards.all() });
       if (this.pilot.back(id)) this.pilotChanged();
       else if (this.agentCards) this.send(ws, { type: "pilot", pilot: this.pilot.view(Date.now()) });
@@ -904,6 +994,10 @@ export class RoomSession implements SpeechSink {
         this.db.editNote(before.id, { text, owner }, conn.name);
         this.sendItemNotes(before.itemId);
         if (before.kind === "action") this.broadcastState();
+        break;
+      }
+      case "brainstorm.remove": {
+        if (this.brain?.map.remove(msg.id)) this.saveBrainstorm();
         break;
       }
       case "note.remove": {
@@ -1277,6 +1371,7 @@ export class RoomSession implements SpeechSink {
         this.broadcast({ type: "segment.updated", segment: seg });
         this.scheduleNotes(seg.itemId, NOTES_DEBOUNCE_MS);
         this.scheduleList();
+        this.scheduleMap();
         // Only the words just added count, so a long turn isn't scored twice.
         this.checkDrift({ ...seg, text: t });
         return;
@@ -1331,6 +1426,7 @@ export class RoomSession implements SpeechSink {
     this.scheduleNotes(itemId, NOTES_DEBOUNCE_MS);
     this.scheduleBoard();
     this.scheduleList();
+    this.scheduleMap();
     this.checkDrift(segment);
     this.checkConxtTerms(text, ts);
     return segment;
@@ -1402,6 +1498,11 @@ export class RoomSession implements SpeechSink {
    *  files it there and the passes that work out topics by themselves sit out. */
   private inReview() {
     return isReviewSlide(this.focusItemId ? this.db.getItem(this.focusItemId) : null);
+  }
+
+  /** The brainstorm's sentence is in focus: its map has the middle screen, so the topic card sits out. */
+  private inBrainstorm() {
+    return !!this.brain?.itemId && this.focusItemId === this.brain.itemId;
   }
 
   private scheduleList() {
@@ -1608,7 +1709,7 @@ export class RoomSession implements SpeechSink {
 
   /** The next board pass: BOARD_EVERY_MS after the last one, or soon after an agenda move. */
   private scheduleBoard(agendaMoved = false) {
-    if (this.ended || !this.board || this.boardRun || this.inReview()) return;
+    if (this.ended || !this.board || this.boardRun || this.inReview() || this.inBrainstorm()) return;
     const wait = agendaMoved ? BOARD_AFTER_FOCUS_MS : Math.max(BOARD_FIRST_MS, this.boardRanAt + BOARD_EVERY_MS - Date.now());
     if (this.boardTimer) {
       // A pass already waiting keeps its time unless this one is due sooner.
@@ -1955,6 +2056,7 @@ export class RoomSession implements SpeechSink {
     for (const t of this.noteTimers.values()) clearTimeout(t);
     if (this.boardTimer) clearTimeout(this.boardTimer);
     if (this.listTimer) clearTimeout(this.listTimer);
+    if (this.brainTimer) clearTimeout(this.brainTimer);
     this.noteTimers.clear();
     if (this.mergeTimer) clearTimeout(this.mergeTimer);
     this.mergeTimer = null;
@@ -1964,6 +2066,12 @@ export class RoomSession implements SpeechSink {
     await this.transcriber?.stop().catch(() => {});
     // A product review that ran in this meeting is over: its slides leave the agenda with what was said on them.
     finishReview(this.db, this.roomId, this.meetingId);
+    // So is a brainstorm: one last look at the talk no pass has read, then its map is the record.
+    if (this.brain) {
+      await this.brainRun?.catch(() => {});
+      await Promise.race([this.runMap(true), new Promise((r) => setTimeout(r, 25_000))]).catch(() => {});
+      finishBrainstorm(this.db, this.roomId, this.meetingId);
+    }
 
     let summary = "";
     let synthesizing: Promise<string | null> = Promise.resolve(null);
