@@ -1,5 +1,6 @@
 // What the server's routes and its WebSocket share: the database, the model, the meetings running
 // now, and the background jobs that tell them when something changed. Made once, at start.
+import { meetingTimeline } from "./timeline.ts";
 import path from "node:path";
 import type { Note } from "../shared/protocol.ts";
 import { agentApi } from "./agents.ts";
@@ -213,6 +214,7 @@ export function startServices() {
         itemById: (id) => db.getItem(id),
         discussionById: (id) => db.getDiscussion(id),
         withTranscript: transcript,
+        timeline: transcript ? meetingTimeline(db, m.id) : undefined,
       });
     },
   });

@@ -160,6 +160,16 @@ export function meetingsStore(db: DatabaseSync) {
         toSegment,
       );
     },
+    /** The same, with who moved it and why ("manual", "pin", "suggestion", "system"), for the timeline. */
+    focusEvents(meetingId: string): Array<{ id: string; ts: number; itemId: string | null; actor: string; reason: string }> {
+      return (db.prepare("SELECT id, item_id, actor, reason, ts FROM focus_events WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map((r) => ({
+        id: r.id as string,
+        ts: r.ts as number,
+        itemId: (r.item_id as string) ?? null,
+        actor: r.actor as string,
+        reason: r.reason as string,
+      }));
+    },
     logFocus(meetingId: string, itemId: string | null, actor: string, reason: string) {
       db.prepare("INSERT INTO focus_events (id, meeting_id, item_id, actor, reason, ts) VALUES (?, ?, ?, ?, ?, ?)").run(
         newId(12),

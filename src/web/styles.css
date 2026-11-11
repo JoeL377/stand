@@ -3324,3 +3324,15 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .brain-caught-h.action svg { color: var(--accent); }
 .brain-caught-h.decision svg { color: var(--ok); }
 .brain-caught-h.question svg { color: var(--warn); }
+
+/* The recap's timeline (Timeline.tsx): Ask Stand and agents' reports beside what was caught. */
+.tl-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.seg.capture-ask { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.seg.capture-ask .capture-head { color: var(--accent); }
+.seg.capture-agent { border-left-color: var(--line); background: var(--panel-2); }
+.seg.capture-agent .capture-head { color: var(--muted); }
+.tl-answer { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.tl-answer > :first-child { margin-top: 0; }
+.tl-answer > :last-child { margin-bottom: 0; }
+.seg.tl-focus { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 6px; }
+.seg.tl-focus:first-child { margin-top: 0; border-top: 0; padding-top: 3px; }
