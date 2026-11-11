@@ -106,6 +106,10 @@ const HANDLED_CIDS = 2_000;
 const UNDO_KEEP_MS = 60_000;
 /** Talk that keeps naming another agenda item adds up to this before the host is nudged to switch. */
 const DRIFT_NUDGE_SCORE = 3;
+/** A list or map pass that failed waits this long before the next, doubling to PASS_RETRY_MAX_MS while it keeps failing. */
+const PASS_RETRY_MS = 5_000;
+const PASS_RETRY_MAX_MS = 60_000;
+const retryWait = (failures: number) => (failures ? Math.min(PASS_RETRY_MAX_MS, PASS_RETRY_MS * 2 ** (failures - 1)) : 0);
 
 interface Conn {
   participantId: string;
@@ -239,6 +243,9 @@ export class RoomSession implements SpeechSink {
   private brainTimer: NodeJS.Timeout | null = null;
   private brainRun: Promise<void> | null = null;
   private listRun: Promise<void> | null = null;
+  /** Passes that failed in a row: the next one waits longer (retryWait), so an API outage isn't hit in a loop. */
+  private listFailures = 0;
+  private mapFailures = 0;
   /** The check-in at the start ("Since last time"): someone moved on from it, and the last answer anyone gave. */
   private checkInClosed = false;
   private checkInAnsweredAt: number | null = null;
@@ -406,7 +413,7 @@ export class RoomSession implements SpeechSink {
     if (this.ended || !brain || this.brainRun) return;
     const since = brain.map.unreadSince(this.db.meetingSegments(this.meetingId));
     if (since === null) return;
-    const wait = Math.max(0, Math.min(MAP_DEBOUNCE_MS, since + MAP_MAX_WAIT_MS - Date.now()));
+    const wait = Math.max(0, Math.min(MAP_DEBOUNCE_MS, since + MAP_MAX_WAIT_MS - Date.now()), retryWait(this.mapFailures));
     if (this.brainTimer) clearTimeout(this.brainTimer);
     this.brainTimer = setTimeout(() => {
       this.brainTimer = null;
@@ -424,10 +431,15 @@ export class RoomSession implements SpeechSink {
     if (!final) this.broadcastBrainstorm(true);
     this.brainRun = brain.map
       .run(segments, people, this.brainCaught(), this.meetingStartedAt, Date.now())
-      .catch((e) => {
-        console.error(`[brainstorm] ${this.meetingId}: ${(e as Error).message}`);
-        return false;
-      })
+      .then(
+        () => {
+          this.mapFailures = 0;
+        },
+        (e) => {
+          this.mapFailures++;
+          console.error(`[brainstorm] ${this.meetingId}: ${(e as Error).message}`);
+        },
+      )
       .then(() => {
         if (this.brain !== brain) return;
         brain.map.refresh(this.brainCaught());
@@ -1630,7 +1642,7 @@ export class RoomSession implements SpeechSink {
     if (this.ended || !list || this.listRun || this.inReview()) return;
     const since = list.unreadSince(this.db.meetingSegments(this.meetingId));
     if (since === null) return;
-    const wait = Math.max(0, Math.min(LIST_DEBOUNCE_MS, since + LIST_MAX_WAIT_MS - Date.now()));
+    const wait = Math.max(0, Math.min(LIST_DEBOUNCE_MS, since + LIST_MAX_WAIT_MS - Date.now()), retryWait(this.listFailures));
     if (this.listTimer) clearTimeout(this.listTimer);
     this.listTimer = setTimeout(() => {
       this.listTimer = null;
@@ -1647,10 +1659,17 @@ export class RoomSession implements SpeechSink {
     const carried = this.carried().filter((f) => !f.saidDone);
     this.listRun = list
       .run(segments, people, (ts) => this.focusAt(ts), Date.now(), carried.map((f) => ({ id: f.id, who: f.owner, text: f.text })))
-      .catch((e) => {
-        console.error(`[list] ${this.meetingId}: ${(e as Error).message}`);
-        return false;
-      })
+      .then(
+        (changed) => {
+          this.listFailures = 0;
+          return changed;
+        },
+        (e) => {
+          this.listFailures++;
+          console.error(`[list] ${this.meetingId}: ${(e as Error).message}`);
+          return false;
+        },
+      )
       .then((changed) => {
         if (changed && !this.ended) this.listChanged();
         if (this.ended || !list.heardDone.length) return;
@@ -2056,32 +2075,36 @@ export class RoomSession implements SpeechSink {
     const at = new Map(segments.map((s) => [s.id, s.ts]));
     const start = (d: DraftDiscussion) => Math.min(...d.segmentIds.map((id) => at.get(id) ?? Infinity));
     const order = [...kept, ...fresh, ...revived].map((d, i) => ({ d, i, t: start(d) })).sort((a, b) => a.t - b.t || a.i - b.i);
-    const discussions = this.db.replaceDiscussions(
-      this.meetingId,
-      itemId,
-      order.map((o) => o.d),
-    );
-    const idOf = new Map(order.map((o, j) => [o.i, discussions[j].id]));
-    // Re-read: a to-do may have been checked off while the agent was writing.
-    const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
-    const settledIds = new Set(settled.map((d) => d.id));
-    const carried = current.filter((n) => n.discussionId !== null && settledIds.has(n.discussionId));
-    const notes = this.db.replaceNotes(this.meetingId, itemId, [
-      ...carried,
-      ...mergeNotes(
-        draft.notes
-          // The model was shown a settled topic's notes to leave alone; one it writes again is dropped.
-          .filter((n) => !carried.some((c) => c.kind === n.kind && similar(c.text, n.text)))
-          .map(({ discussion, ...n }) => ({
-            ...n,
-            discussionId: discussion === null ? null : (idOf.get(kept.length + discussion) ?? null),
-          })),
-        current.filter((n) => !carried.includes(n)),
-        keys,
-        this.db.dismissedNotes(this.meetingId, itemId),
-        draft.answered,
-      ),
-    ]);
+    // The topics and the notes under them are written together: a failure leaves the last run's both.
+    const { discussions, current, notes } = this.db.tx(() => {
+      const discussions = this.db.replaceDiscussions(
+        this.meetingId,
+        itemId,
+        order.map((o) => o.d),
+      );
+      const idOf = new Map(order.map((o, j) => [o.i, discussions[j].id]));
+      // Re-read: a to-do may have been checked off while the agent was writing.
+      const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
+      const settledIds = new Set(settled.map((d) => d.id));
+      const carried = current.filter((n) => n.discussionId !== null && settledIds.has(n.discussionId));
+      const notes = this.db.replaceNotes(this.meetingId, itemId, [
+        ...carried,
+        ...mergeNotes(
+          draft.notes
+            // The model was shown a settled topic's notes to leave alone; one it writes again is dropped.
+            .filter((n) => !carried.some((c) => c.kind === n.kind && similar(c.text, n.text)))
+            .map(({ discussion, ...n }) => ({
+              ...n,
+              discussionId: discussion === null ? null : (idOf.get(kept.length + discussion) ?? null),
+            })),
+          current.filter((n) => !carried.includes(n)),
+          keys,
+          this.db.dismissedNotes(this.meetingId, itemId),
+          draft.answered,
+        ),
+      ]);
+      return { discussions, current, notes };
+    });
     this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
     // A snap belongs to the topic its remarks are in, and the topics were just redrafted.
     if (this.snaps().some((p) => p.itemId === itemId)) this.broadcastState();
@@ -2186,19 +2209,30 @@ export class RoomSession implements SpeechSink {
     if (this.mergeTimer) clearTimeout(this.mergeTimer);
     this.mergeTimer = null;
     // Everyone sees "Writing notes…"; a restart before it's done finishes the recap instead of resuming.
-    this.db.meetingEnding(this.meetingId);
-    this.broadcastState();
+    // Each step below stands alone: one that fails is logged, and the meeting still ends and frees the room.
+    const step = (what: string, fn: () => unknown) => {
+      try {
+        fn();
+      } catch (err) {
+        console.error(`[room] ending ${this.meetingId}: ${what} failed:`, err);
+      }
+    };
+    step("marking it ending", () => this.db.meetingEnding(this.meetingId));
+    step("telling everyone", () => this.broadcastState());
     await this.transcriber?.stop().catch(() => {});
     // A product review that ran in this meeting is over: its slides leave the agenda with what was said on them.
-    finishReview(this.db, this.roomId, this.meetingId);
-    finishIdeaReview(this.db, this.roomId, this.meetingId);
-    finishDesignReview(this.db, this.roomId, this.meetingId);
-    this.db.archiveTaskItems(this.roomId);
+    step("finishing the review", () => finishReview(this.db, this.roomId, this.meetingId));
+    step("finishing the idea review", () => finishIdeaReview(this.db, this.roomId, this.meetingId));
+    step("finishing the design review", () => finishDesignReview(this.db, this.roomId, this.meetingId));
+    step("archiving task items", () => this.db.archiveTaskItems(this.roomId));
     // So is a brainstorm: one last look at the talk no pass has read, then its map is the record.
     if (this.brain) {
       await this.brainRun?.catch(() => {});
-      await Promise.race([this.runMap(true), new Promise((r) => setTimeout(r, 25_000))]).catch(() => {});
-      const done = finishBrainstorm(this.db, this.roomId, this.meetingId);
+      let wait: NodeJS.Timeout | undefined;
+      await Promise.race([this.runMap(true), new Promise((r) => (wait = setTimeout(r, 25_000)))]).catch(() => {});
+      clearTimeout(wait);
+      let done: ReturnType<typeof finishBrainstorm> | undefined;
+      step("finishing the brainstorm", () => (done = finishBrainstorm(this.db, this.roomId, this.meetingId)));
       // A design session leaves a draft spec on its to-do, for the normal design review.
       if (done?.kind === "design") {
         try {
@@ -2281,7 +2315,8 @@ export class RoomSession implements SpeechSink {
     } finally {
       // Whatever the agent managed, the meeting ends and the room is free again.
       await placing;
-      this.db.endMeeting(this.meetingId, summary || null, await synthesizing, endedAt, chapterNotes);
+      const synthesis = await synthesizing;
+      step("saving the recap", () => this.db.endMeeting(this.meetingId, summary || null, synthesis, endedAt, chapterNotes));
       this.polisher?.schedule(this.roomId, 0);
       this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
       for (const ws of this.conns.keys()) ws.close();

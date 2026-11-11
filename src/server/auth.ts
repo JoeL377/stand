@@ -18,7 +18,14 @@ export function parseCookies(header: string | undefined): Record<string, string>
     const i = part.indexOf("=");
     if (i < 0) continue;
     const k = part.slice(0, i).trim();
-    if (k) out[k] = decodeURIComponent(part.slice(i + 1).trim());
+    if (!k) continue;
+    const v = part.slice(i + 1).trim();
+    // Another site's cookie on the same host can hold a bare "%": keep it as sent rather than throw.
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
   }
   return out;
 }

@@ -8,6 +8,11 @@ import { SpaceHome } from "./SpaceHome.tsx";
 
 export function RoomPage() {
   const { roomId = "" } = useParams();
+  // Each space starts fresh: moving between spaces keeps nothing of the last one on screen.
+  return <SpacePage key={roomId} roomId={roomId} />;
+}
+
+function SpacePage({ roomId }: { roomId: string }) {
   const { user, caps } = useAuth();
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +80,6 @@ export function RoomPage() {
       />
     );
   }
-
 
   return <SpaceHome room={room} onJoin={() => setJoined(true)} reload={refresh} />;
 }
