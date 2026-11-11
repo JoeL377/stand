@@ -89,11 +89,6 @@ export function costOf(model: string, u: RunUsage): number | null {
   return Math.round(usd * 10_000) / 10_000;
 }
 
-/** What a run needs from the model: the answer (null when it couldn't give one), what it cost and on which model. */
-export interface OptionsModel {
-  findOptions(prompt: string): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
-}
-
 /** The space's history as a run reads it. */
 export interface SpaceHistory {
   name: string;

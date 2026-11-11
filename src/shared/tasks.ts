@@ -19,10 +19,6 @@ export function stateOf(n: Pick<Note, "kind" | "doneAt" | "state">, work?: Pick<
 
 export const isClosed = (s: TaskState) => s === "done" || s === "dropped";
 
-/** Evidence is in and it needs someone with a say to look: a PR reported ready, still open. */
-export const waitingOnYou = (n: Pick<Note, "kind" | "doneAt" | "state">, work?: Pick<ActionWork, "ready"> | null) =>
-  !!work?.ready && !isClosed(stateOf(n));
-
 /** Someone said it's finished, nothing shows it yet. */
 export const saidDone = (n: Pick<Note, "kind" | "doneAt" | "state" | "saidDone">) => !!n.saidDone && !isClosed(stateOf(n));
 

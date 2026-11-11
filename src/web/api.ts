@@ -123,7 +123,6 @@ export const api = {
   me: () => call<User>("GET", "/api/auth/me"),
   devSignIn: (name: string, email: string) => call<User>("POST", "/api/auth/dev", { name, email }),
   signOut: () => call<{ ok: true }>("POST", "/api/auth/logout"),
-  myRooms: () => call<Array<{ id: string; name: string; lastJoinedAt: number }>>("GET", "/api/my/rooms"),
   createRoom: (name: string, purpose = "") => call<{ id: string; name: string }>("POST", "/api/rooms", { name, purpose }),
   spaces: () => call<SpaceSummary[]>("GET", "/api/spaces"),
   updateSpace: (id: string, patch: { name?: string; purpose?: string; synthesisInstructions?: string }) =>
@@ -131,7 +130,6 @@ export const api = {
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
-  saveJot: (roomId: string, jot: { text: string; itemId?: string | null; at?: number }) => call<Jot>("POST", `/api/rooms/${roomId}/jots`, jot),
   updateJot: (id: string, patch: { itemId?: string | null; text?: string }) => call<Jot>("PATCH", `/api/jots/${id}`, patch),
   /** Archives a row off the space page ("todo:<id>", see server/archive.ts), or restores it. */
   archive: (roomId: string, body: { ref: string; archived?: boolean; title?: string; keys?: string[] }) =>
@@ -141,15 +139,11 @@ export const api = {
   restoreJot: (id: string) => call<Jot>("POST", `/api/jots/${id}/restore`),
   addAgenda: (roomId: string, titles: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items`, { titles }),
   importLinear: (roomId: string, input: string) => call<Item[]>("POST", `/api/rooms/${roomId}/items/linear`, { input }, SLOW_REQUEST_MS),
-  renameItem: (roomId: string, itemId: string, title: string) =>
-    call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { title }),
   removeItem: (roomId: string, itemId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/items/${itemId}`),
   restoreItems: (roomId: string, ids: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items/restore`, { ids }),
-  reorder: (roomId: string, ids: string[]) => call<Item[]>("POST", `/api/rooms/${roomId}/items/reorder`, { ids }),
   removeDeck: (roomId: string, deckId: string) => call<Item[]>("DELETE", `/api/rooms/${roomId}/decks/${deckId}`),
   newDeck: (roomId: string, title: string, brief: string, parentItemId: string | null = null) =>
     call<{ deck: Deck; slides: Item[] }>("POST", `/api/rooms/${roomId}/decks/new`, { title, brief, parentItemId }, SLOW_REQUEST_MS),
-  moveDeck: (deckId: string, parentItemId: string | null) => call<Item[]>("PATCH", `/api/decks/${deckId}`, { parentItemId }),
   deck: (deckId: string) => call<{ deck: Deck; room: { id: string; name: string } | null; slides: Item[] }>("GET", `/api/decks/${deckId}`),
   saveDeck: (deckId: string, draft: DeckDraft) => call<{ deck: Deck; slides: Item[] }>("PUT", `/api/decks/${deckId}`, draft),
   draftSlides: (deckId: string, brief: string) =>

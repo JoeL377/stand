@@ -1,16 +1,11 @@
-import { usePersonColors } from "./PersonColors.tsx";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { Discussion, DiscussionOutcome, Note, Segment, Snap } from "../shared/protocol.ts";
+import type { Discussion, DiscussionOutcome, Note, Segment } from "../shared/protocol.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
-import { SnapsPill } from "./Snaps.tsx";
 import { NoteList } from "./room/SidePanel.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
-import { fmtDate, fmtTime, initials } from "./util.ts";
-import { useDismiss } from "./useDismiss.ts";
-import { toast } from "./Toasts.tsx";
+import { fmtDate, fmtTime } from "./util.ts";
 import { QuoteMark } from "./RecapChapters.tsx";
-import { useGlide } from "./useGlide.ts";
 
 /** An item's notes as the agent grouped them: the summary, then one block per
  *  discussion with who argued what and what came of it. Notes that belong to
@@ -55,17 +50,9 @@ function DiscussionBlock(props: {
   turns: Segment[];
   compact?: boolean;
   open: boolean;
-  live?: boolean;
-  titleOnly?: boolean;
-  /** Live panel: point at this topic's to-dos in the To do card. */
-  onShowTodos?: (ids: string[]) => void;
-  /** Live panel: snaps taken while this topic was talked about. */
-  snaps?: { list: Snap[]; me: string; isHost: boolean };
 }) {
-  const colorFor = usePersonColors();
   const { d, notes, turns } = props;
   const [showTurns, setShowTurns] = useState(false);
-  const [turnsPop, setTurnsPop] = useState(false);
   const o = OUTCOME_META[d.outcome];
   const by = (k: Note["kind"]) => notes.filter((n) => n.kind === k);
   const ranked = [...by("decision"), ...by("action"), ...by("question")];
@@ -76,61 +63,32 @@ function DiscussionBlock(props: {
   const todos = by("action").filter((n) => !n.doneAt).length;
   const remarks = turns.length ? `${turns.length} remark${turns.length === 1 ? "" : "s"}` : null;
   const todoLabel = todos ? `${todos} to-do${todos === 1 ? "" : "s"}` : null;
-  // The live panel shows remarks and to-dos as pills below instead.
-  const meta = props.titleOnly ? [] : [people.join(", "), remarks, !props.live ? todoLabel : null].filter(Boolean);
-  const overview = (
-    <>
-      {headline && (
-        <span className={headline.doneAt ? "disc-outcome done" : "disc-outcome"}>
-          {headline.text}
-          {headline.kind === "action" && headline.owner && <span className="disc-owner"> · {headline.owner}</span>}
-        </span>
-      )}
-      {(meta.length > 0 || props.live) && (
-        <span className="disc-meta">
-          {meta.join(" · ")}
-          {props.live && <span className="disc-now">{meta.length ? " · " : ""}Talking now</span>}
-        </span>
-      )}
-    </>
-  );
+  const meta = [people.join(", "), remarks, todoLabel].filter(Boolean);
   return (
-    <details
-      className={props.titleOnly ? "disc title-only" : "disc"}
-      open={props.open}
-      onToggle={(e) => {
-        const el = e.currentTarget;
-        if (props.titleOnly && el.open) requestAnimationFrame(() => el.scrollIntoView({ block: "nearest", behavior: scrollBehavior() }));
-      }}
-    >
+    <details className="disc" open={props.open}>
       <summary>
         <span className="disc-head">
           <span className="disc-topic">{d.topic}</span>
-          {!props.titleOnly && (
-            <span className={`rc-outcome ${d.outcome}`}>
-              <o.Icon size={13} /> {o.label}
-            </span>
-          )}
-          {props.titleOnly && <ChevronIcon />}
+          <span className={`rc-outcome ${d.outcome}`}>
+            <o.Icon size={13} /> {o.label}
+          </span>
         </span>
-        {!props.titleOnly && overview}
+        {headline && (
+          <span className={headline.doneAt ? "disc-outcome done" : "disc-outcome"}>
+            {headline.text}
+            {headline.kind === "action" && headline.owner && <span className="disc-owner"> · {headline.owner}</span>}
+          </span>
+        )}
+        {meta.length > 0 && <span className="disc-meta">{meta.join(" · ")}</span>}
       </summary>
       <div className="disc-body">
-        {props.titleOnly && (
-          <div className="disc-overview">
-            <span className={`rc-outcome ${d.outcome}`}>
-              <o.Icon size={13} /> {o.label}
-            </span>
-            {overview}
-          </div>
-        )}
         {d.continues && (
           <p className="disc-continues">
             Continues from <Link to={`/meetings/${d.continues.meetingId}`}>{fmtDate(d.continues.startedAt)}</Link>
             {d.continues.topic !== d.topic && <> · “{d.continues.topic}”</>}
           </p>
         )}
-        {!props.titleOnly && d.positions.length > 0 && (
+        {d.positions.length > 0 && (
           <div className="disc-section">
             <div className="disc-label">Where people landed</div>
             {d.positions.map((p, i) => (
@@ -141,7 +99,7 @@ function DiscussionBlock(props: {
             ))}
           </div>
         )}
-        {!props.titleOnly && rest.length > 0 && (
+        {rest.length > 0 && (
           <div className="disc-section">
             <div className="disc-label">Came out of it</div>
             <ul className="disc-points">
@@ -165,58 +123,14 @@ function DiscussionBlock(props: {
             </ul>
           </div>
         )}
-        {props.titleOnly ? (
-          <div className="disc-foot">
-            <span className="disc-pills">
-              {people.length > 0 && (
-                <span className="disc-people" title={people.join(", ")} aria-label={people.join(", ")}>
-                  {people.slice(0, 4).map((name) => (
-                    <span
-                      key={name}
-                      className="disc-avatar"
-                      style={{ background: colorFor(turns.find((t) => t.speakerName === name)?.speakerId ?? name) }}
-                    >
-                      {initials(name)}
-                    </span>
-                  ))}
-                  {people.length > 4 && <span className="disc-avatar more">+{people.length - 4}</span>}
-                </span>
-              )}
-              {remarks && (
-                <button className="disc-pill" onClick={() => setTurnsPop(true)}>
-                  {remarks}
-                </button>
-              )}
-              {todoLabel && props.onShowTodos && (
-                <button
-                  className="disc-pill"
-                  onClick={() =>
-                    props.onShowTodos!(
-                      by("action")
-                        .filter((n) => !n.doneAt)
-                        .map((n) => n.id),
-                    )
-                  }
-                  title="Show in To do"
-                >
-                  {todoLabel}
-                </button>
-              )}
-              {props.snaps && <SnapsPill snaps={props.snaps.list} me={props.snaps.me} isHost={props.snaps.isHost} />}
-            </span>
-            <CopyForAgent kind="topic" id={d.id} />
-          </div>
-        ) : (
-          <div className="disc-foot">
-            {turns.length > 0 && (
-              <button className="link small" onClick={() => setShowTurns((s) => !s)}>
-                {showTurns ? "Hide remarks" : `Show ${turns.length} remark${turns.length === 1 ? "" : "s"}`}
-              </button>
-            )}
-            <CopyForAgent kind="topic" id={d.id} label />
-          </div>
-        )}
-        {turnsPop && <RemarksPopup topic={d.topic} turns={turns} onClose={() => setTurnsPop(false)} />}
+        <div className="disc-foot">
+          {turns.length > 0 && (
+            <button className="link small" onClick={() => setShowTurns((s) => !s)}>
+              {showTurns ? "Hide remarks" : `Show ${turns.length} remark${turns.length === 1 ? "" : "s"}`}
+            </button>
+          )}
+          <CopyForAgent kind="topic" id={d.id} label />
+        </div>
         {showTurns && (
           <div className="disc-turns">
             {turns.map((s) => (
@@ -236,475 +150,9 @@ function DiscussionBlock(props: {
   );
 }
 
-/** Everything said in one topic, over the page. Esc or a click outside closes it. */
-function RemarksPopup(props: { topic: string; turns: Segment[]; onClose: () => void }) {
-  const { onClose } = props;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  return (
-    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog remarks-pop" role="dialog" aria-modal="true" aria-label={`Remarks: ${props.topic}`}>
-        <div className="remarks-pop-head">
-          <strong>{props.topic}</strong>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-        <div className="disc-turns remarks-pop-body">
-          {props.turns.map((s) => (
-            <div key={s.id} className="disc-turn">
-              <div className="disc-turn-head">
-                <span className="who">{s.speakerName}</span>
-                {s.kind === "chat" && <span className="seg-kind">chat</span>}
-                <span className="seg-time">{fmtTime(s.ts)}</span>
-              </div>
-              <div>{s.text}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 const OUTCOME_META: Record<DiscussionOutcome, { label: string; Icon: (p: { size?: number }) => React.ReactElement }> = {
   decided: { label: "Decided", Icon: DecidedIcon },
   action: { label: "To do", Icon: TodoIcon },
   open: { label: "Open", Icon: QuestionIcon },
   info: { label: "FYI", Icon: InfoIcon },
 };
-
-/** The live side-panel card, ranked by what helps during the meeting:
- *  1. open action items (checkable), 2. decisions, 3. open questions;
- *  then the gist and one row per topic (name + outcome), whose positions and
- *  raw turns open one level down. Done actions fold
- *  into a single "n done" line. */
-type EditableKind = "action" | "decision" | "question";
-
-/** What the meeting's host can do to the agent's notes. Absent for everyone else. */
-export type NoteEditing = {
-  change: (n: Note, text: string, owner: string | null) => void;
-  remove: (n: Note) => void;
-  add: (kind: EditableKind, text: string, owner: string | null) => void;
-};
-
-/** Inline form for one note: its wording, plus an owner for a to-do. */
-function NoteForm(props: {
-  kind: EditableKind;
-  text?: string;
-  owner?: string | null;
-  onSave: (text: string, owner: string | null) => void;
-  onCancel: () => void;
-  onDelete?: () => void;
-  /** What's typed so far, so it can be kept if the form has to close (the note changed, or hosting moved). */
-  onDraft?: (text: string, owner: string) => void;
-}) {
-  const [text, setText] = useState(props.text ?? "");
-  const [owner, setOwner] = useState(props.owner ?? "");
-  const draftRef = useRef(props.onDraft);
-  draftRef.current = props.onDraft;
-  useEffect(() => {
-    draftRef.current?.(text, owner);
-  }, [text, owner]);
-  const save = () => {
-    if (text.trim()) props.onSave(text.trim(), owner.trim() || null);
-  };
-  return (
-    <form
-      className="note-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        save();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") props.onCancel();
-      }}
-    >
-      <textarea
-        autoFocus
-        rows={2}
-        value={text}
-        maxLength={500}
-        aria-label="Note"
-        placeholder={props.kind === "action" ? "What needs doing" : props.kind === "decision" ? "What was decided" : "What's still open"}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            save();
-          }
-        }}
-      />
-      {props.kind === "action" && (
-        <label className="note-form-owner">
-          <span>Owner</span>
-          <input value={owner} maxLength={60} placeholder="Anyone" onChange={(e) => setOwner(e.target.value)} />
-        </label>
-      )}
-      <div className="note-form-row">
-        {props.onDelete && (
-          <button type="button" className="note-form-delete" onClick={props.onDelete}>
-            Delete
-          </button>
-        )}
-        <span className="note-form-gap" />
-        <button type="button" onClick={props.onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="primary" disabled={!text.trim()}>
-          Save
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function EditButton(props: { onClick: () => void }) {
-  return (
-    <button className="note-edit-btn" onClick={props.onClick} title="Edit or delete" aria-label="Edit or delete">
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-        <path d="M11.5 2.5l2 2L5 13H3v-2l8.5-8.5z" strokeLinejoin="round" />
-      </svg>
-    </button>
-  );
-}
-
-/** How long a checked-off to-do stays in the list before it folds away. */
-/** Smooth scrolling, unless Reduce Motion is on. */
-const scrollBehavior = (): ScrollBehavior => (matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
-const FOLD_DONE_AFTER_MS = 5_000;
-
-export function LiveItemNotes(props: {
-  notes: Note[];
-  discussions: Discussion[];
-  segments: Segment[];
-  onToggle?: (n: Note, done: boolean) => void;
-  editing?: NoteEditing;
-  snaps?: { list: Snap[]; me: string; isHost: boolean };
-  /** Notes that just arrived or changed, highlighted for a moment. */
-  fresh?: string[];
-}) {
-  const { notes, discussions, segments, onToggle, editing } = props;
-  const isFresh = (n: Note) => (props.fresh?.includes(n.id) ? " fresh" : "");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [adding, setAdding] = useState<EditableKind | null>(null);
-  // The open form's text, kept when the form has to close without a save.
-  const draft = useRef<{ kind: string; text: string; owner: string; original: string } | null>(null);
-  const changed = (d: typeof draft.current) => Boolean(d && d.text.trim() && d.text.trim() !== d.original.trim());
-  // An edit whose note the agent reworded meanwhile reopens as a new note with what was typed.
-  const [addInit, setAddInit] = useState<{ text: string; owner: string } | null>(null);
-  const stopAdding = () => {
-    draft.current = null;
-    setAddInit(null);
-    setAdding(null);
-  };
-  useEffect(() => {
-    if (!editingId || notes.some((n) => n.id === editingId)) return;
-    const d = draft.current;
-    draft.current = null;
-    setEditingId(null);
-    // A note added offline gets its real id once it's through; that's not a rewording.
-    if (editingId.startsWith("pending-") || !d || !changed(d) || !editing) return;
-    setAddInit({ text: d.text, owner: d.owner });
-    setAdding(d.kind as EditableKind);
-  }, [notes, editingId]);
-  // Hosting moved while a form was open: the form goes, but what was typed is offered to copy.
-  const couldEdit = useRef(Boolean(editing));
-  useEffect(() => {
-    const could = couldEdit.current;
-    couldEdit.current = Boolean(editing);
-    if (!could || editing) return;
-    const d = draft.current;
-    draft.current = null;
-    setEditingId(null);
-    setAdding(null);
-    setAddInit(null);
-    if (!d || !changed(d)) return;
-    const text = d.text.trim();
-    toast({
-      tone: "error",
-      text: `Hosting moved before you saved, so this wasn't added: "${text.length > 80 ? `${text.slice(0, 80)}…` : text}"`,
-      ms: 15_000,
-      ...(navigator.clipboard ? { action: { label: "Copy it", run: () => void navigator.clipboard.writeText(text).catch(() => {}) } } : {}),
-    });
-  }, [Boolean(editing)]);
-  const [showDone, setShowDone] = useState(false);
-  const [addMenu, setAddMenu] = useState(false);
-  const addMenuRef = useDismiss<HTMLSpanElement>(addMenu, () => setAddMenu(false));
-  const [flash, setFlash] = useState<string[]>([]);
-  useEffect(() => {
-    if (!flash.length) return;
-    document.querySelector(`[data-note-id="${flash[0]}"]`)?.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
-    const t = setTimeout(() => setFlash([]), 2200);
-    return () => clearTimeout(t);
-  }, [flash]);
-  // A to-do just checked off (here or by someone else) stays in place, struck
-  // through, for a few seconds: uncheck it to undo. Then it folds into "n done".
-  const [lingering, setLingering] = useState<string[]>([]);
-  const wasDone = useRef(new Map<string, boolean>());
-  useLayoutEffect(() => {
-    const newly = notes.filter((n) => n.kind === "action" && n.doneAt && wasDone.current.get(n.id) === false).map((n) => n.id);
-    wasDone.current = new Map(notes.map((n) => [n.id, Boolean(n.doneAt)]));
-    if (newly.length) setLingering((l) => [...l, ...newly.filter((id) => !l.includes(id))]);
-  }, [notes]);
-  const [folding, setFolding] = useState(false);
-  useEffect(() => {
-    setFolding(false);
-    if (!lingering.length) return;
-    // Fades out first, then folds.
-    const fade = setTimeout(() => setFolding(true), FOLD_DONE_AFTER_MS - 200);
-    const fold = setTimeout(() => (setLingering([]), setFolding(false)), FOLD_DONE_AFTER_MS);
-    return () => (clearTimeout(fade), clearTimeout(fold));
-  }, [lingering]);
-  const todo = notes.filter((n) => n.kind === "action" && (!n.doneAt || lingering.includes(n.id)));
-  const done = notes.filter((n) => n.kind === "action" && n.doneAt && !lingering.includes(n.id));
-  const decided = notes.filter((n) => n.kind === "decision");
-  const open = notes.filter((n) => n.kind === "question");
-  const summary = notes.filter((n) => n.kind === "summary");
-  const empty = !todo.length && !done.length && !decided.length && !open.length;
-  const liveId = talkingNow(discussions, segments);
-
-  /** A note being edited turns into its form; otherwise the host gets an edit button beside it. */
-  const editRow = (n: Note) =>
-    editing && editingId === n.id ? (
-      <li key={n.id} className="tk editing">
-        <NoteForm
-          kind={n.kind as EditableKind}
-          text={n.text}
-          owner={n.owner}
-          onSave={(text, owner) => {
-            editing.change(n, text, owner);
-            draft.current = null;
-            setEditingId(null);
-          }}
-          onDelete={() => {
-            editing.remove(n);
-            draft.current = null;
-            setEditingId(null);
-          }}
-          onCancel={() => {
-            draft.current = null;
-            setEditingId(null);
-          }}
-          onDraft={(text, owner) => (draft.current = { kind: n.kind, text, owner, original: n.text })}
-        />
-      </li>
-    ) : null;
-  const edited = (n: Note) =>
-    n.editedBy ? (
-      <span className="note-edited" title={`Edited by ${n.editedBy}`}>
-        edited
-      </span>
-    ) : null;
-  /** Edit and Copy for agent float over the end of the row on hover, so the text keeps the full width. */
-  const tools = (n: Note, kind: "action" | "decision" | "question") => (
-    <span className="tk-tools">
-      {editing && <EditButton onClick={() => setEditingId(n.id)} />}
-      <CopyForAgent kind={kind} id={n.id} />
-    </span>
-  );
-
-  const action = (n: Note) =>
-    editRow(n) ?? (
-      <li key={n.id} data-note-id={n.id} className={`tk action${n.doneAt ? " done" : ""}${folding && n.doneAt && lingering.includes(n.id) ? " folding" : ""}${flash.includes(n.id) ? " flash" : ""}${isFresh(n)}`}>
-        <input
-          type="checkbox"
-          checked={!!n.doneAt}
-          disabled={!onToggle}
-          onChange={(e) => onToggle?.(n, e.target.checked)}
-          aria-label={n.doneAt ? "Mark not done" : "Mark done"}
-        />
-        <span className="tk-text" dir="auto">
-          {n.text}
-          {edited(n)}
-        </span>
-        {n.owner && <span className="owner">{n.owner}</span>}
-        {tools(n, "action")}
-      </li>
-    );
-
-  // A to-do folding away or a note arriving: what's below glides rather than jumps.
-  const notesRef = useRef<HTMLDivElement>(null);
-  useGlide(notesRef, "section.tk-group", "li.tk, .tk-more");
-  return (
-    <div className="live-notes" ref={notesRef}>
-      {empty && !adding && notes.length > 0 && <p className="tk-empty">Nothing decided or assigned yet.</p>}
-      {(todo.length > 0 || done.length > 0 || (editing && !adding)) && (
-        <section className="tk-group tk-card">
-          <h4 className="tk-card-head">
-            To do
-            {editing && !adding && (
-              <span className="add-menu-wrap" ref={addMenuRef}>
-                <button
-                  className="note-add-btn"
-                  title="Add a to-do, decision or question"
-                  aria-expanded={addMenu}
-                  onClick={() => setAddMenu((m) => !m)}
-                >
-                  +
-                </button>
-                {addMenu && (
-                  <div className="add-menu note-add-menu" role="menu">
-                    {(["action", "decision", "question"] as const).map((k) => (
-                      <button
-                        key={k}
-                        role="menuitem"
-                        onClick={() => {
-                          setAddInit(null);
-                          setAdding(k);
-                          setAddMenu(false);
-                        }}
-                      >
-                        {k === "action" ? "To-do" : k === "decision" ? "Decision" : "Open question"}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </span>
-            )}
-          </h4>
-          {todo.length === 0 && done.length === 0 && <p className="tk-none">Nothing yet</p>}
-          {todo.length > 0 && <ul>{todo.map(action)}</ul>}
-          {done.length > 0 && (
-            <>
-              <button className="link small tk-more" onClick={() => setShowDone((s) => !s)}>
-                {showDone ? "Hide done" : `${done.length} done`}
-              </button>
-              {showDone && <ul className="tk-done">{done.map(action)}</ul>}
-            </>
-          )}
-        </section>
-      )}
-      {decided.length > 0 && (
-        <section className="tk-group tk-card">
-          <h4>Decided</h4>
-          <ul>
-            {decided.map(
-              (n) =>
-                editRow(n) ?? (
-                  <li key={n.id} data-note-id={n.id} className={`tk decision${isFresh(n)}`}>
-                    <span className="tk-icon">✓</span>
-                    <span className="tk-text" dir="auto">
-                      {n.text}
-                      {edited(n)}
-                    </span>
-                    {tools(n, "decision")}
-                  </li>
-                ),
-            )}
-          </ul>
-        </section>
-      )}
-      {open.length > 0 && (
-        <section className="tk-group tk-card">
-          <h4>Open questions</h4>
-          <ul>
-            {open.map(
-              (n) =>
-                editRow(n) ?? (
-                  <li key={n.id} data-note-id={n.id} className={`tk question${isFresh(n)}`}>
-                    <span className="tk-icon">?</span>
-                    <span className="tk-text" dir="auto">
-                      {n.text}
-                      {edited(n)}
-                    </span>
-                    {tools(n, "question")}
-                  </li>
-                ),
-            )}
-          </ul>
-        </section>
-      )}
-      {editing &&
-        (adding ? (
-          <section className="tk-group tk-card note-add">
-            <h4>{adding === "action" ? "New to-do" : adding === "decision" ? "New decision" : "New open question"}</h4>
-            {addInit && <p className="note-form-hint">The agent reworded that note while you were editing. Save adds yours as a new one.</p>}
-            <NoteForm
-              key={`${adding}${addInit ? ":kept" : ""}`}
-              kind={adding}
-              text={addInit?.text}
-              owner={addInit?.owner}
-              onSave={(text, owner) => {
-                editing.add(adding, text, owner);
-                stopAdding();
-              }}
-              onCancel={stopAdding}
-              onDraft={(text, owner) => (draft.current = { kind: adding, text, owner, original: "" })}
-            />
-          </section>
-        ) : null)}
-      {discussions.length > 0 ? (
-        <section className="tk-group tk-card live-topics">
-          <h4>Topics</h4>
-          <div className="discussions compact">
-            {rankTopics(discussions, segments).map(({ d, turns }) => (
-              <DiscussionBlock
-                key={d.id}
-                d={d}
-                notes={notes.filter((n) => n.discussionId === d.id)}
-                turns={turns}
-                compact
-                open={false}
-                live={d.id === liveId}
-                titleOnly
-                onShowTodos={setFlash}
-                snaps={props.snaps && { ...props.snaps, list: props.snaps.list.filter((p) => p.discussionId === d.id) }}
-              />
-            ))}
-          </div>
-        </section>
-      ) : (
-        summary.length > 0 && (
-          <section className="tk-group tk-card live-topics">
-            <h4>Summary</h4>
-            {summary.map((n) => (
-              <p key={n.id} className="live-gist">
-                {n.text}
-              </p>
-            ))}
-          </section>
-        )
-      )}
-    </div>
-  );
-}
-
-const TOPIC_ORDER: Record<DiscussionOutcome, number> = { open: 0, action: 1, decided: 2, info: 3 };
-
-/** Topics that still need something first (open, then to-do, decided, FYI); newest first within each. */
-function rankTopics(discussions: Discussion[], segments: Segment[]) {
-  return discussions
-    .map((d) => {
-      const turns = d.segmentIds.flatMap((id) => segments.filter((s) => s.id === id));
-      return { d, turns, last: turns.at(-1)?.ts ?? d.ts };
-    })
-    .sort((a, b) => TOPIC_ORDER[a.d.outcome] - TOPIC_ORDER[b.d.outcome] || b.last - a.last);
-}
-
-/** The topic holding the meeting's latest remark, if that remark was in the last two minutes. */
-function talkingNow(discussions: Discussion[], segments: Segment[]): string | null {
-  const latest = segments.reduce<Segment | null>((a, s) => (!a || s.ts > a.ts ? s : a), null);
-  if (!latest || Date.now() - latest.ts > 120_000) return null;
-  return discussions.find((d) => d.segmentIds.includes(latest.id))?.id ?? null;
-}
-
-const ChevronIcon = () => (
-  <svg
-    className="disc-chevron"
-    width="14"
-    height="14"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden
-  >
-    <path d="m9 6 6 6-6 6" />
-  </svg>
-);

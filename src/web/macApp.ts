@@ -1,8 +1,5 @@
 // Stand for Mac, when the page runs inside it (desktop/preload.js). Missing in a
-// browser, and older copies of the app have only snap().
-
-/** What to tell the person once a snap is done, or nothing if they cancelled. */
-export type SnapReport = { title: string; body: string; snapId?: string; settings?: "screen" | "microphone" } | null | undefined;
+// browser.
 
 /** An open to-do in the space, for the floating bar's list. */
 export type BarTodo = { id: string; text: string; owner: string | null; itemKey: string | null };
@@ -33,8 +30,6 @@ export type MeetingBar = {
 };
 
 type Bridge = {
-  /** The snap toolbar: the screen, a window or part of it. */
-  snap(): Promise<SnapReport>;
   /** The meeting this window is in, or null once it's left. */
   meeting?(m: MeetingBar | null): void;
   /** How loud your mic is, 0 to 1, for the bar's ring. */

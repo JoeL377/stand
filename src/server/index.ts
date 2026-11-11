@@ -580,7 +580,6 @@ const canChangeSnap = (userId: string, snap: { roomId: string; takenById: string
 // ?pasted=1 for a screenshot someone pasted or dropped in, which is nobody's shared screen.
 // ?to=space saves it straight to the space instead, between meetings, on ?item when given, or
 // pinned to ?jot, a note of yours in the space (saved first, from the Mac's bar).
-// The line typed with it comes URI-encoded in the X-Stand-Line header.
 app.post(
   "/api/rooms/:id/snaps",
   express.raw({ type: () => true, limit: MAX_SNAP_BYTES }),
@@ -597,12 +596,6 @@ app.post(
     const key = typeof req.query.key === "string" && /^[A-Za-z0-9-]{8,64}$/.test(req.query.key) ? `${req.user!.id}:${req.query.key}` : null;
     const already = key ? snapKeys.get(key) : undefined;
     if (already && db.getSnap(already)) return res.json({ id: already, itemId: db.getSnap(already)?.itemId ?? null });
-    let line: string | null = null;
-    try {
-      line = cleanLine(decodeURIComponent(String(req.get("x-stand-line") ?? "")));
-    } catch {
-      // A header that isn't URI-encoded: saved without the line rather than not at all.
-    }
     const shot = {
       buf,
       ext,
@@ -611,7 +604,7 @@ app.post(
       at: Number(req.query.at) || Date.now(),
       takenById: req.user!.id,
       takenBy: req.user!.name,
-      line,
+      line: null,
     };
     const jot = toSpace && typeof req.query.jot === "string" ? db.getJot(req.query.jot) : null;
     if (toSpace && req.query.jot && (!jot || jot.roomId !== room.id || jot.byId !== req.user!.id))
@@ -869,13 +862,6 @@ app.get(
     } catch (err) {
       agentErrors(res, err);
     }
-  }),
-);
-
-app.get(
-  "/api/my/rooms",
-  route((req, res) => {
-    res.json(db.userRooms(req.user!.id));
   }),
 );
 
@@ -1464,20 +1450,6 @@ app.get(
   }),
 );
 
-// Moves a deck under an agenda item, or back on its own with parentItemId: null.
-app.patch(
-  "/api/decks/:deckId",
-  route((req, res) => {
-    const deck = db.getDeck(req.params.deckId);
-    if (!deck) return notFound(res);
-    const want = req.body?.parentItemId;
-    const parent = want == null ? null : parentFor(deck.roomId, want);
-    if (want != null && !parent) return res.status(400).json({ error: "That agenda item isn't in this room." });
-    db.setDeckParent(deck.id, parent);
-    res.json(afterItemsChange(deck.roomId));
-  }),
-);
-
 app.delete(
   "/api/rooms/:id/decks/:deckId",
   route((req, res) => {
@@ -1516,28 +1488,6 @@ app.get(
       })),
     };
     res.json(body);
-  }),
-);
-
-app.post(
-  "/api/rooms/:id/items/reorder",
-  route((req, res) => {
-    const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
-    db.reorderItems(req.params.id, ids);
-    res.json(afterItemsChange(req.params.id));
-  }),
-);
-
-app.patch(
-  "/api/rooms/:id/items/:itemId",
-  route((req, res) => {
-    const item = db.getItem(req.params.itemId);
-    if (!item || item.roomId !== req.params.id) return notFound(res);
-    const title = String(req.body?.title ?? "")
-      .trim()
-      .slice(0, 300);
-    if (title) db.updateItem(item.id, { title });
-    res.json(afterItemsChange(item.roomId));
   }),
 );
 
