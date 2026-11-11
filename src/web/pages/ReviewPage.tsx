@@ -200,7 +200,8 @@ export function ReviewPage() {
             </div>
             <div className="rp-about">
               <div className="rp-title">
-                <h1 dir="auto">{slide.title}</h1>
+                {/* A slide with no picture already says its name where the picture would be. */}
+                {shot && <h1 dir="auto">{slide.title}</h1>}
                 {end?.outcome && (
                   <span className={`rv-wrap-outcome ${end.outcome}`} title={end.by ? `${end.by} said so` : undefined}>
                     {outcomeLabel(end.outcome)}
@@ -243,7 +244,7 @@ export function ReviewPage() {
               <button key={s.id} type="button" role="tab" aria-selected={i === at} className={i === at ? "on" : undefined} title={s.title} onClick={() => go(i)}>
                 <span className="rp-thumb">{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
                 <span className="rp-thumb-foot">
-                  <span className="rp-n">{s.name ?? i + 1}</span>
+                  {s.shots[0] && <span className="rp-n">{s.name ?? i + 1}</span>}
                   {endOf(s).outcome && <span className={`rp-dot ${endOf(s).outcome}`} title={outcomeLabel(endOf(s).outcome!)} />}
                   {!!s.caught?.length && <span className="count" title={`${s.caught.length} raised on this slide`}>{s.caught.length}</span>}
                 </span>

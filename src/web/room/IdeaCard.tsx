@@ -19,7 +19,7 @@ export function IdeaCard(props: { title: string; detail: string; idea: IdeaSlide
   useEffect(() => setOpen(null), [idea.nodeId]);
   const pop = useDismiss<HTMLDivElement>(!!open, () => setOpen(null));
   const of = (kind: BrainCaught["kind"]) => idea.caught.filter((c) => c.kind === kind);
-  const heading = open === "points" ? "Built on it" : open ? KIND[open].label : "";
+  const heading = open === "points" ? "Discussion" : open ? KIND[open].label : "";
   return (
     <div className={`idea-card ${props.className ?? ""}`}>
       <div className="idea-from">
@@ -37,7 +37,7 @@ export function IdeaCard(props: { title: string; detail: string; idea: IdeaSlide
         <div className="idea-pills">
           {idea.points.length > 0 && (
             <button type="button" className={`rp-pill${open === "points" ? " on" : ""}`} aria-haspopup="dialog" aria-expanded={open === "points"} onClick={() => setOpen(open === "points" ? null : "points")}>
-              Built on <span className="count">{idea.points.length}</span>
+              Discussion <span className="count">{idea.points.length}</span>
             </button>
           )}
           {KINDS.filter((k) => of(k).length > 0).map((k) => {
