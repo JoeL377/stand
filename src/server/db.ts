@@ -1392,16 +1392,16 @@ export function openDb(file?: string) {
               .all(meetingId, itemId) as Row[]
           ).map((r) => [r.text as string, { doneAt: r.done_at as number, doneBy: (r.done_by as string) ?? null }]),
         );
-        // Where a task stands comes back with its wording, like a check does.
+        // Where a task stands comes back with it: by its id when a rewording kept it, else by its wording.
         const task = new Map(
           (
             db
               .prepare(
-                `SELECT kind, text, ${TASK_COLS} FROM notes WHERE meeting_id = ? AND item_id IS ?
+                `SELECT id, kind, text, ${TASK_COLS} FROM notes WHERE meeting_id = ? AND item_id IS ?
                  AND (state IS NOT NULL OR done_when IS NOT NULL OR parent_id IS NOT NULL OR closed_by IS NOT NULL OR said_done_json IS NOT NULL OR checked_at IS NOT NULL)`,
               )
               .all(meetingId, itemId) as Row[]
-          ).map((r) => [`${r.kind}:${r.text}`, r]),
+          ).flatMap((r) => [[`id:${r.id}`, r], [`${r.kind}:${r.text}`, r]] as const),
         );
         // A note that comes back with the same wording keeps its id, so references
         // agents hold (stand:question/<id>) survive the agent rewriting the notes.
@@ -1411,16 +1411,16 @@ export function openDb(file?: string) {
             r.id as string,
           ]),
         );
-        // Who closed or added a note comes back with its wording too.
+        // Who closed or added a note comes back the same way.
         const actors = new Map(
           (
             db
               .prepare(
-                `SELECT kind, text, done_actor_json, added_actor_json FROM notes WHERE meeting_id = ? AND item_id IS ?
+                `SELECT id, kind, text, done_actor_json, added_actor_json FROM notes WHERE meeting_id = ? AND item_id IS ?
                  AND (done_actor_json IS NOT NULL OR added_actor_json IS NOT NULL)`,
               )
               .all(meetingId, itemId) as Row[]
-          ).map((r) => [`${r.kind}:${r.text}`, r]),
+          ).flatMap((r) => [[`id:${r.id}`, r], [`${r.kind}:${r.text}`, r]] as const),
         );
         // User grouping survives live note redrafts independently of the model's fields.
         const topics = db.prepare("SELECT id, kind, text, topic FROM notes WHERE meeting_id = ? AND item_id IS ? AND topic IS NOT NULL").all(meetingId, itemId) as Row[];
@@ -1474,9 +1474,10 @@ export function openDb(file?: string) {
             note.editedBy ?? null,
             note.quote ? JSON.stringify(note.quote) : null,
           );
-          const a = actors.get(`${note.kind}:${note.text}`);
+          // By the note's id when it kept one through a rewording, else by its wording.
+          const a = actors.get(`id:${note.id}`) ?? actors.get(`${note.kind}:${note.text}`);
           if (a) db.prepare("UPDATE notes SET done_actor_json = ?, added_actor_json = ? WHERE id = ?").run(a.done_actor_json as string | null, a.added_actor_json as string | null, note.id);
-          const t = task.get(`${note.kind}:${note.text}`);
+          const t = task.get(`id:${note.id}`) ?? task.get(`${note.kind}:${note.text}`);
           if (t) {
             db.prepare(`UPDATE notes SET ${TASK_COLS.split(", ").map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).run(
               ...TASK_COLS.split(", ").map((c) => (t[c] as string | number | null) ?? null),
