@@ -18,6 +18,7 @@ const TASK_NAMES: Record<string, string> = {
   liveList: "Running list",
   notesFor: "Live notes",
   mergeTopics: "Topic merge",
+  refileReview: "Review filing",
   recapMeeting: "Recap",
   summarizeMeeting: "Summary",
   synthesizeMeeting: "Synthesis",
@@ -74,9 +75,9 @@ export const initials = (name: string) =>
     .join("");
 
 /** Short label shown before an item's title: the Linear key, or "Slide 3". */
-export function keyOf(item: Pick<Item, "externalId" | "slideNo"> | null | undefined): string | null {
+export function keyOf(item: (Pick<Item, "externalId" | "slideNo"> & { slide?: Item["slide"] }) | null | undefined): string | null {
   if (!item) return null;
-  return item.externalId ?? (item.slideNo ? `Slide ${item.slideNo}` : null);
+  return item.externalId ?? item.slide?.review?.name ?? (item.slideNo ? `Slide ${item.slideNo}` : null);
 }
 
 /** Links read as "PR #12" or the site's name rather than a raw URL. */

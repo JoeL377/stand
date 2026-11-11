@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { REVIEW_OUTCOMES, type ReviewOutcome, type ReviewSummary, type ReviewView } from "../../shared/protocol.ts";
+import { REVIEW_OUTCOMES, type ReviewCaught, type ReviewOutcome, type ReviewSummary, type ReviewView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
@@ -108,6 +108,7 @@ export function ReviewPage() {
         <strong>Product review</strong>
         <ReviewPicker roomId={roomId} current={review} reviews={data.reviews} />
         {review && ran && <OutcomeCounts outcomes={countOutcomes(review)} />}
+        {ran && !!review?.general?.length && <OffSlide caught={review.general} />}
         <span className="rp-grow" />
         {ran && review?.meetingId && (
           <Link className="rp-link" to={`/meetings/${review.meetingId}`}>
@@ -196,16 +197,9 @@ export function ReviewPage() {
               )}
               {ran && (
                 <div className="rp-caught">
-                  {(slide.caught ?? []).map((c) => {
-                    const k = KINDS.find((x) => x.kind === c.kind)!;
-                    return (
-                      <Link key={c.id} to={`/ref/${c.kind}/${c.id}`} className={`rp-line ${c.kind}${c.done ? " done" : ""}`} title={k.label}>
-                        <k.Icon />
-                        <span dir="auto">{c.text}</span>
-                        {c.owner && <span className="rv-who">{c.owner.split(" ")[0]}</span>}
-                      </Link>
-                    );
-                  })}
+                  {(slide.caught ?? []).map((c) => (
+                    <CaughtLine key={c.id} c={c} />
+                  ))}
                   {!slide.caught?.length && <p className="muted rp-none">Nothing was raised on this slide</p>}
                 </div>
               )}
@@ -216,7 +210,7 @@ export function ReviewPage() {
               <button key={s.id} type="button" role="tab" aria-selected={i === at} className={i === at ? "on" : undefined} title={s.title} onClick={() => go(i)}>
                 <span className="rp-thumb">{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
                 <span className="rp-thumb-foot">
-                  <span className="rp-n">{i + 1}</span>
+                  <span className="rp-n">{s.name ?? i + 1}</span>
                   {s.outcome && <span className={`rp-dot ${s.outcome}`} title={outcomeLabel(s.outcome)} />}
                   {!!s.caught?.length && <span className="count" title={`${s.caught.length} raised on this slide`}>{s.caught.length}</span>}
                 </span>
@@ -237,6 +231,37 @@ const countOutcomes = (review: ReviewView) => {
 };
 
 /** Which review this is, as a pill that opens the others: the next one, then each that ran. */
+function CaughtLine({ c }: { c: ReviewCaught }) {
+  const k = KINDS.find((x) => x.kind === c.kind)!;
+  return (
+    <Link to={`/ref/${c.kind}/${c.id}`} className={`rp-line ${c.kind}${c.done ? " done" : ""}`} title={k.label}>
+      <k.Icon />
+      <span dir="auto">{c.text}</span>
+      {c.owner && <span className="rv-who">{c.owner.split(" ")[0]}</span>}
+    </Link>
+  );
+}
+
+/** What the review raised that isn't about one slide, behind a pill. */
+function OffSlide({ caught }: { caught: ReviewCaught[] }) {
+  const [open, setOpen] = useState(false);
+  const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  return (
+    <div className="rp-picker" ref={box}>
+      <button type="button" className="rp-pill" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {caught.length} off the slides <ChevronIcon size={10} />
+      </button>
+      {open && (
+        <div className="rp-menu rp-off" role="dialog" aria-label="Raised outside the slides">
+          {caught.map((c) => (
+            <CaughtLine key={c.id} c={c} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReviewPicker(props: { roomId: string; current: ReviewView | null; reviews: ReviewSummary[] }) {
   const [open, setOpen] = useState(false);
   const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));

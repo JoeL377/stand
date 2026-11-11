@@ -163,7 +163,7 @@ export function itemRef(it: Item | null, decks: Deck[], baseUrl: string): BriefI
     id: it.id,
     kind: it.source === "linear" ? "linear" : it.source === "slide" ? "slide" : "task",
     title: it.title,
-    key: it.externalId ?? (it.slideNo ? `Slide ${it.slideNo}` : null),
+    key: it.externalId ?? it.slide?.review?.name ?? (it.slideNo ? `Slide ${it.slideNo}` : null),
     deck: deck?.title ?? null,
     url: it.url ?? `${baseUrl}/items/${it.id}`,
     historyUrl: `${baseUrl}/items/${it.id}`,

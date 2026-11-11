@@ -11,7 +11,7 @@ import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import type { ActionWork, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
-import { ReviewError, addSlide, lastReview, reviewView, slideShotKey } from "./reviews.ts";
+import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
 import { settledView } from "./spaceSettle.ts";
 import { CHECK_INSTRUCTIONS, CHECK_LEASE_MS, CHECK_VERSION, SHOW_FROM } from "./decisionCheck.ts";
@@ -94,7 +94,7 @@ export function agentApi(deps: AgentDeps) {
     return {
       id: item.id,
       title: item.title,
-      key: item.externalId ?? (item.slideNo ? `Slide ${item.slideNo}` : undefined),
+      key: item.externalId ?? item.slide?.review?.name ?? (item.slideNo ? `Slide ${item.slideNo}` : undefined),
       deck: deck?.title,
       ticket: item.url ?? undefined,
       stand_url: `${baseUrl}/items/${item.id}`,
@@ -1115,7 +1115,7 @@ export function agentApi(deps: AgentDeps) {
 
     /** A slide on the space's next product review: a feature to show, with pictures. One slide per
      *  to-do, so adding again for the same to-do rewrites it. */
-    addReviewSlide(caller: Caller, args: { space?: string; title: string; summary?: string; ref?: string; pr?: string }, baseUrl: string) {
+    addReviewSlide(caller: Caller, args: { space?: string; title: string; name?: string; summary?: string; ref?: string; pr?: string }, baseUrl: string) {
       requireWrite(caller);
       const r = args.ref ? resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`) : null;
       if (r && r.note?.kind !== "action") throw new AgentError("A slide can show a to-do (stand:action/...), or nothing: leave ref out.");
@@ -1124,6 +1124,7 @@ export function agentApi(deps: AgentDeps) {
       try {
         const { slide, review, updated } = addSlide(db, room.id, {
           title: args.title,
+          name: args.name ?? null,
           summary: args.summary ?? "",
           note: r?.note ?? null,
           owner: r?.note?.owner ?? caller.user.name,
@@ -1142,7 +1143,7 @@ export function agentApi(deps: AgentDeps) {
         const view = reviewView(db, room.id, baseUrl);
         const mine = view?.slides.find((x) => x.id === slide.id);
         return {
-          [updated ? "updated" : "added"]: { slide: slide.id, title: slide.title, summary: slide.body, shows: slide.noteId ? `stand:action/${slide.noteId}` : undefined, pr: slide.pr ?? undefined },
+          [updated ? "updated" : "added"]: { slide: slide.id, name: slideName(slide), title: slide.title, summary: slide.body, shows: slide.noteId ? `stand:action/${slide.noteId}` : undefined, pr: slide.pr ?? undefined },
           pictures: mine?.shots.length ?? 0,
           space: room.name,
           review: { slides: view?.slides.length ?? 1, started: review.status !== "draft" },
@@ -1168,6 +1169,7 @@ export function agentApi(deps: AgentDeps) {
           const here = itemId ? caught.filter((n) => n.itemId === itemId) : [];
           const of = (kind: Note["kind"]) => here.filter((n) => n.kind === kind);
           return {
+            name: s.name ?? undefined,
             title: s.title,
             summary: s.body || undefined,
             shows: s.taskId ? `stand:action/${s.taskId}` : undefined,
@@ -1183,12 +1185,27 @@ export function agentApi(deps: AgentDeps) {
           };
         });
       };
+      // What the review raised that isn't about one slide.
+      const offSlides = (v: ReviewView) => {
+        if (!v.id || !v.meetingId) return undefined;
+        const on = new Set(db.reviewSlides(v.id).map((s) => s.itemId));
+        const KIND = { action: "todo", decision: "decision", question: "question" } as const;
+        const off = db.meetingNotes(v.meetingId).filter((n) => n.kind in KIND && !on.has(n.itemId));
+        return off.length ? off.map((n) => ({ ref: `stand:${n.kind}/${n.id}`, kind: KIND[n.kind as keyof typeof KIND], text: n.text, owner: n.owner ?? undefined })) : undefined;
+      };
       const next = reviewView(db, room.id, baseUrl);
       const last = lastReview(db, room.id, baseUrl);
       return {
         space: room.name,
         next: next ? { status: next.status === "live" ? "in a call now" : "not started", slides: slideInfo(next, next.status === "live") } : null,
-        last: last ? { started_at: last.startedAt ? new Date(last.startedAt).toISOString() : undefined, meeting: last.meetingId ?? undefined, slides: slideInfo(last, true) } : null,
+        last: last
+          ? {
+              started_at: last.startedAt ? new Date(last.startedAt).toISOString() : undefined,
+              meeting: last.meetingId ?? undefined,
+              slides: slideInfo(last, true),
+              off_the_slides: offSlides(last),
+            }
+          : null,
         how: "add_review_slide puts a feature on the next review. Finished to-dos nobody made a slide for are added when the review starts.",
       };
     },

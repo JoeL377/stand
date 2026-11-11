@@ -19,12 +19,30 @@ import { prOf, shotUrl } from "./workLog.ts";
 const FIRST_LOOKBACK_MS = 14 * 24 * 3_600_000;
 export const REVIEW_TITLE_MAX = 140;
 export const REVIEW_BODY_MAX = 600;
+export const REVIEW_NAME_MAX = 32;
 const MAX_SLIDES = 40;
 
 export class ReviewError extends Error {}
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 const day = (ts: number) => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+/** What a slide is called where a deck slide would say "Slide 3": the name it was given, else the
+ *  first few words of its title. */
+export function slideName(s: { name?: string | null; title: string }): string {
+  const given = s.name?.replace(/\s+/g, " ").trim();
+  if (given) return clip(given, REVIEW_NAME_MAX);
+  const words = s.title.replace(/\s+/g, " ").trim().replace(/[:,.;]+$/, "").split(" ");
+  let out = "";
+  for (const w of words.slice(0, 4)) {
+    if (out && `${out} ${w}`.length > REVIEW_NAME_MAX) break;
+    out = out ? `${out} ${w}` : w;
+  }
+  // A name doesn't end on a joining word: "Pull fraud numbers", not "Pull fraud numbers for".
+  const kept = out.split(" ");
+  while (kept.length > 1 && /^(a|an|the|for|of|to|in|on|at|and|or|with|by|from|is|are|has|have|its|their)$/i.test(kept[kept.length - 1])) kept.pop();
+  return clip(kept.join(" ").replace(/[:,.;]+$/, ""), REVIEW_NAME_MAX);
+}
 
 /** Where pictures uploaded straight to a slide are kept: work shots, filed under the slide instead of a to-do. */
 export const slideShotKey = (slideId: string) => `review:${slideId}`;
@@ -37,6 +55,7 @@ function shotsOf(db: DB, slide: Pick<ReviewSlideRow, "id" | "noteId">, baseUrl =
 
 const infoOf = (db: DB, s: ReviewSlideRow, baseUrl = ""): ReviewSlideInfo => ({
   slideId: s.id,
+  name: slideName(s),
   taskId: s.noteId,
   owner: s.owner,
   addedBy: s.addedBy,
@@ -96,6 +115,7 @@ const toView = (db: DB, review: ReviewRow, slides: ReviewSlideRow[], pending: Pe
     }),
     ...pending.map((p) => ({
       id: `task:${p.noteId}`,
+      name: slideName(p),
       title: p.title,
       body: p.body,
       taskId: p.noteId,
@@ -128,6 +148,7 @@ export function lastReview(db: DB, roomId: string, baseUrl = ""): ReviewView | n
 }
 
 const CAUGHT = ["action", "decision", "question"];
+const caughtOf = (n: Note): ReviewCaught => ({ id: n.id, kind: n.kind as ReviewCaught["kind"], text: n.text, owner: n.owner ?? null, done: !!n.doneAt });
 
 /** One review as its own page shows it: "next" is the one being put together (or in a call), an id is
  *  one that ran, with what the team raised on each slide. Null when it isn't this space's. */
@@ -142,9 +163,11 @@ export function reviewPage(db: DB, roomId: string, idOrNext: string, baseUrl = "
   view.slides.forEach((s, i) => {
     const itemId = rows[i].itemId;
     s.caught = itemId
-      ? notes.filter((n) => n.itemId === itemId).map((n): ReviewCaught => ({ id: n.id, kind: n.kind as ReviewCaught["kind"], text: n.text, owner: n.owner ?? null, done: !!n.doneAt }))
+      ? notes.filter((n) => n.itemId === itemId).map(caughtOf)
       : [];
   });
+  const onSlide = new Set(rows.map((r) => r.itemId));
+  view.general = notes.filter((n) => !onSlide.has(n.itemId)).map(caughtOf);
   return view;
 }
 
@@ -166,6 +189,8 @@ export function reviewOfMeeting(db: DB, meetingId: string): ReviewSummary | null
 
 export interface NewSlide {
   title: string;
+  /** What people will call it, in two or three words. */
+  name?: string | null;
   summary: string;
   /** The to-do it shows: its pictures and PR come along. */
   note?: Note | null;
@@ -179,17 +204,19 @@ export function addSlide(db: DB, roomId: string, s: NewSlide): { slide: ReviewSl
   const title = clip(s.title.replace(/\s+/g, " ").trim(), REVIEW_TITLE_MAX);
   if (!title) throw new ReviewError("A slide needs a title: the feature, in a line.");
   const body = clip(s.summary.trim(), REVIEW_BODY_MAX);
+  const name = s.name?.replace(/\s+/g, " ").trim() ? clip(s.name.replace(/\s+/g, " ").trim(), REVIEW_NAME_MAX) : null;
   const review = db.reviewIn(roomId, ["draft"]) ?? db.createReview(roomId);
   const slides = db.reviewSlides(review.id);
   const same = s.note ? slides.find((x) => x.noteId === s.note!.id) : slides.find((x) => !x.noteId && x.title.toLowerCase() === title.toLowerCase());
   const owner = s.owner ?? s.note?.owner ?? null;
   const pr = s.pr ?? (s.note ? prIn(s.note, db.notesUpdates([s.note.id])) : null);
   if (same) {
-    db.updateReviewSlide(same.id, { title, body, owner, addedBy: s.addedBy, pr });
+    // A rewrite that gives no name keeps the one the slide had.
+    db.updateReviewSlide(same.id, { title, body, owner, addedBy: s.addedBy, pr, ...(name ? { name } : {}) });
     return { slide: db.getReviewSlide(same.id)!, review, updated: true };
   }
   if (slides.length >= MAX_SLIDES) throw new ReviewError(`The next review already has ${MAX_SLIDES} slides. Start it, or take one off.`);
-  return { slide: db.addReviewSlide(review.id, { title, body, noteId: s.note?.id ?? null, owner, addedBy: s.addedBy, pr }), review, updated: false };
+  return { slide: db.addReviewSlide(review.id, { title, name, body, noteId: s.note?.id ?? null, owner, addedBy: s.addedBy, pr }), review, updated: false };
 }
 
 /** Takes a slide off the next review. Only a review that hasn't started can change. */
@@ -253,3 +280,79 @@ export function finishReview(db: DB, roomId: string, meetingId: string, now = Da
 
 /** Whether an agenda item is a slide of the review running in this space. */
 export const isReviewSlide = (item: { slide: SlideContent | null } | null | undefined) => item?.slide?.layout === "review";
+
+// ---- after the call: each capture goes under the slide it was about -----------------------------
+//
+// During a review, what's said is filed under the slide on screen. People talk past a flip, open
+// with something general, or come back to an earlier feature, so once the meeting's notes are tidy
+// one pass reads every to-do, decision and open question against the slides and says where each
+// belongs. It only moves notes; it writes none.
+
+export interface Refile {
+  note: string;
+  /** A slide's key ("S3"), "none" when it isn't about one slide, or "echo" when it only repeats
+   *  what the slide itself says and nobody raised it. */
+  to: string;
+}
+
+const KIND_WORD: Record<string, string> = { action: "to-do", decision: "decision", question: "open question" };
+
+/** What the filing pass reads: the slides, then every capture with where it sits now. Empty when
+ *  there is nothing to file. */
+export function refilePrompt(slides: ReviewSlideRow[], notes: Note[]): { text: string; noteOf: Map<string, Note>; slideOf: Map<string, ReviewSlideRow> } {
+  const live = slides.filter((s) => s.itemId);
+  const slideOf = new Map(live.map((s, i) => [`S${i + 1}`, s]));
+  const keyOfItem = new Map([...slideOf].map(([k, s]) => [s.itemId!, k]));
+  const caught = notes.filter((n) => CAUGHT.includes(n.kind));
+  const noteOf = new Map(caught.map((n, i) => [`N${i + 1}`, n]));
+  if (!live.length || !caught.length) return { text: "", noteOf, slideOf };
+  const text = [
+    "Slides of the product review, in the order they were shown:",
+    ...[...slideOf].map(([k, s]) => `${k} "${slideName(s)}": ${s.title}${s.body ? `\n   On the slide: ${s.body.replace(/\s*\n\s*/g, " / ")}` : ""}`),
+    "",
+    "What was caught, with the slide that was on screen at the time:",
+    ...[...noteOf].map(([k, n]) => {
+      const at = n.itemId ? (keyOfItem.get(n.itemId) ?? "none") : "none";
+      const said = n.quote?.text ? ` (${n.quote.speaker}: "${clip(n.quote.text, 200)}")` : " (no quote)";
+      return `${k} [${at}] ${KIND_WORD[n.kind]}: ${n.text}${n.owner ? ` (owner ${n.owner})` : ""}${said}`;
+    }),
+  ].join("\n");
+  return { text, noteOf, slideOf };
+}
+
+/** Applies the pass's answers. Returns how many notes moved and how many echoes came off. Answers
+ *  that name a note or slide that isn't there are skipped. */
+export function applyRefile(db: DB, moves: Refile[], noteOf: Map<string, Note>, slideOf: Map<string, ReviewSlideRow>): { moved: number; dropped: number } {
+  let moved = 0;
+  let dropped = 0;
+  const seen = new Set<string>();
+  for (const m of moves) {
+    const note = noteOf.get(m.note);
+    if (!note || seen.has(m.note)) continue;
+    seen.add(m.note);
+    if (m.to === "echo") {
+      // Only a question nobody is quoted asking can be the slide talking to itself.
+      if (note.kind === "question" && !note.quote?.text) {
+        db.removeNote(note.id);
+        dropped++;
+      }
+      continue;
+    }
+    const target = m.to === "none" ? null : slideOf.get(m.to)?.itemId;
+    if (target === undefined || target === note.itemId) continue;
+    db.moveNote(note.id, target);
+    moved++;
+  }
+  return { moved, dropped };
+}
+
+/** Files a finished review's captures under the slides they were about. `ask` is the model call
+ *  (Agent.refileReview); it returning null leaves everything where it was. */
+export async function refileReview(db: DB, meetingId: string, ask: (prompt: string) => Promise<Refile[] | null>): Promise<{ moved: number; dropped: number }> {
+  const review = db.reviewByMeeting(meetingId);
+  if (!review) return { moved: 0, dropped: 0 };
+  const { text, noteOf, slideOf } = refilePrompt(db.reviewSlides(review.id), db.meetingNotes(meetingId));
+  if (!text) return { moved: 0, dropped: 0 };
+  const moves = await ask(text);
+  return moves ? applyRefile(db, moves, noteOf, slideOf) : { moved: 0, dropped: 0 };
+}

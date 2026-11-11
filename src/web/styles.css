@@ -3071,6 +3071,11 @@ a.rp-pill:hover, button.rp-pill:hover { background: var(--panel-2); text-decorat
 .rp-line.done > span:not(.rv-who) { text-decoration: line-through; color: var(--muted); }
 .rp-line .rv-who { color: var(--muted); font-size: 12px; }
 .rp-none { font-size: 13px; }
+.rp-n { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-off { width: min(440px, 86vw); }
+.rp-menu.rp-off a.rp-line { margin: 0; padding: 6px 8px; white-space: normal; align-items: flex-start; gap: 8px; }
+.rp-menu.rp-off a.rp-line > span:not(.rv-who) { white-space: normal; }
+.rp-menu.rp-off a.rp-line > svg { margin-top: 2px; }
 .rp-strip { display: flex; gap: 8px; padding: 8px 16px 12px; overflow-x: auto; border-top: 1px solid var(--line); flex: none; }
 .rp-strip > button { all: unset; cursor: pointer; flex: none; width: 112px; display: flex; flex-direction: column; gap: 3px; opacity: 0.7; }
 .rp-strip > button:hover, .rp-strip > button:focus-visible { opacity: 1; }

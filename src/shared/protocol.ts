@@ -41,6 +41,8 @@ export interface ReviewShot {
 export interface ReviewSlideInfo {
   /** The review_slides row this slide was made from. */
   slideId: string;
+  /** What people call it, in two or three words ("Task drawer"): shown where a deck slide says "Slide 3". */
+  name?: string | null;
   /** The to-do it shows, when it came from one. */
   taskId: string | null;
   /** Whose work it is, and who or what added the slide ("Priya Shah via Claude Code", "Stand"). */
@@ -62,6 +64,8 @@ export interface ReviewView {
   createdAt: number;
   startedAt: number | null;
   endedAt?: number | null;
+  /** What was raised in a review that ran but isn't about one slide. */
+  general?: ReviewCaught[];
   /** A slide of a review that ran also carries what the team raised while it was on screen. */
   slides: Array<{ id: string; title: string; body: string; caught?: ReviewCaught[] } & Omit<ReviewSlideInfo, "slideId">>;
 }
