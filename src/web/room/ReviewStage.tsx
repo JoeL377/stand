@@ -313,7 +313,7 @@ function Wrap(props: {
 }
 
 /** The host writes in a line Stand missed: pick its kind, type, Enter. */
-function AddLine({ onAdd }: { onAdd: (kind: "action" | "decision" | "question", text: string) => void }) {
+export function AddLine({ onAdd }: { onAdd: (kind: "action" | "decision" | "question", text: string) => void }) {
   const [kind, setKind] = useState<"action" | "decision" | "question">("action");
   const [text, setText] = useState("");
   return (

@@ -43,6 +43,8 @@ export function PlanReviewBody({ task, initial }: { task: string; initial?: { th
     try {
       const data = await api.planReview(task, id);
       if (current !== request.current) return;
+      // Opened on a thread that is resolved: show it where it is.
+      if (!version.current && data.threads.find((entry) => entry.id === initial?.thread)?.resolved) setFilter("resolved");
       version.current = data.plan.id;
       setReview(data);
     } catch (e) {

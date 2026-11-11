@@ -11,7 +11,7 @@ import { STATE_LABEL, VERB_LABEL, stateOf, verbOf } from "../shared/tasks.ts";
 import { api } from "./api.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { CloseIcon } from "./icons.tsx";
-import { designReviewHref } from "./pages/DesignReviewPage.tsx";
+import { LastReview, designReviewHref } from "./pages/DesignReviewPage.tsx";
 import { PlanReviewBody } from "./PlanReview.tsx";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
@@ -268,6 +268,7 @@ function RequestReview({ taskId, roomId }: { taskId: string; roomId: string }) {
   return (
     <span className="td-plan-review">
       {error && <span className="error" role="alert">{error}</span>}
+      {state.last && <LastReview roomId={roomId} last={state.last} />}
       <button
         type="button"
         className="primary"
@@ -285,7 +286,7 @@ function RequestReview({ taskId, roomId }: { taskId: string; roomId: string }) {
           }
         }}
       >
-        {busy ? "Requesting…" : "Request review"}
+        {busy ? "Requesting…" : state.last ? "Request review again" : "Request review"}
       </button>
     </span>
   );

@@ -1,6 +1,9 @@
 import { normalizeTopic, TOPIC_MAX } from "../shared/topics.ts";
 import { PlanBriefs } from "./planBrief.ts";
-import { DesignReviewError, designReviewState, designReviewView, isAuthor, prepare, removeSpec, requestReview, requested, specChanged, specView, startDesignReview, whenBriefed } from "./designReviews.ts";
+import {
+  DesignReviewError, designReviewOfMeeting, designReviewRecord, designReviewState, designReviewView, designReviewsRan, isAuthor, prepare, removeSpec, requestReview, requested,
+  specChanged, specView, startDesignReview, whenBriefed,
+} from "./designReviews.ts";
 import { changeReview, logThreadChange, reviewFor } from "./planReview.ts";
 import fs from "node:fs";
 import http from "node:http";
@@ -1129,7 +1132,19 @@ app.get(
   route((req, res) => {
     const room = db.getRoom(req.params.id);
     if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
-    res.json({ roomName: room.name, review: designReviewView(db, planBriefs, room.id, req.user!) });
+    res.json({ roomName: room.name, review: designReviewView(db, planBriefs, room.id, req.user!), reviews: designReviewsRan(db, room.id) });
+  }),
+);
+
+// One that ran, as its page keeps it.
+app.get(
+  "/api/rooms/:id/design-reviews/:reviewId",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    const review = designReviewRecord(db, room.id, req.params.reviewId);
+    if (!review) return notFound(res, "Design review not found");
+    res.json({ roomName: room.name, review, reviews: designReviewsRan(db, room.id) });
   }),
 );
 
@@ -1479,6 +1494,7 @@ app.get(
       chapters: m.chapters,
       cost: db.meetingCost(m.id),
       review: reviewOfMeeting(db, m.id),
+      designReview: designReviewOfMeeting(db, m.id),
       brainstorm: brainstormOfMeeting(db, m.id),
     };
     res.json(body);

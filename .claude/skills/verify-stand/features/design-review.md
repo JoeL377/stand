@@ -1,0 +1,20 @@
+# Design review
+
+A call where the team goes through a spec and leaves with a verdict on it. A to-do's plan joins the space's next design review only on request. In the call each spec is slides: its Overview, a slide for each `##` section with that section's points after it, and its Verdict. A point is an open comment thread on the plan.
+
+## Sub-features
+- Request: **Request review** in the plan viewer's footer, or `request_design_review` on the MCP with questions that each quote the plan.
+- Prepare: the review's page (`/s/<space>/design-review`) lists each spec as its slides. The author rewrites the summary and the lines, takes sections and points off the call, asks questions, and accepts or dismisses Stand's suggestions.
+- The call: **Start design review** on that page, or **Present task** on a to-do with a spec (a review of that one spec). Points end **Settled** or **Still open**; the Verdict takes **Approve**, **Approve with changes** or **Not yet**. **Full spec** opens the plan at the slide's part.
+- Write back: Settled resolves the thread with what was decided, Still open leaves it open; at the end the to-do's log gets the verdict in a line and the to-do waits on the to-dos the review raised.
+- The record: `/s/<space>/design-review/<id>`, linked from the Tasks tab row, the recap and the plan viewer. `get_review` returns it under `design_review`.
+
+## Driving it with Playwright
+`scripts/design-review.cjs <run>` is its own journey with two browser contexts. The space's creator is the host, so the spec's author is the second person: that proves the author moves between the slides of their spec without being the host. It asks for the review over `/mcp`, starts it from the review's page, flips slides as the author and as the host, adds a to-do and a decision on a point with the host's add-line box, calls the points and the verdict, makes a comment mid-call through `POST /api/tasks/<id>/plan-review` and ends the meeting. Proof is in what it reads afterwards: the threads, the to-do's log and `waitsOn`, `get_review`, the record page, the recap's link and the plan viewer.
+
+## Gotchas
+- Without `ANTHROPIC_API_KEY` Stand can't write the brief: the Overview has no summary and sections have no lines unless the author writes them (the journey writes one section's lines through the API). What Stand writes with a model is covered by unit tests with a stand-in model only.
+- Heuristic notes catch nothing from chat, so the journey adds the to-do and the decision by hand. A proof that talk on a slide becomes its to-dos needs the key.
+- The space's creator takes the host role when they join, even if someone else started the meeting. Sign the host in first.
+- A comment made by selecting text can't be driven reliably headless; the journey posts the same request the plan viewer makes.
+- Dates in what Stand writes ("Design review, 11 Nov") are UTC days; the pages show the browser's local day.

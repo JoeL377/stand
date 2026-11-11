@@ -1,5 +1,6 @@
 import { changeReview, logThreadChange, quotePassage, reviewFor } from "./planReview.ts";
-import { DesignReviewError, designReviewState, planChanged, requestReview } from "./designReviews.ts";
+import { DesignReviewError, designReviewRecord, designReviewState, designReviewView, designReviewsRan, planChanged, requestReview } from "./designReviews.ts";
+import { designOutcomeLabel, pointsOnDeck } from "../shared/designReview.ts";
 import type { PlanBriefs } from "./planBrief.ts";
 // What agents see of Stand, shared by the MCP server (mcp.ts) and the
 // "Copy for agent" button: references to single to-dos, decisions, questions
@@ -178,6 +179,53 @@ export function agentApi(deps: AgentDeps) {
       ? { kind: "agent", ...person, agent: caller.token.label, connection: caller.token.id, model: caller.model }
       : { kind: "person", ...person };
   };
+  /** The space's design reviews for an agent: the specs waiting on the next one with their points, and
+   *  the last one that ran with each spec's verdict, how its points ended and what came out of it. */
+  const designReviewInfo = (roomId: string, baseUrl: string) => {
+    const next = designReviewView(db, deps.briefs ?? null, roomId, null);
+    const ran = designReviewsRan(db, roomId)[0];
+    const last = ran ? designReviewRecord(db, roomId, ran.id) : null;
+    const ref = (c: { kind: string; id: string; text: string; owner: string | null }) => ({ ref: `stand:${c.kind}/${c.id}`, text: c.text, owner: c.owner ?? undefined });
+    return {
+      next: next
+        ? {
+            status: next.status === "live" ? "in a call now" : "not started",
+            url: `${baseUrl}/s/${roomId}/design-review`,
+            specs: next.specs.map((s) => ({
+              shows: `stand:action/${s.taskId}`,
+              title: s.title,
+              owner: s.owner ?? undefined,
+              requested_by: s.requestedBy ?? undefined,
+              points: pointsOnDeck(s.points).map((p) => ({ thread: p.threadId, about: clip(p.quote, 200), question: p.text, by: p.by })),
+            })),
+          }
+        : null,
+      last: last
+        ? {
+            started_at: last.startedAt ? new Date(last.startedAt).toISOString() : undefined,
+            meeting: last.meetingId ?? undefined,
+            url: `${baseUrl}/s/${roomId}/design-review/${last.id}`,
+            specs: last.specs.map((s) => ({
+              shows: `stand:action/${s.taskId}`,
+              title: s.title,
+              verdict: s.verdict ? designOutcomeLabel(s.verdict) : "no verdict",
+              verdict_by: s.verdictBy ?? undefined,
+              points: s.slides.filter((x) => x.role === "point").map((x) => ({
+                question: x.body,
+                about: x.quote ? clip(x.quote, 200) : undefined,
+                outcome: x.outcome ? designOutcomeLabel(x.outcome) : "not called",
+                decisions: x.caught.filter((c) => c.kind === "decision").map(ref),
+                todos: x.caught.filter((c) => c.kind === "action").map(ref),
+                questions: x.caught.filter((c) => c.kind === "question").map(ref),
+              })),
+              todos: s.slides.flatMap((x) => x.caught.filter((c) => c.kind === "action")).map(ref),
+            })),
+          }
+        : null,
+      how: "request_design_review puts a to-do's plan on the next design review. After a review, the open threads on the plan (get: plan_review_threads) and the to-dos it waits on are what the author has to change.",
+    };
+  };
+
   /** "me" is the caller; "unassigned", "none" or nothing leaves it open to anyone. */
   const ownerFor = (caller: Caller, owner: string): string | null => {
     const o = oneLine(owner, 80);
@@ -1205,7 +1253,8 @@ export function agentApi(deps: AgentDeps) {
       }
     },
 
-    /** The space's product review: the next one being put together, and how the last one went. */
+    /** The space's product review: the next one being put together, and how the last one went. The
+     *  design review comes with it: the specs waiting, and what the last one decided on each. */
     getReview(caller: Caller, args: { space: string }, baseUrl: string) {
       const room = findSpace(caller, args.space);
       const slideInfo = (v: ReviewView, withCaught: boolean) => {
@@ -1254,6 +1303,7 @@ export function agentApi(deps: AgentDeps) {
             }
           : null,
         how: "add_review_slide puts a feature on the next review. Finished to-dos nobody made a slide for are added when the review starts.",
+        design_review: designReviewInfo(room.id, baseUrl),
       };
     },
 

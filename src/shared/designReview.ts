@@ -57,6 +57,15 @@ export interface DesignPoint {
   placed: boolean;
 }
 
+/** The last design review a spec went through. */
+export interface LastDesignReview {
+  reviewId: string;
+  at: number | null;
+  verdict: Verdict | null;
+  /** The plan has a newer version than the one reviewed. */
+  changed: boolean;
+}
+
 export interface DesignSpec {
   taskId: string;
   title: string;
@@ -69,6 +78,8 @@ export interface DesignSpec {
   mine: boolean;
   brief: PlanBrief;
   points: DesignPoint[];
+  /** The review it went through before this one, when it did. */
+  last?: LastDesignReview | null;
 }
 
 export interface DesignReviewView {
@@ -92,6 +103,57 @@ export interface DesignReviewState {
   points: number;
   /** The review it is on is in a call now. */
   live?: boolean;
+  /** The last review that ran on it, with its verdict. */
+  last?: LastDesignReview | null;
+}
+
+/** A to-do, decision or open question raised while a slide was on screen. */
+export interface DesignCaught {
+  id: string;
+  kind: "action" | "decision" | "question";
+  text: string;
+  owner: string | null;
+  done: boolean;
+}
+
+/** A design review that ran, as its page keeps it: each spec with its verdict, how its points
+ *  ended and what the team raised on each slide. */
+export interface DesignReviewRecord {
+  id: string;
+  startedAt: number | null;
+  endedAt: number | null;
+  meetingId: string | null;
+  specs: Array<{
+    taskId: string;
+    title: string;
+    owner: string | null;
+    verdict: Verdict | null;
+    verdictBy: string | null;
+    slides: Array<{
+      id: string;
+      role: DesignRole;
+      name: string;
+      title: string;
+      body: string;
+      quote?: string;
+      by?: string;
+      outcome: DesignOutcome | null;
+      outcomeBy: string | null;
+      caught: DesignCaught[];
+    }>;
+    lost: Array<{ quote: string; text: string; by: string }>;
+  }>;
+  /** What the meeting raised that isn't under one of the review's slides. */
+  general: DesignCaught[];
+}
+
+/** A design review that ran, in a line. */
+export interface DesignReviewRan {
+  id: string;
+  startedAt: number | null;
+  meetingId: string | null;
+  titles: string[];
+  verdicts: Record<Verdict, number>;
 }
 
 /** One change the author makes while preparing a spec. */

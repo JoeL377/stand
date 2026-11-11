@@ -13,6 +13,7 @@ import { CloseIcon } from "../icons.tsx";
 import { Markdown } from "../Markdown.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { PlanReviewBody } from "../PlanReview.tsx";
+import { AddLine } from "./ReviewStage.tsx";
 import { errorToast } from "../Toasts.tsx";
 
 const KINDS = [
@@ -42,7 +43,9 @@ export function DesignStage(props: {
   onSpec: (open: boolean) => void;
   onFlip: (delta: number) => void;
   onOutcome: (outcome: DesignOutcome | null) => void;
+  /** The host takes a line off that Stand got wrong, or adds one it missed. */
   onRemove?: (note: Note) => void;
+  onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
   className?: string;
 }) {
   const { item, slides, disabled } = props;
@@ -197,6 +200,7 @@ export function DesignStage(props: {
             ) : (
               !caught.length && <p className="muted small">What the team says here is filed under this {design.role === "verdict" ? "spec" : "slide"}.</p>
             )}
+            {props.onAdd && !disabled && <AddLine onAdd={props.onAdd} />}
           </aside>
         </div>
         {props.specOpen && (

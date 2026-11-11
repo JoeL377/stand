@@ -1,6 +1,7 @@
 import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { VerdictCounts, designRecordHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { brainCount, brainstormHref } from "./BrainstormPage.tsx";
 import { ConxtPanel } from "../ConxtPanel.tsx";
@@ -184,6 +185,12 @@ export function RecapPage() {
         {data.brainstorm && (
           <Link className="rp-pill rc-review" to={brainstormHref(data.roomId, data.brainstorm.id)}>
             Brainstorm · {brainCount(data.brainstorm)}
+          </Link>
+        )}
+        {data.designReview && (
+          <Link className="rp-pill rc-review" to={designRecordHref(data.roomId, data.designReview.id)}>
+            Design review · {data.designReview.titles.length} {data.designReview.titles.length === 1 ? "spec" : "specs"}
+            <VerdictCounts verdicts={data.designReview.verdicts} />
           </Link>
         )}
         {data.review && (
