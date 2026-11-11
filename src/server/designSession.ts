@@ -1,0 +1,440 @@
+// A design session: a call where the meeting is the first design. It is a brainstorm (brainstorm.ts)
+// whose middle screen is a diagram instead of a map: boxes are the things being designed, and
+// labelled arrows say how they relate. It can start from a diagram, so the room edits something
+// instead of facing a blank board.
+//
+// Stand proposes and the room accepts. A pass over the newest talk (in the style of the map's) adds
+// boxes and arrows as suggestions; one joins the diagram only when someone keeps it, and nothing a
+// person kept is renamed, moved or dropped by a later pass. When the call ends the diagram is saved
+// as a draft spec on a to-do, which goes through the normal design review from there.
+import { z } from "zod";
+import type { BrainCaught, DesignArrow, DesignBox, DesignDiagram, Segment } from "../shared/protocol.ts";
+import type { Actor } from "../shared/actors.ts";
+import { type BrainstormRow, shownDiagram } from "./brainstorm.ts";
+import type { DB } from "./db.ts";
+import { planChanged } from "./designReviews.ts";
+import { similar } from "./notesMerge.ts";
+
+const WINDOW_MS = 2 * 60_000;
+export const MAX_BOXES = 24;
+export const MAX_ARROWS = 40;
+/** Suggestions waiting on the room at once: past this the board stops being calm, so new ones wait. */
+export const MAX_WAITING = 8;
+const MAX_POINTS = 8;
+export const SEED_MAX = 20_000;
+
+export const DiagramAnswerSchema = z.object({
+  boxes: z
+    .array(
+      z.object({
+        label: z.string().describe("The thing's name as the team says it: at most 4 words, no full stop"),
+        detail: z.string().describe("One sentence saying what it is or what it is for, in the speaker's terms"),
+        by: z.string().nullable().describe("First name of who raised it; null if unclear"),
+        line: z.number().int().describe("The NEW line it comes from"),
+      }),
+    )
+    .describe("A thing the NEW lines introduce into the design that the diagram doesn't have. Usually empty"),
+  arrows: z
+    .array(
+      z.object({
+        from: z.string().describe("A box's id (b2), or new1 for the first box added in this same answer, new2 for the second"),
+        to: z.string().describe("A box's id, or new1, new2…"),
+        label: z.string().describe('How the first relates to the second, read along the arrow: at most 4 words, lower case ("belongs to", "becomes", "has many")'),
+        by: z.string().nullable(),
+        line: z.number().int(),
+      }),
+    )
+    .describe("A relation between two boxes that someone stated in the NEW lines and the diagram doesn't show. Usually empty"),
+  extend: z
+    .array(
+      z.object({
+        id: z.string().describe("A box on the diagram"),
+        point: z.string().describe("What the NEW talk adds about it: a field, a rule, a constraint, a concern. At most 14 words"),
+        by: z.string().nullable(),
+        line: z.number().int(),
+      }),
+    )
+    .describe("Someone said more about a box that is already there instead of raising a new one"),
+  caught: z
+    .array(z.object({ id: z.string().describe("A box on the diagram"), item: z.string().describe("A caught line's id, li_3") }))
+    .describe("A to-do, decision or open question from the caught list that is about one box and isn't linked to it yet. Usually empty"),
+});
+export type DiagramAnswer = z.infer<typeof DiagramAnswerSchema>;
+
+export const DIAGRAM_SYSTEM = `You keep the diagram on the middle screen of a live design session. The team is designing something by talking it through, and the diagram is their design so far: each box is one thing in the design (an object, a record, a screen, a service, a step), and each arrow says in a few words how one box relates to another. Everyone looks at it while they talk, so it has to be right and it has to stay calm.
+
+What you add shows as a suggestion, dashed, until someone in the room keeps it. So suggest only what the team has actually said, and suggest little: an answer with nothing in it is the usual one.
+
+Each time you get the diagram so far, with ids, and the last couple of minutes of transcript. Lines marked NEW are the ones you haven't seen yet. Return only what the NEW lines add. You never rename, move or remove anything: the room does that.
+
+- A box is a thing the design is made of, named the way the team names it. Add one when someone introduces a thing the diagram doesn't have and talks about it as part of the design. Not an example, not a person, not a passing mention. Before adding, check the diagram: when a box already is that thing under another name, don't add it; use extend if the talk says something new about it.
+- An arrow is a relation someone stated: one thing belongs to, contains, becomes, creates, links to, replaces or depends on another. Read along the arrow it should make a short true sentence: "task belongs to project". Add one only when both ends are boxes (on the diagram or added in this answer) and the diagram doesn't already show that relation in either direction.
+- extend is for what the talk adds to a box that is there: a field it has, a rule, a limit, a concern, a decision about it.
+- Lines marked (suggested) are waiting on the room. Don't suggest them again, and don't build on them unless the talk does.
+- Things under "Dropped by the team" were refused. Never suggest them again.
+- by is the first name of the person who said it, matched to the people in the meeting.
+- The caught list is the meeting's to-dos, decisions and open questions. When one is clearly about a box and isn't linked to it yet, link it in caught.
+Transcription is rough: read through misheard words. Never invent a part of the design nobody said, and never return commentary about the transcript.`;
+
+export const SEED_SYSTEM = `You turn a team's notes into the starting diagram for a design session. Each box is one thing in the design described by the notes (an object, a record, a screen, a service, a step), named as the notes name it. Each arrow says in a few words how one box relates to another, read along the arrow: "task belongs to project".
+
+Return the boxes and arrows the notes actually describe, and nothing they don't. At most ${MAX_BOXES} boxes: when the notes hold more, keep the ones the rest hang off. Every arrow joins two boxes you return, named new1, new2… by their position in boxes. Leave extend and caught empty, set by to null and line to 0.`;
+
+/** What the diagram needs from the model; null when it couldn't answer. */
+export interface DiagramModel {
+  designDiagram(context: string, talk: string): Promise<DiagramAnswer | null>;
+}
+
+const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
+const first = (name: string | null | undefined) => name?.trim().split(/\s+/)[0] || null;
+const tidy = (s: string, max: number) => clip(s.replace(/\s+/g, " ").trim().replace(/\.$/, ""), max);
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const at = (ms: number, start: number) => {
+  const s = Math.max(0, Math.floor((ms - start) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+// ---- starting diagram -------------------------------------------------------------------------
+
+/** Reads a diagram someone typed or pasted, one thing per line:
+ *    Task: a to-do with an owner          a box, with what it is
+ *    Task -> Project: belongs to          an arrow, with how they relate
+ *  and the arrows of a mermaid flowchart (A --> B, A -->|label| B, A -- label --> B, with A[Name]).
+ *  Lines that are neither are skipped. Everything read is kept: the room chose it by pasting it. */
+export function parseSeed(text: string, now = Date.now()): DesignDiagram {
+  const boxes: DesignBox[] = [];
+  const arrows: DesignArrow[] = [];
+  /** A mermaid node id to the name it was given (A[Name]). */
+  const named = new Map<string, string>();
+  const box = (raw: string, detail: string | null = null): DesignBox | null => {
+    let name = raw.trim();
+    const m = /^([\w.-]+)\s*(?:\[\[?|\(\(?|\{\{?)\s*"?(.+?)"?\s*(?:\]\]?|\)\)?|\}\}?)$/.exec(name);
+    if (m) (named.set(m[1], m[2]), (name = m[2]));
+    else if (named.has(name)) name = named.get(name)!;
+    name = tidy(name.replace(/^["'`*_]+|["'`*_]+$/g, ""), 48);
+    if (!name) return null;
+    let b = boxes.find((x) => same(x.label, name));
+    if (!b) {
+      if (boxes.length >= MAX_BOXES) return null;
+      b = { id: `b${boxes.length + 1}`, label: name, detail: null, by: null, ts: now, quote: null, points: [], caught: [] };
+      boxes.push(b);
+    }
+    if (detail && !b.detail) b.detail = clip(detail.trim(), 240) || null;
+    return b;
+  };
+  const arrow = (from: string, to: string, label: string) => {
+    const a = box(from);
+    const b = box(to);
+    // A box can relate to itself: a task depends on a task.
+    if (!a || !b || arrows.length >= MAX_ARROWS) return;
+    if (arrows.some((x) => x.from === a.id && x.to === b.id)) return;
+    arrows.push({ id: `a${arrows.length + 1}`, from: a.id, to: b.id, label: tidy(label.replace(/^["'|]+|["'|]+$/g, ""), 40), by: null, ts: now, quote: null });
+  };
+  for (const raw of text.slice(0, SEED_MAX).split("\n")) {
+    const line = raw.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim().replace(/;$/, "");
+    if (!line || /^(```|%%|flowchart\b|graph\b|subgraph\b|end$|classDef\b|class\b|style\b|linkStyle\b|#)/i.test(line)) continue;
+    // A -->|label| B, A -- label --> B, A --> B (mermaid), then A -> B: label and A → B: label.
+    let m = /^(.+?)\s*(?:-->|==>|-\.->|---)\s*\|\s*(.*?)\s*\|\s*(.+)$/.exec(line);
+    if (m) (arrow(m[1], m[3], m[2]));
+    else if ((m = /^(.+?)\s*(?:--|==)\s+(.+?)\s+(?:-->|==>|---)\s*(.+)$/.exec(line))) arrow(m[1], m[3], m[2]);
+    else if ((m = /^(.+?)\s*(?:-->|==>|-\.->|->|→|=>)\s*(.+?)(?:\s*:\s*(.*))?$/.exec(line))) arrow(m[1], m[2], m[3] ?? "");
+    else if ((m = /^([^:]{1,60}):\s+(.+)$/.exec(line))) box(m[1], m[2]);
+    else if (/^[\w.-]+\s*[[({]/.test(line) || (line.length <= 48 && !/[.!?]$/.test(line))) box(line);
+  }
+  return { boxes, arrows };
+}
+
+/** Whether pasted text is already a diagram (most of its lines are a box or an arrow), so it can be
+ *  read as written instead of asking the model to find the design in it. */
+export function isDiagramText(text: string): boolean {
+  const lines = text.split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim()).filter((l) => l && !/^(```|%%|flowchart\b|graph\b)/i.test(l));
+  if (!lines.length) return false;
+  const fits = lines.filter((l) => /(-->|==>|->|→|=>)/.test(l) || /^[^:]{1,40}:\s+\S/.test(l) || (l.length <= 40 && !/[.!?,]$/.test(l)));
+  return fits.length / lines.length >= 0.8;
+}
+
+/** The mermaid diagrams in a plan or spec, joined: what a session started from a to-do reads. */
+export const mermaidIn = (markdown: string) => [...markdown.matchAll(/```mermaid\s*\n([\s\S]*?)```/g)].map((m) => m[1]).join("\n");
+
+/** A diagram the model read out of notes (DiagramAnswer from SEED_SYSTEM), all of it kept. */
+export function seedFromAnswer(a: DiagramAnswer | null, now = Date.now()): DesignDiagram {
+  if (!a) return { boxes: [], arrows: [] };
+  const lines = [
+    ...a.boxes.map((b) => `${tidy(b.label, 48).replace(/:/g, " ")}: ${b.detail.replace(/\s+/g, " ")}`),
+    ...a.arrows.flatMap((x) => {
+      const end = (ref: string) => a.boxes[Number(/^new(\d+)$/.exec(ref)?.[1] ?? 0) - 1]?.label;
+      const from = end(x.from);
+      const to = end(x.to);
+      return from && to ? [`${tidy(from, 48).replace(/:/g, " ")} -> ${tidy(to, 48).replace(/:/g, " ")}: ${x.label}`] : [];
+    }),
+  ];
+  return parseSeed(lines.join("\n"), now);
+}
+
+// ---- the live diagram --------------------------------------------------------------------------
+
+/** Keeps one design session's diagram. Not thread-safe: the room runs one pass at a time. */
+export class DiagramKeeper {
+  private boxes: DesignBox[] = [];
+  private arrows: DesignArrow[] = [];
+  private lastLook = 0;
+  private nb = 0;
+  private na = 0;
+
+  constructor(
+    private model: DiagramModel,
+    readonly prompt: string,
+    /** Talk before this isn't the session's. */
+    private readonly since: number,
+    saved?: DesignDiagram | null,
+    /** What the session started from, as pasted: context for every pass. */
+    private readonly seed: string | null = null,
+  ) {
+    this.lastLook = since;
+    if (saved) {
+      this.boxes = saved.boxes;
+      this.arrows = saved.arrows;
+      const top = (xs: Array<{ id: string }>) => Math.max(0, ...xs.map((x) => Number(x.id.slice(1)) || 0));
+      this.nb = top(saved.boxes);
+      this.na = top(saved.arrows);
+      // What the talk put there carries a quote; a starting diagram's boxes don't, and aren't talk.
+      const heard = [...saved.boxes.flatMap((b) => [b.quote ? b.ts : 0, ...b.points.map((p) => p.ts)]), ...saved.arrows.map((a) => (a.quote ? a.ts : 0))];
+      this.lastLook = Math.max(since, ...heard);
+    }
+  }
+
+  all(): DesignDiagram {
+    return { boxes: this.boxes, arrows: this.arrows };
+  }
+
+  unreadSince(segments: Segment[]): number | null {
+    return segments.find((s) => s.ts > this.lastLook)?.ts ?? null;
+  }
+
+  /** Someone kept a suggestion: it joins the diagram. Keeping an arrow keeps the boxes at its ends. */
+  keep(id: string): boolean {
+    const b = this.boxes.find((x) => x.id === id && !x.removed);
+    if (b) return b.suggested ? (delete b.suggested, true) : false;
+    const a = this.arrows.find((x) => x.id === id && !x.removed);
+    if (!a) return false;
+    let changed = false;
+    if (a.suggested) (delete a.suggested, (changed = true));
+    for (const end of [a.from, a.to]) {
+      const e = this.boxes.find((x) => x.id === end && !x.removed);
+      if (e?.suggested) (delete e.suggested, (changed = true));
+    }
+    return changed;
+  }
+
+  /** Someone dropped a suggestion, or took a kept box or arrow off. Its words stay so a later pass
+   *  doesn't suggest it again. A box takes its arrows with it. */
+  drop(id: string): boolean {
+    const b = this.boxes.find((x) => x.id === id && !x.removed);
+    if (b) {
+      b.removed = true;
+      for (const a of this.arrows) if (a.from === id || a.to === id) a.removed = true;
+      return true;
+    }
+    const a = this.arrows.find((x) => x.id === id && !x.removed);
+    if (!a) return false;
+    a.removed = true;
+    return true;
+  }
+
+  /** One pass over the talk up to `now`. `caught` is the meeting's to-dos, decisions and open
+   *  questions so far. Returns whether the diagram changed. */
+  async run(segments: Segment[], people: string[], caught: BrainCaught[], meetingStartedAt: number, now: number): Promise<boolean> {
+    const talk = segments.filter((s) => s.ts > this.since && s.ts <= now).sort((a, b) => a.ts - b.ts);
+    const firstNew = talk.findIndex((s) => s.ts > this.lastLook);
+    if (firstNew === -1) return false;
+    const from = Math.min(firstNew, Math.max(0, talk.findIndex((s) => s.ts > now - WINDOW_MS)));
+    const shown = talk.slice(from);
+    const live = shownDiagram(this.all());
+    const name = (id: string) => this.boxes.find((b) => b.id === id)?.label ?? id;
+    const linked = new Set(this.boxes.flatMap((b) => b.caught.map((c) => c.id)));
+    const open = caught.filter((c) => !linked.has(c.id));
+    const mark = (x: { suggested?: boolean }) => (x.suggested ? " (suggested)" : "");
+    const boxLines = live.boxes.map((b) => `- [${b.id}] ${b.label}${mark(b)}: ${b.detail ?? ""}${b.points.length ? ` (+ ${b.points.map((p) => p.text).join("; ")})` : ""}`);
+    const arrowLines = live.arrows.map((a) => `- [${a.from}] ${name(a.from)} --${a.label || "relates to"}--> [${a.to}] ${name(a.to)}${mark(a)}`);
+    const off = [...this.boxes.filter((b) => b.removed).map((b) => `- ${b.label}`), ...this.arrows.filter((a) => a.removed && !this.boxes.find((b) => (b.id === a.from || b.id === a.to) && b.removed)).map((a) => `- ${name(a.from)} --${a.label}--> ${name(a.to)}`)];
+    const lines = shown
+      .map((s, k) => `${from + k >= firstNew ? "NEW " : ""}[${k + 1}] [${at(s.ts, meetingStartedAt)}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
+      .join("\n");
+    const a = await this.model.designDiagram(
+      [`What the team is designing: ${this.prompt}`, `People: ${people.join(", ")}`, this.seed ? `What they started from:\n${clip(this.seed, 4000)}` : ""].filter(Boolean).join("\n"),
+      [
+        `Boxes so far:\n${boxLines.join("\n") || "(none)"}`,
+        `Arrows so far:\n${arrowLines.join("\n") || "(none)"}`,
+        off.length ? `Dropped by the team, never suggest these again:\n${off.join("\n")}` : "",
+        open.length ? `Caught, not linked to a box yet:\n${open.map((c) => `- [${c.id}] ${c.kind}: ${c.text}`).join("\n")}` : "",
+        `Transcript, meeting time (${at(now, meetingStartedAt)} now):\n${lines}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    );
+    this.lastLook = talk.at(-1)!.ts;
+    if (!a) return false;
+    let changed = false;
+    const segOf = (n: number) => shown[Math.min(shown.length, Math.max(firstNew - from + 1, n)) - 1];
+    const quote = (s: Segment) => ({ segmentId: s.id, ts: s.ts, speaker: s.speakerName, text: clip(s.text, 400) });
+    const waiting = () => this.boxes.filter((b) => b.suggested && !b.removed).length + this.arrows.filter((x) => x.suggested && !x.removed).length;
+    /** new1, new2…: the box each answer entry became (or already was), "" when it was refused. */
+    const fresh: string[] = [];
+    for (const x of a.boxes) {
+      const label = tidy(x.label, 48);
+      if (!label) {
+        fresh.push("");
+        continue;
+      }
+      // One that is there, or that the room dropped, isn't suggested again; arrows still find the one that is there.
+      const had = this.boxes.find((b) => same(b.label, label) || similar(b.label, label));
+      if (had || this.boxes.filter((b) => !b.removed).length >= MAX_BOXES || waiting() >= MAX_WAITING) {
+        fresh.push(had && !had.removed ? had.id : "");
+        continue;
+      }
+      const seg = segOf(x.line);
+      const b: DesignBox = { id: `b${++this.nb}`, label, detail: clip(x.detail.trim(), 240) || null, by: first(x.by), ts: seg.ts, quote: quote(seg), points: [], caught: [], suggested: true };
+      this.boxes.push(b);
+      fresh.push(b.id);
+      changed = true;
+    }
+    const end = (ref: string) => {
+      const id = /^new\d+$/.test(ref) ? fresh[Number(ref.slice(3)) - 1] : ref;
+      return this.boxes.find((b) => b.id === id && !b.removed) ?? null;
+    };
+    for (const x of a.arrows) {
+      const f = end(x.from);
+      const t = end(x.to);
+      if (!f || !t) continue;
+      // The same pair is joined once, whichever way it was drawn or dropped.
+      if (this.arrows.some((y) => (y.from === f.id && y.to === t.id) || (y.from === t.id && y.to === f.id))) continue;
+      if (this.arrows.filter((y) => !y.removed).length >= MAX_ARROWS || waiting() >= MAX_WAITING + 4) continue;
+      const seg = segOf(x.line);
+      this.arrows.push({ id: `a${++this.na}`, from: f.id, to: t.id, label: tidy(x.label, 40), by: first(x.by), ts: seg.ts, quote: quote(seg), suggested: true });
+      changed = true;
+    }
+    for (const x of a.extend) {
+      const b = this.boxes.find((b) => b.id === x.id && !b.removed);
+      const text = clip(x.point.trim(), 160);
+      if (!b || !text || b.points.length >= MAX_POINTS || b.points.some((p) => similar(p.text, text))) continue;
+      const seg = segOf(x.line);
+      b.points.push({ text, by: first(x.by), ts: seg.ts, quote: quote(seg) });
+      changed = true;
+    }
+    for (const x of a.caught) {
+      const b = this.boxes.find((b) => b.id === x.id && !b.removed);
+      const c = open.find((c) => c.id === x.item);
+      if (!b || !c || linked.has(c.id)) continue;
+      b.caught.push(c);
+      linked.add(c.id);
+      changed = true;
+    }
+    return changed;
+  }
+
+  /** What was caught may have been reworded, ticked off or taken back since it was linked. */
+  refresh(caught: BrainCaught[]): boolean {
+    let changed = false;
+    const now = new Map(caught.map((c) => [c.id, c]));
+    for (const b of this.boxes) {
+      const next = b.caught.flatMap((c) => (now.has(c.id) ? [now.get(c.id)!] : []));
+      if (JSON.stringify(next) !== JSON.stringify(b.caught)) (b.caught = next), (changed = true);
+    }
+    return changed;
+  }
+}
+
+// ---- the draft spec ---------------------------------------------------------------------------
+
+const mm = (s: string) => s.replace(/"/g, "'").replace(/[\[\]{}|<>]/g, " ").replace(/\s+/g, " ").trim();
+
+/** The diagram as a mermaid flowchart: what the room kept, nothing still waiting. */
+export function diagramMermaid(d: DesignDiagram): string {
+  const live = shownDiagram(d);
+  const boxes = live.boxes.filter((b) => !b.suggested);
+  const on = new Set(boxes.map((b) => b.id));
+  const arrows = live.arrows.filter((a) => !a.suggested && on.has(a.from) && on.has(a.to));
+  return [
+    "flowchart LR",
+    ...boxes.map((b) => `  ${b.id}["${mm(b.label)}"]`),
+    ...arrows.map((a) => (a.label ? `  ${a.from} -->|"${mm(a.label)}"| ${a.to}` : `  ${a.from} --> ${a.to}`)),
+  ].join("\n");
+}
+
+/** The session as a draft spec, in markdown: the diagram, each part, how the parts relate, and what
+ *  the call decided, left open and gave people to do. `caught` is everything the meeting caught. */
+export function draftSpec(prompt: string, d: DesignDiagram, caught: BrainCaught[]): string {
+  const live = shownDiagram(d);
+  const boxes = live.boxes.filter((b) => !b.suggested);
+  const on = new Set(boxes.map((b) => b.id));
+  const arrows = live.arrows.filter((a) => !a.suggested && on.has(a.from) && on.has(a.to));
+  const name = (id: string) => live.boxes.find((b) => b.id === id)?.label ?? id;
+  const about = new Map<string, string>();
+  for (const b of live.boxes) for (const c of b.caught) about.set(c.id, b.label);
+  const of = (kind: BrainCaught["kind"]) => caught.filter((c) => c.kind === kind);
+  const list = (kind: BrainCaught["kind"]) => of(kind).map((c) => `- ${c.text}${about.has(c.id) ? ` (${about.get(c.id)})` : ""}${kind === "action" && c.owner ? `, ${c.owner}` : ""}`);
+  const waiting = [...live.boxes.filter((b) => b.suggested).map((b) => `- ${b.label}${b.detail ? `: ${b.detail}` : ""}`), ...live.arrows.filter((a) => a.suggested).map((a) => `- ${name(a.from)} ${a.label || "relates to"} ${name(a.to)}`)];
+  const section = (title: string, lines: string[]) => (lines.length ? [`## ${title}`, "", ...lines, ""] : []);
+  return [
+    `# ${prompt}`,
+    "",
+    "A draft from a design session: the diagram the team drew by talking it through. It hasn't been reviewed.",
+    "",
+    "## Diagram",
+    "",
+    "```mermaid",
+    diagramMermaid(d),
+    "```",
+    "",
+    ...section(
+      "Parts",
+      boxes.flatMap((b) => [`- **${b.label}**${b.detail ? `: ${b.detail}` : ""}`, ...b.points.map((p) => `  - ${p.text}`)]),
+    ),
+    ...section(
+      "How they relate",
+      arrows.map((a) => `- ${name(a.from)} ${a.label || "relates to"} ${name(a.to)}`),
+    ),
+    ...section("Decided", list("decision")),
+    ...section("Open questions", list("question")),
+    ...section("To-dos", list("action")),
+    ...section("Suggested, not kept", waiting),
+  ]
+    .join("\n")
+    .trim();
+}
+
+const STAND: Actor = { kind: "stand", person: null };
+
+/** The session has ended: its diagram is saved as a draft spec on its to-do. A session with no to-do
+ *  gets one, filed in the meeting it ran in. Returns the to-do's id, or null when there is nothing
+ *  to save (no box was kept) or nowhere to put it. */
+export function saveDraftSpec(db: DB, b: BrainstormRow, caught: BrainCaught[]): string | null {
+  if (b.kind !== "design" || !b.diagram) return null;
+  if (!shownDiagram(b.diagram).boxes.some((x) => !x.suggested)) return null;
+  let note = b.taskId ? db.getNote(b.taskId) : null;
+  if (note && (note.roomId !== b.roomId || note.kind !== "action")) note = null;
+  if (!note) {
+    if (!b.meetingId) return null;
+    const made = db.addNote(b.meetingId, b.itemId, { kind: "action", text: clip(`Design: ${b.prompt}`, 200), owner: b.startedBy }, "Stand");
+    db.setBrainstormTask(b.id, made.id);
+    note = db.getNote(made.id);
+    if (!note) return null;
+  }
+  const spec = draftSpec(b.prompt, b.diagram, caught);
+  db.addPlan(b.roomId, note.id, spec, "Stand", STAND);
+  db.addUpdate({
+    roomId: b.roomId,
+    itemId: note.itemId,
+    noteId: note.id,
+    noteText: note.text,
+    userId: "stand",
+    userName: "Stand",
+    client: null,
+    actor: STAND,
+    status: "plan",
+    text: `Draft spec from the design session "${clip(b.prompt, 100)}".`,
+    links: [],
+  });
+  planChanged(db, null, note);
+  return note.id;
+}

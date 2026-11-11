@@ -27,6 +27,7 @@ import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
 import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, finishBrainstorm, toBrainstormView } from "./brainstorm.ts";
+import { DiagramKeeper, saveDraftSpec } from "./designSession.ts";
 import { PilotSeat } from "./pilot.ts";
 import { projectDigest, repoTools } from "./projects.ts";
 import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, draftOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
@@ -234,7 +235,7 @@ export class RoomSession implements SpeechSink {
   private pilotTimer: ReturnType<typeof setTimeout> | null = null;
   private listTimer: NodeJS.Timeout | null = null;
   /** The brainstorm running in this space, if one is (brainstorm.ts): its map, one pass at a time. */
-  private brain: { id: string; itemId: string | null; map: MapKeeper } | null = null;
+  private brain: { id: string; itemId: string | null; map: MapKeeper | DiagramKeeper } | null = null;
   private brainTimer: NodeJS.Timeout | null = null;
   private brainRun: Promise<void> | null = null;
   private listRun: Promise<void> | null = null;
@@ -308,9 +309,16 @@ export class RoomSession implements SpeechSink {
     const b = this.db.brainstormLive(this.roomId);
     if (!b) return void (this.brain = null);
     if (this.brain?.id === b.id) return;
-    const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };
     // Only talk from this call, after the brainstorm began, belongs on its map.
-    this.brain = { id: b.id, itemId: b.itemId, map: new MapKeeper(model, b.prompt, Math.max(b.startedAt, this.meetingStartedAt) - 1, b.nodes) };
+    const since = Math.max(b.startedAt, this.meetingStartedAt) - 1;
+    if (b.kind === "design") {
+      // A design session: the same passes, drawing a diagram of boxes and arrows (designSession.ts).
+      const model = this.agent.designDiagram ? { designDiagram: this.agent.designDiagram.bind(this.agent) } : { designDiagram: async () => null };
+      this.brain = { id: b.id, itemId: b.itemId, map: new DiagramKeeper(model, b.prompt, since, b.diagram, b.seed) };
+      return;
+    }
+    const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };
+    this.brain = { id: b.id, itemId: b.itemId, map: new MapKeeper(model, b.prompt, since, b.nodes) };
   }
 
   /** A brainstorm was started (or replaced) from outside the call's own messages. */
@@ -322,7 +330,9 @@ export class RoomSession implements SpeechSink {
 
   private brainstormView(busy = false) {
     const b = this.brain && this.db.getBrainstorm(this.brain.id);
-    return b ? toBrainstormView({ ...b, nodes: this.brain!.map.all() }, busy) : null;
+    if (!b) return null;
+    const map = this.brain!.map;
+    return toBrainstormView(map instanceof DiagramKeeper ? { ...b, diagram: map.all() } : { ...b, nodes: map.all() }, busy);
   }
 
   private broadcastBrainstorm(busy = false) {
@@ -338,7 +348,9 @@ export class RoomSession implements SpeechSink {
 
   private saveBrainstorm() {
     if (!this.brain) return;
-    this.db.saveBrainstormMap(this.brain.id, this.brain.map.all());
+    const map = this.brain.map;
+    if (map instanceof DiagramKeeper) this.db.saveDesignDiagram(this.brain.id, map.all());
+    else this.db.saveBrainstormMap(this.brain.id, map.all());
     this.broadcastBrainstorm();
   }
 
@@ -1014,8 +1026,14 @@ export class RoomSession implements SpeechSink {
         if (before.kind === "action") this.broadcastState();
         break;
       }
+      case "design.keep":
+      case "design.drop": {
+        const map = this.brain?.map;
+        if (map instanceof DiagramKeeper && (msg.type === "design.keep" ? map.keep(msg.id) : map.drop(msg.id))) this.saveBrainstorm();
+        break;
+      }
       case "brainstorm.remove": {
-        if (this.brain?.map.remove(msg.id)) this.saveBrainstorm();
+        if (this.brain?.map instanceof MapKeeper && this.brain.map.remove(msg.id)) this.saveBrainstorm();
         break;
       }
       case "note.remove": {
@@ -2134,7 +2152,15 @@ export class RoomSession implements SpeechSink {
     if (this.brain) {
       await this.brainRun?.catch(() => {});
       await Promise.race([this.runMap(true), new Promise((r) => setTimeout(r, 25_000))]).catch(() => {});
-      finishBrainstorm(this.db, this.roomId, this.meetingId);
+      const done = finishBrainstorm(this.db, this.roomId, this.meetingId);
+      // A design session leaves a draft spec on its to-do, for the normal design review.
+      if (done?.kind === "design") {
+        try {
+          saveDraftSpec(this.db, done, this.brainCaught());
+        } catch (e) {
+          console.error(`[design session] ${this.meetingId}: ${(e as Error).message}`);
+        }
+      }
     }
 
     let summary = "";

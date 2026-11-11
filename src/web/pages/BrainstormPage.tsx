@@ -7,12 +7,15 @@ import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
 import { BrainMap } from "../room/BrainMap.tsx";
+import { DesignBoard } from "../room/DesignBoard.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { joinHref, spaceHref } from "./SpacesShell.tsx";
 
 export const brainstormHref = (roomId: string, id: string) => `/s/${roomId}/brainstorm/${id}`;
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 export const brainCount = (b: { directions: number; ideas: number }) => `${b.ideas} idea${b.ideas === 1 ? "" : "s"} in ${b.directions} direction${b.directions === 1 ? "" : "s"}`;
+
+export const designCount = (d: { boxes: number; arrows: number }) => `${d.boxes} part${d.boxes === 1 ? "" : "s"}, ${d.arrows} arrow${d.arrows === 1 ? "" : "s"}`;
 
 export function BrainstormPage() {
   const { roomId = "", brainstormId = "" } = useParams();
@@ -41,13 +44,15 @@ export function BrainstormPage() {
         <Link className="rp-back" to={spaceHref(roomId)}>
           ← {data.roomName}
         </Link>
-        <strong>Brainstorm</strong>
-        <BrainstormPicker roomId={roomId} current={b} all={data.brainstorms} />
-        <span className="muted bp-count">{brainCount({ directions: b.nodes.filter((n) => !n.parent).length, ideas: b.nodes.filter((n) => n.parent).length })}</span>
+        <strong>{b.design ? "Design session" : "Brainstorm"}</strong>
+        <BrainstormPicker roomId={roomId} current={b} all={data.brainstorms.filter((x) => !x.design === !b.design)} />
+        <span className="muted bp-count">
+          {b.design ? designCount({ boxes: b.design.boxes.filter((x) => !x.suggested).length, arrows: b.design.arrows.filter((x) => !x.suggested).length }) : brainCount({ directions: b.nodes.filter((n) => !n.parent).length, ideas: b.nodes.filter((n) => n.parent).length })}
+        </span>
         <span className="rp-grow" />
         {live ? (
           <Link className="rp-link" to={joinHref(roomId)}>
-            Join the brainstorm
+            {b.design ? "Join the session" : "Join the brainstorm"}
           </Link>
         ) : (
           b.meetingId && (
@@ -57,7 +62,7 @@ export function BrainstormPage() {
           )
         )}
       </header>
-      <BrainMap brainstorm={b} className="bp-map" />
+      {b.design ? <DesignBoard brainstorm={b} className="bp-map" /> : <BrainMap brainstorm={b} className="bp-map" />}
     </div>
   );
 }

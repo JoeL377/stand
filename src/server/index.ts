@@ -43,6 +43,7 @@ import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
 import { BrainstormError, brainstormOfMeeting, brainstormPage, brainstormsOf, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
+import { SEED_MAX, isDiagramText, mermaidIn, parseSeed, seedFromAnswer } from "./designSession.ts";
 import { ReviewError, removeSlide, reviewOfMeeting, reviewPage, reviewView, reviewsDone, startReview } from "./reviews.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { ownedBy, toSpaceSummary } from "./spaces.ts";
@@ -1040,11 +1041,29 @@ app.post(
 // Starts one on a topic or a question. It leads the agenda, and a call that's running goes to it.
 app.post(
   "/api/rooms/:id/brainstorm/start",
-  route((req, res) => {
+  route(async (req, res) => {
     const room = db.getRoom(req.params.id);
     if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
     try {
-      const b = startBrainstorm(db, room.id, String(req.body?.prompt ?? ""), req.user!.name);
+      // A design session (designSession.ts) when the body carries `design`: it may start from pasted
+      // notes or a diagram, or from the plan of the to-do its draft spec will be saved on.
+      const asked = req.body?.design as { seed?: unknown; taskId?: unknown } | undefined;
+      let design: Parameters<typeof startBrainstorm>[5];
+      if (asked) {
+        const prompt = String(req.body?.prompt ?? "").trim();
+        if (!prompt) throw new BrainstormError("Say what you're designing, in a sentence.");
+        const task = typeof asked.taskId === "string" && asked.taskId ? db.getNote(asked.taskId) : null;
+        if (asked.taskId && (!task || task.roomId !== room.id || task.kind !== "action")) throw new BrainstormError("That to-do isn't in this space.");
+        const pasted = String(asked.seed ?? "").trim().slice(0, SEED_MAX);
+        const plan = !pasted && task ? (db.notePlan(task.id)?.text ?? "") : "";
+        const seed = pasted || plan;
+        let diagram = parseSeed(pasted ? (isDiagramText(pasted) ? pasted : "") : mermaidIn(plan));
+        // Prose, or a plan with no diagram in it: the model finds the design. Without it the session starts blank.
+        if (seed && !diagram.boxes.length && agent.designSeed) diagram = seedFromAnswer(await agent.designSeed(prompt, seed).catch(() => null));
+        if (pasted && !diagram.boxes.length) diagram = parseSeed(pasted);
+        design = { diagram, seed: seed || null, taskId: task?.id ?? null };
+      }
+      const b = startBrainstorm(db, room.id, String(req.body?.prompt ?? ""), req.user!.name, Date.now(), design);
       const s = sessions.get(room.id);
       if (s) {
         s.itemsChanged();

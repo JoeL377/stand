@@ -10,8 +10,8 @@ import { usePersonColors } from "../PersonColors.tsx";
 import { initials } from "../util.ts";
 
 const FRESH_MS = 7_000;
-const KIND = { action: { label: "To do", Icon: TodoIcon }, decision: { label: "Decided", Icon: DecidedIcon }, question: { label: "Open", Icon: QuestionIcon } } as const;
-const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+export const KIND = { action: { label: "To do", Icon: TodoIcon }, decision: { label: "Decided", Icon: DecidedIcon }, question: { label: "Open", Icon: QuestionIcon } } as const;
+export const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 interface Placed {
   id: string;
@@ -131,7 +131,7 @@ export function spread(placed: Placed[], w: number, h: number, big = 1): Placed[
   return placed.map((p, i) => ({ ...p, x: boxes[i]!.x, y: boxes[i]!.y }));
 }
 
-const KINDS: Array<{ kind: BrainCaught["kind"]; Icon: typeof TodoIcon; one: string; many: string }> = [
+export const KINDS: Array<{ kind: BrainCaught["kind"]; Icon: typeof TodoIcon; one: string; many: string }> = [
   { kind: "action", Icon: TodoIcon, one: "to-do", many: "To-dos" },
   { kind: "decision", Icon: DecidedIcon, one: "decision", many: "Decisions" },
   { kind: "question", Icon: QuestionIcon, one: "open question", many: "Open questions" },
@@ -404,7 +404,7 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
   );
 }
 
-function Face({ name }: { name: string }) {
+export function Face({ name }: { name: string }) {
   const colorFor = usePersonColors();
   return (
     <span className="brain-face" style={{ background: colorFor(name) }} title={name}>

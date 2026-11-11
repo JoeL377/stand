@@ -5,6 +5,7 @@ import { ReviewStage } from "./ReviewStage.tsx";
 import { DesignStage } from "./DesignStage.tsx";
 import { specAuthor } from "../../shared/designReview.ts";
 import { BrainMap } from "./BrainMap.tsx";
+import { DesignBoard } from "./DesignBoard.tsx";
 import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
@@ -504,7 +505,15 @@ export function Stage(props: {
             </p>
           </div>
         ) : brainUp ? (
-          <BrainMap brainstorm={props.brainstorm!} onRemove={props.offline || props.ending ? undefined : (id) => send({ type: "brainstorm.remove", id })} />
+          props.brainstorm!.design ? (
+            <DesignBoard
+              brainstorm={props.brainstorm!}
+              onKeep={props.offline || props.ending ? undefined : (id) => send({ type: "design.keep", id })}
+              onDrop={props.offline || props.ending ? undefined : (id) => send({ type: "design.drop", id })}
+            />
+          ) : (
+            <BrainMap brainstorm={props.brainstorm!} onRemove={props.offline || props.ending ? undefined : (id) => send({ type: "brainstorm.remove", id })} />
+          )
         ) : reviewUp && focusItem ? (
           <div className="screen-empty">
             <ReviewStage

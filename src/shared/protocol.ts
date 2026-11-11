@@ -231,6 +231,43 @@ export interface BrainNode {
   removed?: boolean;
 }
 
+/** A box on a design session's diagram (server/designSession.ts): one of the things being designed. */
+export interface DesignBox {
+  /** b3. */
+  id: string;
+  label: string;
+  detail: string | null;
+  /** First name of who raised it; null for one the session started with. */
+  by: string | null;
+  ts: number;
+  quote: Quote | null;
+  points: BrainPoint[];
+  caught: BrainCaught[];
+  /** Stand heard it and nobody has kept it yet: it shows dashed, with Keep and Drop. */
+  suggested?: boolean;
+  /** Dropped or taken off. Kept on the server so it isn't suggested again; never sent. */
+  removed?: boolean;
+}
+
+/** How two boxes relate: an arrow with a few words on it. */
+export interface DesignArrow {
+  /** a2. */
+  id: string;
+  from: string;
+  to: string;
+  label: string;
+  by: string | null;
+  ts: number;
+  quote: Quote | null;
+  suggested?: boolean;
+  removed?: boolean;
+}
+
+export interface DesignDiagram {
+  boxes: DesignBox[];
+  arrows: DesignArrow[];
+}
+
 /** A brainstorm: one sentence in the middle and the map the talk drew around it. */
 export interface BrainstormView {
   id: string;
@@ -245,6 +282,11 @@ export interface BrainstormView {
   startedAt: number;
   endedAt: number | null;
   nodes: BrainNode[];
+  /** Set when this is a design session: the sentence says what is being designed, and the board is
+   *  this diagram instead of the map. */
+  design?: DesignDiagram;
+  /** A design session's to-do: the one its draft spec is saved on when the call ends. */
+  taskId?: string | null;
   /** A pass is reading the latest talk right now. */
   busy?: boolean;
 }
@@ -257,6 +299,8 @@ export interface BrainstormSummary {
   meetingId: string | null;
   directions: number;
   ideas: number;
+  /** Set when it is a design session: what its diagram holds. */
+  design?: { boxes: number; arrows: number };
 }
 
 /** A line on the board's running list (server/liveList.ts), in the shape of a note so the board's
@@ -869,6 +913,9 @@ export type ClientMessage = (
   | { type: "note.remove"; noteId: string }
   /** Take a circle off the brainstorm's map (anyone in the call: Stand got it wrong). */
   | { type: "brainstorm.remove"; id: string }
+  /** Keep or drop something on a design session's diagram, by its id (anyone in the call). Drop also takes a kept one off. */
+  | { type: "design.keep"; id: string }
+  | { type: "design.drop"; id: string }
   | { type: "note.add"; itemId: string | null; kind: "action" | "decision" | "question"; text: string; owner?: string | null }
   | { type: "demo.play" }
   /** Anyone: ask ✦ Stand for options on an open question on the board's list. */

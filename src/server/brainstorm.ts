@@ -8,7 +8,7 @@
 // the map is never regrouped or dropped by a later pass, so what people are looking at stays put;
 // only a person takes one off. Two levels, never deeper: a deeper tree is unreadable on a call.
 import { z } from "zod";
-import type { BrainCaught, BrainNode, BrainstormSummary, BrainstormView, Segment } from "../shared/protocol.ts";
+import type { BrainCaught, BrainNode, BrainstormSummary, BrainstormView, DesignDiagram, Segment } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { similar } from "./notesMerge.ts";
 
@@ -224,7 +224,21 @@ export interface BrainstormRow {
   startedAt: number;
   endedAt: number | null;
   nodes: BrainNode[];
+  /** "design": a design session (designSession.ts), whose board is `diagram` instead of the map. */
+  kind: "map" | "design";
+  diagram: DesignDiagram | null;
+  /** What a design session started from, as it was pasted. */
+  seed: string | null;
+  /** The to-do a design session's draft spec is saved on. */
+  taskId: string | null;
 }
+
+/** A diagram as people see it: without what was dropped. */
+export const shownDiagram = (d: DesignDiagram): DesignDiagram => {
+  const boxes = d.boxes.filter((b) => !b.removed);
+  const on = new Set(boxes.map((b) => b.id));
+  return { boxes, arrows: d.arrows.filter((a) => !a.removed && on.has(a.from) && on.has(a.to)) };
+};
 
 export const toBrainstormView = (b: BrainstormRow, busy = false): BrainstormView => ({
   id: b.id,
@@ -237,27 +251,46 @@ export const toBrainstormView = (b: BrainstormRow, busy = false): BrainstormView
   startedAt: b.startedAt,
   endedAt: b.endedAt,
   nodes: b.nodes.filter((n) => !n.removed),
+  ...(b.kind === "design" ? { design: shownDiagram(b.diagram ?? { boxes: [], arrows: [] }), taskId: b.taskId } : {}),
   ...(busy ? { busy } : {}),
 });
 
 const summaryOf = (b: BrainstormRow): BrainstormSummary => {
   const live = b.nodes.filter((n) => !n.removed);
-  return { id: b.id, prompt: b.prompt, status: b.status, startedAt: b.startedAt, meetingId: b.meetingId, directions: live.filter((n) => !n.parent).length, ideas: live.filter((n) => n.parent).length };
+  const d = b.kind === "design" ? shownDiagram(b.diagram ?? { boxes: [], arrows: [] }) : null;
+  return {
+    id: b.id,
+    prompt: b.prompt,
+    status: b.status,
+    startedAt: b.startedAt,
+    meetingId: b.meetingId,
+    directions: live.filter((n) => !n.parent).length,
+    ideas: live.filter((n) => n.parent).length,
+    ...(d ? { design: { boxes: d.boxes.filter((x) => !x.suggested).length, arrows: d.arrows.filter((x) => !x.suggested).length } } : {}),
+  };
 };
 
 /** Starts a brainstorm on one sentence: it becomes the agenda's first item, so what's said and
  *  caught is filed under it. One runs at a time; starting another closes the one running. */
-export function startBrainstorm(db: DB, roomId: string, prompt: string, by: string | null, now = Date.now()): BrainstormRow {
+export function startBrainstorm(
+  db: DB,
+  roomId: string,
+  prompt: string,
+  by: string | null,
+  now = Date.now(),
+  /** Makes it a design session: the diagram it starts from, what was pasted, and the to-do its spec goes on. */
+  design?: { diagram: DesignDiagram; seed: string | null; taskId: string | null },
+): BrainstormRow {
   const text = clip(prompt.replace(/\s+/g, " ").trim(), PROMPT_MAX);
-  if (!text) throw new BrainstormError("Say what the brainstorm is about: a topic or a question, in a sentence.");
+  if (!text) throw new BrainstormError(design ? "Say what you're designing, in a sentence." : "Say what the brainstorm is about: a topic or a question, in a sentence.");
   const live = db.brainstormLive(roomId);
-  if (live && live.prompt === text) return live;
+  if (live && live.prompt === text && (live.kind === "design") === !!design) return live;
   if (live) finishBrainstorm(db, roomId, null, now);
   const before = new Set(db.listItems(roomId).map((it) => it.id));
   const item = db.addItems(roomId, [{ source: "agenda", externalId: null, title: text, url: null, description: null }]).find((it) => !before.has(it.id))!;
   const rest = db.listItems(roomId).filter((it) => it.id !== item.id).map((it) => it.id);
   db.reorderItems(roomId, [item.id, ...rest]);
-  return db.createBrainstorm({ roomId, prompt: text, itemId: item.id, startedBy: by, startedAt: now });
+  return db.createBrainstorm({ roomId, prompt: text, itemId: item.id, startedBy: by, startedAt: now, design });
 }
 
 /** The meeting it ran in has ended (or another one took its place): it is done, and its sentence

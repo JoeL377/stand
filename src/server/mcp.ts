@@ -496,7 +496,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Read a space's brainstorm map",
       description:
-        "A brainstorm's map as an outline: the sentence it started from, the directions the talk opened, and under each the ideas people raised, with who raised each, what they said, what others built on it, and the to-dos, decisions and open questions caught on it (as refs for get). Returns the one running now, or else the latest; others lists the space's earlier brainstorms so you can ask for one by id. Read only: people start a brainstorm in Stand.",
+        "A brainstorm's map as an outline: the sentence it started from, the directions the talk opened, and under each the ideas people raised, with who raised each, what they said, what others built on it, and the to-dos, decisions and open questions caught on it (as refs for get). Returns the one running now, or else the latest; others lists the space's earlier brainstorms so you can ask for one by id. A design session comes back the same way, with design_session: the parts on its diagram, how they relate, and the to-do its draft spec is saved on. Read only: people start a brainstorm in Stand.",
       inputSchema: {
         space: z.string().describe("A space id, or part of its name"),
         brainstorm: z.string().optional().describe("One brainstorm's id (from others) or its Stand link. Leave out for the one running now, or the latest"),

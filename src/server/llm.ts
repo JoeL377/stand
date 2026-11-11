@@ -11,6 +11,7 @@ import { BOARD_SYSTEM, type BoardAnswer, BoardAnswerSchema, type BoardDrift, Boa
 import { config } from "./config.ts";
 import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
 import { MAP_SYSTEM, type MapAnswer, MapAnswerSchema } from "./brainstorm.ts";
+import { DIAGRAM_SYSTEM, type DiagramAnswer, DiagramAnswerSchema, SEED_SYSTEM } from "./designSession.ts";
 import { ANSWER_SYSTEM, type Answer, AnswerSchema, OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, readPartial, type RunUsage } from "./meetingAgent.ts";
 import { REPO_TOOL_CALLS, type RepoTools } from "./projects.ts";
 import { findQuote, type Said } from "./quotes.ts";
@@ -200,6 +201,10 @@ export interface Agent {
   liveList?(context: string, talk: string): Promise<ListAnswer | null>;
   /** A brainstorm's map (brainstorm.ts): what the newest talk adds to it. Left out by agents that can't. */
   brainstormMap?(context: string, talk: string): Promise<MapAnswer | null>;
+  /** A design session's diagram (designSession.ts): the boxes and arrows the newest talk suggests. */
+  designDiagram?(context: string, talk: string): Promise<DiagramAnswer | null>;
+  /** The diagram a design session starts from, read out of notes someone pasted. */
+  designSeed?(prompt: string, notes: string): Promise<DiagramAnswer | null>;
   /** ✦ Stand's options for an open question (meetingAgent.ts), searching the web as it needs. Left out
    *  without a model. */
   findOptions?(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
@@ -942,6 +947,14 @@ When a capture fits the slide it is already under, answer with that slide. When 
     return this.parse(MapAnswerSchema, boardContent(context, talk), MAP_SYSTEM, "low", config.mapModel, { timeout: MAP_TIMEOUT_MS, maxTokens: 2500, thinking: false });
   }
 
+  async designDiagram(context: string, talk: string): Promise<DiagramAnswer | null> {
+    return this.parse(DiagramAnswerSchema, boardContent(context, talk), DIAGRAM_SYSTEM, "low", config.mapModel, { timeout: MAP_TIMEOUT_MS, maxTokens: 2500, thinking: false });
+  }
+
+  async designSeed(prompt: string, notes: string): Promise<DiagramAnswer | null> {
+    return this.parse(DiagramAnswerSchema, boardContent(`What the team is designing: ${prompt}`, `Their notes:\n${notes}`), SEED_SYSTEM, "low", config.mapModel, { timeout: 45_000, maxTokens: 4000, thinking: false });
+  }
+
   async findOptions(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }> {
     return this.searchRun("options", OptionsAnswerSchema, OPTIONS_SYSTEM, prompt, onDraft);
   }
@@ -1343,6 +1356,31 @@ const DECISION = /\b(let'?s go with|we('| wi)ll go with|decided|decision|agreed|
 const ACTION = /\b(i'?ll|i will|can you|could you|will you|action item|todo|to-do|follow up|take that|on it|by (monday|tuesday|wednesday|thursday|friday|tomorrow|eod|end of day))\b/i;
 
 export class HeuristicAgent implements Agent {
+  /** Demo mode's stand-in for a design session's pass: a NEW line that says "a task belongs to a
+   *  project" suggests those two boxes and that arrow. Enough to see suggestions without a model. */
+  async designDiagram(_context: string, talk: string): Promise<DiagramAnswer | null> {
+    const out: DiagramAnswer = { boxes: [], arrows: [], extend: [], caught: [] };
+    const have = new Map([...talk.matchAll(/^- \[(b\d+)\] (.+?)(?: \(suggested\))?:/gm)].map((m) => [m[2].toLowerCase(), m[1]]));
+    const end = (name: string, line: number) => {
+      const label = name.trim().replace(/^./, (c) => c.toUpperCase());
+      const id = have.get(label.toLowerCase());
+      if (id) return id;
+      out.boxes.push({ label, detail: `Raised as part of the design.`, by: null, line });
+      have.set(label.toLowerCase(), `new${out.boxes.length}`);
+      return `new${out.boxes.length}`;
+    };
+    for (const m of talk.matchAll(/^NEW \[(\d+)\] \[[\d:]+\] ([^:]+): (.+)$/gm)) {
+      const said = /\b(?:an?|the|every|each)\s+([\w-]+(?: [\w-]+)?)\s+(belongs to|has many|has|becomes|depends on|contains|creates|links to|replaces|is part of)\s+(?:an?|the|one|many|another)?\s*([\w-]+(?: [\w-]+)?)/i.exec(m[3]);
+      if (!said) continue;
+      const line = Number(m[1]);
+      const from = end(said[1], line);
+      const to = end(said[3].replace(/s$/, ""), line);
+      for (const b of out.boxes) b.by ??= m[2].replace(/ \(chat\)$/, "").split(" ")[0];
+      out.arrows.push({ from, to, label: said[2].toLowerCase(), by: m[2].replace(/ \(chat\)$/, "").split(" ")[0], line });
+    }
+    return out;
+  }
+
   async notesFor(item: Item | null, segments: Segment[]): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
     const notes: ItemNotesDraft["notes"] = [];
