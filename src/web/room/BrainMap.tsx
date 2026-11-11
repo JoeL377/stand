@@ -4,7 +4,7 @@
 // what's behind it, on your screen only.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { BrainNode, BrainstormView } from "../../shared/protocol.ts";
+import type { BrainCaught, BrainNode, BrainstormView } from "../../shared/protocol.ts";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { usePersonColors } from "../PersonColors.tsx";
 import { initials } from "../util.ts";
@@ -80,7 +80,8 @@ function boxOf(p: Placed): { w: number; h: number } {
   const max = dir ? 170 : 158;
   const pad = dir ? 36 : 26;
   const per = dir ? 8 : 6.9;
-  const extra = 24; // the count or the speaker's face beside the words
+  // The count of what was built on it, and a mark per kind of thing caught on it.
+  const extra = 24 + 18 * new Set(p.node?.caught.map((c) => c.kind) ?? []).size;
   const inner = max - pad - extra;
   const lines = Math.max(1, Math.ceil((text.length * per) / inner));
   return { w: lines > 1 ? max : Math.min(max, text.length * per + pad + extra), h: (dir ? 20 : 12) + lines * (dir ? 17 : 16) };
@@ -130,6 +131,12 @@ export function spread(placed: Placed[], w: number, h: number, big = 1): Placed[
   return placed.map((p, i) => ({ ...p, x: boxes[i]!.x, y: boxes[i]!.y }));
 }
 
+const KINDS: Array<{ kind: BrainCaught["kind"]; Icon: typeof TodoIcon; one: string; many: string }> = [
+  { kind: "action", Icon: TodoIcon, one: "to-do", many: "To-dos" },
+  { kind: "decision", Icon: DecidedIcon, one: "decision", many: "Decisions" },
+  { kind: "question", Icon: QuestionIcon, one: "open question", many: "Open questions" },
+];
+
 export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: string) => void; className?: string }) {
   const { brainstorm } = props;
   const nodes = brainstorm.nodes;
@@ -151,24 +158,55 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
   const fit = narrow ? size.w / cw : 1;
   /** Where you've dragged and pinched to; null is the whole map fitted to the screen. */
   const [view, setView] = useState<{ k: number; x: number; y: number } | null>(null);
-  const v = narrow ? (view ?? { k: fit, x: 0, y: 0 }) : { k: 1, x: 0, y: 0 };
+  const v = view ?? { k: fit, x: 0, y: 0 };
+  // A phone never goes smaller than the whole map; a wider screen can shrink it a little and grow it more.
+  const minK = narrow ? fit : 0.6;
+  const maxK = narrow ? 1.5 : 2.5;
   const clampView = (k: number, x: number, y: number) => {
-    const kk = Math.min(1.5, Math.max(fit, k));
+    const kk = Math.min(maxK, Math.max(minK, k));
     const lim = (pos: number, screen: number, canvas: number) => (canvas * kk <= screen ? (screen - canvas * kk) / 2 : Math.min(0, Math.max(screen - canvas * kk, pos)));
-    return kk <= fit * 1.02 ? null : { k: kk, x: lim(x, size.w, cw), y: lim(y, size.h, ch) };
+    return Math.abs(kk - fit) <= fit * 0.02 ? null : { k: kk, x: lim(x, size.w, cw), y: lim(y, size.h, ch) };
   };
   /** Zooms by `by` keeping the point (px, py) of the screen where it is. */
   const zoomAt = (from: { k: number; x: number; y: number }, by: number, px: number, py: number, dx = 0, dy = 0) => {
-    const k = Math.min(1.5, Math.max(fit, from.k * by));
+    const k = Math.min(maxK, Math.max(minK, from.k * by));
     const r = k / from.k;
     return clampView(k, px - (px - from.x) * r + dx, py - (py - from.y) * r + dy);
   };
+  // The wheel and a trackpad pinch zoom the graph only. A pinch reaches the page as a wheel with
+  // Control held, which the browser would also use to zoom the whole page, card and all, unless it
+  // is refused here; React's own wheel handler can't refuse it.
+  const wheel = useRef<(e: WheelEvent) => void>(() => {});
+  wheel.current = (e) => {
+    const onCard = !!(e.target as HTMLElement).closest?.(".brain-card");
+    // A card scrolls as usual; a pinch on it does nothing.
+    if (onCard && !e.ctrlKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (onCard) return;
+    const rect = box.current!.getBoundingClientRect();
+    setView(zoomAt(v, Math.exp(-e.deltaY / (e.ctrlKey ? 90 : 300)), e.clientX - rect.left, e.clientY - rect.top));
+  };
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => wheel.current(e);
+    // Safari sends its own pinch events and zooms the page on them.
+    const stop = (e: Event) => e.preventDefault();
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("gesturestart", stop);
+    el.addEventListener("gesturechange", stop);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", stop);
+      el.removeEventListener("gesturechange", stop);
+    };
+  }, []);
   const touches = useRef(new Map<number, { x: number; y: number }>());
   const moved = useRef(false);
-  const gestures = narrow
-    ? {
+  const gestures = {
         onPointerDown: (e: React.PointerEvent) => {
-          if ((e.target as HTMLElement).closest(".brain-card, .brain-fit")) return;
+          if ((e.target as HTMLElement).closest(".brain-card, .brain-fit, .brain-kinds, .brain-zoom")) return;
           touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
           if (touches.current.size === 1) moved.current = false;
         },
@@ -198,17 +236,12 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
           moved.current = false;
           e.stopPropagation();
         },
-        onWheel: (e: React.WheelEvent) => {
-          const rect = box.current!.getBoundingClientRect();
-          setView(zoomAt(v, Math.exp(-e.deltaY / 300), e.clientX - rect.left, e.clientY - rect.top));
-        },
         onDoubleClick: (e: React.MouseEvent) => {
           if ((e.target as HTMLElement).closest(".brain-node, .brain-card")) return;
           const rect = box.current!.getBoundingClientRect();
-          setView(view ? null : zoomAt(v, 1 / fit, e.clientX - rect.left, e.clientY - rect.top));
+          setView(view ? null : zoomAt(v, narrow ? 1 / fit : 1.8, e.clientX - rect.left, e.clientY - rect.top));
         },
-      }
-    : {};
+      };
   const placed = useMemo(() => layout(nodes, cw, ch), [nodes, cw, ch]);
   const at = new Map(placed.map((p) => [p.id, p]));
 
@@ -239,17 +272,46 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
   const ideas = nodes.filter((n) => n.parent);
   const cx = cw / 2;
   const cy = ch / 2;
+  const [only, setOnly] = useState<BrainCaught["kind"] | null>(null);
   const pick = (id: string) => setOpenId((cur) => (cur === id ? null : id));
-  const extra = (n: BrainNode) => n.points.length + n.caught.length;
+  // What came out of a circle: the to-dos, decisions and open questions caught while it was talked about.
+  const totals = KINDS.map((k) => ({ ...k, n: new Set(nodes.flatMap((n) => n.caught.filter((c) => c.kind === k.kind).map((c) => c.id))).size })).filter((k) => k.n > 0);
+  const has = (n: BrainNode, kind: BrainCaught["kind"]) => n.caught.some((c) => c.kind === kind);
+  /** With a kind picked, a circle stays lit when it or one of its ideas has that kind. */
+  const lit = (n: BrainNode) => !only || has(n, only) || (!n.parent && nodes.some((i) => i.parent === n.id && has(i, only)));
 
   return (
     <div className={`brain${narrow ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} ref={box} onClick={() => setOpenId(null)} {...gestures}>
+      {!narrow && dirs.length > 0 && (
+        <div className="brain-zoom" role="group" aria-label="Zoom" onClick={(e) => e.stopPropagation()}>
+          <button type="button" aria-label="Zoom out" title="Zoom out" disabled={v.k <= minK + 0.001} onClick={() => setView(zoomAt(v, 1 / 1.3, size.w / 2, size.h / 2))}>
+            −
+          </button>
+          <button type="button" className="brain-zoom-pct" title="See it all" onClick={() => setView(null)}>
+            {Math.round(v.k * 100)}%
+          </button>
+          <button type="button" aria-label="Zoom in" title="Zoom in" disabled={v.k >= maxK - 0.001} onClick={() => setView(zoomAt(v, 1.3, size.w / 2, size.h / 2))}>
+            +
+          </button>
+        </div>
+      )}
       {narrow && view && (
         <button type="button" className="brain-fit" onClick={(e) => (e.stopPropagation(), setView(null))}>
           See it all
         </button>
       )}
-      <div className="brain-canvas" style={narrow ? { width: cw, height: ch, transform: `translate(${v.x}px, ${v.y}px) scale(${v.k})` } : undefined}>
+      {totals.length > 0 && (
+        <div className="brain-kinds" role="group" aria-label="Show one kind" onClick={(e) => e.stopPropagation()}>
+          {totals.map(({ kind, Icon, many, n }) => (
+            <button key={kind} type="button" className={`brain-kind-pill ${kind}${only === kind ? " on" : ""}`} aria-pressed={only === kind} onClick={() => setOnly(only === kind ? null : kind)}>
+              <Icon size={13} />
+              {many}
+              <span>{n}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="brain-canvas" style={narrow || view ? { width: cw, height: ch, inset: "auto", top: 0, left: 0, transformOrigin: "0 0", transform: `translate(${v.x}px, ${v.y}px) scale(${v.k})` } : undefined}>
           <svg className="brain-lines" width={cw} height={ch} aria-hidden>
             {placed.map((p) => {
               const from = p.from === "root" ? { x: cx, y: cy } : at.get(p.from);
@@ -265,17 +327,26 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
               <button
                 key={p.id}
                 type="button"
-                className={`brain-node ${p.node.parent ? "idea" : "dir"}${fresh(p.id) ? " fresh" : ""}${openId === p.id ? " on" : ""}`}
+                className={`brain-node ${p.node.parent ? "idea" : "dir"}${fresh(p.id) ? " fresh" : ""}${openId === p.id ? " on" : ""}${lit(p.node) ? "" : " dim"}`}
                 style={{ left: p.x, top: p.y }}
                 aria-expanded={openId === p.id}
                 onClick={(e) => (e.stopPropagation(), pick(p.id))}
               >
                 {fresh(p.id) && p.node.by && <Face name={p.node.by} />}
                 <span dir="auto">{p.node.label}</span>
-                {extra(p.node) > 0 && <i className="brain-badge">{extra(p.node)}</i>}
+                {p.node.points.length > 0 && <i className="brain-badge">{p.node.points.length}</i>}
+                {KINDS.filter((k) => has(p.node!, k.kind)).map(({ kind, Icon, one }) => {
+                  const n = p.node!.caught.filter((c) => c.kind === kind).length;
+                  return (
+                    <i key={kind} className={`brain-kind ${kind}`} title={n === 1 ? `1 ${one}` : `${n} ${one}s`}>
+                      <Icon size={12} />
+                      {n > 1 && n}
+                    </i>
+                  );
+                })}
               </button>
             ) : (
-              <button key={p.id} type="button" className="brain-node idea more" style={{ left: p.x, top: p.y }} onClick={(e) => (e.stopPropagation(), pick(p.from))}>
+              <button key={p.id} type="button" className={`brain-node idea more${only ? " dim" : ""}`} style={{ left: p.x, top: p.y }} onClick={(e) => (e.stopPropagation(), pick(p.from))}>
                 +{p.more} more
               </button>
             ),
