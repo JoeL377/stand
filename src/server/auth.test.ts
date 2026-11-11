@@ -4,7 +4,7 @@ import type { IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express from "express";
-import { authRoutes, userFromRequest } from "./auth.ts";
+import { authRoutes, parseCookies, userFromRequest } from "./auth.ts";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 
@@ -69,4 +69,8 @@ test("the local preview needs no sign-in, and only outside production", () => {
   } finally {
     Object.assign(config, was);
   }
+});
+
+test("a cookie that isn't URI-encoded is kept as sent, not thrown on", () => {
+  assert.deepEqual(parseCookies("theme=dark; pct=50%; standup_session=abc%20d"), { theme: "dark", pct: "50%", standup_session: "abc d" });
 });

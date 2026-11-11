@@ -887,7 +887,7 @@ function AskStand(props: { pilot: PilotActs; send: (m: ClientMessage) => boolean
   // Someone else pilots Stand: the button asks to take over (or takes it back) instead of listening.
   const seat = seatOf(props.pilot);
   const locked = !seat.free && !seat.mine;
-  const live = useRef({ held: false, at: 0, unmuted: false, latched: false });
+  const live = useRef({ held: false, at: 0, unmuted: false, latched: false, muteTimer: null as ReturnType<typeof setTimeout> | null });
   const p = useRef(props);
   p.current = props;
   const down = () => {
@@ -899,7 +899,10 @@ function AskStand(props: { pilot: PilotActs; send: (m: ClientMessage) => boolean
       return;
     }
     if (!p.current.send({ type: "agent.ask.start" })) return;
-    Object.assign(s, { held: true, at: Date.now(), unmuted: false, latched: false });
+    // Asked again before the last ask muted the mic: it stays on, and this ask mutes it when done.
+    const stillOurs = s.muteTimer !== null;
+    if (s.muteTimer) clearTimeout(s.muteTimer);
+    Object.assign(s, { held: true, at: Date.now(), unmuted: stillOurs, latched: false, muteTimer: null });
     setHeld(true);
     if (!p.current.micOn && p.current.canUnmute) {
       s.unmuted = true;
@@ -917,7 +920,11 @@ function AskStand(props: { pilot: PilotActs; send: (m: ClientMessage) => boolean
     s.held = false;
     setHeld(false);
     p.current.send({ type: "agent.ask.end" });
-    if (s.unmuted) setTimeout(() => p.current.micOn && void p.current.toggleMic(), ASK_TAIL_MS);
+    if (s.unmuted)
+      s.muteTimer = setTimeout(() => {
+        s.muteTimer = null;
+        if (p.current.micOn) void p.current.toggleMic();
+      }, ASK_TAIL_MS);
   };
   useEffect(() => {
     const isAsk = (e: KeyboardEvent) => e.code === "Space" && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;

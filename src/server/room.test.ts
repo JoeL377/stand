@@ -1343,3 +1343,21 @@ test("a brainstorm's map is drawn from the call's talk and is done when the meet
   assert.deepEqual([done.status, done.meetingId], ["done", session.meetingId]);
   assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
 });
+
+test("a running-list pass that fails waits before the next, instead of retrying in a loop", async () => {
+  let calls = 0;
+  class FailingList extends HeuristicAgent {
+    async liveList(): Promise<never> {
+      calls++;
+      throw new Error("API overloaded");
+    }
+  }
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new FailingList(), room, () => {});
+  // Talk older than the list's longest wait: the first pass starts at once.
+  session.addSpeech("p1", "Joe", "We should ship the fix today.", Date.now() - 30_000);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(calls, 1, "one failed pass, then a wait");
+  await session.end();
+});
