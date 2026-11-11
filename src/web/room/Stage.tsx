@@ -506,6 +506,8 @@ export function Stage(props: {
               onShot={setMyShot}
               onFlip={flip}
               onOutcome={(outcome) => send({ type: "review.outcome", itemId: focusItem.id, outcome })}
+              onRemove={canSteer ? removeNote : undefined}
+              onAdd={canSteer ? (kind, text) => send({ type: "note.add", itemId: focusItem.id, kind, text }) : undefined}
             />
           </div>
         ) : focusItem?.deckId && (focusItem.slideNo || focusItem.slide) ? (
