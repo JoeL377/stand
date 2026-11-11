@@ -421,6 +421,8 @@ export function Meeting(props: {
             )
           )}
         </div>
+        {/* Stage puts what's being discussed here (see nowSlot there). */}
+        <div id="topbar-now" className="topbar-now" />
         <div className="topbar-right">
           <People
             participants={state.participants}

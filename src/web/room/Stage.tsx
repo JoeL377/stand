@@ -1,6 +1,7 @@
 import { usePersonColors } from "../PersonColors.tsx";
 import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { createPortal } from "react-dom";
 import { ReviewStage } from "./ReviewStage.tsx";
 import { DesignStage } from "./DesignStage.tsx";
 import { specAuthor } from "../../shared/designReview.ts";
@@ -156,6 +157,15 @@ export function Stage(props: {
   const taskId = focusItem?.taskId ?? null;
   useEffect(() => setMyTaskMode("brief"), [taskId]);
   const [own, setOwn] = useState(false);
+  // The slot the top bar keeps for what's being discussed; none on a phone, where the bar is full.
+  const [nowSlot, setNowSlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const wide = window.matchMedia("(min-width: 761px)");
+    const find = () => setNowSlot(wide.matches ? document.getElementById("topbar-now") : null);
+    find();
+    wide.addEventListener("change", find);
+    return () => wide.removeEventListener("change", find);
+  }, []);
   const following = !canSteer && !!host && !own;
   const tab = following ? (hostView?.tab === "board" ? "board" : null) : ownTab;
   const pickTab = (t: string | null) => {
@@ -342,11 +352,9 @@ export function Stage(props: {
     />
   );
 
-  return (
-    <main className="stage">
-      <div className="now">
+  const nowRow = (
+      <div className={nowSlot ? "now in-bar" : "now"}>
         {canSteer && <TaskPicker roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { if (send({ type: "task.present", taskId: task.id })) pickTab(null); }} />}
-        <span className="now-label">Now discussing</span>
         <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}
@@ -404,7 +412,7 @@ export function Stage(props: {
                 Follow {host.name.split(" ")[0]} →
               </button>
             ) : (
-              <span className="host-note muted small">{canSteer ? "You're the host" : `${host.name} is hosting`}</span>
+              !canSteer && <span className="host-note muted small">{host.name} is hosting</span>
             )}
           </>
         ) : (
@@ -428,6 +436,13 @@ export function Stage(props: {
           )
         )}
       </div>
+  );
+
+  return (
+    <main className="stage">
+      {/* What's being discussed and the host's Present task sit in the call's top bar when there's
+          room for them (Meeting.tsx leaves a slot); on a phone they keep their own row here. */}
+      {nowSlot ? createPortal(nowRow, nowSlot) : nowRow}
 
       <div className="screen" ref={screenRef}>
         <div className="nudges">
