@@ -23,6 +23,7 @@ import type {
   ProjectsStatus,
   Snap,
   SpaceFeed,
+  SpaceMembers,
   SpaceSummary,
   TaskDetail,
   UpNext,
@@ -128,6 +129,8 @@ export const api = {
   spaces: () => call<SpaceSummary[]>("GET", "/api/spaces"),
   updateSpace: (id: string, patch: { name?: string; purpose?: string; synthesisInstructions?: string }) =>
     call<{ id: string; name: string; purpose: string; synthesisInstructions: string }>("PATCH", `/api/rooms/${id}`, patch),
+  members: (roomId: string) => call<SpaceMembers>("GET", `/api/rooms/${roomId}/members`),
+  setAdmin: (roomId: string, userId: string, admin: boolean) => call<SpaceMembers>("PUT", `/api/rooms/${roomId}/members/${userId}`, { admin }),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
