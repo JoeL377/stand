@@ -173,6 +173,35 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
     const r = k / from.k;
     return clampView(k, px - (px - from.x) * r + dx, py - (py - from.y) * r + dy);
   };
+  // The wheel and a trackpad pinch zoom the graph only. A pinch reaches the page as a wheel with
+  // Control held, which the browser would also use to zoom the whole page, card and all, unless it
+  // is refused here; React's own wheel handler can't refuse it.
+  const wheel = useRef<(e: WheelEvent) => void>(() => {});
+  wheel.current = (e) => {
+    const onCard = !!(e.target as HTMLElement).closest?.(".brain-card");
+    // A card scrolls as usual; a pinch on it does nothing.
+    if (onCard && !e.ctrlKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (onCard) return;
+    const rect = box.current!.getBoundingClientRect();
+    setView(zoomAt(v, Math.exp(-e.deltaY / (e.ctrlKey ? 90 : 300)), e.clientX - rect.left, e.clientY - rect.top));
+  };
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => wheel.current(e);
+    // Safari sends its own pinch events and zooms the page on them.
+    const stop = (e: Event) => e.preventDefault();
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("gesturestart", stop);
+    el.addEventListener("gesturechange", stop);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", stop);
+      el.removeEventListener("gesturechange", stop);
+    };
+  }, []);
   const touches = useRef(new Map<number, { x: number; y: number }>());
   const moved = useRef(false);
   const gestures = {
@@ -206,13 +235,6 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
           if (!moved.current) return;
           moved.current = false;
           e.stopPropagation();
-        },
-        onWheel: (e: React.WheelEvent) => {
-          if ((e.target as HTMLElement).closest(".brain-card")) return;
-          // In a call the wheel is the map's here, not the card stack's.
-          e.stopPropagation();
-          const rect = box.current!.getBoundingClientRect();
-          setView(zoomAt(v, Math.exp(-e.deltaY / 300), e.clientX - rect.left, e.clientY - rect.top));
         },
         onDoubleClick: (e: React.MouseEvent) => {
           if ((e.target as HTMLElement).closest(".brain-node, .brain-card")) return;
