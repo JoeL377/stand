@@ -7,6 +7,7 @@ import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, UploadLinks, WORKING_QUIET_MS, prOf, r
 import { ShipWatch, githubPrState, type PrState } from "./shipWatch.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
 import { finishBrainstorm, startBrainstorm } from "./brainstorm.ts";
+import { CHAT_QUIET_MS, Chat } from "./chat.ts";
 import { openDb } from "./db.ts";
 import { parseActor } from "../shared/actors.ts";
 import { addUpNext } from "./upNext.ts";
@@ -1081,4 +1082,77 @@ test("start_design_session sets up a session with its context, and the same topi
 
   assert.throws(() => start({ space: room.id, topic: "Other", context: [{ title: "", text: "x" }] }), AgentError);
   assert.throws(() => api.startDesignSession({ user: joe, token: db.createToken(joe.id, "Claude Code", "read").info }, { space: room.id, topic: "Other" }, ""), AgentError);
+});
+
+test("agents read a space's chat: where it stands, the stretches since a date, and one stretch with what was written", () => {
+  const { db, joe, andy, room } = setup();
+  db.touchMembership(room.id, andy.id);
+  const api = agentApi({ db, notify: () => {}, brief: (id) => ({ meeting: { id }, carriedOver: [] }), suggested: (r) => upNextView(db, r, null), uploads: new UploadLinks() });
+  const caller = { user: joe, token: null };
+  const iso = (t: number) => new Date(t).toISOString();
+
+  // A space nobody has written in.
+  assert.deepEqual(api.chatStatus(caller, room.id), { space: { id: room.id, name: room.name }, channels: [], live: [], recent: [] });
+  assert.deepEqual(api.whatsNew(caller, { space: room.id }).chats, []);
+  assert.equal(api.listSpaces(caller)[0].chat, undefined);
+
+  // A stretch three hours ago, closed since, and one going on now.
+  const chat = new Chat(db);
+  const channel = db.spaceChannel(room.id, joe.id);
+  const say = (user: { id: string }, text: string, ts: number) => chat.accept(channel.id, [{ type: "message", author: { userId: user.id }, text, ts }]).messages[0];
+  const t0 = Date.now() - 3 * CHAT_QUIET_MS;
+  const first = say(joe, "Can we ship the invite flow on Friday?", t0);
+  say(andy, "Yes, if the email copy is done.", t0 + 60_000);
+  const slip = say(andy, "Wrong window, sorry", t0 + 120_000);
+  chat.accept(channel.id, [{ type: "delete", id: slip.id, by: { userId: andy.id }, ts: t0 + 130_000 }]);
+  chat.accept(channel.id, [{ type: "edit", id: first.id, by: { userId: joe.id }, text: "Can we ship the invite flow on Monday?", ts: t0 + 140_000 }]);
+  assert.equal(chat.sweep(), 1);
+  const now = say(andy, "Deploy is out", Date.now() - 60_000);
+
+  const status = api.chatStatus(caller, "checkout");
+  assert.deepEqual(status.channels, [{ id: channel.id, name: "Chat", source: "stand", last_message_at: iso(now.ts) }]);
+  assert.deepEqual(status.live, [
+    { chat_id: now.sessionId, channel: "Chat", from: iso(now.ts), to: iso(now.ts), people: ["Andy Li"], messages: 1, summary: undefined, to_dos: 0, decided: 0, open: 0, live: true },
+  ]);
+  assert.deepEqual(status.recent, [
+    { chat_id: first.sessionId, channel: "Chat", from: iso(t0), to: iso(t0 + 120_000), people: ["Joe Liang", "Andy Li"], messages: 3, summary: undefined, to_dos: 0, decided: 0, open: 0, live: undefined },
+  ]);
+
+  // One stretch. The messages come only when asked for, a deleted one never.
+  const closed = api.getChat(caller, { chatId: first.sessionId });
+  assert.deepEqual([closed.chat_id, closed.space.id, closed.transcript, closed.to_dos, closed.topics], [first.sessionId, room.id, undefined, [], []]);
+  assert.deepEqual(api.getChat(caller, { chatId: first.sessionId, transcript: true }).transcript, [
+    { by: "Joe Liang", at: iso(t0), text: "Can we ship the invite flow on Monday?", edited: true },
+    { by: "Andy Li", at: iso(t0 + 60_000), text: "Yes, if the email copy is done.", edited: undefined },
+  ]);
+
+  // What Stand files under a stretch shows on it, like a meeting's notes.
+  const [topic] = db.replaceDiscussions(first.sessionId, null, [
+    { topic: "When the invite flow ships", positions: [{ speaker: "Joe Liang", position: "Monday" }], outcome: "action", segmentIds: [first.id], continuesId: null },
+  ]);
+  db.syncNotes(first.sessionId, null, [
+    { kind: "action", text: "Finish the email copy", owner: "Andy", discussionId: topic.id },
+    { kind: "question", text: "Who reviews the copy?", owner: null, discussionId: topic.id },
+  ]);
+  const filed = api.getChat(caller, { chatId: first.sessionId });
+  assert.deepEqual(filed.topics.map((t) => [t.topic, t.outcome]), [["When the invite flow ships", "action"]]);
+  assert.deepEqual([filed.to_dos.map((t) => t.text), filed.open_questions.map((q) => q.text), filed.decided], [["Finish the email copy"], ["Who reviews the copy?"], []]);
+  assert.deepEqual([api.chatStatus(caller, room.id).recent[0].to_dos, api.chatStatus(caller, room.id).recent[0].open], [1, 1]);
+
+  // whats_new lists the stretches since a date, apart from the meetings.
+  const week = api.whatsNew(caller, { space: room.id });
+  assert.deepEqual(week.chats.map((c) => [c.chat_id, c.live]), [[now.sessionId, true], [first.sessionId, undefined]]);
+  assert.equal(week.meetings.some((m) => m.id === first.sessionId || m.id === now.sessionId), false);
+  assert.deepEqual(api.whatsNew(caller, { space: room.id, since: iso(Date.now() - CHAT_QUIET_MS) }).chats.map((c) => c.chat_id), [now.sessionId]);
+  assert.deepEqual(api.listSpaces(caller)[0].chat, { last_message_at: iso(now.ts) });
+
+  // The brief of a stretch says it is chat. The latest meeting of the space is still a meeting.
+  assert.deepEqual((api.meetingBrief(caller, { meetingId: first.sessionId }, "") as { meeting: object }).meeting, { id: first.sessionId, kind: "chat", channel: "Chat" });
+  assert.equal((api.meetingBrief(caller, { spaceId: room.id }, "") as { meeting: { id: string; kind?: string } }).meeting.kind, undefined);
+
+  // Someone who isn't in the space reads none of it.
+  const outsider = { user: db.upsertUser({ googleSub: "g-eve", email: "eve@example.com", name: "Eve Adams", picture: null }), token: null };
+  assert.throws(() => api.getChat(outsider, { chatId: first.sessionId, transcript: true }), AgentError);
+  assert.throws(() => api.chatStatus(outsider, room.id), AgentError);
+  assert.throws(() => api.getChat(caller, { chatId: "nope" }), /No chat with that id/);
 });

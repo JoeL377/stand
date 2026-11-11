@@ -12,6 +12,7 @@ import type { PlanBriefs } from "./planBrief.ts";
 // An agent sees exactly the spaces its person is in (spaces are invite only).
 
 import { parseActor, type Actor } from "../shared/actors.ts";
+import type { Channel, ChatSession } from "../shared/chat.ts";
 import { IDEA_OUTCOMES, REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import type { ActionWork, BrainCaught, BrainNode, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
@@ -338,6 +339,27 @@ export function agentApi(deps: AgentDeps) {
       throw new AgentError(`"${query}" matches ${spaces.map((r) => `${r.name} (${r.id})`).join(", ")}. Give one id.`);
     return space((spaces.find((r) => r.id === query || r.name.toLowerCase() === q) ?? spaces[0]).id, caller);
   }
+
+  /** A stretch of chat (a session), as agents see it. */
+  const chatInfo = (s: ChatSession, channels: Channel[]) => {
+    const channel = channels.find((c) => c.id === s.channelId);
+    const notes = db.meetingNotes(s.id);
+    const count = (kind: Note["kind"]) => notes.filter((n) => n.kind === kind).length;
+    return {
+      chat_id: s.id,
+      channel: channel?.name,
+      from: new Date(s.startedAt).toISOString(),
+      to: new Date(s.endedAt).toISOString(),
+      people: [...new Set(db.sessionMessages(s.id).filter((m) => !m.deletedAt).map((m) => m.author))],
+      messages: s.messages,
+      summary: db.getMeeting(s.id)?.summary ?? undefined,
+      to_dos: count("action"),
+      decided: count("decision"),
+      open: count("question"),
+      // People are still writing: more can come, and nothing in it is final.
+      live: channel?.openSessionId === s.id || undefined,
+    };
+  };
 
   /** A note saved from the bar, with the snaps pinned to it. */
   const noteInfo = (j: Jot, baseUrl: string) => {
@@ -682,7 +704,54 @@ export function agentApi(deps: AgentDeps) {
           .map((i) => ({ id: i.id, title: i.externalId ? `${i.externalId} ${i.title}` : i.title })),
         latest_meeting_id: db.latestMeeting(row.id) ?? undefined,
         live: deps.liveMeeting?.(row.id) ?? null,
+        chat: (() => {
+          const last = db.roomChatSessions(row.id, 0, 1)[0];
+          return last ? { last_message_at: new Date(last.endedAt).toISOString() } : undefined;
+        })(),
       }));
+    },
+
+    /** One stretch of chat: what came out of it, and with transcript what was written. */
+    getChat(caller: Caller, opts: { chatId: string; transcript?: boolean }, baseUrl = "") {
+      const s = db.chatSession(opts.chatId);
+      if (!s) throw new AgentError("No chat with that id. get_chat with a space lists its chats.");
+      const room = space(s.roomId, caller);
+      const notes = db.meetingNotes(s.id);
+      const work = workOn(notes.filter((n) => n.kind === "action"));
+      const line = (kind: RefKind) => (n: Note) => ({ ref: refOf(kind, n.id), text: n.text, url: refUrl(baseUrl, kind, n.id) });
+      const { to_dos: _t, decided: _d, open: _o, ...info } = chatInfo(s, db.roomChannels(room.id));
+      return {
+        space: { id: room.id, name: room.name },
+        ...info,
+        topics: db.meetingDiscussions(s.id).map((d) => ({ ref: refOf("topic", d.id), topic: d.topic, outcome: d.outcome })),
+        to_dos: notes.filter((n) => n.kind === "action").map((n) => actionInfo(n, work.get(n.id))),
+        decided: notes.filter((n) => n.kind === "decision").map(line("decision")),
+        open_questions: notes.filter((n) => n.kind === "question" && !isClosed(stateOf(n))).map(line("question")),
+        transcript: opts.transcript
+          ? db
+              .sessionMessages(s.id)
+              .filter((m) => !m.deletedAt)
+              .map((m) => ({ by: m.author, at: new Date(m.ts).toISOString(), text: m.text, edited: m.editedAt ? true : undefined }))
+          : undefined,
+      };
+    },
+
+    /** Where chat stands in a space: its channels, the stretch going on now and the recent ones. */
+    chatStatus(caller: Caller, spaceQuery: string) {
+      const room = findSpace(caller, spaceQuery);
+      const channels = db.roomChannels(room.id);
+      const sessions = db.roomChatSessions(room.id, 0, 10).map((s) => chatInfo(s, channels));
+      return {
+        space: { id: room.id, name: room.name },
+        channels: channels.map((c) => ({
+          id: c.id,
+          name: c.name,
+          source: c.source,
+          last_message_at: ((t) => (t ? new Date(t).toISOString() : undefined))(db.channelSessions(c.id, 1)[0]?.endedAt),
+        })),
+        live: sessions.filter((s) => s.live),
+        recent: sessions.filter((s) => !s.live),
+      };
     },
 
     listMyWork(caller: Caller, opts: { space?: string; status?: "open" | "done" | "all"; includeUnassigned?: boolean }, baseUrl: string) {
@@ -754,7 +823,10 @@ export function agentApi(deps: AgentDeps) {
       const m = db.getMeeting(meetingId);
       if (!m) throw new AgentError("No meeting with that id.");
       space(m.roomId, caller);
-      const brief = deps.brief(m.id, baseUrl, !!opts.transcript) as { carriedOver?: unknown[] };
+      const brief = deps.brief(m.id, baseUrl, !!opts.transcript) as { carriedOver?: unknown[]; meeting?: object };
+      // A stretch of chat reads like a meeting; the brief says which it is.
+      const chat = db.chatSession(m.id);
+      if (chat && typeof brief.meeting === "object") brief.meeting = { ...brief.meeting, kind: "chat", channel: db.getChannel(chat.channelId)?.name };
       // Every open to-do from earlier meetings: more than the rest of a brief put together, and list_actions has them.
       if (opts.carriedOver || !brief.carriedOver) return brief;
       const { carriedOver, ...rest } = brief;
@@ -1175,6 +1247,7 @@ export function agentApi(deps: AgentDeps) {
             decided: m.decided,
             open: m.open,
           })),
+        chats: ((channels) => db.roomChatSessions(room.id, since).map((s) => chatInfo(s, channels)))(db.roomChannels(room.id)),
         decided: recent("decision").map(line("decision")),
         open_questions: recent("question")
           .filter((n) => !isClosed(stateOf(n)))
