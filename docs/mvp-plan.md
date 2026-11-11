@@ -56,7 +56,7 @@ The test, run on real work:
 
 **MVP is done when that runs without us steering it, for four weeks, on a team that shares a repo and has nobody from our team in it.** That's the group we're building for, and only they can run the whole test.
 
-Brista comes first, and proves less. Brista is Janesh's coffee water company: the cofounders chat on Discord and talk in person, with no calls. They test the chat half: talk becomes tasks and decisions with zero lift, and people come back to them. They can't test steps 3 to 5 if they don't work through agents on a repo, and Janesh is on both teams, so it isn't a test without us.
+BaristaTears comes first, and proves less. BaristaTears is Janesh's coffee water company: the cofounders chat on Discord and talk in person, with no calls. They test the chat half: talk becomes tasks and decisions with zero lift, and people come back to them. They can't test steps 3 to 5 if they don't work through agents on a repo, and Janesh is on both teams, so it isn't a test without us.
 
 ## How we work
 
@@ -160,13 +160,13 @@ Demo: Janesh's agent hears the Oct 30 decision without being told, and a Discord
 | One intake path for any channel: text in, tasks and decisions with quotes out | Huy, Janesh | M |
 | Discord: the bot feeds a Stand space and answers with what's open | Janesh | M |
 
-### Week 3, Nov 23 to 29: Brista goes live
+### Week 3, Nov 23 to 29: BaristaTears goes live
 
 Thanksgiving week, so short on purpose. Demo: their real to-dos on the board.
 
 | Work | Owner | Size |
 | --- | --- | --- |
-| Janesh's Brista cofounders start, with zero lift from them. No PRs there, so a task closes on the owner's click | Janesh | |
+| Janesh's BaristaTears cofounders start, with zero lift from them. No PRs there, so a task closes on the owner's click | Janesh | |
 | Sign up the repo team for Nov 30 | Andy | |
 | Real deletion: today a meeting or space can only be archived | Huy | S |
 | Nightly backups: Stand is one SQLite volume with none in the repo | Andy | S |
@@ -193,7 +193,7 @@ Demo: the check finds our own reversals; "done? here's the PR" on unlinked to-do
 | Live callouts: a Keep or Change card during the call, rebuilt from Conxt #117 | Huy, Joe | M |
 | Review the numbers and decide | All | Dec 20 |
 
-**Gate 3, Dec 20:** did the repo team come back three weeks running, and did Brista's cofounders come back four, without being asked? If yes, keep going and start on launch. The full four-week bar for the repo team lands Dec 27. If they use the to-dos but not the decisions, the product is the task loop and Conxt's governance waits. If Brista stays and the repo team drops, we've found a different customer, and that's worth a real conversation. If both stop, find out why before any more features.
+**Gate 3, Dec 20:** did the repo team come back three weeks running, and did BaristaTears's cofounders come back four, without being asked? If yes, keep going and start on launch. The full four-week bar for the repo team lands Dec 27. If they use the to-dos but not the decisions, the product is the task loop and Conxt's governance waits. If BaristaTears stays and the repo team drops, we've found a different customer, and that's worth a real conversation. If both stop, find out why before any more features.
 
 ## The feedback loop
 
@@ -207,7 +207,7 @@ Demo: the check finds our own reversals; "done? here's the PR" on unlinked to-do
 | Tasks with a done-when | 0 of 115 | Most |
 | Reversals the check catches | 0 of 2 we know of | All known |
 | Times a kept decision changed what someone did | Not measured | Counted weekly |
-| Weeks in a row Brista came back | 0 | 4 |
+| Weeks in a row BaristaTears came back | 0 | 4 |
 | Weeks in a row the repo team came back | 0 | 3 |
 | Cost per meeting hour | About $5 | Under $3 |
 
@@ -233,8 +233,8 @@ Demo: the check finds our own reversals; "done? here's the PR" on unlinked to-do
 - **CI becomes the only check.** With no review wait and a merge that deploys, a bad merge reaches production. CI is in. Backups are the first job before outside teams.
 - **Without blocks, bad decisions get through.** That's the trade. The conflict check and the useful marks are how we'd see it, and Gate 3 is when to revisit it.
 - **Overlap with work nobody can see.** Janesh's rebuild work and the orchestrator goal aren't on GitHub yet, and both touch the same files as Keep and Use. The habits above are the fix.
-- **Brista pulls us off course.** A coffee water company will want Shopify and wholesale help, not agents on a repo. Build for them only what the chat path needs anyway, and treat the rest as a signal about who else might want this.
-- **Brista flatters us.** Janesh is a cofounder there, so they'll try harder than a stranger would. Their numbers can't carry Gate 3 alone.
+- **BaristaTears pulls us off course.** A coffee water company will want Shopify and wholesale help, not agents on a repo. Build for them only what the chat path needs anyway, and treat the rest as a signal about who else might want this.
+- **BaristaTears flatters us.** Janesh is a cofounder there, so they'll try harder than a stranger would. Their numbers can't carry Gate 3 alone.
 - **Andy's trip.** Andy mentioned Japan starting around Nov 7. The repo move may need another owner.
 
 ## Still open

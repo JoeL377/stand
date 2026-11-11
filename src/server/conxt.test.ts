@@ -227,7 +227,7 @@ test("finalized synthesis carries exact discussion evidence and holds tasks and 
   const first = db.addSegment({ meetingId: meeting.id, itemId: null, speakerId: "a", speakerName: "Alice", kind: "speech", text: "Launch Friday?", ts: meeting.startedAt });
   const last = db.addSegment({ meetingId: meeting.id, itemId: null, speakerId: "b", speakerName: "Bob", kind: "speech", text: "😀 Agreed Monday instead.\r\nAlice will do QA.", ts: meeting.startedAt + 1 });
   const [discussion] = db.replaceDiscussions(meeting.id, null, [{ topic: "Launch", outcome: "decided", positions: [], segmentIds: [first.id, last.id], continuesId: null }]);
-  db.replaceNotes(meeting.id, null, [
+  db.syncNotes(meeting.id, null, [
     { kind: "decision", text: "Launch Monday.", owner: null, discussionId: discussion.id },
     { kind: "action", text: "Run QA.", owner: "Alice", discussionId: discussion.id },
     { kind: "decision", text: "Use Redis.", owner: null, discussionId: null },
@@ -286,7 +286,7 @@ test("a note from a long discussion cites the turns that support it, at most 32"
   }));
   const [discussion] = db.replaceDiscussions(meeting.id, null, [{ topic: "Deploys", outcome: "decided", positions: [],
     segmentIds: segs.map(s => s.id), continuesId: null }]);
-  db.replaceNotes(meeting.id, null, [
+  db.syncNotes(meeting.id, null, [
     { kind: "decision", text: "Freeze deploys on Fridays.", owner: null, discussionId: discussion.id,
       quote: { segmentId: segs[90].id, ts: segs[90].ts, speaker: "Alice", text: segs[90].text } },
     { kind: "action", text: "Book the dentist.", owner: "Bob", discussionId: discussion.id },

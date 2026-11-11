@@ -84,6 +84,8 @@ export function ReviewPage() {
   // The slide you're on stays in view in the strip.
   const strip = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    // On a phone an idea review's strip is a list under the slide: a pick brings the slide back up.
+    if (strip.current && getComputedStyle(strip.current).flexDirection === "column") return void window.scrollTo({ top: 0 });
     strip.current?.querySelector(".on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [at, count]);
 
@@ -107,9 +109,9 @@ export function ReviewPage() {
 
   return (
     <div className="rp">
-      <header className="rp-head">
+      <header className={ideas ? "rp-head ideas" : "rp-head"}>
         <Link className="rp-back" to={spaceHref(roomId)}>
-          ← {data.roomName}
+          ← <span className="rp-back-name">{data.roomName}</span>
         </Link>
         <strong>{ideas ? "Idea review" : "Product review"}</strong>
         {ideas ? (
@@ -200,7 +202,8 @@ export function ReviewPage() {
             </div>
             <div className="rp-about">
               <div className="rp-title">
-                <h1 dir="auto">{slide.title}</h1>
+                {/* A slide with no picture already says its name where the picture would be. */}
+                {shot && <h1 dir="auto">{slide.title}</h1>}
                 {end?.outcome && (
                   <span className={`rv-wrap-outcome ${end.outcome}`} title={end.by ? `${end.by} said so` : undefined}>
                     {outcomeLabel(end.outcome)}
@@ -238,12 +241,13 @@ export function ReviewPage() {
               )}
             </div>
           </main>
-          <div className="rp-strip" ref={strip} role="tablist" aria-label="Slides">
+          <div className={ideas ? "rp-strip ideas" : "rp-strip"} ref={strip} role="tablist" aria-label="Slides">
             {review.slides.map((s, i) => (
               <button key={s.id} type="button" role="tab" aria-selected={i === at} className={i === at ? "on" : undefined} title={s.title} onClick={() => go(i)}>
-                <span className="rp-thumb">{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
+                <span className="rp-num">{i + 1}</span>
+                <span className={s.shots[0] ? "rp-thumb" : "rp-thumb text"}>{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
                 <span className="rp-thumb-foot">
-                  <span className="rp-n">{s.name ?? i + 1}</span>
+                  {s.shots[0] && <span className="rp-n">{s.name ?? i + 1}</span>}
                   {endOf(s).outcome && <span className={`rp-dot ${endOf(s).outcome}`} title={outcomeLabel(endOf(s).outcome!)} />}
                   {!!s.caught?.length && <span className="count" title={`${s.caught.length} raised on this slide`}>{s.caught.length}</span>}
                 </span>

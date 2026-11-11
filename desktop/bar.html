@@ -550,7 +550,7 @@
     const pill = $("pill");
     pill.classList.remove("arrive", "first");
     pill.classList.add("waiting");
-    requestAnimationFrame(() => requestAnimationFrame(() => (window.bar.painted ? window.bar.painted() : arrive())));
+    requestAnimationFrame(() => requestAnimationFrame(() => window.bar.painted()));
   });
   function arrive() {
     const pill = $("pill");
@@ -561,7 +561,7 @@
     pill.classList.add("arrive");
     if (pulseNext) pill.classList.add("first");
   }
-  window.bar.onVisible?.(arrive);
+  window.bar.onVisible(arrive);
   addEventListener("blur", () => up());
   // On press, not on click: a press on the bar can bring Stand forward, which used to hide
   // the bar before the click finished, so the click was lost. A click with no pointer behind

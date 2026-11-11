@@ -210,6 +210,7 @@ export class BoardKeeper {
     const fresh = talk.filter((s) => s.ts > this.lastLook);
     if (!fresh.length) return false;
     const lastLook = this.lastLook;
+    const forcedAtStart = this.forcedItem;
     const forced = this.forcedItem && this.forcedItem.at <= now ? this.forcedItem : null;
     const onOtherItem = !!forced && this.current?.itemId !== forced.itemId;
     // The drift check, on a thread that has been up a while, when no move is waiting.
@@ -250,6 +251,8 @@ export class BoardKeeper {
         this.retitled.add(this.current.id);
       }
     }
+    // The host moved the agenda while this pass ran: a move it proposes was read for the item before.
+    if (this.forcedItem !== forcedAtStart) return true;
     if (!a.shift) {
       this.pending = null;
       // After an agenda move with no thread there yet, the card waits for one.

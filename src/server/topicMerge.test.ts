@@ -122,8 +122,8 @@ test("a run that writes the same note twice keeps one, and every note gets its o
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
   const m = db.startMeeting(room.id);
-  const [kept] = db.replaceNotes(m.id, null, [{ kind: "decision", text: "Ship Friday", owner: null }]);
-  const notes = db.replaceNotes(m.id, null, [
+  const [kept] = db.syncNotes(m.id, null, [{ kind: "decision", text: "Ship Friday", owner: null }]);
+  const notes = db.syncNotes(m.id, null, [
     { kind: "decision", text: "Ship Friday", owner: null },
     { kind: "decision", text: "Ship Friday", owner: null, id: kept.id },
     { kind: "decision", text: "Ship Friday", owner: null, discussionId: "other" },

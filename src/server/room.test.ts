@@ -284,13 +284,13 @@ test("action items stay open on their item across meetings until someone checks 
     { source: "linear" as const, externalId: "ENG-7", title: "Search latency", url: "https://linear.app/acme/issue/ENG-7", description: null },
   ]);
   const first = db.startMeeting(room.id);
-  const [dash, alerts] = db.replaceNotes(first.id, ticket.id, [
+  const [dash, alerts] = db.syncNotes(first.id, ticket.id, [
     { kind: "action", text: "Add a dashboard", owner: "Priya" },
     { kind: "action", text: "Page on p95", owner: null },
   ]);
   // Notes regenerate while the meeting runs; a checked-off action stays checked.
   assert.ok(db.setActionDone(room.id, alerts.id, "Joe"));
-  const again = db.replaceNotes(first.id, ticket.id, [
+  const again = db.syncNotes(first.id, ticket.id, [
     { kind: "action", text: "Add a dashboard", owner: "Priya" },
     { kind: "action", text: "Page on p95", owner: null },
   ]);
@@ -612,7 +612,7 @@ test("spaces: every space is listed with its open to-dos, the ones for you, and 
   db.touchMembership(a.id, joe.id);
   const [item] = db.addItems(a.id, [{ source: "agenda" as const, externalId: null, title: "Apple Pay", url: null, description: null }]);
   const m = db.startMeeting(a.id);
-  db.replaceNotes(m.id, item.id, [
+  db.syncNotes(m.id, item.id, [
     { kind: "decision", text: "Guest checkout stays for v1", owner: null },
     { kind: "action", text: "Set up the Apple Pay sandbox", owner: "Joe" },
     { kind: "action", text: "Write the copy", owner: "Sam" },
@@ -1041,7 +1041,7 @@ test("the board's running list: lines come in, anyone ticks a to-do (and its liv
   const guest = await join(session, { id: "u2", name: "Huy" });
   assert.deepEqual(host.got.find((m) => m.type === "list"), { type: "list", items: [] });
   session.addSpeech("u2", "Huy", "I'll send Joe the repo link", Date.now());
-  await (session as unknown as { runList(): Promise<void> }).runList();
+  await (session as unknown as { listPasses: { run(): Promise<void> } }).listPasses.run();
   const lastList = (ws: FakeSocket) => ws.got.filter((m) => m.type === "list").at(-1) as Extract<ServerMessage, { type: "list" }>;
   const [line] = lastList(guest).items!;
   assert.deepEqual([line.kind, line.owner, line.itemId], ["action", "Huy", item.id]);
@@ -1072,7 +1072,7 @@ test("tasks: done needs what closed it, drop keeps why and leaves open lists, an
   const db = openDb(":memory:");
   const room = db.createRoom("Tasks");
   const m = db.startMeeting(room.id);
-  const [fix, docs, q] = db.replaceNotes(m.id, null, [
+  const [fix, docs, q] = db.syncNotes(m.id, null, [
     { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
     { kind: "action", text: "Write the docs", owner: "Huy" },
     { kind: "question", text: "Do we keep SQLite?", owner: null },
@@ -1082,7 +1082,7 @@ test("tasks: done needs what closed it, drop keeps why and leaves open lists, an
   assert.deepEqual([dropped.state, dropped.dropReason, dropped.doneBy, !!dropped.doneAt], ["dropped", "Conxt has them", "Andy", true]);
   assert.equal(db.setTaskState(room.id, q.id, { state: "done", by: "Joe" })?.state, "done");
   // The live notes rewrite the item: each task keeps where it stood.
-  const again = db.replaceNotes(m.id, null, [
+  const again = db.syncNotes(m.id, null, [
     { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
     { kind: "action", text: "Write the docs", owner: "Huy" },
     { kind: "question", text: "Do we keep SQLite?", owner: null },
@@ -1096,7 +1096,7 @@ test("tasks: done needs what closed it, drop keeps why and leaves open lists, an
   assert.deepEqual([reopened.state, reopened.doneAt, reopened.dropReason, !!reopened.checkedAt], [null, null, null, true]);
   assert.equal(db.setTaskState(room.id, docs.id, { state: "open", by: "Huy", checked: false })?.checkedAt, null);
   // A decision is a closed Decide task; it can't be moved, and another space can't move anything.
-  const [dec] = db.replaceNotes(db.startMeeting(room.id).id, null, [{ kind: "decision", text: "Keep SQLite", owner: null }]);
+  const [dec] = db.syncNotes(db.startMeeting(room.id).id, null, [{ kind: "decision", text: "Keep SQLite", owner: null }]);
   assert.equal(db.setTaskState(room.id, dec.id, { state: "dropped", by: "Joe" }), null);
   assert.equal(db.setTaskState(db.createRoom("Other").id, docs.id, { state: "done", by: "Mallory" }), null);
 });
@@ -1105,7 +1105,7 @@ test("since last time: carried tasks open the meeting, Stand hears one called do
   const db = openDb(":memory:");
   const room = db.createRoom("Check-in");
   const last = db.startMeeting(room.id);
-  const [railway, docs, pr] = db.replaceNotes(last.id, null, [
+  const [railway, docs, pr] = db.syncNotes(last.id, null, [
     { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
     { kind: "action", text: "Write the docs", owner: "Huy" },
     { kind: "action", text: "Ship the bar fix", owner: "Andy" },
@@ -1131,7 +1131,7 @@ test("since last time: carried tasks open the meeting, Stand hears one called do
   assert.equal(state().checkIn?.page, 1);
 
   session.addSpeech("u1", "Joe", "I fixed the Railway deploy yesterday", Date.now());
-  await (session as unknown as { runList(): Promise<void> }).runList();
+  await (session as unknown as { listPasses: { run(): Promise<void> } }).listPasses.run();
   assert.match(shown, /Open tasks from earlier meetings:\n- \[t1\] \(Joe\) Fix the Railway deploy\n- \[t2\] \(Huy\) Write the docs/);
   const heard = state().followUps.find((f) => f.id === railway.id)!;
   assert.deepEqual([heard.saidDone?.speaker, heard.saidDone?.text, heard.doneAt], ["Joe", "I fixed the Railway deploy yesterday", null]);
@@ -1329,7 +1329,7 @@ test("a brainstorm's map is drawn from the call's talk and is done when the meet
   // The brainstorm's sentence leads the agenda, so the call opens on it.
   assert.equal(db.listItems(room.id)[0].id, b.itemId);
   session.addSpeech("p1", "Huy", "each agent could add a slide when it finishes", Date.now());
-  await (session as unknown as { runMap(): Promise<void> }).runMap();
+  await (session as unknown as { mapPasses: { run(): Promise<void> } }).mapPasses.run();
   assert.deepEqual(db.getBrainstorm(b.id)!.nodes.map((n) => [n.id, n.label]), [["d1", "From the work"], ["i1", "Agents add slides"]]);
   const maps = sent.flatMap((m) => (m.type === "brainstorm" ? [m.brainstorm] : []));
   assert.equal(maps.at(-1)!.nodes.length, 2);
@@ -1342,4 +1342,63 @@ test("a brainstorm's map is drawn from the call's talk and is done when the meet
   const done = db.getBrainstorm(b.id)!;
   assert.deepEqual([done.status, done.meetingId], ["done", session.meetingId]);
   assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
+});
+
+test("a running-list pass that fails waits before the next, instead of retrying in a loop", async () => {
+  let calls = 0;
+  class FailingList extends HeuristicAgent {
+    async liveList(): Promise<never> {
+      calls++;
+      throw new Error("API overloaded");
+    }
+  }
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new FailingList(), room, () => {});
+  // Talk older than the list's longest wait: the first pass starts at once.
+  session.addSpeech("p1", "Joe", "We should ship the fix today.", Date.now() - 30_000);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(calls, 1, "one failed pass, then a wait");
+  await session.end();
+});
+
+test("what isn't a message is ignored, and a remark only moves to an item on this agenda", async () => {
+  const { db, session, items, meetingId } = setup();
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  for (const raw of ["null", "42", '"chat"', '{"text":"no type"}', '{"type":"chat","text":"hi","cid":7}']) joe.emit("message", Buffer.from(raw));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(db.meetingSegments(meetingId).length, 0, "nothing landed in the transcript");
+  assert.equal(joe.got.filter((m) => m.type === "error").length, 0, "and nothing threw");
+  await say(joe, { type: "chat", text: "On the first item" });
+  const [seg] = db.meetingSegments(meetingId);
+  await say(joe, { type: "segment.move", segmentId: seg.id, itemId: "elsewhere" });
+  assert.equal(db.meetingSegments(meetingId)[0].itemId, seg.itemId, "an id from no agenda here is refused");
+  await say(joe, { type: "segment.move", segmentId: seg.id, itemId: items[2].id });
+  assert.equal(db.meetingSegments(meetingId)[0].itemId, items[2].id);
+  await say(joe, { type: "segment.move", segmentId: seg.id, itemId: null });
+  assert.equal(db.meetingSegments(meetingId)[0].itemId, null, "General is fine");
+});
+
+test("finishing a brainstorm mid-call reads the talk no pass has read, then the call goes on without it", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const b = startBrainstorm(db, room.id, "How should a review start?", "Joe");
+  let passes = 0;
+  const agent = Object.assign(new HeuristicAgent(), {
+    async brainstormMap() {
+      passes++;
+      return { add: [{ under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }], extend: [], caught: [] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  session.addSpeech("p1", "Huy", "start from what shipped", Date.now());
+  assert.deepEqual(await session.finishExperience(), ["brainstorm"]);
+  assert.equal(passes, 1, "one last pass before the map is the record");
+  assert.deepEqual(db.getBrainstorm(b.id)!.nodes.map((n) => n.label), ["From the work"]);
+  assert.equal(db.getBrainstorm(b.id)!.status, "done");
+  session.addSpeech("p1", "Huy", "and now something else", Date.now());
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(passes, 1, "no map passes once it's finished");
+  await session.end();
 });

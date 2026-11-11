@@ -107,6 +107,31 @@ test("after the host moves to another agenda item, the next thread there shows w
   assert.match(asked[1], /host just moved the meeting/);
 });
 
+test("a move proposed by a pass that ran while the host changed the agenda item is dropped", async () => {
+  const { model } = scripted([{ shift: shift("Audio bug") }, { shift: shift("Old item move") }, { shift: shift("Pricing toggle") }]);
+  let midPass: (() => void) | null = null;
+  const card = model.boardCard.bind(model);
+  model.boardCard = async (c, t) => {
+    const a = await card(c, t);
+    midPass?.();
+    return a;
+  };
+  const k = new BoardKeeper(model, T0);
+  const talk = [say(1, 0, "a"), say(2, 5 * S, "a")];
+  await k.run(talk, [], [], "a", T0 + 10 * S);
+  talk.push(say(3, 15 * S, "a"), say(4, 18 * S, "a"));
+  midPass = () => k.focused("b", T0 + 20 * S);
+  await k.run(talk, [], [], "a", T0 + 19 * S);
+  midPass = null;
+  assert.equal(k.board().pending, null, "the move read for item a doesn't wait to be confirmed");
+  talk.push(say(5, 30 * S, "b"));
+  await k.run(talk, [], [], "b", T0 + 35 * S);
+  const b = k.board();
+  assert.equal(b.threads.length, 2);
+  assert.equal(b.threads[1].title, "Pricing toggle");
+  assert.equal(b.threads[1].itemId, "b");
+});
+
 test("the drift check reads only the title and the talk, and a move it finds is put to the card model", async () => {
   const { model, asked, driftAsked } = scripted(
     [{ shift: shift("Recap page review") }, {}, {}, {}, { shift: shift("Can an agent catch drift?") }, { shift: shift("Can an agent catch drift?") }],

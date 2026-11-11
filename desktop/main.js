@@ -459,8 +459,7 @@ async function callElsewhere() {
 }
 
 /** Snaps, and resolves to what to tell the person ({ title, body }), or nothing when they
- *  cancelled. The shortcut shows it as a notification; the page's Snap button shows it in
- *  the page, where it can't be missed. */
+ *  cancelled. tell() shows it on the bar or as a notification. */
 async function snap(from, onDisplay) {
   const report = await snapOn(from, onDisplay);
   // A click on another display moves the toolbar there.
@@ -561,11 +560,11 @@ async function snapOn(from, onDisplay) {
     me.saving = true;
     // Where it began says where it's reported: from the page's Snap button, in the page;
     // otherwise on the bar while it's up, else in the page if Stand is in front (and in the meeting).
-    const onBar = Boolean(to && prefs.toMeeting && from !== "page" && bar?.isVisible());
+    const onBar = Boolean(to && prefs.toMeeting && bar?.isVisible());
     if (onBar) bar.webContents.send("bar:report", { title: "Saving snap…", pending: true });
     const inPage = Boolean(roomId && prefs.toMeeting && !onBar && win?.isVisible());
     if (inPage) win.webContents.send("app:command", "saving");
-    const report = await deliver(image, shotAt, prefs, to).finally(() => inPage && !win.isDestroyed() && win.webContents.send("app:command", "saved"));
+    const report = await deliver(image, shotAt, prefs, to).finally(() => inPage && win && !win.isDestroyed() && win.webContents.send("app:command", "saved"));
     void addText(report.snapId, reading);
     // The bar said it was saving, so the bar says how it went, wherever the snap began.
     if (onBar && bar && !bar.isDestroyed()) {
@@ -968,7 +967,7 @@ const copyImage = (image) => clipboard.write([new ClipboardItem({ "image/png": n
  *  jot=, pinned to a note). A blip in the connection shouldn't lose it: a few tries, each with a
  *  time limit, as in the page. extra.key, when given, is the key for every try instead of a new
  *  one. Resolves to {ok, id} or {ok: false, why}. */
-async function postSnap(image, at, roomId, extra = {}, line = "") {
+async function postSnap(image, at, roomId, extra = {}) {
   const { width: w, height: h } = image.getSize();
   const body = image.toJPEG(90);
   // One key for every try, so a try that got through before timing out isn't saved twice.
@@ -984,7 +983,7 @@ async function postSnap(image, at, roomId, extra = {}, line = "") {
     if (left < 2000) break;
     res = await standFetch(`/api/rooms/${encodeURIComponent(roomId)}/snaps?${query}`, {
       method: "POST",
-      headers: { "content-type": "image/jpeg", ...(line ? { "x-stand-line": encodeURIComponent(line) } : {}) },
+      headers: { "content-type": "image/jpeg" },
       body,
       signal: AbortSignal.timeout(Math.min(limit, left)),
     }).catch(() => null);
@@ -2048,7 +2047,6 @@ app.whenReady().then(async () => {
   if (mac && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, "build", "icon.png"));
   showWindow();
   // The Snap button on Stand's meeting page.
-  ipcMain.handle("app:snap", (e) => (isStand(e.senderFrame?.url) ? snap("page") : null));
   // The meeting page, and the floating bar's buttons.
   ipcMain.on("app:meeting", (e, m) => e.sender === win?.webContents && isStand(e.senderFrame?.url) && setMeeting(m));
   // How loud your mic is, for the bar's ring. Only a number, and only while the bar is up.

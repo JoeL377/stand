@@ -31,7 +31,9 @@ Something true about the project that nobody had to choose, and the next person 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
 const fail = (err: unknown) => {
   if (err instanceof AgentError) return { content: [{ type: "text" as const, text: err.message }], isError: true };
-  throw err;
+  // A fault in Stand, not in what the agent asked: logged here, and the agent gets a plain message.
+  console.error("[mcp] tool failed:", err);
+  return { content: [{ type: "text" as const, text: "Stand hit an error doing that. Try again, and tell the person if it keeps failing." }], isError: true };
 };
 const run = (fn: () => unknown) => {
   try {

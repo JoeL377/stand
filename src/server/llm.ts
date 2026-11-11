@@ -287,9 +287,6 @@ export function createAgent(): Agent {
   return config.anthropicKey ? new ClaudeAgent(config.anthropicKey) : new HeuristicAgent();
 }
 
-const transcriptText = (segments: Segment[]) =>
-  segments.map((s) => `${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`).join("\n");
-
 /** The space's synthesis instructions as a section of the notes prompt: they shape
  *  emphasis and wording, never the structure, and never drop a note. */
 const asked = (instructions?: string) =>
@@ -798,6 +795,7 @@ This is the record people will read after the meeting, and a position put in oth
       ],
       "You match a shared screen to a meeting agenda. Be conservative: a wrong guess interrupts the meeting host.",
       "low",
+      config.quickModel,
     );
     if (!out || !out.item_id || !items.some((i) => i.id === out.item_id)) {
       return { itemId: null, confidence: 0, reason: out?.reason ?? "" };
@@ -811,6 +809,7 @@ This is the record people will read after the meeting, and a position put in oth
       `Make a slide deck from this brief:\n\n${brief.slice(0, 20000)}`,
       "You write slide decks for team meetings. If the brief is already an outline, keep its structure and wording and only tidy it into slides. Otherwise write a tight deck: a title slide, then one idea per slide, few words per bullet, no filler slides. Every slide will be discussed in the meeting, so make each one something people can react to.",
       "medium",
+      config.deckModel,
     );
     if (!out) return outlineToSlides(brief);
     return out.slides.slice(0, 60).map((s) => ({ ...s, image: null }));
@@ -830,6 +829,7 @@ This is the record people will read after the meeting, and a position put in oth
       ],
       "You caption screenshots from team meetings so people and agents can find them later. Be concrete: name the ticket, file, chart, page or error shown, and the detail that matters. No preamble.",
       "low",
+      config.quickModel,
     );
     return out?.caption.trim().slice(0, 160) || null;
   }
@@ -854,6 +854,7 @@ This is the record people will read after the meeting, and a position put in oth
       ],
       "You caption screenshots people save for their team so people and agents can find them later. Be concrete: name the ticket, file, chart, page or error shown, and the detail that matters. No preamble. Only pick an item when the screenshot or what they wrote is plainly about it.",
       "low",
+      config.quickModel,
     );
     if (!out) return null;
     const pick = out.item ? listed[Number(out.item.replace(/\D/g, "")) - 1] : undefined;
@@ -870,6 +871,7 @@ This is the record people will read after the meeting, and a position put in oth
         .join("\n")}\n\nWhich item is it about?`,
       "You file notes people save for their team under the agenda item they're about. Only pick an item when the note is plainly about it.",
       "low",
+      config.quickModel,
     );
     return out?.item ? (listed[Number(out.item.replace(/\D/g, "")) - 1]?.id ?? null) : null;
   }
@@ -1100,6 +1102,7 @@ These are suggestions: the author decides what goes in front of the team.`,
 
   async doneDeck(prompt: string, system: string): Promise<DoneDeckDraft | null> {
     // Written between meetings, read out at the start of the next one: worth the bigger model.
+    // It runs in batches (doneDeck.ts DONE_BATCH_MS), not after every report.
     return this.parse(DoneDeckSchema, prompt, system, "medium", config.anthropicModel, { maxTokens: 8000 });
   }
 

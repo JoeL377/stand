@@ -46,7 +46,7 @@ function setup() {
   db.touchMembership(room.id, joe.id);
   db.touchMembership(room.id, andy.id);
   const m = db.startMeeting(room.id);
-  const notes = db.replaceNotes(m.id, null, [
+  const notes = db.syncNotes(m.id, null, [
     { kind: "action", text: "Move transcript capture to the server", owner: "Joe", discussionId: null },
     { kind: "question", text: "Do we need it on mobile first?", owner: null, discussionId: null },
   ]);

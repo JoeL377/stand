@@ -38,7 +38,7 @@ test("topic edits survive live redrafts, rewording and delete/restore, including
   try {
     const room = db.createRoom("Topics");
     const m = db.startMeeting(room.id);
-    const notes = db.replaceNotes(m.id, null, [
+    const notes = db.syncNotes(m.id, null, [
       { kind: "action", text: "Check prices", owner: "Sam" },
       { kind: "decision", text: "Choose monthly", owner: null },
       { kind: "question", text: "Annual too?", owner: null },
@@ -46,7 +46,7 @@ test("topic edits survive live redrafts, rewording and delete/restore, including
     db.setNoteTopic(room.id, notes[0].id, "Pricing");
     db.setNoteTopic(room.id, notes[1].id, "");
     db.setNoteTopic(room.id, notes[2].id, "Billing");
-    const redrafted = db.replaceNotes(m.id, null, notes.map((n) => ({ ...n, text: n.kind === "question" ? "Offer annual billing?" : n.text })));
+    const redrafted = db.syncNotes(m.id, null, notes.map((n) => ({ ...n, text: n.kind === "question" ? "Offer annual billing?" : n.text })));
     assert.deepEqual(redrafted.map((n) => n.topic), ["Pricing", "", "Billing"]);
     db.editNote(notes[0].id, { text: "Compare prices", owner: "Sam" }, "Sam");
     assert.equal(db.getNote(notes[0].id)?.topic, "Pricing");

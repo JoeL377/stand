@@ -1,0 +1,85 @@
+// A meeting's recap and brief, and the space's follow-ups feed.
+import type { Express } from "express";
+import type { MeetingRecap } from "../../shared/protocol.ts";
+import { brainstormOfMeeting } from "../brainstorm.ts";
+import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "../brief.ts";
+import { designReviewOfMeeting } from "../designReviews.ts";
+import { ideaReviewOfMeeting } from "../ideaReview.ts";
+import { reviewOfMeeting } from "../reviews.ts";
+import type { Services } from "../services.ts";
+import { notFound, route } from "./http.ts";
+
+export function meetingRoutes(app: Express, ctx: Services) {
+  const { db, meetingGroups } = ctx;
+  app.get(
+    "/api/meetings/:id",
+    route((req, res) => {
+      const m = db.getMeeting(req.params.id);
+      if (!m) return notFound(res);
+      const room = db.getRoom(m.roomId)!;
+      const body: MeetingRecap = {
+        meetingId: m.id,
+        roomId: m.roomId,
+        roomName: room.name,
+        startedAt: m.startedAt,
+        endedAt: m.endedAt,
+        summary: m.summary,
+        synthesis: m.synthesis,
+        items: meetingGroups(m),
+        chapters: m.chapters,
+        cost: db.meetingCost(m.id),
+        review: reviewOfMeeting(db, m.id),
+        ideaReview: ideaReviewOfMeeting(db, m.id),
+        designReview: designReviewOfMeeting(db, m.id),
+        brainstorm: brainstormOfMeeting(db, m.id),
+      };
+      res.json(body);
+    }),
+  );
+
+  // The meeting brief for follow-up: /brief.json for agents and tools,
+  // /brief.md for pasting. Add ?transcript=1 to include what was said.
+  app.get(
+    "/api/meetings/:id/brief.:format",
+    route((req, res) => {
+      const m = db.getMeeting(req.params.id);
+      if (!m || !["json", "md"].includes(req.params.format)) return notFound(res);
+      const brief = buildBrief({
+        meeting: m,
+        roomName: db.getRoom(m.roomId)!.name,
+        synthesisInstructions: db.getRoom(m.roomId)!.synthesisInstructions,
+        groups: meetingGroups(m, `${req.protocol}://${req.get("host")}`),
+        decks: db.listDecks(m.roomId),
+        baseUrl: `${req.protocol}://${req.get("host")}`,
+        followUps: db.roomFollowUps(m.roomId),
+        itemById: (id) => db.getItem(id),
+        discussionById: (id) => db.getDiscussion(id),
+        withTranscript: req.query.transcript === "1",
+      });
+      if (req.params.format === "json") return void res.json(brief);
+      res.type("text/markdown; charset=utf-8").send(briefToMarkdown(brief));
+    }),
+  );
+
+  // The room's follow-ups across meetings: the standing to-do list for people
+  // and agents. ?status=open (default), done or all; .json or .md.
+  app.get(
+    "/api/rooms/:id/followups.:format",
+    route((req, res) => {
+      const room = db.getRoom(req.params.id);
+      if (!room || !["json", "md"].includes(req.params.format)) return notFound(res);
+      const status = (["open", "done", "all"] as const).find((s) => s === req.query.status) ?? "open";
+      const feed = buildFollowUps({
+        room,
+        followUps: db.roomFollowUps(room.id),
+        itemById: (id) => db.getItem(id),
+        decks: db.listDecks(room.id),
+        baseUrl: `${req.protocol}://${req.get("host")}`,
+        status,
+        discussionById: (id) => db.getDiscussion(id),
+      });
+      if (req.params.format === "json") return void res.json(feed);
+      res.type("text/markdown; charset=utf-8").send(followUpsToMarkdown(feed));
+    }),
+  );
+}

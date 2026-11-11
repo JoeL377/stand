@@ -22,13 +22,13 @@ test("after the call each capture is filed under the slide it was about", async 
   const m = db.startMeeting(room.id);
   const [first, second] = db.listItems(room.id);
   const said = (text: string) => ({ segmentId: "s", speaker: "Huy Ngo", text, ts: Date.now() });
-  const [general, echo, asked] = db.replaceNotes(m.id, first.id, [
+  const [general, echo, asked] = db.syncNotes(m.id, first.id, [
     { kind: "action", text: "Book the offsite", owner: null, quote: said("we should book the offsite") },
     { kind: "question", text: "Does the hero read well on phones?", owner: null },
     { kind: "question", text: "Keep the old pricing table?", owner: null, quote: said("do we keep the pricing table") },
     { kind: "context", text: "Huy walked through the page", owner: null },
   ]);
-  const [late, stays] = db.replaceNotes(m.id, second.id, [
+  const [late, stays] = db.syncNotes(m.id, second.id, [
     { kind: "action", text: "Shrink the hero on phones", owner: "Huy Ngo", quote: said("the hero is too tall on my phone") },
     { kind: "decision", text: "Dark mode ships behind a setting", owner: null },
   ]);

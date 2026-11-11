@@ -9,14 +9,21 @@
 import { createHash } from "node:crypto";
 import type { DoneDeck, DoneSlide, ItemUpdate, Note, WorkShot } from "../shared/protocol.ts";
 import { closedLabel, closedPr } from "../shared/tasks.ts";
+import { config } from "./config.ts";
 import type { DB } from "./db.ts";
 import type { Agent, DoneDeckDraft } from "./llm.ts";
 import { prOf, shotUrl } from "./workLog.ts";
 
-/** A burst of closes (an agent finishing three to-dos) makes one pass, this long after the last. */
-export const DONE_DEBOUNCE_MS = 20_000;
+// Off unless DONE_SINCE=on (config.ts): the pages cost a Claude call after every report between
+// meetings, and may come back as something an agent writes over the MCP. While off, nothing is
+// written or shown, and the pages already saved stay in the database.
+
+/** Reports and closes between meetings are batched: the first one starts the wait, later ones join
+ *  it, so a space gets at most one pass this often however busy its agents are. Each pass is a
+ *  Claude call over everything closed since the last meeting, and agents report many times a day. */
+export const DONE_BATCH_MS = 30 * 60_000;
 /** Every so often, a look over every space, for closes nothing told us about. */
-export const DONE_SWEEP_MS = 10 * 60_000;
+export const DONE_SWEEP_MS = 60 * 60_000;
 const MAX_SLIDES = 8;
 const MAX_POINTS = 7;
 /** Points on the plain pages (no model). */
@@ -213,6 +220,7 @@ export function plainSlides(input: DoneInput, notes: Note[], title = "Done"): Do
 /** The pages as they stand for a meeting starting at `before` (or now): only when they count from the
  *  last meeting before it, and have something on them. */
 export function currentDoneDeck(db: DB, roomId: string, before?: number): DoneDeck | null {
+  if (!config.doneSince) return null;
   const last = db.lastRealMeeting(roomId, before);
   const deck = db.getDoneDeck(roomId);
   if (!deck || !last || deck.since !== last.endedAt || !deck.slides.length) return null;
@@ -221,7 +229,7 @@ export function currentDoneDeck(db: DB, roomId: string, before?: number): DoneDe
 }
 
 export class DoneDecks {
-  private timers = new Map<string, NodeJS.Timeout>();
+  private timers = new Map<string, { timer: NodeJS.Timeout; due: number }>();
   private running = new Set<string>();
   private sweeper: NodeJS.Timeout | null = null;
 
@@ -234,23 +242,31 @@ export class DoneDecks {
     private changed: (roomId: string) => void,
   ) {}
 
-  /** A task in the space closed (or reopened): rewrite the pages shortly. */
-  schedule(roomId: string, delayMs = DONE_DEBOUNCE_MS) {
-    clearTimeout(this.timers.get(roomId));
-    this.timers.set(
-      roomId,
-      setTimeout(() => {
-        this.timers.delete(roomId);
-        this.run(roomId).catch((err) => console.error("[agent] done since last time failed:", err));
-      }, delayMs),
-    );
+  /** A task in the space closed or moved: rewrite the pages in a while. A pass already waiting keeps
+   *  its time unless this asks for sooner, so a stream of reports never pushes it back. */
+  schedule(roomId: string, delayMs = DONE_BATCH_MS) {
+    if (!config.doneSince) return;
+    const due = Date.now() + delayMs;
+    const waiting = this.timers.get(roomId);
+    if (waiting && waiting.due <= due) return;
+    if (waiting) clearTimeout(waiting.timer);
+    const timer = setTimeout(() => {
+      this.timers.delete(roomId);
+      this.run(roomId).catch((err) => console.error("[agent] done since last time failed:", err));
+    }, delayMs);
+    timer.unref?.();
+    this.timers.set(roomId, { timer, due });
   }
 
   /** Every space with something closed lately, now and every so often: picks up what nothing told us about,
    *  and on the first start fills in the pages for closes from before this existed. */
   start() {
+    if (!config.doneSince) return;
     const sweep = () => {
-      for (const roomId of this.db.roomsWithClosesSince(Date.now() - 60 * 86_400_000)) this.schedule(roomId, 1000 + Math.random() * 5000);
+      // A space with a batch already waiting is left to it. Elsewhere this only calls Claude when
+      // something changed since the pages were written (run() compares the basis).
+      for (const roomId of this.db.roomsWithClosesSince(Date.now() - 60 * 86_400_000))
+        if (!this.timers.has(roomId)) this.schedule(roomId, 1000 + Math.random() * 5000);
     };
     sweep();
     this.sweeper = setInterval(sweep, DONE_SWEEP_MS);
@@ -259,7 +275,7 @@ export class DoneDecks {
 
   stop() {
     if (this.sweeper) clearInterval(this.sweeper);
-    for (const t of this.timers.values()) clearTimeout(t);
+    for (const t of this.timers.values()) clearTimeout(t.timer);
     this.timers.clear();
   }
 

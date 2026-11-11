@@ -97,12 +97,15 @@ function NextPage() {
   const spec = specs.find((s) => s.taskId === params.get("spec")) ?? specs[0];
   const points = specs.reduce((n, s) => n + pointsOnDeck(s.points).length, 0);
   const live = data.review?.status === "live";
+  /** Saves a change to the spec's slides. False when it failed (the person was told), so a form keeps what they typed. */
   const change = async (taskId: string, c: BriefChange) => {
     try {
       const { spec: next } = await api.prepareDesignReview(taskId, c);
       setData((d) => (d?.review && next ? { ...d, review: { ...d.review, specs: d.review.specs.map((s) => (s.taskId === taskId ? next : s)) } } : d));
+      return true;
     } catch (err) {
       errorToast("Couldn't save that")(err);
+      return false;
     }
   };
 
@@ -179,7 +182,7 @@ function NextPage() {
   );
 }
 
-function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; spec: DesignSpec; live: boolean; change: (c: BriefChange) => Promise<void>; onRemove: () => void }) {
+function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; spec: DesignSpec; live: boolean; change: (c: BriefChange) => Promise<boolean>; onRemove: () => void }) {
   const { brief, mine } = spec;
   const whole = spec.points.filter((p) => p.placed && !p.section);
   const lost = spec.points.filter((p) => !p.placed);
@@ -353,7 +356,7 @@ function SectionPart(props: {
   section: BriefSection;
   points: DesignPoint[];
   mine: boolean;
-  change: (c: BriefChange) => Promise<void>;
+  change: (c: BriefChange) => Promise<boolean>;
   /** How many lines of the section its slide shows. */
   lines: number;
   /** What the author can do with its place: join the slide above, or leave the one it shares. */
@@ -423,7 +426,7 @@ function Editable(props: {
   list?: boolean;
   hint?: string;
   empty: string;
-  onSave: (text: string) => Promise<void>;
+  onSave: (text: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -446,9 +449,9 @@ function Editable(props: {
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        await props.onSave(draft);
+        const saved = await props.onSave(draft);
         setBusy(false);
-        setDraft(null);
+        if (saved) setDraft(null);
       }}
     >
       <textarea aria-label={props.label} autoFocus rows={props.rows} maxLength={props.max} value={draft} readOnly={busy} onChange={(e) => setDraft(e.target.value)} dir="auto" />
@@ -466,7 +469,7 @@ function Editable(props: {
 }
 
 /** The questions on a slide: the call opens each one in turn there, unless the author takes it off the call. */
-function Points({ points, mine, change }: { points: DesignPoint[]; mine: boolean; change: (c: BriefChange) => Promise<void> }) {
+function Points({ points, mine, change }: { points: DesignPoint[]; mine: boolean; change: (c: BriefChange) => Promise<boolean> }) {
   if (!points.length) return null;
   return (
     <div className="dr-points">
@@ -489,7 +492,7 @@ function Points({ points, mine, change }: { points: DesignPoint[]; mine: boolean
   );
 }
 
-function Ask({ label, onAsk }: { label: string; onAsk: (question: string) => Promise<void> }) {
+function Ask({ label, onAsk }: { label: string; onAsk: (question: string) => Promise<boolean> }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   return (
@@ -499,9 +502,9 @@ function Ask({ label, onAsk }: { label: string; onAsk: (question: string) => Pro
         e.preventDefault();
         if (!text.trim()) return;
         setBusy(true);
-        await onAsk(text.trim());
+        const saved = await onAsk(text.trim());
         setBusy(false);
-        setText("");
+        if (saved) setText("");
       }}
     >
       <input aria-label={label} placeholder="Ask the team a question here…" maxLength={TASK_COMMENT_MAX} value={text} readOnly={busy} onChange={(e) => setText(e.target.value)} dir="auto" />

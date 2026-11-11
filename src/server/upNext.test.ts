@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { config } from "./config.ts";
 import type { ItemUpdate, Note } from "../shared/protocol.ts";
 import { openDb } from "./db.ts";
 import { type AgendaDraftRow, HeuristicAgent } from "./llm.ts";
 import { applyPolish, computeUpNext, polishBasis, type UpNextInput } from "./upNext.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
+
+// These tests cover the suggested agenda itself, which production has off for now (config.ts).
+config.suggestedAgenda = true;
 
 const note = (id: string, meetingId: string, kind: Note["kind"], text: string, extra: Partial<Note> = {}): Note => ({
   id,
@@ -275,4 +279,23 @@ test("Conxt's open items join the agenda as needing people, and can be dismissed
   assert.ok(upNext.suggestions.indexOf(c1) < upNext.suggestions.findIndex((s) => s.key === "conxt:q1"));
   const dismissed = computeUpNext(base({ conxt, dismissed: new Map([["conxt:c1", 400]]) })).upNext;
   assert.equal(dismissed.suggestions.some((s) => s.key === "conxt:c1"), false);
+});
+
+test("with the suggested agenda off, nothing is suggested and reports between meetings run no pass", async () => {
+  config.suggestedAgenda = false;
+  try {
+    const db = openDb(":memory:");
+    const room = db.createRoom("Off", "u1", "Ann");
+    const view = upNextView(db, room.id, null).upNext;
+    assert.deepEqual([view.suggestions, view.parked, view.total], [[], [], 0]);
+    let calls = 0;
+    const agent = Object.assign(new HeuristicAgent(), { polishAgenda: async () => (calls++, []) });
+    const polisher = new UpNextPolisher(db, agent, () => null, () => {});
+    polisher.schedule(room.id, 60_000);
+    await new Promise((r) => setTimeout(r, 20));
+    await polisher.run(room.id);
+    assert.equal(calls, 0);
+  } finally {
+    config.suggestedAgenda = true;
+  }
 });
