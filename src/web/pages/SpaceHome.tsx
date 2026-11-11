@@ -16,7 +16,7 @@ import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
-import { ArchiveIcon, CameraIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
@@ -32,6 +32,7 @@ import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designRe
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { TaskDrawer } from "../TaskDrawer.tsx";
+import { SpaceChat, useSpaceChat } from "../SpaceChat.tsx";
 import { Opener } from "../room/Opener.tsx";
 
 type Entry =
@@ -47,6 +48,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
   const [upNext, setUpNext] = useState<UpNext | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const chat = useSpaceChat(room.id, user.id);
   // The snap open big: one on its own, or a note's pictures with the note.
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -219,6 +221,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     tasks: todos.length + questions.length,
     decisions: decisions.filter((n) => !n.replacedBy).length,
     next: agenda.length + suggested.length,
+    // Chat counts what you haven't read, not what is there.
+    chat: chat.unread,
   };
   const deck = feed?.doneDeck ?? null;
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
@@ -299,7 +303,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
 
   return (
   <PersonColors.Provider value={colorFor}>
-    <SpacesShell spaces={spaces}>
+    <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread } : s))}>
       <main className="sh-main">
         {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls and only the tabs stay. */}
         <div className="sh-top">
@@ -361,7 +365,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         </div>
         </div>
         {/* The lists scroll in here, under the header, which is a fixed part of the page. */}
-        <div className="sh-body" onScroll={(e) => e.currentTarget.previousElementSibling?.classList.toggle("over", e.currentTarget.scrollTop > 2)}>
+        <div className={tab === "chat" ? "sh-body chat" : "sh-body"} onScroll={(e) => e.currentTarget.previousElementSibling?.classList.toggle("over", e.currentTarget.scrollTop > 2)}>
 
         {showReview && feed?.review && (
           <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
@@ -370,6 +374,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         {showSession && <DesignSessionPop todos={todos.filter((t) => !t.doneAt)} onStart={startSession} onClose={() => setShowSession(false)} />}
 
         <section className={`sh-panel ${tab}`} role="tabpanel">
+          {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} />}
           {tab === "meetings" && (
             <>
               {error && !feed && (
@@ -553,7 +558,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               <p className="sh-card-empty">Nothing on the agenda yet. Suggestions come from meetings and what people save here.</p>
             ))}
 
-          {(!(tab === "tasks" || tab === "decisions") || !topicFilter) && <ArchivedList
+          {tab !== "chat" && (!(tab === "tasks" || tab === "decisions") || !topicFilter) && <ArchivedList
             rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
             open={showArchived}
             onToggle={() => setShowArchived((v) => !v)}
@@ -1298,7 +1303,7 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "tasks" | "meetings" | "decisions" | "next";
+type TabKey = "tasks" | "chat" | "meetings" | "decisions" | "next";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
@@ -1321,6 +1326,7 @@ function ArchiveButton({ onClick }: { onClick: () => void }) {
 /** Which archived rows each tab lists at its bottom. */
 const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
   tasks: ["todo", "question"],
+  chat: [],
   meetings: ["meeting", "snap", "jot"],
   decisions: ["decision"],
   next: ["item", "deck", "suggestion"],
@@ -1358,6 +1364,7 @@ function ArchivedList(props: { rows: ArchivedRow[]; open: boolean; onToggle: () 
 
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
+  { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
   { key: "decisions", label: "Decisions", icon: <DecidedIcon size={14} /> },
   { key: "next", label: "Up next" },

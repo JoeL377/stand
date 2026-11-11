@@ -1289,6 +1289,8 @@ export interface SpaceSummary {
   waiting?: number;
   /** Open tasks where a comment tags you and waits on you. */
   mentions?: number;
+  /** Chat messages from other people that you haven't read. */
+  unread?: number;
   /** The latest decision or open question, for the card's last line. */
   last: { kind: "decision" | "question" | "action"; text: string; ts: number } | null;
   /** People who have been in it. */

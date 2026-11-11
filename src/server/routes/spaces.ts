@@ -33,6 +33,7 @@ export function spaceRoutes(app: Express, ctx: Services) {
         if (!mentioned.has(u.roomId)) mentioned.set(u.roomId, new Set());
         mentioned.get(u.roomId)!.add(u.noteId);
       }
+      const unread = db.unreadChat(user.id);
       const spaces = db.spaceRows(user.id).map((row) => {
         const live = sessions.get(row.id);
         const state = live && !live.ended ? live.state() : null;
@@ -51,6 +52,7 @@ export function spaceRoutes(app: Express, ctx: Services) {
             : null,
           waiting.get(row.id) ?? 0,
           mentioned.get(row.id)?.size ?? 0,
+          unread.get(row.id) ?? 0,
         );
       });
       res.json(spaces.sort((a, b) => b.activeAt - a.activeAt));

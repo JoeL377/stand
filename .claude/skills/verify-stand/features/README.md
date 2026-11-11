@@ -8,5 +8,6 @@ One file per user-facing feature: how a person reaches it, how `drive.cjs` drive
 | Live meeting and notes | [live-meeting.md](live-meeting.md) | `meeting` | yes, with the scripted demo (no real audio) |
 | End meeting, space page and recap | [end-and-recap.md](end-and-recap.md) | `meeting` | yes |
 | Agent MCP | [agent-mcp.md](agent-mcp.md) | `mcp` | yes |
+| Chat | [chat.md](chat.md) | `chat.cjs` (its own script) | yes, without capture (not built yet) |
 | Design review | [design-review.md](design-review.md) | `design-review.cjs` (its own script) | yes, without the AI brief (needs a key) |
 | Bar notes and snaps | [bar-notes-and-snaps.md](bar-notes-and-snaps.md) | none | no, needs the Mac app |

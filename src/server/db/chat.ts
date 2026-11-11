@@ -110,6 +110,31 @@ export function chatStore(db: DatabaseSync) {
       db.prepare("UPDATE chat_messages SET deleted_at = ? WHERE segment_id = ?").run(at, id);
       return this.chatMessage(id);
     },
+    /** This person has read the channel up to this message. It never moves back. */
+    markChannelRead(channelId: string, userId: string, upTo: number) {
+      db.prepare(
+        `INSERT INTO channel_reads (channel_id, user_id, read_up_to) VALUES (?, ?, ?)
+         ON CONFLICT (channel_id, user_id) DO UPDATE SET read_up_to = MAX(read_up_to, excluded.read_up_to)`,
+      ).run(channelId, userId, upTo);
+    },
+    channelReadUpTo(channelId: string, userId: string): number {
+      const r = db.prepare("SELECT read_up_to FROM channel_reads WHERE channel_id = ? AND user_id = ?").get(channelId, userId) as Row | undefined;
+      return (r?.read_up_to as number) ?? 0;
+    },
+    /** Messages other people wrote that this person hasn't read, in each of their spaces that has some. */
+    unreadChat(userId: string): Map<string, number> {
+      const rows = db
+        .prepare(
+          `SELECT ch.room_id, COUNT(*) AS n FROM channels ch
+           JOIN room_members x ON x.room_id = ch.room_id AND x.user_id = ?
+           LEFT JOIN channel_reads r ON r.channel_id = ch.id AND r.user_id = x.user_id
+           JOIN chat_messages c ON c.channel_id = ch.id AND c.seq > COALESCE(r.read_up_to, 0) AND c.deleted_at IS NULL
+           JOIN segments s ON s.id = c.segment_id AND s.speaker_id != x.user_id
+           GROUP BY ch.room_id`,
+        )
+        .all(userId) as Row[];
+      return new Map(rows.map((r) => [r.room_id as string, r.n as number]));
+    },
     /** A page of a channel's messages, oldest first: the newest ones, those before a seq, or those after one. */
     channelMessages(channelId: string, page: { before?: number; after?: number; limit?: number } = {}): ChatMessage[] {
       const limit = Math.min(Math.max(page.limit ?? 100, 1), 500);
