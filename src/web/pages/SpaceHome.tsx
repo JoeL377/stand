@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention, UpNext } from "../../shared/protocol.ts";
 import { matchesTopic, topicKey, topicOf, topicOptions } from "../../shared/topics.ts";
 import { TopicPicker } from "../TopicPicker.tsx";
 import { stateOf } from "../../shared/tasks.ts";
@@ -460,6 +460,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               deck={topicFilter ? null : deck}
               open={[...todos, ...questions].filter(matching)}
               closed={[...done, ...closedQuestions].filter(matching)}
+              mentions={feed?.mentions ?? []}
               topicPicker={topicPicker}
               filtered={!!topicFilter}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
@@ -543,7 +544,18 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             onDeleted={load}
           />
         )}
-        {openTask && <TaskDrawer key={openTask} id={openTask} onOpen={showTask} onClose={closeTask} />}
+        {openTask && (
+          <TaskDrawer
+            key={openTask}
+            id={openTask}
+            onOpen={showTask}
+            onClose={closeTask}
+            onMentionsChange={() => {
+              load();
+              api.spaces().then(setSpaces, () => {});
+            }}
+          />
+        )}
       </main>
     </SpacesShell>
   </PersonColors.Provider>
@@ -757,9 +769,10 @@ function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; 
 type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
 
 /**
- * One list for everything still to do in the space: to-dos (Do) and open questions (Answer). Work
- * waiting on someone's look (a PR reported ready) comes first, then the rest grouped by owner, yours
- * first, then folded Done and Dropped. Anyone can tick a task off, drop it or reopen it, with Undo.
+ * One list for everything still to do in the space: to-dos (Do) and open questions (Answer). Tasks
+ * where a comment tags you come first, then work waiting on someone's look (a PR reported ready),
+ * then the rest grouped by owner, yours first, then folded Done and Dropped. Anyone can tick a task
+ * off, drop it or reopen it, with Undo.
  */
 function TasksTab(props: {
   topicPicker: (n: Note) => React.ReactNode;
@@ -770,6 +783,8 @@ function TasksTab(props: {
   deck: DoneDeck | null;
   open: TaskNote[];
   closed: TaskNote[];
+  /** Comments that tag you and wait on you, newest first. */
+  mentions: TaskMention[];
   onArchive: (n: Note) => void;
   reload: () => void;
   openId: string | null;
@@ -780,9 +795,13 @@ function TasksTab(props: {
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
   const work = useWork(props.open.filter((n) => n.kind === "action").map((n) => n.id));
-  const waiting = props.open.filter((n) => work[n.id]?.ready);
+  // The comments that tag you, per task: newest first, so [0] is the latest.
+  const tagged = new Map<string, TaskMention[]>();
+  for (const m of props.mentions) tagged.set(m.noteId, [...(tagged.get(m.noteId) ?? []), m]);
+  const mentioned = props.open.filter((n) => tagged.has(n.id)).sort((a, b) => tagged.get(b.id)![0].ts - tagged.get(a.id)![0].ts);
+  const waiting = props.open.filter((n) => work[n.id]?.ready && !tagged.has(n.id));
   const groups = new Map<string, TaskNote[]>();
-  for (const n of props.open.filter((x) => !work[x.id]?.ready)) {
+  for (const n of props.open.filter((x) => !work[x.id]?.ready && !tagged.has(x.id))) {
     const k = n.owner ? firstName(n.owner) : "";
     groups.set(k, [...(groups.get(k) ?? []), n]);
   }
@@ -821,6 +840,7 @@ function TasksTab(props: {
       onToggle={(n, d) => move(n, d ? "done" : "open")}
       after={(n: TaskNote) => (
         <>
+          {!closed && tagged.has(n.id) && <MentionPill mentions={tagged.get(n.id)!} />}
           {props.topicPicker(n)}
           {n.kind === "question" && <span className="task-verb">Answer</span>}
           {n.saidDone && !n.doneAt && <SaidDonePill quote={n.saidDone} onUndo={() => notSaid(n)} />}
@@ -885,6 +905,14 @@ function TasksTab(props: {
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
       {!props.open.length && <p className="sh-card-empty">{props.filtered ? "No open tasks in this topic." : "Nothing open. New tasks come from meetings and what people save here."}</p>}
+      {mentioned.length > 0 && (
+        <div className="sh-task-group">
+          <p className="sh-group mentioned" title="Someone tagged you in a comment. Reply on the task or dismiss it there.">
+            Mentions you · {mentioned.length}
+          </p>
+          {list(mentioned)}
+        </div>
+      )}
       {waiting.length > 0 && (
         <div className="sh-task-group">
           <p className="sh-group waiting" title="A PR or other work is in and needs someone with a say to look">
@@ -918,6 +946,26 @@ function TasksTab(props: {
 }
 
 /** The done pages in a pop-up, paged like the Kickoff card the next meeting opens on. */
+/** "@ Joe" after a task's text: who tagged you, with their comment in the pop-up. */
+function MentionPill({ mentions }: { mentions: TaskMention[] }) {
+  const [latest] = mentions;
+  const who = [...new Set(mentions.map((m) => firstName(m.by.split(" via ")[0])))].join(", ");
+  return (
+    <span className="rc-pill-wrap">
+      <span className="rc-pill task-mention" tabIndex={0} aria-label={`${who} mentioned you: “${latest.text}”`}>
+        @ {who}
+      </span>
+      <span className="rc-pop" role="tooltip">
+        <span className="rc-pop-crux">“{latest.text.length > 280 ? `${latest.text.slice(0, 279)}…` : latest.text}”</span>
+        <span className="rc-pop-meta">
+          {latest.by} · {fmtDate(latest.ts)} {fmtTime(latest.ts)}
+          {mentions.length > 1 && ` · ${mentions.length} comments`}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function DonePop({ deck, onClose }: { deck: DoneDeck; onClose: () => void }) {
   const [page, setPage] = useState(0);
   useEffect(() => {

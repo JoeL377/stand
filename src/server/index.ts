@@ -46,6 +46,7 @@ import { BrainstormError, brainstormOfMeeting, brainstormPage, brainstormsOf, st
 import { ReviewError, removeSlide, reviewOfMeeting, reviewPage, reviewView, reviewsDone, startReview } from "./reviews.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { ownedBy, toSpaceSummary } from "./spaces.ts";
+import { mentionView, recordMentions } from "./mentions.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
 import { ConxtLiveDelivery } from "./conxtLive.ts";
 import { ConxtDelivery, conxtRoutes, parseDestinations } from "./conxt.ts";
@@ -373,6 +374,8 @@ app.get(
       work: workOf(n, db.notesUpdates([n.id]), db.noteWorkShots([n.id]), true),
       waitsOn: linked(links.filter((l) => l.fromId === n.id).map((l) => l.toId)),
       blocking: linked(links.filter((l) => l.toId === n.id).map((l) => l.fromId)),
+      people: db.roomPeople(n.roomId),
+      mentionsYou: db.openMentions(req.user!.id, n.roomId).filter((u) => u.noteId === n.id).map(mentionView),
     };
     res.json(detail);
   }),
@@ -413,7 +416,19 @@ app.post(
       text,
       links: [],
     });
+    recordMentions(db, comment, user.id);
     res.status(201).json(workLog([comment], [])[0]);
+  }),
+);
+
+// "Dismiss": the comments on this task that tag you stop waiting on you.
+app.post(
+  "/api/tasks/:id/mentions/clear",
+  route((req, res) => {
+    const n = db.getNote(req.params.id);
+    if (!n || !db.isMember(n.roomId, req.user!.id)) return notFound(res);
+    db.clearMentions(n.id, req.user!.id);
+    res.json({ ok: true });
   }),
 );
 
@@ -867,6 +882,12 @@ app.get(
       const n = u.noteId ? db.getNote(u.noteId) : null;
       if (n && ownedBy(n.owner, user.name)) waiting.set(n.roomId, (waiting.get(n.roomId) ?? 0) + 1);
     }
+    // Your open tasks where a comment tags you, per space.
+    const mentioned = new Map<string, Set<string>>();
+    for (const u of db.openMentions(user.id)) {
+      if (!mentioned.has(u.roomId)) mentioned.set(u.roomId, new Set());
+      mentioned.get(u.roomId)!.add(u.noteId);
+    }
     const spaces = db.spaceRows(user.id).map((row) => {
       const live = sessions.get(row.id);
       const state = live && !live.ended ? live.state() : null;
@@ -884,6 +905,7 @@ app.get(
             }
           : null,
         waiting.get(row.id) ?? 0,
+        mentioned.get(row.id)?.size ?? 0,
       );
     });
     res.json(spaces.sort((a, b) => b.activeAt - a.activeAt));
@@ -1555,7 +1577,7 @@ app.get(
     const room = db.getRoom(req.params.id);
     if (!room) return notFound(res, "Space not found");
     db.touchMembership(room.id, req.user!.id);
-    res.json(spaceFeed(db, room.id));
+    res.json({ ...spaceFeed(db, room.id), mentions: db.openMentions(req.user!.id, room.id).map(mentionView) });
   }),
 );
 

@@ -63,11 +63,11 @@ function useArrivalTick(count: number) {
   return state.tick;
 }
 
-/** How many of your tasks in this space have work in and wait on your look. */
+/** How many tasks in this space wait on you: your work to look at, or a comment that tags you. */
 function WaitingCount(props: { count: number; collapsed: boolean }) {
   const tick = useArrivalTick(props.count);
   if (props.count === 0) return null;
-  const label = `${props.count} of your tasks ${props.count === 1 ? "has" : "have"} work in and ${props.count === 1 ? "waits" : "wait"} on your look`;
+  const label = `${props.count} ${props.count === 1 ? "task waits" : "tasks wait"} on you: work to look at, or a comment that tags you`;
   return (
     <span key={tick} className={`sp-count${props.collapsed ? " folded" : ""}${tick > 0 ? " arriving" : ""}`} title={label} aria-label={label}>
       {props.count}
@@ -91,7 +91,7 @@ function SpaceRow(props: { space: SpaceSummary; collapsed: boolean }) {
             </span>
             <span className="sp-side-text">{s.name}</span>
             {s.live && <span className="sr-only">(talking now)</span>}
-            <WaitingCount count={s.waiting ?? 0} collapsed={collapsed} />
+            <WaitingCount count={(s.waiting ?? 0) + (s.mentions ?? 0)} collapsed={collapsed} />
           </>
         )}
       </NavLink>

@@ -1268,6 +1268,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .sp-states { display: flex; gap: 6px; flex-wrap: wrap; }
 .sp-state { font-size: 12px; font-weight: 500; border-radius: 6px; padding: 2px 8px; background: var(--panel-2); color: var(--text); }
 .sp-state.decide { color: var(--warn-text); background: rgb(194 65 12 / 0.1); }
+.sp-state.mention { color: var(--accent-text); background: var(--accent-soft); font-weight: 600; }
 .sp-last { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; margin-top: auto; }
 .sp-last-text { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-last .small { white-space: nowrap; }
@@ -2347,6 +2348,17 @@ a.sh-pill:hover { text-decoration: none; }
 .td-compose textarea { width: 100%; max-height: 25dvh; resize: vertical; }
 .td-compose button { justify-self: end; }
 .td-compose .error { margin: 0; }
+.mention-box { position: relative; }
+.mention-box textarea { width: 100%; max-height: 25dvh; resize: vertical; }
+.mention-list { position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 30; min-width: 200px; max-width: 100%; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); }
+.mention-list li { padding: 6px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.mention-list li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.td-mention { margin: 8px 0 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--accent-soft); font-size: 13px; }
+.td-mention p { margin: 0; }
+.td-mention-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.td-mention-head strong { color: var(--accent-text); }
+.td-mention-head button { margin-left: auto; }
+.td-mention-text { margin: 6px 0 4px !important; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .td-plan-card { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; width: 100%; text-align: left; }
 .td-plan-dialog {
   position: fixed; inset: 0; margin: auto; z-index: 60; overflow: hidden;
@@ -2511,6 +2523,7 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .task-closed { color: var(--ok-text); }
 .task-closed.dropped { color: var(--muted); }
 .task-doing { margin-left: 8px; vertical-align: 1px; color: var(--accent-text); background: var(--accent-soft); }
+.task-mention { margin-left: 8px; vertical-align: 1px; color: var(--accent-text); background: var(--accent-soft); font-weight: 600; }
 .task-ready { background: var(--accent-soft); color: var(--accent-text); }
 .task-state { flex: none; font-size: 11.5px; line-height: 18px; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); }
 @media (max-width: 640px) {
@@ -2520,6 +2533,7 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 }
 .sh-task-group + .sh-task-group { margin-top: 6px; }
 .sh-group.waiting { color: var(--accent-text); }
+.sh-group.mentioned { color: var(--accent-text); }
 .task-verb { margin-left: 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); vertical-align: 1px; }
 .followups li.done.dropped .check, .sh-done .followups li.done.dropped .check { background: var(--panel-2); border-color: var(--line); color: var(--muted); }
 /* A card opened from the card list: the topic as it stood then, on this screen only. */

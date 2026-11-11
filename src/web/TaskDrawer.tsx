@@ -6,17 +6,27 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import type { DesignReviewState } from "../shared/designReview.ts";
-import { TASK_COMMENT_MAX, type TaskDetail, type TaskLink } from "../shared/protocol.ts";
+import { TASK_COMMENT_MAX, type TaskDetail, type TaskLink, type TaskMention } from "../shared/protocol.ts";
 import { STATE_LABEL, VERB_LABEL, stateOf, verbOf } from "../shared/tasks.ts";
 import { api } from "./api.ts";
+import { useAuth } from "./auth.tsx";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { CloseIcon } from "./icons.tsx";
+import { MentionTextarea } from "./MentionTextarea.tsx";
 import { LastReview, designReviewHref } from "./pages/DesignReviewPage.tsx";
 import { PlanReviewBody } from "./PlanReview.tsx";
+import { errorToast } from "./Toasts.tsx";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
 
-export function TaskDrawer({ id, onOpen, onClose }: { id: string; onOpen: (id: string) => void; onClose: () => void }) {
+export function TaskDrawer({ id, onOpen, onClose, onMentionsChange }: {
+  id: string;
+  onOpen: (id: string) => void;
+  onClose: () => void;
+  /** The comments that tag you here stopped waiting on you: the list moves the task back. */
+  onMentionsChange?: () => void;
+}) {
+  const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const planOpen = params.get("view") === "plan";
   const setPlanOpen = (open: boolean) => {
@@ -59,7 +69,10 @@ export function TaskDrawer({ id, onOpen, onClose }: { id: string; onOpen: (id: s
       setTask((prev) => prev && {
         ...prev,
         work: { ...prev.work, log: [comment, ...prev.work.log.filter((entry) => entry.id !== comment.id)] },
+        // A reply answers the comments that tagged you here.
+        mentionsYou: [],
       });
+      onMentionsChange?.();
       setDraft("");
       try {
         if (sessionStorage.getItem(draftKey) === draft) sessionStorage.removeItem(draftKey);
@@ -82,7 +95,7 @@ export function TaskDrawer({ id, onOpen, onClose }: { id: string; onOpen: (id: s
 
   useEffect(() => {
     // A screenshot open over the drawer closes first.
-    const key = (e: KeyboardEvent) => e.key === "Escape" && !planOpen && !document.querySelector('[role="dialog"][aria-modal="true"]') && onClose();
+    const key = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && !planOpen && !document.querySelector('[role="dialog"][aria-modal="true"]') && onClose();
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose, planOpen]);
@@ -108,6 +121,20 @@ export function TaskDrawer({ id, onOpen, onClose }: { id: string; onOpen: (id: s
         {task && n && (
           <div className="td-body">
             <h2 className="td-title">{n.text}</h2>
+            {task.mentionsYou.length > 0 && (
+              <MentionNotice
+                mentions={task.mentionsYou}
+                onDismiss={async () => {
+                  try {
+                    await api.clearMentions(id);
+                    setTask((prev) => prev && { ...prev, mentionsYou: [] });
+                    onMentionsChange?.();
+                  } catch (e) {
+                    errorToast("Couldn't dismiss it")(e);
+                  }
+                }}
+              />
+            )}
             <p className="td-meta">
               <span className={n.owner ? undefined : "muted"}>{n.owner ?? (n.kind === "question" ? "Anyone" : "Unassigned")}</span>
               {task.meeting ? (
@@ -157,15 +184,15 @@ export function TaskDrawer({ id, onOpen, onClose }: { id: string; onOpen: (id: s
         )}
         {task && (
           <form className="td-compose" onSubmit={(e) => { e.preventDefault(); void postComment(); }}>
-            <textarea
+            <MentionTextarea
               aria-label="Write a comment"
-              placeholder="Write a comment…"
+              placeholder="Write a comment… Type @ to tag someone"
               value={draft}
               rows={2}
               maxLength={TASK_COMMENT_MAX}
               readOnly={posting}
-              onChange={(e) => {
-                const value = e.target.value;
+              people={task.people.filter((p) => p.id !== user.id)}
+              onChange={(value) => {
                 setDraft(value);
                 try { sessionStorage.setItem(draftKey, value); } catch {}
               }}
@@ -289,6 +316,23 @@ function RequestReview({ taskId, roomId }: { taskId: string; roomId: string }) {
         {busy ? "Requesting…" : state.last ? "Request review again" : "Request review"}
       </button>
     </span>
+  );
+}
+
+/** "Joe mentioned you": the comments here that tag you, until you reply or dismiss them. */
+function MentionNotice({ mentions, onDismiss }: { mentions: TaskMention[]; onDismiss: () => void }) {
+  const [latest] = mentions;
+  const who = [...new Set(mentions.map((m) => m.by.split(" via ")[0].split(" ")[0]))];
+  return (
+    <section className="td-mention" aria-label="You were tagged">
+      <p className="td-mention-head">
+        <strong>{who.join(", ")} mentioned you</strong>
+        <span className="muted">{fmtAgo(latest.ts)}</span>
+        <button type="button" onClick={onDismiss} title="Take this task out of Mentions you">Dismiss</button>
+      </p>
+      <p className="td-mention-text">{latest.text}</p>
+      <p className="muted small">Reply below, or dismiss it. Until then the task shows first in your task list.</p>
+    </section>
   );
 }
 
