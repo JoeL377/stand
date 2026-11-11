@@ -549,6 +549,7 @@ export function Stage(props: {
               }}
               onOutcome={(outcome) => send({ type: "design.outcome", itemId: focusItem.id, outcome })}
               onRemove={canSteer ? removeNote : undefined}
+              onAdd={canSteer ? (kind, text) => send({ type: "note.add", itemId: focusItem.id, kind, text }) : undefined}
             />
           </div>
         ) : focusItem?.deckId && (focusItem.slideNo || focusItem.slide) ? (

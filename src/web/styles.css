@@ -3130,6 +3130,9 @@ a.sh-review { text-decoration: none; color: inherit; }
 .dr-ask input { flex: 1; min-width: 0; font-size: 13px; }
 .dr-suggest { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .dr-suggest .dr-point { border-left-style: dashed; }
+.dr-record { display: flex; flex-direction: column; gap: 10px; padding-bottom: 18px; }
+.dr-record + .dr-record { border-top: 1px solid var(--line); padding-top: 18px; }
+.rp-pill .rp-count, .rp-pill .dr-changed { font-size: 12px; font-weight: 500; }
 /* A design review slide in the call: a part of the spec on a card, with what Stand caught beside it. */
 .design-stage { text-align: left; min-width: 0; width: 100%; }
 .screen-empty:has(.design-stage) { grid-template-columns: minmax(0, 1fr); }
@@ -3162,6 +3165,7 @@ a.sh-review { text-decoration: none; color: inherit; }
 .ds-group p { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 4px 0; }
 .ds-group p > span:first-child { flex: 1; min-width: 0; }
 .ds-group p.done > span:first-child { text-decoration: line-through; opacity: 0.6; }
+.ds-caught .rv-wrap-add { margin-top: auto; }
 .ds-spec-pane { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--bg); }
 .ds-spec-pane > header { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); min-width: 0; }
 @media (max-width: 760px) {

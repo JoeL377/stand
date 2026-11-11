@@ -25,9 +25,9 @@ import { useDismiss } from "../useDismiss.ts";
 import { fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { BrainstormPicker, brainstormHref } from "./BrainstormPage.tsx";
-import { designReviewHref } from "./DesignReviewPage.tsx";
+import { VerdictCounts, designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
-import type { DesignReviewSummary } from "../../shared/designReview.ts";
+import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { TaskDrawer } from "../TaskDrawer.tsx";
@@ -370,6 +370,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               review={topicFilter ? null : (feed?.review ?? null)}
               reviews={topicFilter ? [] : (feed?.reviews ?? [])}
               designReview={topicFilter ? null : (feed?.designReview ?? null)}
+              designReviews={topicFilter ? [] : (feed?.designReviews ?? [])}
               onStartReview={async () => {
                 try {
                   await api.startReview(room.id);
@@ -707,6 +708,8 @@ function TasksTab(props: {
   reviews: ReviewSummary[];
   /** The specs waiting on the next design review. */
   designReview: DesignReviewSummary | null;
+  /** Design reviews that ran, newest first. */
+  designReviews: DesignReviewRan[];
   onStartReview: () => Promise<void>;
   onRemoveSlide: (slideId: string) => void;
   /** The space's brainstorms, newest first. */
@@ -850,6 +853,20 @@ function TasksTab(props: {
             <ChevronIcon />
           </Link>
         )
+      )}
+      {/* With no next one, the row stays on the last design review that ran. */}
+      {!props.designReview && props.designReviews[0] && (
+        <Link className="sh-done-since sh-review" to={designRecordHref(props.roomId, props.designReviews[0].id)}>
+          <strong>Design review</strong>
+          <span className="sh-done-since-summary">
+            {reviewDay(props.designReviews[0].startedAt)} · {props.designReviews[0].titles.join(" · ")}
+            <VerdictCounts verdicts={props.designReviews[0].verdicts} />
+          </span>
+          <span className="count">
+            {props.designReviews[0].titles.length} {props.designReviews[0].titles.length === 1 ? "spec" : "specs"}
+          </span>
+          <ChevronIcon />
+        </Link>
       )}
       {props.designReview && (
         <Link className="sh-done-since sh-review" to={designReviewHref(props.roomId)}>

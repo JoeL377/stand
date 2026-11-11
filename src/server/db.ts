@@ -2202,6 +2202,15 @@ export function openDb(file?: string) {
     removeReviewSlide(id: string) {
       db.prepare("DELETE FROM review_slides WHERE id = ?").run(id);
     },
+    /** The verdict slide of the last design review that ran on a to-do's plan, with when it started. */
+    lastDesignVerdict(noteId: string): (ReviewSlideRow & { startedAt: number | null }) | null {
+      const r = db
+        .prepare(
+          "SELECT s.*, r.started_at AS review_started_at FROM review_slides s JOIN reviews r ON r.id = s.review_id WHERE s.note_id = ? AND s.role = 'verdict' AND r.kind = 'design' AND r.status = 'done' ORDER BY r.started_at DESC, r.rowid DESC LIMIT 1",
+        )
+        .get(noteId) as Row | undefined;
+      return r ? { ...toReviewSlide(r), startedAt: (r.review_started_at as number) ?? null } : null;
+    },
     /** Puts a review's slides in this order; one from another review moves over. */
     orderReviewSlides(reviewId: string, ids: string[]) {
       const set = db.prepare("UPDATE review_slides SET review_id = ?, position = ? WHERE id = ?");

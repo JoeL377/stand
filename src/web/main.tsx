@@ -27,6 +27,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/r/:roomId" element={<RoomPage />} />
           <Route path="/s/:roomId/review/:reviewId" element={<ReviewPage />} />
           <Route path="/s/:roomId/design-review" element={<DesignReviewPage />} />
+          <Route path="/s/:roomId/design-review/:reviewId" element={<DesignReviewPage />} />
           <Route path="/s/:roomId/brainstorm/:brainstormId" element={<BrainstormPage />} />
           <Route path="/spaces/manage" element={<ManageSpaces />} />
           <Route path="/agents" element={<ConnectAgentPage />} />

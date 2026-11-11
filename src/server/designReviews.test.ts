@@ -4,8 +4,8 @@ import { pointsOnDeck } from "../shared/designReview.ts";
 import { spaceFeed } from "./captures.ts";
 import { openDb } from "./db.ts";
 import {
-  DesignReviewError, authorMay, designReviewState, designReviewView, finishDesignReview, isAuthor, planChanged, prepare, removeSpec, requestReview, setDesignOutcome,
-  specChanged, startDesignReview,
+  DesignReviewError, authorMay, designReviewOfMeeting, designReviewRecord, designReviewState, designReviewView, designReviewsRan, finishDesignReview, isAuthor, lastReviewOf,
+  planChanged, prepare, removeSpec, requestReview, setDesignOutcome, specChanged, startDesignReview, writeBackReview,
 } from "./designReviews.ts";
 import type { Agent } from "./llm.ts";
 import { PlanBriefs } from "./planBrief.ts";
@@ -397,4 +397,87 @@ test("in the call a new comment gets a slide after the one on screen, and the au
   assert.equal(authorMay(db, room.id, slides[0].id, slides[5].id, sam), false);
   assert.equal(authorMay(db, room.id, slides[5].id, slides[6].id, ann), true);
   assert.equal(authorMay(db, room.id, null, slides[0].id, sam), false);
+});
+
+test("what the review decides goes back: onto each point's thread, the spec's to-do and what it waits on", () => {
+  const { db, sam, room, task, by } = space();
+  const briefs = new PlanBriefs(db, {});
+  const capture = task("Move capture to the server");
+  requestReview(db, briefs, capture, by(sam), [{ quote: "fallback for a week", text: "Is a week enough?" }, { quote: "ten percent", text: "Why ten percent?" }]);
+  const started = startDesignReview(db, briefs, room.id);
+  const m = db.startMeeting(room.id);
+  const slides = db.listItems(room.id).filter((it) => it.slide?.layout === "design");
+  const [week, ten] = ["Is a week enough?", "Why ten percent?"].map((q) => slides.find((it) => it.title === q)!);
+  const steps = slides.find((it) => it.title === "Steps")!;
+  const thread = (q: string) => db.planThreads(capture.id).find((t) => t.messages[0].text === q)!;
+  db.replaceNotes(m.id, week.id, [
+    { kind: "decision", text: "Keep the fallback for two weeks", owner: null },
+    { kind: "action", text: "Change the plan to two weeks", owner: "Sam" },
+  ]);
+  db.replaceNotes(m.id, ten.id, [{ kind: "question", text: "Can we start at one percent?", owner: null }]);
+
+  // Settled resolves the thread, with the decision caught on its slide; a second click takes that back.
+  setDesignOutcome(db, briefs, week.id, "settled", "Ann Lee", m.id);
+  let t = thread("Is a week enough?");
+  assert.equal(t.resolved, true);
+  assert.equal(t.messages.length, 2);
+  assert.equal(t.messages[1].by, "Stand");
+  assert.match(t.messages[1].text, /^Settled in the design review on \d+ \w+, by Ann Lee\.\nDecided:\n- Keep the fallback for two weeks\nTo do:\n- Change the plan to two weeks \(Sam\)$/);
+  setDesignOutcome(db, briefs, week.id, null, "Ann Lee", m.id);
+  t = thread("Is a week enough?");
+  assert.deepEqual([t.resolved, t.messages.length], [false, 1]);
+  // Still open leaves the thread open, with the questions and to-dos.
+  setDesignOutcome(db, briefs, ten.id, "open", "Sam Hill", m.id);
+  t = thread("Why ten percent?");
+  assert.equal(t.resolved, false);
+  assert.match(t.messages[1].text, /^Still open after the design review on \d+ \w+, by Sam Hill\.\nOpen questions:\n- Can we start at one percent\?$/);
+  setDesignOutcome(db, briefs, week.id, "settled", "Ann Lee", m.id);
+  setDesignOutcome(db, briefs, slides.at(-1)!.id, "changes", "Ann Lee", m.id);
+
+  // The meeting ends, and its notes are tidied: one more to-do on a section slide, another decision on the point.
+  finishDesignReview(db, room.id, m.id);
+  db.replaceNotes(m.id, week.id, [
+    { kind: "decision", text: "Keep the fallback for two weeks", owner: null },
+    { kind: "decision", text: "Mobile clients get a banner", owner: null },
+    { kind: "action", text: "Change the plan to two weeks", owner: "Sam" },
+  ]);
+  db.replaceNotes(m.id, steps.id, [{ kind: "action", text: "Write the flag removal checklist", owner: null }]);
+  const general = db.replaceNotes(m.id, null, [{ kind: "action", text: "Book the offsite", owner: null }]);
+  assert.deepEqual(writeBackReview(db, m.id), { specs: 1, links: 2 });
+
+  // Stand's line on the thread is rewritten in place with everything caught.
+  t = thread("Is a week enough?");
+  assert.equal(t.messages.length, 2);
+  assert.match(t.messages[1].text, /Decided:\n- Keep the fallback for two weeks\n- Mobile clients get a banner\nTo do:/);
+  assert.equal(t.resolved, true);
+  // The spec's to-do: one line with the verdict, and it waits on the to-dos from its slides only.
+  const log = db.noteUpdates(capture.id).map((u) => u.text);
+  assert.ok(log.some((l) => /^Design review, \d+ \w+: Approve with changes\. 1 point settled, 1 open\. 2 to-dos came out of it; this to-do waits on them\.$/.test(l)), log.join(" | "));
+  const todos = db.meetingNotes(m.id).filter((n) => n.kind === "action");
+  const waits = db.roomLinks(room.id, "depends_on").filter((l) => l.fromId === capture.id).map((l) => todos.find((n) => n.id === l.toId)?.text).sort();
+  assert.deepEqual(waits, ["Change the plan to two weeks", "Write the flag removal checklist"]);
+  assert.equal(db.roomLinks(room.id, "depends_on").some((l) => l.toId === general[0].id), false);
+  // Writing back again adds no second link.
+  assert.equal(writeBackReview(db, m.id).links, 0);
+
+  // The review keeps a record: the verdict, each point with how it ended and what was raised on it.
+  const record = designReviewRecord(db, room.id, started.review.id)!;
+  assert.deepEqual([record.specs[0].title, record.specs[0].verdict, record.specs[0].verdictBy], ["Move capture to the server", "changes", "Ann Lee"]);
+  const points = record.specs[0].slides.filter((x) => x.role === "point");
+  assert.deepEqual(points.map((x) => [x.title, x.outcome, x.caught.length]), [["Why ten percent?", "open", 1], ["Is a week enough?", "settled", 3]]);
+  assert.deepEqual(record.general.map((c) => c.text), ["Book the offsite"]);
+  assert.deepEqual(designReviewsRan(db, room.id).map((r) => [r.titles, r.verdicts]), [[["Move capture to the server"], { approve: 0, changes: 1, not_yet: 0 }]]);
+  assert.equal(designReviewOfMeeting(db, m.id)!.id, record.id);
+  assert.equal(designReviewRecord(db, "other-room", record.id), null);
+  assert.deepEqual(spaceFeed(db, room.id).designReviews!.map((r) => r.id), [record.id]);
+
+  // The plan viewer knows the version that was reviewed, and a new request says the plan changed since.
+  assert.deepEqual([lastReviewOf(db, capture.id)!.verdict, lastReviewOf(db, capture.id)!.changed], ["changes", false]);
+  db.addPlan(room.id, capture.id, SPEC.replace("for a week", "for two weeks"), "Sam Hill");
+  assert.equal(designReviewState(db, capture).last!.changed, true);
+  requestReview(db, briefs, capture, by(sam));
+  assert.ok(db.noteUpdates(capture.id).some((u) => /^Review requested: the plan is on the next design review\. Changed since the last review on \d+ \w+ \(Approve with changes\)\.$/.test(u.text)));
+  assert.equal(designReviewView(db, briefs, room.id, sam)!.specs[0].last!.reviewId, record.id);
+  // The point settled last time is resolved, so it isn't a point again; the open one is.
+  assert.deepEqual(designReviewView(db, briefs, room.id, sam)!.specs[0].points.map((p) => p.text), ["Why ten percent?"]);
 });

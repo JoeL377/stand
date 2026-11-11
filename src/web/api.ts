@@ -1,5 +1,5 @@
 import type { PlanReview, PlanThread } from "../shared/planReview.ts";
-import type { BriefChange, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
+import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type {
   BrainstormSummary,
@@ -181,7 +181,9 @@ export const api = {
     call<TaskDetail["work"]["log"][number]>("POST", `/api/tasks/${id}/comments`, { text }),
   presentationTasks: (roomId: string) => call<Note[]>("GET", `/api/rooms/${roomId}/presentation-tasks`),
   taskBrief: (id: string, retry = false) => call<PlanBrief>("POST", `/api/tasks/${id}/presentation-brief`, { retry }, SLOW_REQUEST_MS),
-  designReview: (roomId: string) => call<{ roomName: string; review: DesignReviewView | null }>("GET", `/api/rooms/${roomId}/design-review`),
+  designReview: (roomId: string) => call<{ roomName: string; review: DesignReviewView | null; reviews: DesignReviewRan[] }>("GET", `/api/rooms/${roomId}/design-review`),
+  designReviewRecord: (roomId: string, reviewId: string) =>
+    call<{ roomName: string; review: DesignReviewRecord; reviews: DesignReviewRan[] }>("GET", `/api/rooms/${roomId}/design-reviews/${encodeURIComponent(reviewId)}`),
   startDesignReview: (roomId: string) => call<{ review: DesignReviewView | null; firstItemId: string }>("POST", `/api/rooms/${roomId}/design-review/start`),
   designReviewState: (taskId: string) => call<DesignReviewState>("GET", `/api/tasks/${taskId}/design-review`),
   requestDesignReview: (taskId: string) => call<DesignReviewState>("POST", `/api/tasks/${taskId}/design-review`),

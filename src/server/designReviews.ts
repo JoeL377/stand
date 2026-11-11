@@ -12,8 +12,9 @@
 import type { Actor } from "../shared/actors.ts";
 import {
   DESIGN_QUESTIONS_MAX, POINT_OUTCOMES, VERDICTS, pointsOnDeck, specAuthor,
-  type BriefChange, type DesignOutcome, type DesignPoint, type DesignReviewState, type DesignReviewSummary, type DesignReviewView, type DesignSlideInfo, type DesignSpec,
-  type PlanBrief,
+  designOutcomeLabel,
+  type BriefChange, type DesignCaught, type DesignOutcome, type DesignPoint, type DesignReviewRan, type DesignReviewRecord, type DesignReviewState, type DesignReviewSummary,
+  type DesignReviewView, type DesignSlideInfo, type DesignSpec, type LastDesignReview, type PlanBrief, type Verdict,
 } from "../shared/designReview.ts";
 import type { Passage, PlanThread } from "../shared/planReview.ts";
 import { TASK_COMMENT_MAX, type Item, type Note, type SlideContent } from "../shared/protocol.ts";
@@ -37,6 +38,7 @@ export interface By {
 }
 const nameOf = (by: By) => (by.client ? `${by.userName} via ${by.client}` : by.userName);
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+const day = (ts: number) => new Date(ts).toLocaleDateString("en-GB", { month: "short", day: "numeric", timeZone: "UTC" });
 
 /** Whether this person prepares the spec for its review: they own the to-do, or wrote its latest plan. */
 export function isAuthor(db: DB, note: Note, user: { id: string; name: string }): boolean {
@@ -46,6 +48,14 @@ export function isAuthor(db: DB, note: Note, user: { id: string; name: string })
 
 const overviewIn = (db: DB, review: ReviewRow | null, noteId: string) =>
   (review && db.reviewSlides(review.id).find((s) => s.role === "overview" && s.noteId === noteId)) ?? null;
+
+/** The last design review that ran on a to-do's plan: its verdict, and whether the plan has changed since. */
+export function lastReviewOf(db: DB, noteId: string): LastDesignReview | null {
+  const verdict = db.lastDesignVerdict(noteId);
+  if (!verdict) return null;
+  const latest = db.planVersions(noteId).at(-1)?.id;
+  return { reviewId: verdict.reviewId, at: verdict.startedAt, verdict: (verdict.outcome as Verdict | null) ?? null, changed: !!latest && !!verdict.planVersion && latest !== verdict.planVersion };
+}
 
 /** The spec's place on the design review in a call, else on the next one, if it has one. */
 function queued(db: DB, roomId: string, noteId: string): ReviewSlideRow | null {
@@ -95,6 +105,7 @@ function specOf(db: DB, briefs: PlanBriefs | null, slide: ReviewSlideRow, user: 
     mine: !!user && isAuthor(db, note, user),
     brief: brief ?? emptyBrief(plan.id),
     points: pointsOf(db, note.id),
+    last: lastReviewOf(db, note.id),
   };
 }
 
@@ -119,7 +130,8 @@ export function designReviewSummary(db: DB, roomId: string): DesignReviewSummary
 /** Whether a to-do's spec waits on the next design review, and with how many points. */
 export function designReviewState(db: DB, note: Task): DesignReviewState {
   const live = !!liveWith(db, note.roomId, note.id);
-  return { queued: !!queued(db, note.roomId, note.id), points: pointsOnDeck(pointsOf(db, note.id)).length, ...(live && { live }) };
+  const last = lastReviewOf(db, note.id);
+  return { queued: !!queued(db, note.roomId, note.id), points: pointsOnDeck(pointsOf(db, note.id)).length, ...(live && { live }), ...(last && { last }) };
 }
 
 export interface DesignQuestion {
@@ -168,9 +180,13 @@ export function requestReview(db: DB, briefs: PlanBriefs | null, note: Task, by:
   let made = 0;
   for (const q of asked) if (ask(db, note, by, review.plan.id, q.passage, q.text, { review: draft.id, source: "author" })) made++;
   if (!had) {
+    const last = lastReviewOf(db, note.id);
+    const since = last
+      ? ` ${last.changed ? "Changed" : "Not changed"} since the last review${last.at ? ` on ${day(last.at)}` : ""}${last.verdict ? ` (${designOutcomeLabel(last.verdict)})` : ""}.`
+      : "";
     db.addUpdate({
       roomId: note.roomId, itemId: note.itemId, noteId: note.id, noteText: note.text, ...by,
-      status: "comment", text: "Review requested: the plan is on the next design review.", links: [],
+      status: "comment", text: `Review requested: the plan is on the next design review.${since}`, links: [],
     });
   }
   void briefs?.ensure(note).catch(() => {});
@@ -262,7 +278,6 @@ export function specView(db: DB, briefs: PlanBriefs, note: Task, user: { id: str
 const TITLE_MAX = 140;
 const NAME_MAX = 32;
 const PASSAGE_MAX = 1500;
-const day = (ts: number) => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 const mine = (rows: ReviewSlideRow[], noteId: string) => rows.filter((r) => r.noteId === noteId);
 
 /** The brief the slides read: the saved one, else the spec's headings with nothing under them. */
@@ -508,13 +523,15 @@ export function whenBriefed(db: DB, briefs: PlanBriefs | null, note: Task, done:
 
 /** How a point ended, or the verdict on a spec, by anyone's click; null takes it back. Returns the
  *  slide's item, or null when it isn't a slide of a running design review that takes that outcome. */
-export function setDesignOutcome(db: DB, briefs: PlanBriefs | null, itemId: string, outcome: DesignOutcome | null, by: string, now = Date.now()): Item | null {
+export function setDesignOutcome(db: DB, briefs: PlanBriefs | null, itemId: string, outcome: DesignOutcome | null, by: string, meetingId?: string, now = Date.now()): Item | null {
   const slide = db.reviewSlideByItem(itemId);
   const review = slide && db.getReview(slide.reviewId);
   if (!slide || review?.kind !== "design" || review.status !== "live") return null;
   const allowed: Array<{ id: DesignOutcome }> = slide.role === "point" ? POINT_OUTCOMES : slide.role === "verdict" ? VERDICTS : [];
   if (outcome ? !allowed.some((o) => o.id === outcome) : !allowed.length) return null;
   db.updateReviewSlide(slide.id, { outcome, outcomeBy: outcome ? by : null, outcomeAt: outcome ? now : null });
+  // A point's call goes on its thread at once; the meeting's end writes it again with everything caught.
+  if (slide.role === "point") writePoint(db, db.getReviewSlide(slide.id)!, meetingId ? db.meetingNotes(meetingId) : [], review.startedAt ?? now);
   syncDeck(db, briefs, review);
   return db.getItem(itemId);
 }
@@ -539,4 +556,132 @@ export function finishDesignReview(db: DB, roomId: string, meetingId: string, no
   db.setReview(live.id, { status: "done", meetingId, endedAt: now });
   if (live.deckId) db.archiveDeck(live.deckId);
   return db.getReview(live.id);
+}
+
+// ---- what a review leaves behind --------------------------------------------------------------
+//
+// A point's call goes back onto its thread: Settled resolves it with the decisions caught on its
+// slide, Still open leaves it open with the to-dos and questions. When the meeting ends, each spec's
+// to-do gets one line with the verdict, and waits on the to-dos that came out of its review. The
+// open threads and those to-dos are the change list the author and their agent read.
+
+const STAND: By = { userId: "stand", userName: "Stand", client: null, actor: { kind: "stand", person: null } };
+const CAUGHT = ["action", "decision", "question"];
+const caughtOf = (n: Note): DesignCaught => ({ id: n.id, kind: n.kind as DesignCaught["kind"], text: n.text, owner: n.owner ?? null, done: !!n.doneAt });
+
+/** What Stand says on a point's thread: how it ended, and what the team said on its slide. */
+function pointReply(slide: ReviewSlideRow, caught: Note[], at: number): string {
+  const list = (title: string, kind: Note["kind"]) => {
+    const lines = caught.filter((n) => n.kind === kind).map((n) => `- ${n.text.replace(/\s+/g, " ")}${kind === "action" && n.owner ? ` (${n.owner})` : ""}`);
+    return lines.length ? [`${title}:`, ...lines] : [];
+  };
+  const who = slide.outcomeBy ? `, by ${slide.outcomeBy}` : "";
+  if (slide.outcome === "settled") {
+    const decided = list("Decided", "decision");
+    return [`Settled in the design review on ${day(at)}${who}.`, ...(decided.length ? decided : ["Stand caught no decision on this point."]), ...list("To do", "action")].join("\n");
+  }
+  return [`Still open after the design review on ${day(at)}${who}.`, ...list("To do", "action"), ...list("Open questions", "question")].join("\n");
+}
+
+/** Puts a point's call on its thread, or takes it back off. Stand's line there is rewritten in place. */
+function writePoint(db: DB, slide: ReviewSlideRow, notes: Note[], at: number) {
+  const thread = slide.noteId && db.planThreads(slide.noteId).find((t) => t.id === slide.threadId);
+  if (!slide.noteId || !thread) return;
+  const was = thread.messages.find((m) => m.slide === slide.id);
+  if (slide.outcome !== "settled" && slide.outcome !== "open") {
+    // Taken back: the thread is as it was before the call, open.
+    if (was) db.savePlanThread(slide.noteId, { ...thread, messages: thread.messages.filter((m) => m !== was), resolved: false });
+    return;
+  }
+  const text = pointReply(slide, notes.filter((n) => n.itemId === slide.itemId && CAUGHT.includes(n.kind)), at);
+  const message = { id: was?.id ?? newId(12), by: "Stand", text, ts: was?.ts ?? Date.now(), slide: slide.id };
+  const messages = was ? thread.messages.map((m) => (m === was ? message : m)) : [...thread.messages, message];
+  db.savePlanThread(slide.noteId, { ...thread, messages, resolved: slide.outcome === "settled" });
+}
+
+/** After the meeting's notes are final: each called point's thread gets what was caught on it, each
+ *  spec's to-do gets the verdict in a line, and waits on the to-dos its review raised. */
+export function writeBackReview(db: DB, meetingId: string): { specs: number; links: number } {
+  const review = db.reviewByMeeting(meetingId, "design");
+  if (!review) return { specs: 0, links: 0 };
+  const rows = db.reviewSlides(review.id);
+  const notes = db.meetingNotes(meetingId);
+  const at = review.startedAt ?? Date.now();
+  for (const row of rows) if (row.role === "point" && row.outcome) writePoint(db, row, notes, at);
+  let links = 0;
+  const specs = rows.filter((r) => r.role === "overview" && r.noteId);
+  for (const spec of specs) {
+    const note = db.getNote(spec.noteId!);
+    if (!note) continue;
+    const slides = mine(rows, note.id);
+    const points = slides.filter((r) => r.role === "point");
+    const settled = points.filter((r) => r.outcome === "settled").length;
+    const verdict = slides.find((r) => r.role === "verdict")?.outcome as Verdict | null | undefined;
+    // The to-dos the team left under this spec's slides: its to-do waits on each.
+    const on = new Set(slides.map((r) => r.itemId));
+    const todos = notes.filter((n) => n.kind === "action" && n.itemId && on.has(n.itemId) && n.id !== note.id && n.state !== "dropped");
+    const have = db.roomLinks(note.roomId, "depends_on");
+    for (const todo of todos) {
+      if (have.some((l) => (l.fromId === note.id && l.toId === todo.id) || (l.fromId === todo.id && l.toId === note.id))) continue;
+      db.addLink(note.roomId, note.id, todo.id, "depends_on", "Stand", STAND.actor ?? null);
+      links++;
+    }
+    const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+    const text = [
+      `Design review, ${day(at)}: ${verdict ? designOutcomeLabel(verdict) : "no verdict"}.`,
+      points.length ? `${count(settled, "point")} settled, ${points.length - settled} open.` : "",
+      todos.length ? `${count(todos.length, "to-do")} came out of it; this to-do waits on ${todos.length === 1 ? "it" : "them"}.` : "",
+    ].filter(Boolean).join(" ");
+    db.addUpdate({ roomId: note.roomId, itemId: note.itemId, noteId: note.id, noteText: note.text, ...STAND, status: "comment", text, links: [] });
+  }
+  return { specs: specs.length, links };
+}
+
+function ranOf(db: DB, review: ReviewRow): DesignReviewRan {
+  const rows = db.reviewSlides(review.id);
+  const verdicts = { approve: 0, changes: 0, not_yet: 0 };
+  for (const r of rows) if (r.role === "verdict" && r.outcome && r.outcome in verdicts) verdicts[r.outcome as Verdict]++;
+  return { id: review.id, startedAt: review.startedAt, meetingId: review.meetingId, titles: rows.filter((r) => r.role === "overview").map((r) => r.title), verdicts };
+}
+
+/** The space's design reviews that ran, newest first. */
+export const designReviewsRan = (db: DB, roomId: string): DesignReviewRan[] => db.reviewsDone(roomId, 30, "design").map((r) => ranOf(db, r));
+
+/** The design review that ran in a meeting, if one did. */
+export function designReviewOfMeeting(db: DB, meetingId: string): DesignReviewRan | null {
+  const review = db.reviewByMeeting(meetingId, "design");
+  return review ? ranOf(db, review) : null;
+}
+
+/** A design review that ran, as its page shows it: each slide as it stood when the meeting ended,
+ *  with what the team raised on it. Null when it isn't a finished one of this space. */
+export function designReviewRecord(db: DB, roomId: string, id: string): DesignReviewRecord | null {
+  const review = db.getReview(id);
+  if (!review || review.roomId !== roomId || review.kind !== "design" || review.status !== "done") return null;
+  const rows = db.reviewSlides(review.id);
+  const notes = review.meetingId ? db.meetingNotes(review.meetingId).filter((n) => CAUGHT.includes(n.kind)) : [];
+  const onSlide = new Set(rows.map((r) => r.itemId));
+  const specs = rows.filter((r) => r.role === "overview" && r.noteId).map((spec) => {
+    const slides = mine(rows, spec.noteId!).flatMap((row) => {
+      const item = row.itemId ? db.getItem(row.itemId) : null;
+      const design = item?.slide?.design;
+      if (!item || !design) return [];
+      return [{
+        id: row.id, role: design.role, name: design.name, title: item.title, body: item.slide!.body, quote: design.quote, by: design.by,
+        outcome: design.outcome, outcomeBy: design.outcomeBy, lost: design.lost ?? [],
+        caught: notes.filter((n) => n.itemId === item.id).map(caughtOf),
+      }];
+    });
+    const verdict = slides.find((s) => s.role === "verdict");
+    return {
+      taskId: spec.noteId!,
+      title: db.getNote(spec.noteId!)?.text ?? spec.title,
+      owner: spec.owner,
+      verdict: (verdict?.outcome as Verdict | null) ?? null,
+      verdictBy: verdict?.outcomeBy ?? null,
+      slides: slides.map(({ lost: _l, ...slide }) => slide),
+      lost: verdict?.lost ?? [],
+    };
+  });
+  return { id: review.id, startedAt: review.startedAt, endedAt: review.endedAt, meetingId: review.meetingId, specs, general: notes.filter((n) => !onSlide.has(n.itemId)).map(caughtOf) };
 }

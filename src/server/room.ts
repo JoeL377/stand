@@ -42,7 +42,7 @@ import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
 import { applyMerges, mergePrompt, planMerge, stickyMerges, type TopicMerge } from "./topicMerge.ts";
 import { newId } from "./ids.ts";
 import { finishReview, isReviewDeck, refileReview, setOutcome } from "./reviews.ts";
-import { DesignReviewError, authorMay, finishDesignReview, setDesignOutcome, startDesignReview, whenBriefed } from "./designReviews.ts";
+import { DesignReviewError, authorMay, finishDesignReview, setDesignOutcome, startDesignReview, whenBriefed, writeBackReview } from "./designReviews.ts";
 import type { PlanBriefs } from "./planBrief.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
@@ -796,7 +796,7 @@ export class RoomSession implements SpeechSink {
       // How a point of a design review ended, or the verdict on its spec. Anyone can say, and take it back.
       case "design.outcome":
         if (this.ended) return;
-        if (setDesignOutcome(this.db, this.briefs, msg.itemId, typeof msg.outcome === "string" ? msg.outcome : null, conn.name)) this.broadcastState();
+        if (setDesignOutcome(this.db, this.briefs, msg.itemId, typeof msg.outcome === "string" ? msg.outcome : null, conn.name, this.meetingId)) this.broadcastState();
         break;
       // A spec's author walks the team through it: they move between its slides for everyone.
       case "design.go":
@@ -2164,6 +2164,12 @@ export class RoomSession implements SpeechSink {
         const all = this.db.meetingNotes(this.meetingId);
         for (const p of perItem) p.notes = all.filter((n) => n.itemId === (p.item?.id ?? null));
         if (!perItem.some((p) => !p.item) && all.some((n) => !n.itemId)) perItem.push({ item: null, notes: all.filter((n) => !n.itemId) });
+      }
+      // A design review ran: its points' threads, its specs' to-dos and their links get what the meeting caught.
+      try {
+        writeBackReview(this.db, this.meetingId);
+      } catch (err) {
+        console.error("[agent] design review write-back failed:", err);
       }
       // The tidy runs rewrote the topics: place the smaller ones again, then write the recap on those chapters.
       placing = this.mergeTopics(true);

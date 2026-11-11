@@ -993,6 +993,12 @@ test("an agent asks for a design review of its plan, with the questions the team
   assert.equal(requested.status, "comment");
   assert.equal(requested.actor?.kind, "agent");
 
+  // get_review tells an agent what waits on the next design review.
+  const review = api.getReview(caller, { space: room.id }, "https://stand.test") as { design_review: { next: { status: string; specs: Array<{ shows: string; points: Array<{ question: string }> }> } | null; last: unknown } };
+  assert.equal(review.design_review.next?.status, "not started");
+  assert.deepEqual(review.design_review.next?.specs.map((s) => [s.shows, s.points.map((p) => p.question)]), [[ref, ["Is a week enough?"]]]);
+  assert.equal(review.design_review.last, null);
+
   // A new version of the plan: the review is of that one.
   api.attachPlan(caller, { ref, plan: "# Capture\n\n## Fallback\n\nKeep the browser fallback for a week." });
   const draft = db.reviewIn(room.id, ["draft"], "design")!;

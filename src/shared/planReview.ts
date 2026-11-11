@@ -1,7 +1,8 @@
 export type PlanVersion = { id: string; text: string; by: string; ts: number };
 export type Passage = { start: number; end: number };
 export type PlanAnchor = Passage & { version: string; quote: string };
-export type ReviewMessage = { id: string; by: string; text: string; ts: number };
+/** `slide`: Stand wrote it when a design review called the point; the review's slide it was. */
+export type ReviewMessage = { id: string; by: string; text: string; ts: number; slide?: string };
 export type PlanThread = {
   id: string;
   original: PlanAnchor;
