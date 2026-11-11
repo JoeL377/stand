@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dagre from "@dagrejs/dagre";
 import type { BrainstormView, DesignArrow, DesignBox } from "../../shared/protocol.ts";
-import { Face, KIND, KINDS, clock } from "./BrainMap.tsx";
+import { CaughtMarks, Face, KIND, KINDS, clock } from "./BrainMap.tsx";
 import { Markdown } from "../Markdown.tsx";
 
 const BOX_W = 176;
@@ -302,24 +302,7 @@ function BoxDetails(props: { box: DesignBox; arrows: DesignArrow[]; name: (id: s
           ))}
         </section>
       )}
-      {/* What was caught, under the same marks and words as the pills and the circles. */}
-      {KINDS.map((k) => {
-        const got = box.caught.filter((c) => c.kind === k.kind);
-        return got.length ? (
-          <section key={k.kind}>
-            <h4 className={`brain-caught-h ${k.kind}`}>
-              <k.Icon />
-              {k.many}
-            </h4>
-            {got.map((c) => (
-              <div key={c.id} className={`brain-point caught ${c.kind}${c.done ? " done" : ""}`}>
-                <span dir="auto">{c.text}</span>
-                {c.owner && <small>{c.owner.split(" ")[0]}</small>}
-              </div>
-            ))}
-          </section>
-        ) : null;
-      })}
+      <CaughtMarks caught={box.caught} />
       {rel.length > 0 && (
         <section>
           <h4>Relates to</h4>

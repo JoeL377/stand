@@ -3455,8 +3455,12 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .xp-what { font-style: normal; }
 /* A phone's control row has no room for the kind: "Finish" alone, the board says which. */
 @media (max-width: 760px) { .xp-what { display: none; } }
-/* A card's caught lines sit under their kind, marked as on the pills and the circles. */
-.brain-card h4.brain-caught-h { display: flex; align-items: center; gap: 5px; }
-.brain-caught-h.action svg { color: var(--accent); }
-.brain-caught-h.decision svg { color: var(--ok); }
-.brain-caught-h.question svg { color: var(--warn); }
+/* A card's caught lines stay behind their marks: one mark and a count per kind, lines on hover, focus or tap. */
+.brain-got-row { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.brain-card .brain-got-row h4 { margin: 0 0 0 4px; }
+.brain-got-mark { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.brain-got-mark:hover, .brain-got-mark.on { background: var(--panel-2); }
+.brain-got-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.brain-got-mark.action svg { color: var(--accent); }
+.brain-got-mark.decision svg { color: var(--ok); }
+.brain-got-mark.question svg { color: var(--warn); }

@@ -404,6 +404,53 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
   );
 }
 
+/** What a card's circle or box caught: one mark with a count per kind, as on the map. The lines
+ *  themselves show while a mark is hovered or focused; a click (a tap on a phone) keeps them open. */
+export function CaughtMarks({ caught }: { caught: BrainCaught[] }) {
+  const [hover, setHover] = useState<BrainCaught["kind"] | null>(null);
+  const [pinned, setPinned] = useState<BrainCaught["kind"] | null>(null);
+  const touched = useRef(0);
+  const kinds = KINDS.map((k) => ({ ...k, got: caught.filter((c) => c.kind === k.kind) })).filter((k) => k.got.length);
+  if (!kinds.length) return null;
+  const open = kinds.find((k) => k.kind === (hover ?? pinned));
+  return (
+    <section className="brain-got" onMouseLeave={() => setHover(null)}>
+      <div className="brain-got-row">
+        {kinds.map((k) => (
+          <button
+            key={k.kind}
+            type="button"
+            className={`brain-got-mark ${k.kind}${open?.kind === k.kind ? " on" : ""}`}
+            aria-expanded={open?.kind === k.kind}
+            aria-label={`${k.got.length} ${k.got.length === 1 ? k.one : k.many}`}
+            // A finger has no hover: its tap opens and closes the lines, on the way down, because the
+            // card grows as they open and a mark that moved under the finger never gets its click.
+            onPointerEnter={(e) => e.pointerType === "mouse" && setHover(k.kind)}
+            onPointerDown={(e) => {
+              if (e.pointerType === "mouse") return;
+              touched.current = Date.now();
+              setPinned(pinned === k.kind ? null : k.kind);
+            }}
+            onFocus={(e) => e.currentTarget.matches(":focus-visible") && setHover(k.kind)}
+            onBlur={() => setHover(null)}
+            onClick={() => Date.now() - touched.current > 700 && setPinned(pinned === k.kind ? null : k.kind)}
+          >
+            <k.Icon />
+            {k.got.length}
+          </button>
+        ))}
+        {open && <h4>{open.many}</h4>}
+      </div>
+      {open?.got.map((c) => (
+        <div key={c.id} className={`brain-point caught ${c.kind}${c.done ? " done" : ""}`}>
+          <span dir="auto">{c.text}</span>
+          {c.owner && <small>{c.owner.split(" ")[0]}</small>}
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function Face({ name }: { name: string }) {
   const colorFor = usePersonColors();
   return (
@@ -450,24 +497,7 @@ function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas:
           ))}
         </section>
       )}
-      {/* What was caught, under the same marks and words as the pills and the circles. */}
-      {KINDS.map((k) => {
-        const got = node.caught.filter((c) => c.kind === k.kind);
-        return got.length ? (
-          <section key={k.kind}>
-            <h4 className={`brain-caught-h ${k.kind}`}>
-              <k.Icon />
-              {k.many}
-            </h4>
-            {got.map((c) => (
-              <div key={c.id} className={`brain-point caught ${c.kind}${c.done ? " done" : ""}`}>
-                <span dir="auto">{c.text}</span>
-                {c.owner && <small>{c.owner.split(" ")[0]}</small>}
-              </div>
-            ))}
-          </section>
-        ) : null;
-      })}
+      <CaughtMarks caught={node.caught} />
       {/* The ideas the map had no room for come first, under their own heading: they're what "+N more" stands for. */}
       {[
         { title: hidden.length ? "Not on the map" : "Ideas", list: hidden.length ? hidden : props.ideas },
