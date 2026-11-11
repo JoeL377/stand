@@ -470,6 +470,8 @@ function RecordPage({ reviewId }: { reviewId: string }) {
   const { roomId = "" } = useParams();
   const [data, setData] = useState<{ roomName: string; review: DesignReviewRecord; reviews: DesignReviewRan[] } | null>(null);
   const [failed, setFailed] = useState(false);
+  const [again, setAgain] = useState<string | null>(null);
+  const navigate = useNavigate();
   useEffect(() => {
     setData(null);
     setFailed(false);
@@ -516,6 +518,23 @@ function RecordPage({ reviewId }: { reviewId: string }) {
                   <Link className="rp-pill" to={planHref(roomId, spec.taskId)}>
                     Open the spec
                   </Link>
+                  <button
+                    type="button"
+                    className="rp-pill"
+                    disabled={again === spec.taskId}
+                    onClick={async () => {
+                      setAgain(spec.taskId);
+                      try {
+                        await api.requestDesignReview(spec.taskId);
+                        navigate(designReviewHref(roomId));
+                      } catch (err) {
+                        errorToast("Couldn't put it on the next review")(err);
+                        setAgain(null);
+                      }
+                    }}
+                  >
+                    {again === spec.taskId ? "Adding…" : "Review again"}
+                  </button>
                 </div>
                 {points.length === 0 && <p className="muted">No points were on this spec.</p>}
                 {points.map((p) => (
