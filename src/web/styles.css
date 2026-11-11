@@ -3165,7 +3165,8 @@ a.sh-review { text-decoration: none; color: inherit; }
 .brain-outline section { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .brain-outline .brain-node { position: static; translate: none; max-width: 100%; text-align: left; }
 .brain-outline-ideas { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 12px; border-left: 2px solid var(--line); }
-.brain.narrow .brain-card { position: fixed; top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: 60dvh; }
+/* The card rides the bottom of the outline, above the call's own controls. */
+.brain.narrow .brain-card { position: sticky; top: auto; bottom: 8px; left: auto; right: auto; width: auto; margin: 0 8px 8px; max-height: min(60dvh, 70%); }
 
 .bp-map { flex: 1; }
 .bp-count { font-size: 12.5px; white-space: nowrap; }
@@ -3176,4 +3177,15 @@ a.sh-review { text-decoration: none; color: inherit; }
 .sh-brain input { flex: 1 1 auto; min-width: 0; height: 30px; border: 0; background: none; box-shadow: none; padding: 0 4px; font-size: 14px; color: var(--text); outline: none; }
 .sh-brain button.primary { flex: none; height: 30px; padding: 0 14px; font-size: 13px; }
 .sh-brain a.sh-done-since-summary:hover { color: var(--text); }
-@media (max-width: 720px) { .bp-count { display: none; } }
+@media (max-width: 720px) {
+  .bp-count { display: none; }
+  /* The outline scrolls inside the page, so a tapped circle's card stays at the bottom of the screen. */
+  .rp.bp { height: 100dvh; }
+  /* The row takes two lines: its name and earlier ones, then the sentence and Start. */
+  .sh-panel form.sh-brain { flex-wrap: wrap; row-gap: 4px; padding: 8px 8px 8px 12px; }
+  form.sh-brain strong { flex: 1; }
+  div.sh-brain strong { white-space: nowrap; }
+  .sh-brain input { order: 2; flex-basis: 60%; padding: 0; font-size: 16px; }
+  .sh-brain button.primary { order: 3; }
+  .brain-outline .brain-node.idea { min-height: 36px; font-size: 14px; }
+}

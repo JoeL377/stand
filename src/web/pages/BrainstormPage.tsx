@@ -36,7 +36,7 @@ export function BrainstormPage() {
   const b = data.brainstorm;
   const live = b.status === "live";
   return (
-    <div className="rp">
+    <div className="rp bp">
       <header className="rp-head">
         <Link className="rp-back" to={spaceHref(roomId)}>
           ← {data.roomName}
