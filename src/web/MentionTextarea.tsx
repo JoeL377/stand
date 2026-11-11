@@ -1,7 +1,7 @@
 // A comment box where typing @ lists the people in the space; picking one writes @Full Name, which
 // tags them (shared/mentions.ts). The list opens above the box, as the box sits at the drawer's foot.
 
-import { type KeyboardEvent, type TextareaHTMLAttributes, useId, useRef, useState } from "react";
+import { type KeyboardEvent, type TextareaHTMLAttributes, useId, useLayoutEffect, useRef, useState } from "react";
 import type { Person } from "../shared/mentions.ts";
 
 type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "onChange"> & {
@@ -19,6 +19,14 @@ export function MentionTextarea({ value, onChange, people, onKeyDown, ...rest }:
   const listId = useId();
   const [query, setQuery] = useState<{ start: number; text: string } | null>(null);
   const [active, setActive] = useState(0);
+  // Where the caret goes once the picked name is in the box: right after React writes the new
+  // value, before anything else is typed.
+  const caret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (caret.current === null || !box.current) return;
+    box.current.setSelectionRange(caret.current, caret.current);
+    caret.current = null;
+  });
 
   const q = query?.text.toLowerCase() ?? "";
   const matches = query
@@ -41,13 +49,9 @@ export function MentionTextarea({ value, onChange, people, onKeyDown, ...rest }:
     if (!el || !query) return;
     const end = el.selectionStart ?? value.length;
     const tag = `@${p.name} `;
+    caret.current = query.start + tag.length;
     onChange(value.slice(0, query.start) + tag + value.slice(end));
-    const at = query.start + tag.length;
     setQuery(null);
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(at, at);
-    });
   }
 
   function keys(e: KeyboardEvent<HTMLTextAreaElement>) {
