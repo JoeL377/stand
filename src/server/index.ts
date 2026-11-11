@@ -38,6 +38,7 @@ import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
+import { BrainstormError, brainstormOfMeeting, brainstormPage, brainstormsOf, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { ReviewError, removeSlide, reviewOfMeeting, reviewPage, reviewView, reviewsDone, startReview } from "./reviews.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { ownedBy, toSpaceSummary } from "./spaces.ts";
@@ -1020,6 +1021,42 @@ app.post(
   }),
 );
 
+// ---- brainstorms: a call that starts from one sentence and draws a map of what's said ----
+
+// Starts one on a topic or a question. It leads the agenda, and a call that's running goes to it.
+app.post(
+  "/api/rooms/:id/brainstorm/start",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    try {
+      const b = startBrainstorm(db, room.id, String(req.body?.prompt ?? ""), req.user!.name);
+      const s = sessions.get(room.id);
+      if (s) {
+        s.itemsChanged();
+        s.brainstormChanged();
+        if (b.itemId) s.setFocus(b.itemId, req.user!.name, "manual");
+      }
+      res.json({ brainstorm: toBrainstormView(b) });
+    } catch (err) {
+      if (err instanceof BrainstormError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+  }),
+);
+
+// One brainstorm's own page.
+app.get(
+  "/api/rooms/:id/brainstorms/:brainstormId",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    const brainstorm = brainstormPage(db, room.id, req.params.brainstormId);
+    if (!brainstorm) return notFound(res, "Brainstorm not found");
+    res.json({ roomName: room.name, brainstorm, brainstorms: brainstormsOf(db, room.id) });
+  }),
+);
+
 // ---- product reviews: a call that goes through what was built, one slide per feature ----
 
 // The space's next review, as its page shows it.
@@ -1328,6 +1365,7 @@ app.get(
       chapters: m.chapters,
       cost: db.meetingCost(m.id),
       review: reviewOfMeeting(db, m.id),
+      brainstorm: brainstormOfMeeting(db, m.id),
     };
     res.json(body);
   }),

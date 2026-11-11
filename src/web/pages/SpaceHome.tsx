@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { matchesTopic, topicKey, topicOf, topicOptions } from "../../shared/topics.ts";
 import { TopicPicker } from "../TopicPicker.tsx";
 import { stateOf } from "../../shared/tasks.ts";
@@ -24,6 +24,7 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
+import { BrainstormPicker, brainstormHref } from "./BrainstormPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
@@ -374,6 +375,16 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                   errorToast("Couldn't start the review")(err);
                 }
               }}
+              brainstorms={topicFilter ? [] : (feed?.brainstorms ?? [])}
+              onStartBrainstorm={async (prompt) => {
+                try {
+                  await api.startBrainstorm(room.id, prompt);
+                  props.onJoin();
+                } catch (err) {
+                  errorToast("Couldn't start the brainstorm")(err);
+                }
+              }}
+              onJoin={props.onJoin}
               onRemoveSlide={async (slideId) => {
                 try {
                   await api.removeReviewSlide(room.id, slideId);
@@ -693,6 +704,10 @@ function TasksTab(props: {
   reviews: ReviewSummary[];
   onStartReview: () => Promise<void>;
   onRemoveSlide: (slideId: string) => void;
+  /** The space's brainstorms, newest first. */
+  brainstorms: BrainstormSummary[];
+  onStartBrainstorm: (prompt: string) => Promise<void>;
+  onJoin: () => void;
   open: TaskNote[];
   closed: TaskNote[];
   onArchive: (n: Note) => void;
@@ -831,6 +846,7 @@ function TasksTab(props: {
           </Link>
         )
       )}
+      <BrainstormRow roomId={props.roomId} all={props.brainstorms} onStart={props.onStartBrainstorm} onJoin={props.onJoin} />
       {showReview && props.review && (
         <ReviewPop roomId={props.roomId} review={props.review} reviews={props.reviews} onStart={props.onStartReview} onRemove={props.onRemoveSlide} onClose={() => setShowReview(false)} />
       )}
@@ -896,6 +912,46 @@ function DonePop({ deck, onClose }: { deck: DoneDeck; onClose: () => void }) {
         />
       </div>
     </div>
+  );
+}
+
+/** Starts a brainstorm from one sentence, or joins the one running; earlier ones sit behind a pill. */
+function BrainstormRow(props: { roomId: string; all: BrainstormSummary[]; onStart: (prompt: string) => Promise<void>; onJoin: () => void }) {
+  const [prompt, setPrompt] = useState("");
+  const [starting, setStarting] = useState(false);
+  const live = props.all.find((b) => b.status === "live");
+  const earlier = props.all.filter((b) => b.status === "done");
+  if (live)
+    return (
+      <div className="sh-done-since sh-brain">
+        <strong>Brainstorm, on now</strong>
+        <Link className="sh-done-since-summary" to={brainstormHref(props.roomId, live.id)} dir="auto">
+          {live.prompt}
+        </Link>
+        <span className="count">{live.ideas}</span>
+        <button type="button" className="primary" onClick={props.onJoin}>
+          Join
+        </button>
+      </div>
+    );
+  return (
+    <form
+      className="sh-done-since sh-brain"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!prompt.trim() || starting) return;
+        setStarting(true);
+        await props.onStart(prompt);
+        setStarting(false);
+      }}
+    >
+      <strong>Brainstorm</strong>
+      <input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A topic or a question to start from" aria-label="What the brainstorm is about" maxLength={160} dir="auto" />
+      <BrainstormPicker roomId={props.roomId} current={null} all={earlier} label={`Earlier · ${earlier.length}`} />
+      <button type="submit" className="primary" disabled={!prompt.trim() || starting}>
+        {starting ? "Starting…" : "Start"}
+      </button>
+    </form>
   );
 }
 

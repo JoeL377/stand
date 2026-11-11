@@ -503,6 +503,7 @@ export function Meeting(props: {
           segments={room.segments}
           discussions={room.discussions}
           board={room.board}
+          brainstorm={room.brainstorm}
           list={room.list}
           agentCards={room.agentCards}
           notes={room.notes}

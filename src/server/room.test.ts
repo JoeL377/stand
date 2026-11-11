@@ -1256,3 +1256,39 @@ test("presenting a task moves the meeting to an item for it, so what's said is f
   assert.equal(db.listItems(session.state().roomId).some((i) => i.taskId), false);
   assert.equal(db.taskItem(session.state().roomId, task.id, "Review rollout", null).id, shown?.id);
 });
+
+test("a brainstorm's map is drawn from the call's talk and is done when the meeting ends", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "Roadmap", url: null, description: null }]);
+  const b = startBrainstorm(db, room.id, "How should a review start?", "Joe");
+  const asked: string[] = [];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async brainstormMap(_context: string, talk: string) {
+      asked.push(talk);
+      return asked.length > 1
+        ? { add: [], extend: [], caught: [] }
+        : { add: [{ under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }, { under: "new1", label: "Agents add slides", detail: "Each agent adds a slide when it finishes.", by: "Huy", line: 1 }], extend: [], caught: [] };
+    },
+  });
+  const sent: ServerMessage[] = [];
+  const session = new RoomSession(db, agent, room, () => {});
+  (session as unknown as { broadcast(m: ServerMessage): void }).broadcast = (m) => void sent.push(m);
+  // The brainstorm's sentence leads the agenda, so the call opens on it.
+  assert.equal(db.listItems(room.id)[0].id, b.itemId);
+  session.addSpeech("p1", "Huy", "each agent could add a slide when it finishes", Date.now());
+  await (session as unknown as { runMap(): Promise<void> }).runMap();
+  assert.deepEqual(db.getBrainstorm(b.id)!.nodes.map((n) => [n.id, n.label]), [["d1", "From the work"], ["i1", "Agents add slides"]]);
+  const maps = sent.flatMap((m) => (m.type === "brainstorm" ? [m.brainstorm] : []));
+  assert.equal(maps.at(-1)!.nodes.length, 2);
+  // Anyone takes a circle off; it leaves the map everyone sees.
+  const inner = session as unknown as { brain: { map: { remove(id: string): boolean } }; saveBrainstorm(): void };
+  assert.equal(inner.brain.map.remove("i1"), true);
+  inner.saveBrainstorm();
+  assert.deepEqual(maps.length && sent.flatMap((m) => (m.type === "brainstorm" ? [m.brainstorm] : [])).at(-1)!.nodes.map((n) => n.id), ["d1"]);
+  await session.end();
+  const done = db.getBrainstorm(b.id)!;
+  assert.deepEqual([done.status, done.meetingId], ["done", session.meetingId]);
+  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
+});
