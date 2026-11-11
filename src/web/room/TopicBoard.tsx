@@ -251,8 +251,8 @@ export function TopicBoard(props: {
     const decided = said.filter((n) => n.kind === "decision" && inThread(t, n)).length;
     return [todo && `${todo} to do`, decided && `${decided} decided`].filter(Boolean).join(" · ");
   };
-  // Every meeting after a space's first opens with "Done since" as a card of its own, even when nothing
-  // closed; the check-in on what's still open from earlier follows it as another.
+  // A meeting opens with "Done since" as a card of its own when the space has its pages (server
+  // doneDeck.ts, off for now); the check-in on what's still open from earlier follows it as another.
   const deck = props.doneDeck?.slides.length ? props.doneDeck : null;
   const doneSince = deck?.sinceStartedAt ?? props.lastMeetingAt ?? null;
   const donePages = deck?.slides.length ?? 0;
@@ -260,7 +260,7 @@ export function TopicBoard(props: {
   const toCheck = unanswered(props.followUps ?? [], props.meetingStartedAt).length;
   const options = (props.agent?.cards ?? []).filter((c) => c.kind === "options" && !c.dismissed && c.status !== "failed");
   const entries: Entry[] = [
-    ...(doneSince !== null
+    ...(deck && doneSince !== null
       ? [
           {
             id: DONE,

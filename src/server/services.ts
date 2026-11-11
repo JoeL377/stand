@@ -17,13 +17,14 @@ import { DoneDecks } from "./doneDeck.ts";
 import { GithubApp, appReady } from "./github.ts";
 import { startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
+import { labeled } from "./usage.ts";
 import { PlanBriefs } from "./planBrief.ts";
 import { Projects, setProjects } from "./projects.ts";
 import { RoomSession } from "./room.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { linkSnaps } from "./snaps.ts";
 import { SpaceEvents } from "./spaceEvents.ts";
-import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
+import { POLISH_BATCH_MS, UpNextPolisher, upNextView } from "./upNextPolish.ts";
 import { setUsageSink } from "./usage.ts";
 import { UploadLinks } from "./workLog.ts";
 
@@ -41,7 +42,8 @@ export function startServices() {
   const db = openDb(path.join(config.dataDir, "standup.db"));
   setUsageSink((row) => db.addUsage(row));
   configureAppDefault(db.raw, conxtDestinations, process.env.CONXT_DEFAULT_DESTINATION, process.env.CONXT_DEFAULT_OPERATOR_EMAIL);
-  const agent = createAgent();
+  // Calls made outside a meeting are kept under their task name in llm_usage (usage.ts).
+  const agent = labeled(createAgent());
   const planBriefs = new PlanBriefs(db, agent);
   const sessions = new Map<string, RoomSession>();
   /** The meeting running in a space now, if one is. */
@@ -194,7 +196,7 @@ export function startServices() {
       if (s) what === "updates" ? s.updatesChanged() : s.followUpsChanged();
       // Between meetings, let reports settle, then tidy the next agenda and what's been done.
       else {
-        polisher.schedule(roomId, 60_000);
+        polisher.schedule(roomId, POLISH_BATCH_MS);
         doneDecks.schedule(roomId);
       }
     },
@@ -223,7 +225,7 @@ export function startServices() {
       const s = live(roomId);
       if (s) s.followUpsChanged();
       else {
-        polisher.schedule(roomId, 60_000);
+        polisher.schedule(roomId, POLISH_BATCH_MS);
         doneDecks.schedule(roomId);
       }
     },
