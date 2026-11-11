@@ -36,6 +36,11 @@ export const config = {
   mapModel: env("MAP_MODEL") ?? "claude-sonnet-5-5",
   /** ✦ Stand's options for an open question (meetingAgent.ts), with web search, on a click. */
   agentModel: env("AGENT_MODEL") ?? "claude-sonnet-5-5",
+  /** Small, frequent calls: captions for snaps and Mac bar captures, filing a bar note under an
+   *  item, and matching a shared screen to the agenda. Haiku is about 40x cheaper than Opus. */
+  quickModel: env("QUICK_MODEL") ?? "claude-haiku-5-5",
+  /** A product review deck drafted from a brief: mostly reshaping, so Sonnet. */
+  writerModel: env("WRITER_MODEL") ?? "claude-sonnet-5-5",
   /** Live notes experiments, for trying on a recorded meeting with scripts/replay-notes.ts; all
    *  off unless set. NOTES_TURNS=ranges: the model lists a topic's lines as ranges ("3-17, 20")
    *  instead of every number. NOTES_THINKING=off: live notes runs answer without thinking first.

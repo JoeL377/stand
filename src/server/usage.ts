@@ -32,7 +32,7 @@ export function costOf(r: Pick<UsageRow, "model" | "input" | "cacheRead" | "cach
   return (r.input * p.input + r.cacheWrite * p.input * 1.25 + r.cacheRead * p.cacheRead + r.output * p.output) / 1_000_000;
 }
 
-const scope = new AsyncLocalStorage<{ meetingId: string; task: string; spent?: () => void }>();
+const scope = new AsyncLocalStorage<{ meetingId: string | null; task: string; spent?: () => void }>();
 let sink: ((row: UsageRow) => void) | null = null;
 
 /** Where usage rows go (the database), set once at startup. */
@@ -67,6 +67,19 @@ export function metered<T extends object>(agent: T, meetingId: string, spent?: (
       const v = Reflect.get(target, key, receiver);
       if (typeof v !== "function") return v;
       return (...args: unknown[]) => scope.run({ meetingId, task: String(key), spent }, () => v.apply(target, args));
+    },
+  });
+}
+
+/** The agent, with every call made outside a meeting kept under its method's name (doneDeck,
+ *  polishAgenda, describeCapture...) instead of "other", so between-meeting spend can be told apart.
+ *  A call already inside a meeting's scope (metered above) keeps that meeting. */
+export function labeled<T extends object>(agent: T): T {
+  return new Proxy(agent, {
+    get(target, key, receiver) {
+      const v = Reflect.get(target, key, receiver);
+      if (typeof v !== "function") return v;
+      return (...args: unknown[]) => (scope.getStore() ? v.apply(target, args) : scope.run({ meetingId: null, task: String(key) }, () => v.apply(target, args)));
     },
   });
 }
