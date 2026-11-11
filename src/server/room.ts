@@ -2026,7 +2026,7 @@ export class RoomSession implements SpeechSink {
       const current = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === itemId);
       const settledIds = new Set(settled.map((d) => d.id));
       const carried = current.filter((n) => n.discussionId !== null && settledIds.has(n.discussionId));
-      const notes = this.db.replaceNotes(this.meetingId, itemId, [
+      const notes = this.db.syncNotes(this.meetingId, itemId, [
         ...carried,
         ...mergeNotes(
           draft.notes

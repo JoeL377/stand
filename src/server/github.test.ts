@@ -16,7 +16,7 @@ function setup() {
   db.touchMembership(room.id, joe.id);
   const [item] = db.addItems(room.id, [{ source: "agenda", externalId: null, title: "Fixes", url: null, description: null }]);
   const m = db.startMeeting(room.id);
-  const notes = db.replaceNotes(m.id, item.id, [
+  const notes = db.syncNotes(m.id, item.id, [
     { kind: "action", text: "Fix the loading bar", owner: "Joe", discussionId: null },
     { kind: "action", text: "Add a mic picker", owner: "Joe", discussionId: null },
     { kind: "action", text: "Follow headphone switches", owner: "Joe", discussionId: null },

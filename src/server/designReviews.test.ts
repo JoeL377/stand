@@ -409,11 +409,11 @@ test("what the review decides goes back: onto each point's thread, the spec's to
   const [week, ten] = ["Is a week enough?", "Why ten percent?"].map((q) => slides.find((it) => it.title === q)!);
   const steps = slides.find((it) => it.title === "Steps")!;
   const thread = (q: string) => db.planThreads(capture.id).find((t) => t.messages[0].text === q)!;
-  db.replaceNotes(m.id, week.id, [
+  db.syncNotes(m.id, week.id, [
     { kind: "decision", text: "Keep the fallback for two weeks", owner: null },
     { kind: "action", text: "Change the plan to two weeks", owner: "Sam" },
   ]);
-  db.replaceNotes(m.id, ten.id, [{ kind: "question", text: "Can we start at one percent?", owner: null }]);
+  db.syncNotes(m.id, ten.id, [{ kind: "question", text: "Can we start at one percent?", owner: null }]);
 
   // Settled resolves the thread, with the decision caught on its slide; a second click takes that back.
   setDesignOutcome(db, briefs, week.id, "settled", "Ann Lee", m.id);
@@ -435,13 +435,13 @@ test("what the review decides goes back: onto each point's thread, the spec's to
 
   // The meeting ends, and its notes are tidied: one more to-do on a section slide, another decision on the point.
   finishDesignReview(db, room.id, m.id);
-  db.replaceNotes(m.id, week.id, [
+  db.syncNotes(m.id, week.id, [
     { kind: "decision", text: "Keep the fallback for two weeks", owner: null },
     { kind: "decision", text: "Mobile clients get a banner", owner: null },
     { kind: "action", text: "Change the plan to two weeks", owner: "Sam" },
   ]);
-  db.replaceNotes(m.id, steps.id, [{ kind: "action", text: "Write the flag removal checklist", owner: null }]);
-  const general = db.replaceNotes(m.id, null, [{ kind: "action", text: "Book the offsite", owner: null }]);
+  db.syncNotes(m.id, steps.id, [{ kind: "action", text: "Write the flag removal checklist", owner: null }]);
+  const general = db.syncNotes(m.id, null, [{ kind: "action", text: "Book the offsite", owner: null }]);
   assert.deepEqual(writeBackReview(db, m.id), { specs: 1, links: 2 });
 
   // Stand's line on the thread is rewritten in place with everything caught.
@@ -493,8 +493,8 @@ test("after a design review each capture goes under the slide it was about, befo
   const week = slides.find((it) => it.title === "Is a week enough?")!;
   const steps = slides.find((it) => it.title === "Steps")!;
   // The answer to the question was said after the author moved on to the next section.
-  const [late] = db.replaceNotes(m.id, steps.id, [{ kind: "decision", text: "Keep the fallback for two weeks", owner: null }]);
-  const [kept] = db.replaceNotes(m.id, standing.id, [{ kind: "action", text: "Book the offsite", owner: null }]);
+  const [late] = db.syncNotes(m.id, steps.id, [{ kind: "decision", text: "Keep the fallback for two weeks", owner: null }]);
+  const [kept] = db.syncNotes(m.id, standing.id, [{ kind: "action", text: "Book the offsite", owner: null }]);
   setDesignOutcome(db, briefs, week.id, "settled", "Ann Lee", m.id);
   finishDesignReview(db, room.id, m.id);
 

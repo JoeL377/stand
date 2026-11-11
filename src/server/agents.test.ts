@@ -29,7 +29,7 @@ function setup(deps: { readyToShip?: () => void; liveMeeting?: (roomId: string) 
       continuesId: null,
     },
   ]);
-  const notes = db.replaceNotes(m.id, item.id, [
+  const notes = db.syncNotes(m.id, item.id, [
     { kind: "decision", text: "Keep LiveKit; drop the browser fallback", owner: null, discussionId: topic.id },
     { kind: "action", text: "Move transcript capture to the server", owner: "Joe", discussionId: topic.id },
     { kind: "action", text: "Write the migration note", owner: "Andy", discussionId: topic.id },
@@ -89,7 +89,7 @@ test("a redraft of the notes and an undone removal keep who closed a to-do", () 
   const { api, db, joe, item, action } = setup();
   const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
   api.completeAction({ user: joe, token, model: "gpt-5" }, { ref: `stand:action/${action.id}` });
-  const [redrafted] = db.replaceNotes(action.meetingId, item.id, [{ kind: "action", text: action.text, owner: "Joe" }]);
+  const [redrafted] = db.syncNotes(action.meetingId, item.id, [{ kind: "action", text: action.text, owner: "Joe" }]);
   assert.equal(redrafted.doneActor?.connection, "tok1");
   const kept = db.getNote(redrafted.id)!;
   db.removeNote(kept.id);
@@ -120,7 +120,7 @@ test("anyone in a space can confirm a replacement, and agents see whether a deci
   db.touchMembership(room.id, andy.id);
   const old = notes[0];
   const m = db.startMeeting(room.id);
-  const [later] = db.replaceNotes(m.id, item.id, [{ kind: "decision", text: "Drop LiveKit", owner: null }]);
+  const [later] = db.syncNotes(m.id, item.id, [{ kind: "decision", text: "Drop LiveKit", owner: null }]);
   db.endMeeting(m.id, null);
   const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
   const ref = `stand:decision/${old.id}`;
@@ -156,7 +156,7 @@ test("an agent takes a conflict check, and what it finds stays a proposal until 
   const old = notes[0];
   const m = db.startMeeting(room.id);
   db.raw.prepare("UPDATE meetings SET started_at = started_at + 1000 WHERE id = ?").run(m.id);
-  const [later] = db.replaceNotes(m.id, item.id, [{ kind: "decision", text: "Drop LiveKit", owner: null }]);
+  const [later] = db.syncNotes(m.id, item.id, [{ kind: "decision", text: "Drop LiveKit", owner: null }]);
   db.endMeeting(m.id, null);
   const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
   const agent = { user: joe, token, model: "gpt-5" };
@@ -188,7 +188,7 @@ test("a check's low-confidence findings stay on record and don't show", () => {
   const { api, db, joe, room, item, notes } = setup();
   const m = db.startMeeting(room.id);
   db.raw.prepare("UPDATE meetings SET started_at = started_at + 1000 WHERE id = ?").run(m.id);
-  const [later] = db.replaceNotes(m.id, item.id, [{ kind: "decision", text: "Keep LiveKit for now", owner: null }]);
+  const [later] = db.syncNotes(m.id, item.id, [{ kind: "decision", text: "Keep LiveKit for now", owner: null }]);
   db.endMeeting(m.id, null);
   const token = { id: "tok1", label: "Codex", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
   const out = api.submitCheck({ user: joe, token }, {
@@ -393,11 +393,11 @@ test("references survive the agent rewriting the notes and topics mid-meeting", 
   const [t1] = db.replaceDiscussions(m.id, item.id, [
     { topic: "Pricing", positions: [], outcome: "open", segmentIds: [], continuesId: null },
   ]);
-  const [q1] = db.replaceNotes(m.id, item.id, [{ kind: "question", text: "Monthly too?", owner: null }]);
+  const [q1] = db.syncNotes(m.id, item.id, [{ kind: "question", text: "Monthly too?", owner: null }]);
   const [t2] = db.replaceDiscussions(m.id, item.id, [
     { topic: "pricing ", positions: [], outcome: "decided", segmentIds: [], continuesId: null },
   ]);
-  const [q2] = db.replaceNotes(m.id, item.id, [{ kind: "question", text: "Monthly too?", owner: null }]);
+  const [q2] = db.syncNotes(m.id, item.id, [{ kind: "question", text: "Monthly too?", owner: null }]);
   assert.equal(t2.id, t1.id);
   assert.equal(q2.id, q1.id);
 });
@@ -533,7 +533,7 @@ test("update_action rewords, reassigns and moves any to-do, and logs the summary
 test("a to-do added by hand comes up on the next agenda as added, and doesn't count as a meeting passing", () => {
   const { db, api, joe, room } = setup();
   const m = db.startMeeting(room.id);
-  const [loose] = db.replaceNotes(m.id, null, [{ kind: "action", text: "Book the offsite", owner: null, discussionId: null }]);
+  const [loose] = db.syncNotes(m.id, null, [{ kind: "action", text: "Book the offsite", owner: null, discussionId: null }]);
   db.endMeeting(m.id, null);
   api.createAction({ user: joe, token: null }, { space: room.id, text: "Renew the cert" });
   const { upNext } = upNextView(db, room.id, null);
