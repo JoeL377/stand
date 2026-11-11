@@ -481,3 +481,24 @@ test("what the review decides goes back: onto each point's thread, the spec's to
   // The point settled last time is resolved, so it isn't a point again; the open one is.
   assert.deepEqual(designReviewView(db, briefs, room.id, sam)!.specs[0].points.map((p) => p.text), ["Why ten percent?"]);
 });
+
+test("a design review that ends with nothing called goes back to waiting and can start again", () => {
+  const { db, sam, room, task, by } = space();
+  const briefs = new PlanBriefs(db, { taskBrief: async () => DRAFT });
+  const capture = task("Move capture to the server");
+  requestReview(db, briefs, capture, by(sam));
+  const first = startDesignReview(db, briefs, room.id);
+  const m = db.startMeeting(room.id);
+  const back = finishDesignReview(db, room.id, m.id)!;
+  assert.deepEqual([back.status, back.meetingId, back.startedAt], ["draft", null, null]);
+  assert.equal(designReviewsRan(db, room.id).length, 0);
+  assert.equal(designReviewOfMeeting(db, m.id), null);
+  const view = designReviewView(db, briefs, room.id, sam)!;
+  assert.deepEqual([view.status, view.specs.map((s) => s.taskId)], ["draft", [capture.id]]);
+  assert.deepEqual(designReviewState(db, capture), { queued: true, points: 0 });
+  // Starting again lays the slides out afresh.
+  const again = startDesignReview(db, briefs, room.id);
+  assert.equal(again.started, true);
+  assert.notEqual(again.firstItemId, first.firstItemId);
+  assert.equal(db.listItems(room.id)[0].id, again.firstItemId);
+});

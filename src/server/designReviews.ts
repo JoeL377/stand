@@ -549,12 +549,34 @@ export function authorMay(db: DB, roomId: string, fromItemId: string | null, toI
 }
 
 /** The meeting a design review ran in has ended: the review is done and its slides leave the agenda,
- *  with what was said on them kept. */
+ *  with what was said on them kept. One where no point and no verdict was called goes back to waiting. */
 export function finishDesignReview(db: DB, roomId: string, meetingId: string, now = Date.now()): ReviewRow | null {
   const live = db.reviewIn(roomId, ["live"], "design");
   if (!live) return null;
-  db.setReview(live.id, { status: "done", meetingId, endedAt: now });
   if (live.deckId) db.archiveDeck(live.deckId);
+  const rows = db.reviewSlides(live.id);
+  if (!rows.some((r) => r.outcome)) {
+    // Nothing was called, so it wasn't a review (started by mistake, or the call ended early): its
+    // specs wait on the next one again, as if it never started.
+    for (const r of rows) {
+      if (r.role === "overview") db.updateReviewSlide(r.id, { itemId: null });
+      else db.removeReviewSlide(r.id);
+    }
+    const specs = rows.filter((r) => r.role === "overview");
+    const draft = db.reviewIn(roomId, ["draft"], "design");
+    if (!draft) {
+      db.setReview(live.id, { status: "draft", deckId: null, startedAt: null });
+      return db.getReview(live.id);
+    }
+    // Others were asked for meanwhile: these go ahead of them, since they were asked for first.
+    const waiting = db.reviewSlides(draft.id);
+    const back = specs.filter((r) => !waiting.some((w) => w.role === "overview" && w.noteId === r.noteId));
+    for (const r of specs) if (!back.includes(r)) db.removeReviewSlide(r.id);
+    db.orderReviewSlides(draft.id, [...back.map((r) => r.id), ...waiting.map((w) => w.id)]);
+    db.deleteReview(live.id);
+    return db.getReview(draft.id);
+  }
+  db.setReview(live.id, { status: "done", meetingId, endedAt: now });
   return db.getReview(live.id);
 }
 

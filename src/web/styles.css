@@ -3300,3 +3300,5 @@ a.sh-review { text-decoration: none; color: inherit; }
 .sh-kinds .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
 .sh-kinds .rp-pill.on .muted { color: inherit; opacity: 0.7; }
 .sh-row > a.rp-pill { flex: none; }
+.dr-record button.rp-pill { cursor: pointer; font-family: inherit; }
+.dr-record button.rp-pill:disabled { cursor: default; opacity: 0.6; }
