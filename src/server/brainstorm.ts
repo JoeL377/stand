@@ -8,7 +8,7 @@
 // the map is never regrouped or dropped by a later pass, so what people are looking at stays put;
 // only a person takes one off. Two levels, never deeper: a deeper tree is unreadable on a call.
 import { z } from "zod";
-import type { BrainCaught, BrainNode, BrainstormSummary, BrainstormView, DesignDiagram, Segment } from "../shared/protocol.ts";
+import type { BrainCaught, BrainNode, BrainstormSummary, BrainstormView, DesignContext, DesignDiagram, Segment } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { similar } from "./notesMerge.ts";
 
@@ -229,6 +229,8 @@ export interface BrainstormRow {
   diagram: DesignDiagram | null;
   /** What a design session started from, as it was pasted. */
   seed: string | null;
+  /** A design session's background, given through the MCP: shown behind Context, read by every pass. */
+  context: DesignContext[];
   /** The to-do a design session's draft spec is saved on. */
   taskId: string | null;
 }
@@ -251,7 +253,7 @@ export const toBrainstormView = (b: BrainstormRow, busy = false): BrainstormView
   startedAt: b.startedAt,
   endedAt: b.endedAt,
   nodes: b.nodes.filter((n) => !n.removed),
-  ...(b.kind === "design" ? { design: shownDiagram(b.diagram ?? { boxes: [], arrows: [] }), taskId: b.taskId } : {}),
+  ...(b.kind === "design" ? { design: shownDiagram(b.diagram ?? { boxes: [], arrows: [] }), taskId: b.taskId, ...(b.context.length ? { context: b.context } : {}) } : {}),
   ...(busy ? { busy } : {}),
 });
 

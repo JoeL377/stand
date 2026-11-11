@@ -263,6 +263,18 @@ export interface DesignArrow {
   removed?: boolean;
 }
 
+/** One piece of background a design session was given (through the MCP): a doc, notes, a decision. */
+export interface DesignContext {
+  id: string;
+  title: string;
+  /** Markdown. */
+  text: string;
+  url: string | null;
+  /** Who gave it: "Joe via Claude". */
+  by: string | null;
+  ts: number;
+}
+
 export interface DesignDiagram {
   boxes: DesignBox[];
   arrows: DesignArrow[];
@@ -287,6 +299,8 @@ export interface BrainstormView {
   design?: DesignDiagram;
   /** A design session's to-do: the one its draft spec is saved on when the call ends. */
   taskId?: string | null;
+  /** A design session's background, shown behind its Context button. */
+  context?: DesignContext[];
   /** A pass is reading the latest talk right now. */
   busy?: boolean;
 }

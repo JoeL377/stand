@@ -1,12 +1,13 @@
 // A design session's diagram (server/designSession.ts): boxes for the things being designed and
 // labelled arrows for how they relate. What Stand heard shows dashed, with Keep and Drop, and joins
 // the diagram only when someone keeps it. A click on a box or an arrow opens what's behind it, on
-// your screen only. In the call it grows as the team talks; on the session's page it is the record.
+// your screen only. Context a session was given (MCP start_design_session) sits behind a Context button. In the call it grows as the team talks; on the session's page it is the record.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dagre from "@dagrejs/dagre";
 import type { BrainstormView, DesignArrow, DesignBox } from "../../shared/protocol.ts";
 import { Face, KIND, KINDS, clock } from "./BrainMap.tsx";
+import { Markdown } from "../Markdown.tsx";
 
 const BOX_W = 176;
 const PAD = 28;
@@ -93,15 +94,20 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
   const fit = size.w && size.h ? Math.min(1.3, Math.max(tall ? 0.7 : 0.6, Math.min(size.w / laid.w, size.h / laid.h))) : 1;
 
   const [openId, setOpenId] = useState<string | null>(null);
+  const context = brainstorm.context ?? [];
+  const [showContext, setShowContext] = useState(false);
+  const [piece, setPiece] = useState<string | null>(null);
+  const shownPiece = context.find((c) => c.id === piece) ?? context[0] ?? null;
   const openBox = boxes.find((b) => b.id === openId) ?? null;
   const openArrow = arrows.find((a) => a.id === openId) ?? null;
   useEffect(() => {
-    if (!openId) return;
-    const key = (e: KeyboardEvent) => e.key === "Escape" && setOpenId(null);
+    if (!openId && !showContext) return;
+    const key = (e: KeyboardEvent) => e.key === "Escape" && (setOpenId(null), setShowContext(false));
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [openId]);
-  const pick = (id: string) => setOpenId((cur) => (cur === id ? null : id));
+  }, [openId, showContext]);
+  const pick = (id: string) => (setShowContext(false), setOpenId((cur) => (cur === id ? null : id)));
+
   const name = (id: string) => boxes.find((b) => b.id === id)?.label ?? "";
   const waiting = boxes.filter((b) => b.suggested).length + arrows.filter((a) => a.suggested).length;
   const live = brainstorm.status === "live";
@@ -109,11 +115,16 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
   const openAt = laid.boxes.find((p) => p.box.id === openId)?.x ?? laid.arrows.find((p) => p.arrow.id === openId)?.x ?? 0;
 
   return (
-    <div className={`brain design${tall ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} onClick={() => setOpenId(null)}>
+    <div className={`brain design${tall ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} onClick={() => (setOpenId(null), setShowContext(false))}>
       <div className="design-top">
         <span className="design-what" dir="auto" title={brainstorm.prompt}>
           {brainstorm.prompt}
         </span>
+        {context.length > 0 && (
+          <button type="button" className={`design-context${showContext ? " on" : ""}`} onClick={(e) => (e.stopPropagation(), setOpenId(null), setShowContext((v) => !v))}>
+            Context <i>{context.length}</i>
+          </button>
+        )}
         {waiting > 0 && <span className="design-waiting">{waiting} {live ? "suggested" : "left as suggestions"}</span>}
         {brainstorm.busy && <span className="design-busy">Listening…</span>}
       </div>
@@ -195,6 +206,37 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
           </div>
         )}
       </div>
+      {showContext && shownPiece && (
+        <aside className="brain-card design-context-card left" role="dialog" aria-label="Context" onClick={(e) => e.stopPropagation()}>
+          <header>
+            <span className="brain-crumb plain">Context</span>
+            <button type="button" className="brain-x" aria-label="Close" onClick={() => setShowContext(false)}>
+              ✕
+            </button>
+          </header>
+          {context.length > 1 && (
+            <div className="design-context-tabs">
+              {context.map((c) => (
+                <button key={c.id} type="button" className={c.id === shownPiece.id ? "on" : ""} onClick={() => setPiece(c.id)} title={c.title}>
+                  {c.title}
+                </button>
+              ))}
+            </div>
+          )}
+          <h3 dir="auto">{shownPiece.title}</h3>
+          <div className="design-context-text">
+            <Markdown text={shownPiece.text} />
+          </div>
+          <footer className="design-context-foot muted">
+            {shownPiece.by && <span>From {shownPiece.by}</span>}
+            {shownPiece.url && (
+              <a href={shownPiece.url} target="_blank" rel="noreferrer">
+                Open the source ↗
+              </a>
+            )}
+          </footer>
+        </aside>
+      )}
       {(openBox || openArrow) && (
         <aside className={`brain-card ${!tall && openAt * fit > size.w / 2 ? "left" : "right"}`} role="dialog" aria-label={openBox?.label ?? "Arrow"} onClick={(e) => e.stopPropagation()}>
           <header>

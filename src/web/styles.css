@@ -3436,3 +3436,15 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .design:not(.bp-map) .design-what { display: none; }
 .design:not(.bp-map) .design-top:empty { display: none; }
 .design.narrow .design-frame { align-items: start; }
+/* A design session's background, given through the MCP: a button on the board, a card to read it in. */
+.design-context { all: unset; flex: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); font-size: 12px; font-weight: 500; }
+.design-context:hover, .design-context.on { background: var(--panel-2); }
+.design-context:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.design-context i { font-style: normal; color: var(--muted); }
+.brain-card.design-context-card { top: 44px; width: min(440px, calc(100% - 28px)); max-height: calc(100% - 58px); }
+.design-context-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.design-context-tabs button { all: unset; cursor: pointer; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.design-context-tabs button.on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.design-context-text { font-size: 13.5px; overflow-wrap: anywhere; }
+.design-context-text .md > :first-child { margin-top: 0; }
+.brain-card footer.design-context-foot { display: flex; justify-content: space-between; gap: 10px; }

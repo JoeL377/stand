@@ -8,7 +8,7 @@
 // person kept is renamed, moved or dropped by a later pass. When the call ends the diagram is saved
 // as a draft spec on a to-do, which goes through the normal design review from there.
 import { z } from "zod";
-import type { BrainCaught, DesignArrow, DesignBox, DesignDiagram, Segment } from "../shared/protocol.ts";
+import type { BrainCaught, DesignArrow, DesignBox, DesignContext, DesignDiagram, Segment } from "../shared/protocol.ts";
 import type { Actor } from "../shared/actors.ts";
 import { type BrainstormRow, shownDiagram } from "./brainstorm.ts";
 import type { DB } from "./db.ts";
@@ -174,6 +174,14 @@ export function seedFromAnswer(a: DiagramAnswer | null, now = Date.now()): Desig
 // ---- the live diagram --------------------------------------------------------------------------
 
 /** Keeps one design session's diagram. Not thread-safe: the room runs one pass at a time. */
+export const CONTEXT_MAX = 12;
+export const CONTEXT_TEXT_MAX = 20_000;
+
+/** What every pass of a session reads as background: what was pasted at the start, then each piece
+ *  of context it was given. */
+export const sessionBackground = (row: { seed: string | null; context: DesignContext[] }): string | null =>
+  [row.seed ?? "", ...row.context.map((c) => `## ${c.title}\n${c.text}`)].filter((x) => x.trim()).join("\n\n") || null;
+
 export class DiagramKeeper {
   private boxes: DesignBox[] = [];
   private arrows: DesignArrow[] = [];
@@ -188,7 +196,7 @@ export class DiagramKeeper {
     private readonly since: number,
     saved?: DesignDiagram | null,
     /** What the session started from, as pasted: context for every pass. */
-    private readonly seed: string | null = null,
+    private seed: string | null = null,
   ) {
     this.lastLook = since;
     if (saved) {
@@ -201,6 +209,11 @@ export class DiagramKeeper {
       const heard = [...saved.boxes.flatMap((b) => [b.quote ? b.ts : 0, ...b.points.map((p) => p.ts)]), ...saved.arrows.map((a) => (a.quote ? a.ts : 0))];
       this.lastLook = Math.max(since, ...heard);
     }
+  }
+
+  /** The session was given more context during the call. */
+  background(text: string | null) {
+    this.seed = text;
   }
 
   all(): DesignDiagram {
@@ -261,7 +274,7 @@ export class DiagramKeeper {
       .map((s, k) => `${from + k >= firstNew ? "NEW " : ""}[${k + 1}] [${at(s.ts, meetingStartedAt)}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
       .join("\n");
     const a = await this.model.designDiagram(
-      [`What the team is designing: ${this.prompt}`, `People: ${people.join(", ")}`, this.seed ? `What they started from:\n${clip(this.seed, 4000)}` : ""].filter(Boolean).join("\n"),
+      [`What the team is designing: ${this.prompt}`, `People: ${people.join(", ")}`, this.seed ? `What they started from:\n${clip(this.seed, 6000)}` : ""].filter(Boolean).join("\n"),
       [
         `Boxes so far:\n${boxLines.join("\n") || "(none)"}`,
         `Arrows so far:\n${arrowLines.join("\n") || "(none)"}`,
@@ -363,7 +376,7 @@ export function diagramMermaid(d: DesignDiagram): string {
 
 /** The session as a draft spec, in markdown: the diagram, each part, how the parts relate, and what
  *  the call decided, left open and gave people to do. `caught` is everything the meeting caught. */
-export function draftSpec(prompt: string, d: DesignDiagram, caught: BrainCaught[]): string {
+export function draftSpec(prompt: string, d: DesignDiagram, caught: BrainCaught[], context: DesignContext[] = []): string {
   const live = shownDiagram(d);
   const boxes = live.boxes.filter((b) => !b.suggested);
   const on = new Set(boxes.map((b) => b.id));
@@ -398,6 +411,10 @@ export function draftSpec(prompt: string, d: DesignDiagram, caught: BrainCaught[
     ...section("Open questions", list("question")),
     ...section("To-dos", list("action")),
     ...section("Suggested, not kept", waiting),
+    ...section(
+      "Context it started from",
+      context.map((c) => `- ${c.url ? `[${c.title}](${c.url})` : c.title}`),
+    ),
   ]
     .join("\n")
     .trim();
@@ -420,7 +437,7 @@ export function saveDraftSpec(db: DB, b: BrainstormRow, caught: BrainCaught[]): 
     note = db.getNote(made.id);
     if (!note) return null;
   }
-  const spec = draftSpec(b.prompt, b.diagram, caught);
+  const spec = draftSpec(b.prompt, b.diagram, caught, b.context);
   db.addPlan(b.roomId, note.id, spec, "Stand", STAND);
   db.addUpdate({
     roomId: b.roomId,
