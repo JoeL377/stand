@@ -547,6 +547,7 @@ export function Stage(props: {
                 const next = mine[mine.findIndex((s) => s.id === focusItem.id) + delta];
                 if (next) send({ type: "design.go", itemId: next.id });
               }}
+              onGo={(itemId) => send(canSteer ? { type: "focus", itemId } : { type: "design.go", itemId })}
               onOutcome={(outcome) => send({ type: "design.outcome", itemId: focusItem.id, outcome })}
               onRemove={canSteer ? removeNote : undefined}
               onAdd={canSteer ? (kind, text) => send({ type: "note.add", itemId: focusItem.id, kind, text }) : undefined}

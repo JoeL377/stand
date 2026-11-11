@@ -982,7 +982,7 @@ test("an agent asks for a design review of its plan, with the questions the team
   const out = api.requestDesignReview(caller, { ref, questions: [{ quote: "fallback for a week", question: "Is a week enough?" }] }, "https://stand.test") as Record<string, unknown>;
   assert.equal(out.requested, ref);
   assert.equal(out.questions_added, 1);
-  assert.equal(out.points, 1);
+  assert.equal(out.questions_open, 1);
   assert.equal(out.review_url, `https://stand.test/s/${room.id}/design-review`);
   assert.ok(notified.includes(`${room.id}:updates`));
   assert.equal((api.requestDesignReview(caller, { ref }) as Record<string, unknown>).already_requested, ref);
@@ -994,9 +994,9 @@ test("an agent asks for a design review of its plan, with the questions the team
   assert.equal(requested.actor?.kind, "agent");
 
   // get_review tells an agent what waits on the next design review.
-  const review = api.getReview(caller, { space: room.id }, "https://stand.test") as { design_review: { next: { status: string; specs: Array<{ shows: string; points: Array<{ question: string }> }> } | null; last: unknown } };
+  const review = api.getReview(caller, { space: room.id }, "https://stand.test") as { design_review: { next: { status: string; specs: Array<{ shows: string; section_slides: number; questions: Array<{ question: string }> }> } | null; last: unknown } };
   assert.equal(review.design_review.next?.status, "not started");
-  assert.deepEqual(review.design_review.next?.specs.map((s) => [s.shows, s.points.map((p) => p.question)]), [[ref, ["Is a week enough?"]]]);
+  assert.deepEqual(review.design_review.next?.specs.map((s) => [s.shows, s.section_slides, s.questions.map((p) => p.question)]), [[ref, 2, ["Is a week enough?"]]]);
   assert.equal(review.design_review.last, null);
 
   // A new version of the plan: the review is of that one.

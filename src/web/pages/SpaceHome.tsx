@@ -873,7 +873,7 @@ function TasksTab(props: {
           <strong>{props.designReview.live ? "Design review, on now" : "Design review"}</strong>
           <span className="sh-done-since-summary">{props.designReview.titles.join(" · ")}</span>
           <span className="count">
-            {props.designReview.specs} {props.designReview.specs === 1 ? "spec" : "specs"} · {props.designReview.points} {props.designReview.points === 1 ? "point" : "points"}
+            {props.designReview.specs} {props.designReview.specs === 1 ? "spec" : "specs"} · {props.designReview.points} {props.designReview.points === 1 ? "question" : "questions"}
           </span>
           <ChevronIcon />
         </Link>

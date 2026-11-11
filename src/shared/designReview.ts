@@ -1,10 +1,16 @@
-// A design review: a call where the team goes through a spec, one slide per section and one per
-// open comment thread (a point). These are the shapes the queue and the review page share.
+// A design review: a call where the team goes through a spec on a few slides: its sections, with
+// each open comment thread as a question on the slide of its section. These are the shapes the
+// queue, the call and the review page share. The app says "question"; the code's older word for an
+// open thread on the deck is "point".
 
 export const BRIEF_SUMMARY_MAX = 600;
 export const BRIEF_LINES_MAX = 4;
 export const BRIEF_LINE_MAX = 200;
 export const DESIGN_QUESTIONS_MAX = 12;
+/** A spec's sections go on at most this many slides: past it, adjacent sections share one. */
+export const SECTION_SLIDES_MAX = 8;
+/** How many lines of each section a slide shows, by how many sections share it. */
+export const linesShown = (sections: number) => Math.max(1, Math.min(BRIEF_LINES_MAX, Math.floor(6 / Math.max(1, sections))));
 
 /** One `##` section of the spec as its slide shows it. The heading and the order come from the spec. */
 export interface BriefSection {
@@ -17,6 +23,8 @@ export interface BriefSection {
   off: boolean;
   /** The spec's text under this heading changed after the author wrote the lines. */
   changed?: boolean;
+  /** With the author's grouping (PlanBrief.grouped): it shares the slide of the section before it. */
+  join?: boolean;
 }
 
 /** A question Stand suggests about a passage. It is a point only after the author accepts it. */
@@ -38,6 +46,8 @@ export interface PlanBrief {
   /** The spec changed after the author wrote the summary. */
   summaryChanged?: boolean;
   sections: BriefSection[];
+  /** The author chose which sections share a slide (BriefSection.join). Until then Stand groups them. */
+  grouped?: boolean;
   suggestions: BriefSuggestion[];
   editedBy: string | null;
   at: number;
@@ -77,6 +87,8 @@ export interface DesignSpec {
   /** The person looking wrote the spec or owns its to-do: they prepare it. */
   mine: boolean;
   brief: PlanBrief;
+  /** The section slides of the call: the headings on each, in the spec's order. */
+  groups: string[][];
   points: DesignPoint[];
   /** The review it went through before this one, when it did. */
   last?: LastDesignReview | null;
@@ -159,7 +171,10 @@ export interface DesignReviewRan {
 /** One change the author makes while preparing a spec. */
 export type BriefChange =
   | { summary: string }
-  | { section: string; lines?: string[]; off?: boolean }
+  /** join: the section shares the slide of the section before it (true), or starts its own (false). */
+  | { section: string; lines?: string[]; off?: boolean; join?: boolean }
+  /** Hands the grouping of sections into slides back to Stand. */
+  | { regroup: true }
   | { suggestion: string; accept: boolean }
   | { point: string; off: boolean }
   | { question: string; section?: string | null }
@@ -183,7 +198,9 @@ export const designOutcomeLabel = (o: DesignOutcome) => [...POINT_OUTCOMES, ...V
 export type DesignRole = "overview" | "section" | "point" | "verdict";
 
 /** What a design review's slide carries besides its title and body (server/designReviews.ts). The
- *  body is the summary on an overview, the lines on a section, and the question on a point. */
+ *  body is the summary on an overview, the lines on a section, and the question on a point. A point
+ *  is an agenda item of its own, so what's said on it is filed under it, but the call shows it as a
+ *  step on the slide before it. */
 export interface DesignSlideInfo {
   role: DesignRole;
   /** What the slide is called where a deck slide says "Slide 3". */
@@ -197,11 +214,13 @@ export interface DesignSlideInfo {
   planById: string | null;
   /** Stand wrote the body and the author hasn't rewritten it. */
   stand?: boolean;
-  /** A section's heading in the spec, also on the points under it. */
+  /** A section's heading in the spec (the first, when sections share the slide), also on the points under it. */
   section?: string | null;
+  /** Section: each section on the slide, with the lines of it the slide shows. */
+  parts?: Array<{ heading: string; lines: string[]; stand: boolean }>;
   /** Where the slide's part of the spec is, for Full spec to open on. */
   passage?: { start: number; end: number } | null;
-  /** Overview: the sections the call goes through. */
+  /** Overview: the section slides the call goes through. */
   sections?: string[];
   /** Overview: questions Stand suggests; the author can put one in front of the team. */
   suggestions?: BriefSuggestion[];

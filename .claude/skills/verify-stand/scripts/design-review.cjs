@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Drives a design review from end to end on a Stand instance started by launch.sh, with two people:
 // the host, and a spec's author who is not the host. The author's agent attaches a plan and asks for
-// its review over the MCP; the review starts from its page; they walk the slides, call the points
+// its review over the MCP; the review starts from its page; they walk the slides, call the questions
 // and the verdict, and end the meeting. Then it reads what the review wrote back.
 //
 //   NODE_PATH="$(npm root -g)" node design-review.cjs <run dir>
@@ -64,6 +64,11 @@ const PLAN = [
   "|---|---|",
   "| Cost | Watch the bill daily |",
 ].join("\n");
+
+// A spec of twelve sections, some long and some short: more than the eight section slides a spec gets.
+const BIG_TASK = "Design the billing export";
+const BIG_SIZES = [10, 500, 20, 30, 400, 15, 600, 25, 35, 700, 12, 18];
+const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", ...BIG_SIZES.flatMap((n, i) => [`## Part ${i + 1}`, "", `Body ${i + 1}: ${"x".repeat(n)}`, ""])].join("\n");
 
 (async () => {
   const browser = await chromium.launch({ headless: true, channel: process.env.STAND_VERIFY_CHANNEL || undefined, args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
@@ -129,6 +134,33 @@ const PLAN = [
       if (!edit.ok()) throw new Error(`prepare: ${edit.status()}`);
     });
 
+    await step("a spec of twelve sections is on eight section slides, and its author regroups them", async () => {
+      lastPage = vera;
+      const made = await tool("create_action", { space, text: BIG_TASK, owner: "me" });
+      const ref = (made.text.match(/stand:action\/[a-z0-9]+/) ?? [""])[0];
+      await tool("attach_plan", { ref, plan: BIG_PLAN });
+      const asked = await tool("request_design_review", { ref, questions: [{ quote: "Body 4:", question: "Is part four right?" }] });
+      if (asked.isError) throw new Error(asked.text.slice(0, 200));
+      await vera.goto(`${base}/s/${space}/design-review?spec=${ref.split("/")[1]}`);
+      await vera.getByRole("heading", { name: BIG_TASK }).waitFor();
+      await vera.getByText("Stand put the 12 sections on 8 slides").waitFor();
+      await snap("twelve-sections-on-eight-slides", vera);
+    });
+    const slideCards = () => vera.locator(".dr-slides > .dr-slide:not(.off)").count();
+    check("the review page shows ten slides: the Overview, eight section slides and the Verdict", (await slideCards()) === 10 && (await vera.locator(".rp-title").innerText()).includes("10 slides"), await vera.locator(".rp-title").innerText());
+    const shared = vera.locator(".dr-slide", { has: vera.getByRole("heading", { name: "Part 3", exact: true }) });
+    check("short sections that follow each other share a slide, with the question under its section",
+      (await shared.getByRole("heading", { name: "Part 4", exact: true }).count()) === 1 && (await shared.locator(".dr-part", { hasText: "Part 4" }).locator(".dr-point").innerText()).includes("Is part four right?"));
+    await step("the author gives a section its own slide, then lets Stand group them again", async () => {
+      await vera.getByRole("region", { name: "Part 4", exact: true }).getByRole("button", { name: "Give it its own slide" }).click();
+      await vera.getByText("You chose which sections share a slide.").waitFor();
+      if ((await slideCards()) !== 11) throw new Error(`expected 11 slides, saw ${await slideCards()}`);
+      await vera.getByRole("button", { name: "Let Stand group them" }).click();
+      await vera.getByText("Stand put the 12 sections on 8 slides").waitFor();
+      await vera.getByRole("button", { name: "Take off the review" }).click();
+      await vera.getByRole("heading", { name: TASK }).waitFor();
+    });
+
     await step("the host starts the meeting; the host is not the author", async () => {
       lastPage = rae;
       await rae.goto(spaceUrl);
@@ -145,8 +177,8 @@ const PLAN = [
     });
     const stageText = async (p) => (await p.locator(".design-stage").innerText()).replace(/\s+/g, " ");
     const veraOverview = await stageText(vera);
-    check("the call opens on the Overview: the spec's title and its sections", veraOverview.includes(TASK) && /Sections.*Why.*Steps.*Risks/.test(veraOverview) && veraOverview.includes("1 point"), veraOverview.slice(0, 200));
-    check("the deck has six slides", veraOverview.includes("1 of 6"), veraOverview.match(/\d+ of \d+/)?.[0]);
+    check("the call opens on the Overview: the spec's title and its slides", veraOverview.includes(TASK) && /Slides.*Why.*Steps.*Risks/.test(veraOverview) && veraOverview.includes("1 question"), veraOverview.slice(0, 200));
+    check("the deck has five slides: a question is not a slide", veraOverview.includes("Slide 1 of 5"), veraOverview.match(/Slide \d+ of \d+/)?.[0]);
     await rae.locator(".design-stage").waitFor({ timeout: 15_000 });
     check("the host's screen went to the review too", (await stageText(rae)).includes(TASK));
 
@@ -158,19 +190,26 @@ const PLAN = [
     });
     check("the section slide shows the author's lines", (await stageText(rae)).includes("The server never sleeps"));
 
-    await step("the host goes on to the point", async () => {
+    await step("the host goes on to the Steps slide, which lists its question", async () => {
       lastPage = rae;
       await rae.getByRole("button", { name: "Next slide" }).click();
       await rae.locator(".design-stage h1", { hasText: "Steps" }).waitFor();
-      await rae.getByRole("button", { name: "Next slide" }).click();
-      await rae.locator(".ds-question").waitFor();
-      await vera.locator(".ds-question").waitFor();
-      await snap("point-author", vera);
+      await rae.locator(".ds-q", { hasText: "Is a week enough for the mobile clients?" }).waitFor();
+      await snap("section-with-question", rae);
+    });
+    check("the question is closed on the slide of its section", (await rae.locator(".ds-q.open").count()) === 0 && (await stageText(rae)).includes("Slide 3 of 5"), (await stageText(rae)).match(/Slide [^←→]*/)?.[0]);
+    await step("the author opens the question for everyone, and the slide stays up", async () => {
+      lastPage = vera;
+      await vera.locator("button.ds-q", { hasText: "Is a week enough for the mobile clients?" }).click();
+      await vera.locator(".ds-q.open .ds-question").waitFor();
+      await rae.locator(".ds-q.open .ds-question").waitFor();
+      await snap("question-open-author", vera);
     });
     const point = await stageText(vera);
-    check("the point shows the passage with the question about it", point.includes("Keep the browser fallback for a week") && point.includes("Is a week enough for the mobile clients?"), point.slice(0, 220));
+    check("the open question shows its passage, on the slide of its section", point.includes("Keep the browser fallback for a week") && point.includes("Is a week enough for the mobile clients?") && (await vera.locator(".design-stage h1", { hasText: "Steps" }).count()) === 1, point.slice(0, 220));
+    check("the bar says which slide and which question", point.includes("Slide 3 of 5 · Question 1 of 1"), point.match(/Slide [^←→]*/)?.[0]);
 
-    await step("someone says something while the point is up", async () => {
+    await step("someone says something while the question is up", async () => {
       const open = rae.getByRole("button", { name: "Show chat and transcript" });
       if (await open.count()) await open.click();
       const chat = rae.getByRole("tab", { name: /^Chat/ });
@@ -180,7 +219,7 @@ const PLAN = [
       await rae.waitForTimeout(1500);
     });
 
-    await step("the host adds a to-do and a decision Stand missed on the point", async () => {
+    await step("the host adds a to-do and a decision Stand missed on the question", async () => {
       lastPage = rae;
       const add = rae.locator(".ds-caught .rv-wrap-add");
       await add.getByPlaceholder("Add a to-do").fill("Change the plan to two weeks");
@@ -193,13 +232,13 @@ const PLAN = [
       await snap("point-with-caught", vera);
     });
 
-    await step("the author calls the point Settled", async () => {
+    await step("the author calls the question Settled", async () => {
       lastPage = vera;
       await vera.getByRole("button", { name: "Settled" }).click();
       await rae.getByRole("button", { name: "Settled", pressed: true }).waitFor();
     });
 
-    await step("the host opens the full spec for everyone, at the point's passage", async () => {
+    await step("the host opens the full spec for everyone, at the question's passage", async () => {
       lastPage = rae;
       await rae.getByRole("button", { name: "Full spec" }).click();
       await rae.getByRole("dialog", { name: "Full spec" }).waitFor();
@@ -207,9 +246,9 @@ const PLAN = [
       await vera.getByRole("dialog", { name: "Full spec" }).getByText("Is a week enough for the mobile clients?").first().waitFor();
       await snap("full-spec-for-all", vera);
     });
-    check("the spec opens on the point's thread", (await vera.locator("[data-plan-highlight]").count()) > 0, await vera.locator("[data-plan-highlight]").allInnerTexts());
+    check("the spec opens on the question's thread", (await vera.locator("[data-plan-highlight]").count()) > 0, await vera.locator("[data-plan-highlight]").allInnerTexts());
 
-    await step("a comment made in the call becomes a point after the slide on screen", async () => {
+    await step("a comment made in the call becomes a question on the slide of its section", async () => {
       const review = await rae.request.get(`${base}/api/tasks/${taskId}/plan-review`).then((r) => r.json());
       const q = "| Cost | Watch the bill daily |";
       const tableStart = review.plan.text.indexOf("| Risk | Answer |");
@@ -218,16 +257,17 @@ const PLAN = [
       });
       if (!made.ok()) throw new Error(`comment: ${made.status()} ${await made.text()}`);
       await rae.getByRole("button", { name: "Back to the slide" }).click();
-      await rae.locator(".rv-pos", { hasText: "4 of 7" }).waitFor();
       await rae.getByRole("button", { name: "Next slide" }).click();
-      await rae.locator(".ds-question", { hasText: "Who watches the bill?" }).waitFor();
-      await snap("point-added-in-call", rae);
+      await rae.locator(".design-stage h1", { hasText: "Risks" }).waitFor();
+      await rae.locator(".ds-q", { hasText: "Who watches the bill?" }).waitFor();
+      await rae.getByRole("button", { name: "Next slide" }).click();
+      await rae.locator(".ds-q.open .ds-question", { hasText: "Who watches the bill?" }).waitFor();
+      await snap("question-added-in-call", rae);
     });
-    check("the new point is slide 5 of 7", (await stageText(rae)).includes("5 of 7"));
+    check("the new question is a step on the Risks slide, and the deck still has five slides", (await stageText(rae)).includes("Slide 4 of 5 · Question 1 of 1"), (await stageText(rae)).match(/Slide [^←→]*/)?.[0]);
 
     await step("the team reaches the Verdict and calls it", async () => {
       await rae.getByRole("button", { name: "Still open" }).click();
-      await rae.getByRole("button", { name: "Next slide" }).click();
       await rae.getByRole("button", { name: "Next slide" }).click();
       await rae.locator(".ds-results").waitFor();
       await vera.locator(".ds-results").waitFor();
@@ -236,7 +276,7 @@ const PLAN = [
       await snap("verdict", rae);
     });
     const verdict = await stageText(rae);
-    check("the Verdict lists each point with how it ended", /Is a week enough for the mobile clients\? Settled/.test(verdict) && /Who watches the bill\? Still open/.test(verdict), verdict.slice(0, 260));
+    check("the Verdict lists each question with how it ended", /Is a week enough for the mobile clients\? Settled/.test(verdict) && /Who watches the bill\? Still open/.test(verdict), verdict.slice(0, 260));
     const agenda = (await rae.locator("body").innerText());
     fs.writeFileSync(path.join(out, "host-page.txt"), agenda);
 
@@ -256,11 +296,11 @@ const PLAN = [
     const detail = await vera.request.get(`${base}/api/tasks/${taskId}`).then((r) => r.json());
     fs.writeFileSync(path.join(out, "task-after.json"), JSON.stringify(detail, null, 2));
     const verdictLine = JSON.stringify(detail).match(/Design review, [^"]*/)?.[0];
-    check("the to-do's log has the verdict in one line", /Approve with changes\. 1 point settled, 1 open\. 1 to-do came out of it/.test(verdictLine ?? ""), verdictLine);
+    check("the to-do's log has the verdict in one line", /Approve with changes\. 1 question settled, 1 open\. 1 to-do came out of it/.test(verdictLine ?? ""), verdictLine);
     check("the spec's to-do waits on the to-do from the review", detail.waitsOn.some((l) => l.text === "Change the plan to two weeks"), detail.waitsOn.map((l) => l.text));
     const review = await tool("get_review", { space });
     const last = review.json?.design_review?.last;
-    check("get_review gives agents the verdict and how each point ended", last?.specs?.[0]?.verdict === "Approve with changes" && JSON.stringify(last.specs[0].points.map((p) => p.outcome)) === JSON.stringify(["Settled", "Still open"]), last?.specs?.[0]);
+    check("get_review gives agents the verdict and how each question ended", last?.specs?.[0]?.verdict === "Approve with changes" && JSON.stringify(last.specs[0].questions.map((p) => p.outcome)) === JSON.stringify(["Settled", "Still open"]), last?.specs?.[0]);
 
     await step("the Tasks tab keeps the review that ran, and its page", async () => {
       lastPage = vera;
@@ -273,7 +313,7 @@ const PLAN = [
       await snap("review-record", vera);
     });
     const record = (await vera.locator(".dr-spec").innerText()).replace(/\s+/g, " ");
-    check("the record shows the verdict, each point's result and what was raised", record.includes("Approve with changes") && /Is a week enough for the mobile clients\? Settled/.test(record) && record.includes("Keep the fallback for two weeks") && /Who watches the bill\? Still open/.test(record), record.slice(0, 400));
+    check("the record shows the verdict, each question's result and what was raised", record.includes("Approve with changes") && /Is a week enough for the mobile clients\? Settled/.test(record) && record.includes("Keep the fallback for two weeks") && /Who watches the bill\? Still open/.test(record), record.slice(0, 400));
 
     await step("the recap links to the review, and the plan viewer shows it was reviewed", async () => {
       await vera.getByRole("link", { name: "Recap" }).click();

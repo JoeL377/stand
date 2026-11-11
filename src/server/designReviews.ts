@@ -4,14 +4,15 @@
 // on a plan, or the MCP's request_design_review). The review shares the product review's tables:
 // it is a review of kind "design", and each spec waiting on it is one slide, its overview.
 //
-// A point is an open comment thread on the spec (planReview.ts); there is no new primitive. The
-// author's questions come with the request as threads, reviewers comment on passages as they do
-// anywhere, and Stand's suggestions become threads only when the author accepts them. What each
-// slide says is the spec's brief (planBrief.ts).
+// A question for the team is an open comment thread on the spec (planReview.ts); there is no new
+// primitive, and the code calls one on the deck a point. The author's questions come with the
+// request as threads, reviewers comment on passages as they do anywhere, and Stand's suggestions
+// become threads only when the author accepts them. What each slide says is the spec's brief
+// (planBrief.ts).
 
 import type { Actor } from "../shared/actors.ts";
 import {
-  DESIGN_QUESTIONS_MAX, POINT_OUTCOMES, VERDICTS, pointsOnDeck, specAuthor,
+  DESIGN_QUESTIONS_MAX, POINT_OUTCOMES, VERDICTS, linesShown, pointsOnDeck, specAuthor,
   designOutcomeLabel,
   type BriefChange, type DesignCaught, type DesignOutcome, type DesignPoint, type DesignReviewRan, type DesignReviewRecord, type DesignReviewState, type DesignReviewSummary,
   type DesignReviewView, type DesignSlideInfo, type DesignSpec, type LastDesignReview, type PlanBrief, type Verdict,
@@ -20,7 +21,7 @@ import type { Passage, PlanThread } from "../shared/planReview.ts";
 import { TASK_COMMENT_MAX, type Item, type Note, type SlideContent } from "../shared/protocol.ts";
 import type { DB, ReviewRow, ReviewSlideRow } from "./db.ts";
 import { newId } from "./ids.ts";
-import type { PlanBriefs } from "./planBrief.ts";
+import { slideGroups, type PlanBriefs } from "./planBrief.ts";
 import { changeReview, logThreadChange, passageAround, planBlocks, planSections, quotePassage, reviewFor } from "./planReview.ts";
 
 const MAX_SPECS = 20;
@@ -104,6 +105,7 @@ function specOf(db: DB, briefs: PlanBriefs | null, slide: ReviewSlideRow, user: 
     planBy: plan.by,
     mine: !!user && isAuthor(db, note, user),
     brief: brief ?? emptyBrief(plan.id),
+    groups: slideGroups(briefFor(db, briefs, note.id, plan), plan.text),
     points: pointsOf(db, note.id),
     last: lastReviewOf(db, note.id),
   };
@@ -240,7 +242,10 @@ export function prepare(db: DB, briefs: PlanBriefs, note: Task, by: By, change: 
   } else if ("section" in change) {
     const lines = Array.isArray(change.lines) ? change.lines.filter((l): l is string => typeof l === "string") : undefined;
     const off = typeof change.off === "boolean" ? change.off : undefined;
-    if (typeof change.section !== "string" || !briefs.setSection(note, change.section, { lines, off }, by.userName)) throw gone();
+    const join = typeof change.join === "boolean" ? change.join : undefined;
+    if (typeof change.section !== "string" || !briefs.setSection(note, change.section, { lines, off, join }, by.userName)) throw gone();
+  } else if ("regroup" in change) {
+    if (!briefs.regroup(note, by.userName)) throw gone();
   } else if ("suggestion" in change) {
     const s = briefs.closeSuggestion(note, String(change.suggestion), change.accept ? "accepted" : "dismissed");
     if (!s) throw gone();
@@ -270,10 +275,11 @@ export function specView(db: DB, briefs: PlanBriefs, note: Task, user: { id: str
 
 // ---- the call -------------------------------------------------------------------------------------
 //
-// Starting a design review turns each spec into slides: its Overview, a slide for each section with
-// the points of that section after it, and its Verdict. Each slide is an agenda item, so what's said
-// while it is on screen is filed under it. The rows in review_slides hold the order; what a slide
-// says is read from the plan, its brief and its threads each time the deck is laid out again.
+// Starting a design review turns each spec into slides: its Overview, its sections on at most
+// SECTION_SLIDES_MAX slides (planBrief.ts slideGroups), and its Verdict. Each question is a step on
+// the slide of its section: a row and an agenda item of its own, right after that slide, so what's
+// said while it is up is filed under the question. The rows in review_slides hold the order; what
+// a slide says is read from the plan, its brief and its threads each time the deck is laid out again.
 
 const TITLE_MAX = 140;
 const NAME_MAX = 32;
@@ -288,11 +294,12 @@ function briefFor(db: DB, briefs: PlanBriefs | null, noteId: string, plan: { id:
   );
 }
 
-/** Makes one spec's rows match what should be on the deck now: a slide for each section still on the
- *  call and for each point, in the plan's order. A point that already has a slide keeps its place; a
- *  new one goes after the slide `after` (the one on screen) when that is a slide of this spec. Only
- *  what the author took off the call leaves, and never a point the team has already called. */
-function layOut(db: DB, briefs: PlanBriefs | null, review: ReviewRow, noteId: string, after?: string | null) {
+/** Makes one spec's rows match what should be on the deck now: a row for each section slide and for
+ *  each point, in the plan's order. A section slide's row carries the heading of its first section.
+ *  A point that already has a row keeps its place; a new one goes after the points of the slide its
+ *  section is on. Only what the author took off the call leaves, and never a point the team has
+ *  already called. */
+function layOut(db: DB, briefs: PlanBriefs | null, review: ReviewRow, noteId: string) {
   const note = db.getNote(noteId);
   const plan = db.planVersions(noteId).at(-1);
   const all = db.reviewSlides(review.id);
@@ -311,8 +318,10 @@ function layOut(db: DB, briefs: PlanBriefs | null, review: ReviewRow, noteId: st
     return row;
   };
   const verdict = rows.find((r) => r.role === "verdict") ?? add({ role: "verdict", title: "Verdict" });
-  // Sections: the ones on the call. One the author took off loses its slide.
-  const on = brief.sections.filter((s) => !s.off).map((s) => s.heading);
+  // Section slides: one for each group of sections on the call. A heading that no longer leads a slide loses its row.
+  const groups = slideGroups(brief, plan.text);
+  const leadOf = new Map(groups.flatMap((g) => g.map((h) => [h, g[0]] as const)));
+  const on = groups.map((g) => g[0]);
   for (const row of rows.filter((r) => r.role === "section" && !on.includes(r.section!))) db.removeReviewSlide(row.id);
   const newSections = on.filter((h) => !rows.some((r) => r.role === "section" && r.section === h)).map((h) => add({ role: "section", title: h, section: h }));
   // Points: every open one on the deck has a slide. One taken off the call loses its slide unless the team called it.
@@ -321,7 +330,7 @@ function layOut(db: DB, briefs: PlanBriefs | null, review: ReviewRow, noteId: st
   for (const p of points) {
     const row = had.get(p.threadId);
     if (row && p.off && !row.outcome) db.removeReviewSlide(row.id);
-    else if (!row && !p.off && p.placed) newPoints.push(add({ role: "point", title: "Point", threadId: p.threadId, section: p.section }));
+    else if (!row && !p.off && p.placed) newPoints.push(add({ role: "point", title: "Question", threadId: p.threadId, section: p.section }));
   }
   // Order. The slides that were there keep their places; a new one finds its own.
   const before = db.reviewSlides(review.id);
@@ -335,27 +344,25 @@ function layOut(db: DB, briefs: PlanBriefs | null, review: ReviewRow, noteId: st
     while (isPoint(order[at])) at++;
     return at;
   };
-  const sectionRow = (heading: string) => order.find((id) => byId.get(id)?.role === "section" && byId.get(id)?.section === heading);
-  /** The slide a section's part of the spec comes after: the nearest section before it that is on the deck, else the overview. */
-  const leadFor = (heading: string | null, self = false) => {
-    const at = heading ? brief.sections.findIndex((s) => s.heading === heading) : -1;
-    const own = self && heading ? sectionRow(heading) : undefined;
-    return own ?? brief.sections.slice(0, Math.max(0, at)).reverse().map((s) => sectionRow(s.heading)).find(Boolean) ?? overview.id;
+  /** The heading that leads the slide a section is on or, for one off the call, the slide it comes
+   *  after. Null is the overview. */
+  const homeOf = (heading: string | null | undefined): string | null => {
+    for (let i = heading ? brief.sections.findIndex((x) => x.heading === heading) : -1; i >= 0; i--) {
+      const lead = leadOf.get(brief.sections[i].heading);
+      if (lead) return lead;
+    }
+    return null;
   };
-  // A section goes after the one before it in the plan, past that section's own points.
+  const rowOf = (lead: string | null) => (lead && order.find((id) => byId.get(id)?.role === "section" && byId.get(id)?.section === lead)) || overview.id;
+  // A section slide goes after the one before it in the plan, past that slide's own points.
   for (const row of newSections) {
-    const lead = leadFor(row.section);
-    let at = order.indexOf(lead) + 1;
-    while (isPoint(order[at]) && (byId.get(order[at])!.section ?? null) === (byId.get(lead)!.section ?? null)) at++;
+    const prev = homeOf(brief.sections[brief.sections.findIndex((x) => x.heading === row.section) - 1]?.heading);
+    let at = order.indexOf(rowOf(prev)) + 1;
+    while (isPoint(order[at]) && homeOf(byId.get(order[at])!.section) === prev) at++;
     order.splice(at, 0, row.id);
   }
-  // A point goes after the slide on screen; else at the end of its section's points.
-  const anchor = after ? mine(before, noteId).find((r) => r.itemId === after && r.role !== "verdict") : null;
-  let next = anchor && order.includes(anchor.id) ? order.indexOf(anchor.id) + 1 : -1;
-  for (const row of newPoints) {
-    const at = next > 0 ? next++ : endOf(leadFor(row.section, true));
-    order.splice(at, 0, row.id);
-  }
+  // A point goes on the slide of its section, after the points that slide has.
+  for (const row of newPoints) order.splice(endOf(rowOf(homeOf(row.section))), 0, row.id);
   order.push(verdict.id);
   // The spec's slides stay one block, where its overview is among the other specs.
   const others = before.filter((r) => r.noteId !== noteId).map((r) => r.id);
@@ -394,6 +401,8 @@ function specContext(db: DB, briefs: PlanBriefs | null, rows: ReviewSlideRow[], 
   const points = pointsOf(db, noteId);
   const threads = new Map((reviewFor(db, noteId)?.threads ?? []).map((t) => [t.id, t]));
   const numbered = rows.filter((r) => r.role === "point").map((r) => r.id);
+  const groups = slideGroups(brief, plan.text);
+  const titleOf = (group: string[]) => group.join(" · ");
   const base = { taskId: note.id, spec: note.text, owner: note.owner ?? null, planBy: written?.by ?? plan.by, planById: written?.actor?.personId ?? null };
   return (row: ReviewSlideRow): ({ title: string } & SlideContent) | null => {
     const info = (i: Omit<DesignSlideInfo, keyof typeof base | "outcome" | "outcomeBy">): DesignSlideInfo => ({
@@ -406,19 +415,26 @@ function specContext(db: DB, briefs: PlanBriefs | null, rows: ReviewSlideRow[], 
           role: "overview",
           name: "Overview",
           stand: !!brief.summary && !brief.summaryEdited,
-          sections: rows.filter((r) => r.role === "section").map((r) => r.section!),
+          sections: rows.filter((r) => r.role === "section").map((r) => titleOf(groups.find((g) => g[0] === r.section) ?? [r.section!])),
           suggestions: brief.suggestions.filter((s) => s.state === "open"),
         }));
       case "section": {
-        const section = sections.find((s) => s.heading === row.section);
-        const lines = brief.sections.find((s) => s.heading === row.section);
-        if (!section) return null;
-        return slide(section.heading, (lines?.lines ?? []).join("\n"), `This section of the spec:\n${clip(plan.text.slice(section.headingEnd, section.end).trim(), PASSAGE_MAX)}`, info({
+        const group = (groups.find((g) => g[0] === row.section) ?? []).flatMap((h) => sections.find((x) => x.heading === h) ?? []);
+        if (!group.length) return null;
+        const shown = linesShown(group.length);
+        const parts = group.map((section) => {
+          const written = brief.sections.find((x) => x.heading === section.heading);
+          return { heading: section.heading, lines: (written?.lines ?? []).slice(0, shown), stand: !!written?.lines.length && !written.edited };
+        });
+        const one = group.length === 1;
+        const under = group.map((x) => `${one ? "" : `${x.heading}\n`}${clip(plan.text.slice(x.headingEnd, x.end).trim(), Math.floor(PASSAGE_MAX / group.length))}`).join("\n\n");
+        return slide(titleOf(group.map((x) => x.heading)), parts.flatMap((p) => p.lines).join("\n"), `${one ? "This section" : "These sections"} of the spec:\n${under}`, info({
           role: "section",
-          name: clip(section.heading, NAME_MAX),
-          section: section.heading,
-          stand: !!lines?.lines.length && !lines.edited,
-          passage: { start: section.start, end: section.headingEnd },
+          name: one ? clip(group[0].heading, NAME_MAX) : `${clip(group[0].heading, NAME_MAX - 3)} +${group.length - 1}`,
+          section: group[0].heading,
+          parts,
+          stand: parts.some((p) => p.stand),
+          passage: { start: group[0].start, end: group[0].headingEnd },
         }));
       }
       case "point": {
@@ -428,7 +444,7 @@ function specContext(db: DB, briefs: PlanBriefs | null, rows: ReviewSlideRow[], 
         const question = thread.messages[0]?.text ?? "";
         return slide(question.split("\n")[0], clip(question, QUOTE_MAX), `It is about this passage of the spec:\n${quote}`, info({
           role: "point",
-          name: `Point ${numbered.indexOf(row.id) + 1}`,
+          name: `Question ${numbered.indexOf(row.id) + 1}`,
           section: row.section,
           threadId: thread.id,
           quote,
@@ -440,7 +456,7 @@ function specContext(db: DB, briefs: PlanBriefs | null, rows: ReviewSlideRow[], 
         return slide(`Verdict: ${note.text}`, "", "", info({
           role: "verdict",
           name: "Verdict",
-          // One that got a slide before its passage went is already among the points.
+          // One that got a row before its passage went is already among the questions.
           lost: points.filter((p) => !p.placed && !p.off && !rows.some((r) => r.threadId === p.threadId)).map((p) => ({ quote: p.quote, text: p.text, by: p.by })),
         }));
       default:
@@ -505,12 +521,11 @@ function liveWith(db: DB, roomId: string, noteId: string): ReviewRow | null {
 }
 
 /** Something about a spec changed while its review runs (a new comment, the author's edit, a brief
- *  Stand finished writing): its slides are laid out again. `after`: the slide on screen, which a new
- *  point follows. True when the spec is in a running review. */
-export function specChanged(db: DB, briefs: PlanBriefs | null, note: Task, after?: string | null): boolean {
+ *  Stand finished writing): its slides are laid out again. True when the spec is in a running review. */
+export function specChanged(db: DB, briefs: PlanBriefs | null, note: Task): boolean {
   const live = liveWith(db, note.roomId, note.id);
   if (!live) return false;
-  layOut(db, briefs, live, note.id, after);
+  layOut(db, briefs, live, note.id);
   syncDeck(db, briefs, live);
   return true;
 }
@@ -578,7 +593,7 @@ function pointReply(slide: ReviewSlideRow, caught: Note[], at: number): string {
   const who = slide.outcomeBy ? `, by ${slide.outcomeBy}` : "";
   if (slide.outcome === "settled") {
     const decided = list("Decided", "decision");
-    return [`Settled in the design review on ${day(at)}${who}.`, ...(decided.length ? decided : ["Stand caught no decision on this point."]), ...list("To do", "action")].join("\n");
+    return [`Settled in the design review on ${day(at)}${who}.`, ...(decided.length ? decided : ["Stand caught no decision on this question."]), ...list("To do", "action")].join("\n");
   }
   return [`Still open after the design review on ${day(at)}${who}.`, ...list("To do", "action"), ...list("Open questions", "question")].join("\n");
 }
@@ -629,7 +644,7 @@ export function writeBackReview(db: DB, meetingId: string): { specs: number; lin
     const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
     const text = [
       `Design review, ${day(at)}: ${verdict ? designOutcomeLabel(verdict) : "no verdict"}.`,
-      points.length ? `${count(settled, "point")} settled, ${points.length - settled} open.` : "",
+      points.length ? `${count(settled, "question")} settled, ${points.length - settled} open.` : "",
       todos.length ? `${count(todos.length, "to-do")} came out of it; this to-do waits on ${todos.length === 1 ? "it" : "them"}.` : "",
     ].filter(Boolean).join(" ");
     db.addUpdate({ roomId: note.roomId, itemId: note.itemId, noteId: note.id, noteText: note.text, ...STAND, status: "comment", text, links: [] });
