@@ -1434,6 +1434,7 @@ export function agentApi(deps: AgentDeps) {
           label: n.label,
           detail: n.detail ?? undefined,
           by: n.by ?? undefined,
+          starred: b.starred.includes(n.id) || undefined,
           said: n.quote ? `${n.quote.speaker}: ${n.quote.text}` : undefined,
           built_on: list(n.points.map((p) => ({ text: p.text, by: p.by ?? undefined }))),
           todos: list(of("action").map((c) => ({ ref: `stand:action/${c.id}`, text: c.text, owner: c.owner ?? undefined, done: c.done }))),

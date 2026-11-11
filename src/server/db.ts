@@ -566,6 +566,7 @@ const toBrainstorm = (r: Row): BrainstormRow => ({
   seed: (r.seed as string) ?? null,
   taskId: (r.task_id as string) ?? null,
   context: r.context_json ? (JSON.parse(r.context_json as string) as DesignContext[]) : [],
+  starred: r.stars_json ? (JSON.parse(r.stars_json as string) as string[]) : [],
 });
 const toReviewSlide = (r: Row): ReviewSlideRow => ({
   id: r.id as string,
@@ -748,6 +749,9 @@ export function openDb(file?: string) {
   if (!brainCols.includes("kind"))
     db.exec("ALTER TABLE brainstorms ADD COLUMN kind TEXT NOT NULL DEFAULT 'map'; ALTER TABLE brainstorms ADD COLUMN diagram_json TEXT; ALTER TABLE brainstorms ADD COLUMN seed TEXT; ALTER TABLE brainstorms ADD COLUMN task_id TEXT;");
   if (!brainCols.includes("context_json")) db.exec("ALTER TABLE brainstorms ADD COLUMN context_json TEXT");
+  // The ideas people starred on a brainstorm's page. Kept beside the map, not in it: the map is
+  // rewritten by every pass of a running brainstorm.
+  if (!brainCols.includes("stars_json")) db.exec("ALTER TABLE brainstorms ADD COLUMN stars_json TEXT");
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
   // What ✦ Stand did on the board (meetingAgent.ts): its cards, which are also its log.
   if (!meetingCols.includes("agent_json")) db.exec("ALTER TABLE meetings ADD COLUMN agent_json TEXT");
@@ -2181,6 +2185,9 @@ export function openDb(file?: string) {
     setBrainstorm(id: string, patch: Partial<Pick<BrainstormRow, "status" | "meetingId" | "endedAt">>) {
       const cols: Record<string, string> = { status: "status", meetingId: "meeting_id", endedAt: "ended_at" };
       for (const [k, v] of Object.entries(patch)) db.prepare(`UPDATE brainstorms SET ${cols[k]} = ? WHERE id = ?`).run(v ?? null, id);
+    },
+    saveBrainstormStars(id: string, starred: string[]) {
+      db.prepare("UPDATE brainstorms SET stars_json = ? WHERE id = ?").run(starred.length ? JSON.stringify(starred) : null, id);
     },
     saveBrainstormMap(id: string, nodes: BrainNode[]) {
       db.prepare("UPDATE brainstorms SET map_json = ? WHERE id = ?").run(JSON.stringify(nodes), id);

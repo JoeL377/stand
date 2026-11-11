@@ -3309,6 +3309,34 @@ button.ds-q:focus-visible { outline: 2px solid var(--accent); }
 .bp-map { flex: 1; }
 .bp-count { font-size: 12.5px; white-space: nowrap; }
 .bp-menu { min-width: 300px; }
+.bp-views { display: inline-flex; gap: 4px; }
+.bp-views .rp-pill, .bi-bar .rp-pill { cursor: pointer; }
+.bp-views .rp-pill.on, .bi-bar .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
+.bi-bar .rp-pill.on .muted { color: inherit; opacity: 0.7; }
+/* A brainstorm's ideas as a list (pages/BrainIdeas.tsx). */
+.bi { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 40px; }
+.bi-empty { display: grid; place-items: center; }
+.bi-list { max-width: 820px; margin: 0 auto; }
+.bi-bar { display: flex; gap: 6px; margin-bottom: 8px; }
+.bi-none { padding: 24px 0; text-align: center; font-size: 13.5px; }
+.bi-row { display: grid; grid-template-columns: 36px minmax(0, 1fr); border-bottom: 1px solid var(--line); }
+.bi-star { all: unset; box-sizing: border-box; width: 36px; height: 40px; display: grid; place-items: center; color: var(--muted); cursor: pointer; border-radius: 8px; }
+.bi-star:hover { color: var(--text); background: var(--panel-2); }
+.bi-star.on { color: #e0a100; }
+.bi-star:focus-visible, .bi-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.bi-main { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 10px 8px 10px 4px; min-width: 0; cursor: pointer; border-radius: 8px; }
+.bi-main:disabled { cursor: default; opacity: 1; color: inherit; }
+.bi-main:not(:disabled):hover { background: var(--panel-2); }
+.bi-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bi-top > strong { font-size: 14.5px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.bi-dir { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 20px; line-height: 18px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
+.bi-by { flex: none; font-size: 12px; }
+.bi-marks { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 7px; }
+.bi-detail { font-size: 13.5px; line-height: 1.4; color: var(--muted); }
+.bi-more { grid-column: 2; list-style: none; margin: 0; padding: 0 8px 12px 4px; display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; line-height: 1.4; }
+.bi-more li { display: block; padding-left: 12px; border-left: 2px solid var(--line); }
+.bi-more li.bi-caught { display: flex; align-items: baseline; gap: 6px; padding-left: 0; border-left: 0; font-weight: 500; }
+.bi-more li.bi-caught .brain-kind { translate: 0 2px; }
 .bp-menu-prompt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sh-panel form.sh-brain, .sh-panel div.sh-brain { cursor: default; padding: 5px 6px 5px 12px; }
 .sh-panel .sh-brain:hover { background: none; border-color: var(--line); }
@@ -3317,6 +3345,10 @@ button.ds-q:focus-visible { outline: 2px solid var(--accent); }
 .sh-brain a.sh-done-since-summary:hover { color: var(--text); }
 @media (max-width: 720px) {
   .bp-count { display: none; }
+  .bi { padding: 10px 10px 32px; }
+  .bi-top { flex-wrap: wrap; row-gap: 3px; }
+  .bi-top > strong { flex: 1 1 100%; }
+  .bi-marks { margin-left: auto; }
   /* The outline scrolls inside the page, so a tapped circle's card stays at the bottom of the screen. */
   .rp.bp { height: 100dvh; }
   /* The row takes two lines: its name and earlier ones, then the sentence and Start. */

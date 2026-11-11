@@ -294,6 +294,8 @@ export interface BrainstormView {
   startedAt: number;
   endedAt: number | null;
   nodes: BrainNode[];
+  /** Ids of the ideas someone in the space starred as worth coming back to. */
+  starred?: string[];
   /** Set when this is a design session: the sentence says what is being designed, and the board is
    *  this diagram instead of the map. */
   design?: DesignDiagram;

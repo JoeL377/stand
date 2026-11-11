@@ -42,7 +42,7 @@ import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
-import { BrainstormError, brainstormOfMeeting, brainstormPage, brainstormsOf, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
+import { BrainstormError, brainstormOfMeeting, brainstormPage, brainstormsOf, starIdea, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { SEED_MAX, isDiagramText, mermaidIn, parseSeed, seedFromAnswer } from "./designSession.ts";
 import { ReviewError, removeSlide, reviewOfMeeting, reviewPage, reviewView, reviewsDone, startReview } from "./reviews.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
@@ -1130,6 +1130,18 @@ app.get(
     const brainstorm = brainstormPage(db, room.id, req.params.brainstormId);
     if (!brainstorm) return notFound(res, "Brainstorm not found");
     res.json({ roomName: room.name, brainstorm, brainstorms: brainstormsOf(db, room.id) });
+  }),
+);
+
+// Star an idea on a brainstorm's page, or take the star off.
+app.post(
+  "/api/rooms/:id/brainstorms/:brainstormId/star",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    const brainstorm = starIdea(db, room.id, req.params.brainstormId, String(req.body?.idea ?? ""), req.body?.on !== false);
+    if (!brainstorm) return notFound(res, "Idea not found");
+    res.json({ brainstorm });
   }),
 );
 

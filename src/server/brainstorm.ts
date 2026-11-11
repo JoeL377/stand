@@ -233,6 +233,8 @@ export interface BrainstormRow {
   context: DesignContext[];
   /** The to-do a design session's draft spec is saved on. */
   taskId: string | null;
+  /** Ids of the ideas people starred on its page. */
+  starred: string[];
 }
 
 /** A diagram as people see it: without what was dropped. */
@@ -253,6 +255,7 @@ export const toBrainstormView = (b: BrainstormRow, busy = false): BrainstormView
   startedAt: b.startedAt,
   endedAt: b.endedAt,
   nodes: b.nodes.filter((n) => !n.removed),
+  ...(b.starred.length ? { starred: b.starred.filter((id) => b.nodes.some((n) => n.id === id && !n.removed)) } : {}),
   ...(b.kind === "design" ? { design: shownDiagram(b.diagram ?? { boxes: [], arrows: [] }), taskId: b.taskId, ...(b.context.length ? { context: b.context } : {}) } : {}),
   ...(busy ? { busy } : {}),
 });
@@ -314,6 +317,17 @@ export const brainstormLive = (db: DB, roomId: string): BrainstormView | null =>
 export function brainstormPage(db: DB, roomId: string, id: string): BrainstormView | null {
   const b = db.getBrainstorm(id);
   return b && b.roomId === roomId ? toBrainstormView(b) : null;
+}
+
+/** Stars an idea on a brainstorm's page, or takes the star off. The star is the space's, not one
+ *  person's: it marks an idea worth coming back to. Null when the idea isn't on this space's map. */
+export function starIdea(db: DB, roomId: string, id: string, nodeId: string, on: boolean): BrainstormView | null {
+  const b = db.getBrainstorm(id);
+  if (!b || b.roomId !== roomId || !b.nodes.some((n) => n.id === nodeId && n.parent && !n.removed)) return null;
+  const starred = b.starred.filter((x) => x !== nodeId);
+  if (on) starred.push(nodeId);
+  db.saveBrainstormStars(id, starred);
+  return toBrainstormView({ ...b, starred });
 }
 
 /** The space's brainstorms, newest first, the one running included. */
