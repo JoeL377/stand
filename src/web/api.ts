@@ -165,6 +165,8 @@ export const api = {
     call<{ brainstorm: BrainstormView }>("POST", `/api/rooms/${roomId}/brainstorm/start`, { prompt, design }),
   brainstorm: (roomId: string, id: string) =>
     call<{ roomName: string; brainstorm: BrainstormView; brainstorms: BrainstormSummary[] }>("GET", `/api/rooms/${roomId}/brainstorms/${encodeURIComponent(id)}`),
+  /** "Finish this" in a call: ends the review, brainstorm or design session on its board. */
+  finishExperience: (roomId: string) => call<{ finished: string[] }>("POST", `/api/rooms/${roomId}/experience/finish`),
   startReview: (roomId: string) => call<{ review: ReviewView | null; firstItemId: string }>("POST", `/api/rooms/${roomId}/review/start`),
   removeReviewSlide: (roomId: string, slideId: string) => call<{ review: ReviewView | null }>("DELETE", `/api/rooms/${roomId}/review/slides/${slideId}`),
   suggested: (roomId: string) => call<{ upNext: UpNext }>("GET", `/api/rooms/${roomId}/suggested.json`),

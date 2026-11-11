@@ -1107,6 +1107,20 @@ app.post(
   }),
 );
 
+// "Finish this": the host ends the review, brainstorm or design session running in the call, and the
+// call goes on as plain talk.
+app.post(
+  "/api/rooms/:id/experience/finish",
+  route(async (req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    const s = sessions.get(room.id);
+    if (!s) return void res.status(409).json({ error: "No call is running in this space." });
+    if (!s.hostIs(req.user!.id)) return void res.status(403).json({ error: "Only the host can finish it." });
+    res.json({ finished: await s.finishExperience() });
+  }),
+);
+
 // One brainstorm's own page.
 app.get(
   "/api/rooms/:id/brainstorms/:brainstormId",
