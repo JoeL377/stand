@@ -43,7 +43,7 @@ import { costOf, type UsageRow } from "./usage.ts";
 import type { Settled } from "./spaceSettle.ts";
 import type { ListItem } from "./liveList.ts";
 import type { BrainstormRow } from "./brainstorm.ts";
-import type { BrainNode } from "../shared/protocol.ts";
+import type { BrainNode, DesignDiagram } from "../shared/protocol.ts";
 import { initGithub } from "./github.ts";
 import { initProjects } from "./projects.ts";
 import { initConxt, enqueueConxtMeeting } from "./conxt.ts";
@@ -561,6 +561,10 @@ const toBrainstorm = (r: Row): BrainstormRow => ({
   startedAt: r.started_at as number,
   endedAt: (r.ended_at as number) ?? null,
   nodes: r.map_json ? (JSON.parse(r.map_json as string) as BrainNode[]) : [],
+  kind: r.kind === "design" ? "design" : "map",
+  diagram: r.diagram_json ? (JSON.parse(r.diagram_json as string) as DesignDiagram) : null,
+  seed: (r.seed as string) ?? null,
+  taskId: (r.task_id as string) ?? null,
 });
 const toReviewSlide = (r: Row): ReviewSlideRow => ({
   id: r.id as string,
@@ -738,6 +742,10 @@ export function openDb(file?: string) {
   // "added": not a meeting but where a to-do someone added by hand (MCP create_action) lives, since
   // every note sits in a meeting. Lists of meetings leave these out (see addTask).
   if (!meetingCols.includes("kind")) db.exec("ALTER TABLE meetings ADD COLUMN kind TEXT");
+  // A design session (designSession.ts) is a brainstorm whose board is a diagram of boxes and arrows.
+  const brainCols = (db.prepare("PRAGMA table_info(brainstorms)").all() as Row[]).map((c) => c.name);
+  if (!brainCols.includes("kind"))
+    db.exec("ALTER TABLE brainstorms ADD COLUMN kind TEXT NOT NULL DEFAULT 'map'; ALTER TABLE brainstorms ADD COLUMN diagram_json TEXT; ALTER TABLE brainstorms ADD COLUMN seed TEXT; ALTER TABLE brainstorms ADD COLUMN task_id TEXT;");
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
   // What ✦ Stand did on the board (meetingAgent.ts): its cards, which are also its log.
   if (!meetingCols.includes("agent_json")) db.exec("ALTER TABLE meetings ADD COLUMN agent_json TEXT");
@@ -2135,10 +2143,34 @@ export function openDb(file?: string) {
       const r = db.prepare("SELECT * FROM brainstorms WHERE meeting_id = ? ORDER BY rowid DESC LIMIT 1").get(meetingId) as Row | undefined;
       return r ? toBrainstorm(r) : null;
     },
-    createBrainstorm(b: { roomId: string; prompt: string; itemId: string | null; startedBy: string | null; startedAt: number }): BrainstormRow {
+    createBrainstorm(b: {
+      roomId: string;
+      prompt: string;
+      itemId: string | null;
+      startedBy: string | null;
+      startedAt: number;
+      design?: { diagram: DesignDiagram; seed: string | null; taskId: string | null };
+    }): BrainstormRow {
       const id = newId();
-      db.prepare("INSERT INTO brainstorms (id, room_id, prompt, status, item_id, started_by, started_at) VALUES (?, ?, ?, 'live', ?, ?, ?)").run(id, b.roomId, b.prompt, b.itemId, b.startedBy, b.startedAt);
+      db.prepare("INSERT INTO brainstorms (id, room_id, prompt, status, item_id, started_by, started_at, kind, diagram_json, seed, task_id) VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, ?, ?)").run(
+        id,
+        b.roomId,
+        b.prompt,
+        b.itemId,
+        b.startedBy,
+        b.startedAt,
+        b.design ? "design" : "map",
+        b.design ? JSON.stringify(b.design.diagram) : null,
+        b.design?.seed ?? null,
+        b.design?.taskId ?? null,
+      );
       return this.getBrainstorm(id)!;
+    },
+    saveDesignDiagram(id: string, diagram: DesignDiagram) {
+      db.prepare("UPDATE brainstorms SET diagram_json = ? WHERE id = ?").run(JSON.stringify(diagram), id);
+    },
+    setBrainstormTask(id: string, taskId: string) {
+      db.prepare("UPDATE brainstorms SET task_id = ? WHERE id = ?").run(taskId, id);
     },
     setBrainstorm(id: string, patch: Partial<Pick<BrainstormRow, "status" | "meetingId" | "endedAt">>) {
       const cols: Record<string, string> = { status: "status", meetingId: "meeting_id", endedAt: "ended_at" };

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { VerdictCounts, designRecordHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
-import { brainCount, brainstormHref } from "./BrainstormPage.tsx";
+import { brainCount, brainstormHref, designCount } from "./BrainstormPage.tsx";
 import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
@@ -184,7 +184,7 @@ export function RecapPage() {
         </p>
         {data.brainstorm && (
           <Link className="rp-pill rc-review" to={brainstormHref(data.roomId, data.brainstorm.id)}>
-            Brainstorm · {brainCount(data.brainstorm)}
+            {data.brainstorm.design ? `Design session · ${designCount(data.brainstorm.design)}` : `Brainstorm · ${brainCount(data.brainstorm)}`}
           </Link>
         )}
         {data.designReview && (

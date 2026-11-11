@@ -1,4 +1,5 @@
 import { changeReview, logThreadChange, quotePassage, reviewFor } from "./planReview.ts";
+import { shownDiagram } from "./brainstorm.ts";
 import { DesignReviewError, designReviewRecord, designReviewState, designReviewView, designReviewsRan, planChanged, requestReview } from "./designReviews.ts";
 import { designOutcomeLabel, pointsOnDeck } from "../shared/designReview.ts";
 import type { PlanBriefs } from "./planBrief.ts";
@@ -1377,6 +1378,17 @@ export function agentApi(deps: AgentDeps) {
           ideas: n.parent ? undefined : nodes.filter((x) => x.parent === n.id).map(circle),
         };
       };
+      const designInfo = (row: typeof b) => {
+        const d = shownDiagram(row.diagram ?? { boxes: [], arrows: [] });
+        const name = (id: string) => d.boxes.find((x) => x.id === id)?.label ?? id;
+        const state = (x: { suggested?: boolean }) => (x.suggested ? "suggested, not kept" : undefined);
+        return {
+          parts: d.boxes.map((x) => ({ ...circle({ ...x, parent: "-" }), state: state(x) })),
+          relations: d.arrows.map((x) => ({ from: name(x.from), relation: x.label || "relates to", to: name(x.to), state: state(x) })),
+          spec_on: row.taskId ? `stand:action/${row.taskId}` : undefined,
+          how: "When the call ends the diagram is saved as a draft spec on spec_on; get it with get.",
+        };
+      };
       const count = (kind: BrainCaught["kind"]) => new Set(nodes.flatMap((n) => n.caught.filter((c) => c.kind === kind).map((c) => c.id))).size;
       return {
         space: room.name,
@@ -1390,6 +1402,8 @@ export function agentApi(deps: AgentDeps) {
           meeting: b.meetingId ?? undefined,
           counts: { directions: nodes.filter((n) => !n.parent).length, ideas: nodes.filter((n) => n.parent).length, todos: count("action"), decisions: count("decision"), questions: count("question") },
           directions: nodes.filter((n) => !n.parent).map(circle),
+          // A design session: its board is a diagram of parts and how they relate, and it has no directions.
+          ...(b.kind === "design" ? { design_session: designInfo(b) } : {}),
         },
         others,
         how: "get takes a ref for the full story of a to-do, decision or question. get_meeting_brief with meeting gives everything else the call caught, on the map or not.",

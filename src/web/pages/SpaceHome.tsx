@@ -69,7 +69,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [showReview, setShowReview] = useState(false);
   const [showBrain, setShowBrain] = useState(false);
-  const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm">("");
+  const [showSession, setShowSession] = useState(false);
+  const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session">("");
   const [tab, setTab] = useState<TabKey>(() => {
     if (openTask) return "tasks";
     try {
@@ -233,15 +234,19 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
 
   const reviews = feed?.reviews ?? [];
   const designReviews = feed?.designReviews ?? [];
-  const brainstorms = (feed?.brainstorms ?? []).filter((b) => b.status === "done");
+  const ran = (feed?.brainstorms ?? []).filter((b) => b.status === "done");
+  const brainstorms = ran.filter((b) => !b.design);
+  const sessions = ran.filter((b) => b.design);
   const kinds = [
     { key: "review" as const, label: "Product reviews", n: reviews.length },
     { key: "design" as const, label: "Design reviews", n: designReviews.length },
     { key: "brainstorm" as const, label: "Brainstorms", n: brainstorms.length },
+    { key: "session" as const, label: "Design sessions", n: sessions.length },
   ].filter((k) => k.n > 0);
   /** What a meeting was, with the page it left behind. */
   const kindOf = new Map<string, { name: string; open: string; to: string }>();
   for (const b of brainstorms) if (b.meetingId) kindOf.set(b.meetingId, { name: "Brainstorm", open: "Map", to: brainstormHref(room.id, b.id) });
+  for (const b of sessions) if (b.meetingId) kindOf.set(b.meetingId, { name: "Design session", open: "Diagram", to: brainstormHref(room.id, b.id) });
   for (const r of designReviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Design review", open: "Spec", to: designRecordHref(room.id, r.id) });
   for (const r of reviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Product review", open: "Slides", to: reviewHref(room.id, r.id) });
   const startReview = async () => {
@@ -258,6 +263,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       props.onJoin();
     } catch (err) {
       errorToast("Couldn't start the brainstorm")(err);
+    }
+  };
+  const startSession = async (prompt: string, seed: string, taskId: string | null) => {
+    try {
+      await api.startBrainstorm(room.id, prompt, { seed, taskId });
+      props.onJoin();
+    } catch (err) {
+      errorToast("Couldn't start the design session")(err);
     }
   };
   const removeSlide = async (slideId: string) => {
@@ -319,6 +332,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               review={feed?.review ?? null}
               designReview={feed?.designReview ?? null}
               brainstorm={(feed?.brainstorms ?? []).find((b) => b.status === "live") ?? null}
+              onSession={() => setShowSession(true)}
               designHref={designReviewHref(room.id)}
               onTalk={props.onJoin}
               onReview={() => setShowReview(true)}
@@ -351,6 +365,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
           <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
         )}
         {showBrain && <BrainstormPop onStart={startBrainstorm} onClose={() => setShowBrain(false)} />}
+        {showSession && <DesignSessionPop todos={todos.filter((t) => !t.doneAt)} onStart={startSession} onClose={() => setShowSession(false)} />}
 
         <section className={`sh-panel ${tab}`} role="tabpanel">
           {tab === "meetings" && (
@@ -396,6 +411,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                       <KindRow key={r.id} to={designRecordHref(room.id, r.id)} name="Design review" at={r.startedAt}>
                         <span className="sh-what muted" dir="auto">{r.titles.join(" · ")}</span>
                         <VerdictCounts verdicts={r.verdicts} />
+                      </KindRow>
+                    ))}
+                  {kind === "session" &&
+                    sessions.map((b) => (
+                      <KindRow key={b.id} to={brainstormHref(room.id, b.id)} name="Design session" at={b.startedAt}>
+                        <span className="sh-what muted" dir="auto">{b.prompt}</span>
+                        <span className="sh-what muted">{b.design!.boxes} {b.design!.boxes === 1 ? "part" : "parts"}</span>
                       </KindRow>
                     ))}
                   {kind === "brainstorm" &&
@@ -1010,6 +1032,7 @@ function StartMenu(props: {
   onTalk: () => void;
   onReview: () => void;
   onBrainstorm: () => void;
+  onSession: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
@@ -1048,9 +1071,13 @@ function StartMenu(props: {
               <span className="muted">no spec waiting</span>
             </button>
           )}
-          <button type="button" role="menuitem" onClick={pick(props.brainstorm ? props.onTalk : props.onBrainstorm)}>
+          <button type="button" role="menuitem" onClick={pick(props.brainstorm && !props.brainstorm.design ? props.onTalk : props.onBrainstorm)}>
             <strong>Brainstorm</strong>
-            {props.brainstorm && <span className="muted">on now</span>}
+            {props.brainstorm && !props.brainstorm.design && <span className="muted">on now</span>}
+          </button>
+          <button type="button" role="menuitem" onClick={pick(props.brainstorm?.design ? props.onTalk : props.onSession)}>
+            <strong>Design session</strong>
+            {props.brainstorm?.design && <span className="muted">on now</span>}
           </button>
         </div>
       )}
@@ -1084,6 +1111,65 @@ function BrainstormPop(props: { onStart: (prompt: string) => Promise<void>; onCl
       >
         <h2>Brainstorm</h2>
         <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A topic or a question to start from" aria-label="What the brainstorm is about" maxLength={160} dir="auto" />
+        <div className="brain-pop-end">
+          <button type="button" onClick={props.onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="primary" disabled={!prompt.trim() || starting}>
+            {starting ? "Starting…" : "Start"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** A design session starts from one sentence on what is being designed. It can start from notes or a
+ *  diagram instead of a blank board, and its draft spec is saved on a to-do when the call ends. */
+function DesignSessionPop(props: { todos: Array<{ id: string; text: string }>; onStart: (prompt: string, seed: string, taskId: string | null) => Promise<void>; onClose: () => void }) {
+  const [prompt, setPrompt] = useState("");
+  const [seed, setSeed] = useState("");
+  const [taskId, setTaskId] = useState("");
+  const [starting, setStarting] = useState(false);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [props.onClose]);
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
+      <form
+        className="dialog brain-pop"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Design session"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!prompt.trim() || starting) return;
+          setStarting(true);
+          await props.onStart(prompt, seed, taskId || null);
+          setStarting(false);
+        }}
+      >
+        <h2>Design session</h2>
+        <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What you're designing" aria-label="What you're designing" maxLength={160} dir="auto" />
+        <textarea
+          value={seed}
+          onChange={(e) => setSeed(e.target.value)}
+          rows={5}
+          placeholder={"Start from (optional): notes, or a diagram, one line each\nTask: a to-do with an owner\nTask -> Project: belongs to"}
+          aria-label="What to start from"
+          maxLength={20000}
+          dir="auto"
+        />
+        <select value={taskId} onChange={(e) => setTaskId(e.target.value)} aria-label="Where the draft spec is saved">
+          <option value="">Save the draft spec on a new to-do</option>
+          {props.todos.map((t) => (
+            <option key={t.id} value={t.id}>
+              Save it on: {t.text.length > 70 ? `${t.text.slice(0, 69)}…` : t.text}
+            </option>
+          ))}
+        </select>
         <div className="brain-pop-end">
           <button type="button" onClick={props.onClose}>
             Cancel
