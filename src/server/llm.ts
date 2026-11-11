@@ -916,10 +916,11 @@ Answer for every smaller topic exactly once.`,
     const out = await this.parse(
       RefileSchema,
       prompt,
-      `A team just finished a product review: a call that went through features one slide at a time. Each to-do, decision and open question was filed under the slide on screen when it was said. People talk past a slide change, open with general talk, and come back to earlier features, so some sit under the wrong slide.
+      `A team just finished a review call that went through slides one at a time. A product review shows features that were built, one per slide. A design review walks through a spec: its overview, its sections, the questions its author asked about passages of it, and a verdict. Each to-do, decision and open question was filed under the slide on screen when it was said. People talk past a slide change, open with general talk, and come back to earlier slides, so some sit under the wrong slide.
 For every capture, say where it belongs:
-- A slide's key, when the capture is about that feature: something to fix or build on it, a decision about it, a question about it. Go by what the capture is about, not by when it was said.
-- none, when it isn't about one feature: how the team works, the review format itself (unless a slide shows that), a chore, a new idea that no slide shows.
+- A slide's key, when the capture is about what that slide shows: something to fix or build on a feature, a decision about it, a question about it. Go by what the capture is about, not by when it was said.
+- In a design review: a decision or to-do that answers one of the author's questions goes to that question's slide. One about a part of the spec goes to that section's slide. One about the spec as a whole goes to its verdict slide when it is about whether the spec is ready, else to its overview.
+- none, when it isn't about one slide: how the team works, the review format itself (unless a slide shows that), a chore, a new idea that no slide shows.
 - echo, only for an open question that just repeats a question written on its slide ("On the slide") and has no quote: nobody asked it, the slide did.
 When a capture fits the slide it is already under, answer with that slide. When two slides fit, prefer the one it is already under. Answer for every capture exactly once.`,
       "low",
