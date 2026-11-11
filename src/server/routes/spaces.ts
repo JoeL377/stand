@@ -1,6 +1,6 @@
 // Spaces: the list, a space and its agenda, its feed and suggested agenda, archiving, and the call's token.
 import type { Express } from "express";
-import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS } from "../../shared/protocol.ts";
+import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS, type SpaceMembers } from "../../shared/protocol.ts";
 import { archiveRow, restoreRow } from "../archive.ts";
 import { spaceFeed } from "../captures.ts";
 import { capabilities, config } from "../config.ts";
@@ -11,7 +11,7 @@ import { withFrom } from "../noteFrom.ts";
 import { ownedBy, toSpaceSummary } from "../spaces.ts";
 import { upNextView } from "../upNextPolish.ts";
 import type { Services } from "../services.ts";
-import { notFound, route } from "./http.ts";
+import { memberRoom, notFound, route } from "./http.ts";
 
 export function spaceRoutes(app: Express, ctx: Services) {
   const { db, sessions, live, polisher, afterItemsChange } = ctx;
@@ -57,7 +57,7 @@ export function spaceRoutes(app: Express, ctx: Services) {
     }),
   );
 
-  /** Rename a space or change its purpose: only whoever created it (or anyone, for
+  /** Rename a space or change its purpose: only whoever created it and its admins (or anyone, for
    *  older spaces with no creator). Anyone in the space can change its synthesis instructions. */
   app.patch(
     "/api/rooms/:id",
@@ -68,14 +68,38 @@ export function spaceRoutes(app: Express, ctx: Services) {
       const purpose = req.body?.purpose === undefined ? undefined : String(req.body.purpose).trim().slice(0, 200);
       const synthesisInstructions =
         req.body?.synthesisInstructions === undefined ? undefined : String(req.body.synthesisInstructions).trim().slice(0, MAX_SYNTHESIS_INSTRUCTIONS);
-      const creatorOnly = name !== undefined || purpose !== undefined;
-      if (creatorOnly && room.createdBy && room.createdBy !== req.user!.id)
-        return void res.status(403).json({ error: "Only the person who created this space can change it" });
-      if (!creatorOnly && !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+      const adminOnly = name !== undefined || purpose !== undefined;
+      if (adminOnly && !db.managesSpace(room, req.user!.id)) return void res.status(403).json({ error: "Only an admin of this space can change it" });
+      if (!adminOnly && !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
       if (name === "") return void res.status(400).json({ error: "A space needs a name" });
       db.updateRoom(room.id, { name, purpose, synthesisInstructions });
       if (name) sessions.get(room.id)?.renamed(name);
       res.json(db.getRoom(room.id));
+    }),
+  );
+
+  // The people in a space and who manages it. The creator and admins make people admins and take that back.
+  const spaceMembers = (room: { id: string; createdBy: string | null }, userId: string): SpaceMembers => ({
+    canManage: db.managesSpace(room, userId),
+    members: db.spaceMembers(room, userId),
+  });
+  app.get(
+    "/api/rooms/:id/members",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (room) res.json(spaceMembers(room, req.user!.id));
+    }),
+  );
+  app.put(
+    "/api/rooms/:id/members/:userId",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      if (!db.managesSpace(room, req.user!.id)) return void res.status(403).json({ error: "Only an admin of this space can change its admins" });
+      if (typeof req.body?.admin !== "boolean") return void res.status(400).json({ error: "Say whether they're an admin" });
+      if (req.params.userId === room.createdBy) return void res.status(400).json({ error: "The person who created the space always manages it" });
+      if (!db.setAdmin(room.id, req.params.userId, req.body.admin)) return notFound(res, "That person isn't in this space");
+      res.json(spaceMembers(room, req.user!.id));
     }),
   );
 

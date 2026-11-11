@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS room_members (
   room_id TEXT NOT NULL REFERENCES rooms(id),
   user_id TEXT NOT NULL REFERENCES users(id),
   last_joined_at INTEGER NOT NULL,
+  role TEXT,                        -- 'admin', or NULL for everyone else. The creator is rooms.created_by
   PRIMARY KEY (room_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS rooms (
@@ -427,6 +428,9 @@ export function migrate(db: DatabaseSync) {
   if (!tokenCols.includes("client_id"))
     db.exec("ALTER TABLE api_tokens ADD COLUMN client_id TEXT; ALTER TABLE api_tokens ADD COLUMN refresh_hash TEXT;");
   if (!roomCols.includes("created_by")) db.exec("ALTER TABLE rooms ADD COLUMN created_by TEXT");
+  // Space admins: people the creator (or another admin) lets manage the space.
+  const memberCols = (db.prepare("PRAGMA table_info(room_members)").all() as Row[]).map((c) => c.name);
+  if (!memberCols.includes("role")) db.exec("ALTER TABLE room_members ADD COLUMN role TEXT");
   if (!roomCols.includes("purpose")) db.exec("ALTER TABLE rooms ADD COLUMN purpose TEXT NOT NULL DEFAULT ''");
   // Synthesis instructions: what the space asks the agent to pull out of every meeting, besides the default notes.
   if (!roomCols.includes("synthesis_instructions")) db.exec("ALTER TABLE rooms ADD COLUMN synthesis_instructions TEXT NOT NULL DEFAULT ''");

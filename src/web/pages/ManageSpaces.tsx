@@ -4,27 +4,29 @@ import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { SYNTHESIS_HINT, SynthesisField } from "../Synthesis.tsx";
 import { ConxtPanel } from "../ConxtPanel.tsx";
+import { MembersPanel } from "../MembersPanel.tsx";
 import { ProjectPanel } from "../ProjectPanel.tsx";
 import { SpacesShell, spaceHref } from "./SpacesShell.tsx";
 
-/** The spaces you created: rename them, keep their purpose current, and say what to synthesize from each meeting. */
+/** The spaces you manage (you created them, or you're an admin): rename them, keep their purpose current, say what to
+ *  synthesize from each meeting, and choose who else manages them. */
 export function ManageSpaces() {
   const [all, setAll] = useState<SpaceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api.spaces().then(setAll, (e: Error) => setError(e.message));
   }, []);
-  const spaces = all?.filter((s) => s.mine);
+  const spaces = all?.filter((s) => s.canManage);
 
   return (
     <SpacesShell spaces={all}>
       <main className="sp-main narrow">
         <section className="sp-find">
           <h1>Manage spaces</h1>
-          <p className="muted">Spaces you created. People get in by the link you share from inside the space.</p>
+          <p className="muted">Spaces you created or are an admin of. People get in by the link you share from inside the space.</p>
         </section>
         {error && <p className="error">{error}</p>}
-        {spaces?.length === 0 && <p className="muted">You haven't created a space yet.</p>}
+        {spaces?.length === 0 && <p className="muted">You don't manage a space yet.</p>}
         <div className="sp-rows">
           {spaces?.map((s) => (
             <SpaceEditor key={s.id} s={s} />
@@ -74,6 +76,7 @@ function SpaceEditor({ s }: { s: SpaceSummary }) {
       <p className="muted small synth-hint">{SYNTHESIS_HINT}</p>
       <ConxtPanel roomId={s.id} />
       <ProjectPanel roomId={s.id} />
+      <MembersPanel roomId={s.id} />
       <div className="sp-manage-foot">
         <button className="primary" disabled={!dirty || state === "saving"}>
           Save

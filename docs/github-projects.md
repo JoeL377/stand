@@ -50,7 +50,7 @@ CREATE TABLE space_projects (
 
 It allows more than one repo per space from day one. Conxt 1.0 already spans `nxt-lvl/conxt-v7` and `JoeL377/stand`. The UI can cap it at 3.
 
-**Who may link.** Only the space's creator, the same rule as renaming it (`PATCH /api/rooms/:id`). The creator also has to show they can read the repo:
+**Who may link.** Only the space's creator and its admins (the people the creator or another admin made one on Manage spaces), the same rule as renaming it (`PATCH /api/rooms/:id`). The linker also has to show they can read the repo:
 
 - **v1:** the repo must be in an installation the linker connected (`github_installations.connected_by`). That's cheap and closes the obvious hole, where any Stand user attaches any repo that some installation covers.
 - **v2:** turn on "Request user authorization" for the app and check `GET /user/installations/{id}/repositories` with the person's own GitHub token. That covers org installs someone else connected.
@@ -186,7 +186,7 @@ Phases 1 and 3 can ship apart: phase 1 is useful on its own, and phase 3 only ne
 ## Risks
 
 - **Prompt injection from the repo.** Mitigated by design: the tools only read, a model's output can at most propose, and answers render as text with links checked to be `github.com/<owner>/<repo>`. The remaining risk is a misleading answer, the same as with web search.
-- **Leaking code to the wrong people.** Anyone with the space link can now ask about the code. Linking is creator-only with a repo-access check, and the link screen says who can see it. The week 3 "what's stored and which models read it" page needs a line on repo content going to Anthropic.
+- **Leaking code to the wrong people.** Anyone with the space link can now ask about the code. Linking is for the creator and admins only, with a repo-access check, and the link screen says who can see it. The week 3 "what's stored and which models read it" page needs a line on repo content going to Anthropic.
 - **Committed secrets.** The filter covers the usual names, not every secret. Worth saying on the link screen.
 - **Disk on a single volume.** A partial clone of Stand or Conxt is tens of MB. The size cap and metadata-only mode cover monorepos.
 - **False "Looks done".** These cost a click, and rejections stick. If precision on the test set is poor, ship tier A in the poll first. It needs no model.

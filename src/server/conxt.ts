@@ -298,10 +298,8 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
     if (!room || !db.isMember(room.id, req.user!.id)) return void res.status(404).json({ error: "Space not found" });
     res.set("Cache-Control", "no-store"); next();
   });
-  const owner = (req: Request) => {
-    const room = db.getRoom(roomId(req))!;
-    return !room.createdBy || room.createdBy === req.user!.id;
-  };
+  // The space's creator and its admins.
+  const owner = (req: Request) => db.managesSpace(db.getRoom(roomId(req))!, req.user!.id);
   const mutation = (req: Request) => owner(req) && req.headers.origin === origin(req);
   router.get("/", (req, res) => {
     const id = roomId(req);
@@ -317,7 +315,7 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
                deliveries, canManage: owner(req) });
   });
   router.post("/", (req, res) => {
-    if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can connect from this app" });
+    if (!mutation(req)) return void res.status(403).json({ error: "Only an admin of this space can connect from this app" });
     const destination = destinations.find(d => d.key === req.body?.destinationKey);
     if (!destination || req.body?.confirmedTeamAccess !== true) return void res.status(400).json({ error: "Choose a configured destination and confirm team access" });
     const active = db.raw.prepare("SELECT destination_key,submission_url FROM conxt_connections WHERE room_id=? AND enabled=1").get(roomId(req));
@@ -336,7 +334,7 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
     } catch (err) { db.raw.exec("ROLLBACK"); throw err; }
   });
   router.delete("/", (req, res) => {
-    if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can disconnect from this app" });
+    if (!mutation(req)) return void res.status(403).json({ error: "Only an admin of this space can disconnect from this app" });
     db.raw.exec("BEGIN IMMEDIATE");
     try {
       db.raw.prepare("INSERT INTO conxt_room_preferences VALUES (?,'off') ON CONFLICT(room_id) DO UPDATE SET mode='off'").run(roomId(req));
@@ -345,7 +343,7 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
     } catch(err) { db.raw.exec("ROLLBACK"); throw err; }
   });
   router.post("/default", (req,res) => {
-    if (!mutation(req)) return void res.status(403).json({error:"Only the space owner can change sharing"});
+    if (!mutation(req)) return void res.status(403).json({error:"Only an admin of this space can change sharing"});
     if(req.body?.confirmedTeamAccess!==true || !db.raw.prepare("SELECT 1 FROM conxt_app_default").get())
       return void res.status(400).json({error:"Confirm team access and configure an app default first"});
     db.raw.exec("BEGIN IMMEDIATE");
@@ -357,14 +355,14 @@ export function conxtRoutes(db: DB, destinations: ConxtDestination[]) {
     }catch(err){db.raw.exec("ROLLBACK");throw err;}
   });
   router.post("/live/:meetingId/retry", (req, res) => {
-    if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can retry live delivery" });
+    if (!mutation(req)) return void res.status(403).json({ error: "Only an admin of this space can retry live delivery" });
     const result=db.raw.prepare(`UPDATE conxt_live_deliveries SET state='queued',attempts=0,next_at=0,error=NULL
       WHERE meeting_id=? AND state='failed' AND connection_id IN (SELECT id FROM conxt_connections WHERE room_id=? AND enabled=1)`)
       .run(String(req.params.meetingId),roomId(req));
     res.status(result.changes?200:409).json(result.changes?{ok:true}:{error:"Live delivery cannot be retried"});
   });
   router.post("/:deliveryId/retry", (req, res) => {
-    if (!mutation(req)) return void res.status(403).json({ error: "Only the space owner can retry from this app" });
+    if (!mutation(req)) return void res.status(403).json({ error: "Only an admin of this space can retry from this app" });
     const result = db.raw.prepare(`UPDATE conxt_deliveries SET state=CASE WHEN receipt_id IS NULL THEN 'queued' ELSE 'delivered' END,
       attempts=0,next_at=0,error=NULL WHERE id=? AND state='failed' AND remote_status IS NOT 'failed'
       AND connection_id IN (SELECT id FROM conxt_connections WHERE room_id=? AND enabled=1)

@@ -1792,6 +1792,10 @@ a.sh-pill:hover { text-decoration: none; }
 .project-row { border-top: 1px solid var(--line); padding: 10px 0; }
 .project-row > span { margin-left: 12px; }
 .project-row .error { margin: 6px 0 0; }
+.members-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.members-panel h3 { margin: 0 0 8px; }
+.members-row { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding: 10px 0; }
+.members-row button { margin-left: auto; }
 
 /* ---- Topic board: the middle screen while nobody shares ---- */
 .screen > .topic-board, .board-tab > .topic-board { position: relative; flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg); color: var(--text); text-align: left; }
