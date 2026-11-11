@@ -3167,9 +3167,9 @@ a.sh-review { text-decoration: none; color: inherit; }
 .ds-main.asking > h1, .ds-main.asking .ds-parts h1 { font-size: 16px; }
 .ds-main.asking .ds-lines, .ds-main.asking .ds-summary { font-size: 14px; color: var(--muted); gap: 2px; }
 .ds-diagram { margin: 4px 0 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
-.ds-diagram svg { max-height: 46vh; }
-.ds-parts .ds-diagram svg { max-height: 30vh; }
-.ds-main.asking .ds-diagram svg { max-height: 20vh; }
+/* --ds-diagram-max: the height that makes the slide fit its box (diagramFit.ts). */
+.ds-diagram svg { max-height: min(46vh, var(--ds-diagram-max, 100vh)); }
+.ds-main.asking .ds-diagram svg { max-height: min(20vh, var(--ds-diagram-max, 100vh)); }
 .dr-diagram > summary { cursor: pointer; }
 .dr-diagram .mermaid-diagram { margin-top: 8px; }
 .ds-questions { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }

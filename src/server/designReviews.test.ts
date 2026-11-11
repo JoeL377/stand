@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pointsOnDeck } from "../shared/designReview.ts";
+import { linesShown, pointsOnDeck } from "../shared/designReview.ts";
 import { spaceFeed } from "./captures.ts";
 import { openDb } from "./db.ts";
 import {
@@ -614,6 +614,26 @@ test("a section's slide shows the first mermaid diagram the spec has under it", 
   const [, flowSlide, code] = db.listItems(room.id);
   assert.deepEqual(flowSlide.slide!.design!.parts, [{ heading: "Flow", lines: [], stand: false, diagram: flow }]);
   assert.deepEqual(code.slide!.design!.parts, [{ heading: "Code", lines: [], stand: false }]);
+});
+
+test("on a shared slide a diagram takes the room of a section, so each section shows fewer lines", async () => {
+  // Alone on a slide a section keeps its four lines, with a diagram or not.
+  assert.deepEqual([linesShown(1), linesShown(1, 1), linesShown(2), linesShown(2, 1), linesShown(2, 2), linesShown(3), linesShown(3, 1)], [4, 4, 3, 2, 1, 2, 1]);
+  const { db, sam, room, task, by } = space();
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `Line ${i + 1}`);
+  const mermaid = (code: string) => ["```mermaid", code, "```"].join("\n");
+  const spec = ["# Capture", "", "## Flow", "", mermaid("flowchart LR\n  a --> b"), "", "## States", "", mermaid("stateDiagram-v2\n  [*] --> On"), "", "## Cost", "", "Cheap.", "", "## Risks", "", "Few."].join("\n");
+  const briefs = new PlanBriefs(db, { taskBrief: async () => ({ summary: "Capture.", sections: ["Flow", "States", "Cost", "Risks"].map((heading) => ({ heading, lines: lines(4) })), questions: [] }) });
+  const note = task("Move capture to the server", "Sam", spec);
+  requestReview(db, briefs, note, by(sam));
+  await briefs.ensure(note);
+  prepare(db, briefs, note, by(sam), { section: "States", join: true });
+  prepare(db, briefs, note, by(sam), { section: "Risks", join: true });
+  startDesignReview(db, briefs, room.id);
+  const [, both, plain] = db.listItems(room.id);
+  // Two sections and two diagrams: one line of each. Two sections and no diagram: three.
+  assert.deepEqual(both.slide!.design!.parts!.map((p) => [p.heading, p.lines, !!p.diagram]), [["Flow", lines(1), true], ["States", lines(1), true]]);
+  assert.deepEqual(plain.slide!.design!.parts!.map((p) => [p.heading, p.lines.length, !!p.diagram]), [["Cost", 3, false], ["Risks", 3, false]]);
 });
 
 test("a design review that ends with nothing called goes back to waiting and can start again", () => {

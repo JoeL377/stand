@@ -268,17 +268,20 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
           if ("off" in row) {
             return (
               <li key={row.off.heading} className="dr-slide off">
-                <SectionPart section={row.off} points={of(row.off)} mine={mine} change={change} shares={1} />
+                <SectionPart section={row.off} points={of(row.off)} mine={mine} change={change} lines={linesShown(1)} />
               </li>
             );
           }
+          const drawn = row.sections.filter((s) => spec.diagrams?.[s.heading]).length;
+          const lines = linesShown(row.sections.length, drawn);
           return (
             <li key={row.sections[0].heading} className="dr-slide">
               <header>
                 <span className="dr-kind">Slide {row.at + 2}</span>
                 {row.sections.length > 1 && (
                   <span className="muted small">
-                    {row.sections.length} sections share this slide. It shows {plural(linesShown(row.sections.length), "line")} of each.
+                    {row.sections.length} sections share this slide. It shows {plural(lines, "line")} of each
+                    {drawn > 0 ? `, to leave room for ${drawn === 1 ? "the diagram" : `${drawn} diagrams`}.` : "."}
                   </span>
                 )}
               </header>
@@ -289,7 +292,7 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
                   points={of(s)}
                   mine={mine}
                   change={change}
-                  shares={row.sections.length}
+                  lines={lines}
                   join={i > 0 ? "split" : row.at > 0 ? "join" : undefined}
                   diagram={spec.diagrams?.[s.heading]}
                 />
@@ -351,15 +354,15 @@ function SectionPart(props: {
   points: DesignPoint[];
   mine: boolean;
   change: (c: BriefChange) => Promise<void>;
-  /** How many sections are on the slide. */
-  shares: number;
+  /** How many lines of the section its slide shows. */
+  lines: number;
   /** What the author can do with its place: join the slide above, or leave the one it shares. */
   join?: "join" | "split";
   /** The section's diagram in the spec: the slide shows it under the lines. */
   diagram?: string;
 }) {
   const { section: s, points, mine, change } = props;
-  const shown = linesShown(props.shares);
+  const shown = props.lines;
   return (
     <section className="dr-part" aria-label={s.heading}>
       <header>
