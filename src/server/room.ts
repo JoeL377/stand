@@ -27,7 +27,7 @@ import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
 import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, finishBrainstorm, toBrainstormView } from "./brainstorm.ts";
-import { DiagramKeeper, saveDraftSpec } from "./designSession.ts";
+import { DiagramKeeper, sessionBackground, saveDraftSpec } from "./designSession.ts";
 import { PilotSeat } from "./pilot.ts";
 import { projectDigest, repoTools } from "./projects.ts";
 import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, draftOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
@@ -308,13 +308,17 @@ export class RoomSession implements SpeechSink {
   private loadBrainstorm() {
     const b = this.db.brainstormLive(this.roomId);
     if (!b) return void (this.brain = null);
-    if (this.brain?.id === b.id) return;
+    if (this.brain?.id === b.id) {
+      // Context can be added to a running design session (MCP start_design_session).
+      if (this.brain.map instanceof DiagramKeeper) this.brain.map.background(sessionBackground(b));
+      return;
+    }
     // Only talk from this call, after the brainstorm began, belongs on its map.
     const since = Math.max(b.startedAt, this.meetingStartedAt) - 1;
     if (b.kind === "design") {
       // A design session: the same passes, drawing a diagram of boxes and arrows (designSession.ts).
       const model = this.agent.designDiagram ? { designDiagram: this.agent.designDiagram.bind(this.agent) } : { designDiagram: async () => null };
-      this.brain = { id: b.id, itemId: b.itemId, map: new DiagramKeeper(model, b.prompt, since, b.diagram, b.seed) };
+      this.brain = { id: b.id, itemId: b.itemId, map: new DiagramKeeper(model, b.prompt, since, b.diagram, sessionBackground(b)) };
       return;
     }
     const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };

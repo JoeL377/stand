@@ -214,6 +214,13 @@ const agents = agentApi({
   db,
   briefs: planBriefs,
   specTouched,
+  brainstormTouched: (roomId, itemId, by) => {
+    const s = sessions.get(roomId);
+    if (!s) return;
+    s.itemsChanged();
+    s.brainstormChanged();
+    if (itemId) s.setFocus(itemId, by, "manual");
+  },
   uploads: uploadLinks,
   readyToShip: () => void shipWatch.check(),
   liveMeeting: (roomId) => {

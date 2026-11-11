@@ -23,6 +23,7 @@ If the change shows on screen, attach screenshots before you report: screenshot_
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
+When your person wants to design something with the team in a call -> start_design_session, with the context they should have to hand.
 What a brainstorm came up with -> get_brainstorm: the map as an outline, with the ideas under each direction and the to-dos, decisions and open questions caught on them.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
 
@@ -492,11 +493,42 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
   );
 
   server.registerTool(
+    "start_design_session",
+    {
+      title: "Set up a design session with its context",
+      description:
+        "Sets up a design session in a space: a call where the team designs something by talking it through, while the board draws what they say as a diagram of parts and labelled arrows. Give the topic in a sentence and the context the team should have to hand: specs, notes, earlier decisions, findings. People open that context from a Context button on the board, and Stand reads it when it suggests parts. Give a starting diagram too if there is one. The session waits until someone starts talking in the space (or lands on the board of a call that's running with nothing else on it). Calling again with the same topic adds context to it, and a piece with the same title replaces the old one. When the call ends the diagram is saved as a draft spec on a to-do. Use it when your person asks for a design session; don't set one up on your own.",
+      inputSchema: {
+        topic: z.string().describe("What is being designed, in a sentence: \"Stand's primitives and how they relate\""),
+        space: z.string().optional().describe("A space id, or part of its name. Needed when there is no ref"),
+        context: z
+          .array(
+            z.object({
+              title: z.string().describe("What this piece is, in a few words: \"Projects spec\", \"What the 11 Nov review asked for\""),
+              text: z.string().describe("The piece itself, in markdown. People read it in the call, so keep it to what matters"),
+              url: z.string().optional().describe("Where it came from, if it has a link"),
+            }),
+          )
+          .optional()
+          .describe("The background for the session, one entry per doc or set of notes (up to 12)"),
+        diagram: z
+          .string()
+          .optional()
+          .describe("The diagram to start from, one line each: `Task: a to-do with an owner` for a part, `Task -> Project: belongs to` for a relation. Mermaid arrows work too. Left out, the board starts empty"),
+        ref: z.string().optional().describe("The to-do the draft spec is saved on, stand:action/<id>. Left out, the session makes a new to-do when it ends"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ topic, space, context, diagram, ref, model }) => run(() => api.startDesignSession(as(model), { topic, space, context, diagram, ref }, baseUrl)),
+  );
+
+  server.registerTool(
     "get_brainstorm",
     {
       title: "Read a space's brainstorm map",
       description:
-        "A brainstorm's map as an outline: the sentence it started from, the directions the talk opened, and under each the ideas people raised, with who raised each, what they said, what others built on it, and the to-dos, decisions and open questions caught on it (as refs for get). Returns the one running now, or else the latest; others lists the space's earlier brainstorms so you can ask for one by id. A design session comes back the same way, with design_session: the parts on its diagram, how they relate, and the to-do its draft spec is saved on. Read only: people start a brainstorm in Stand.",
+        "A brainstorm's map as an outline: the sentence it started from, the directions the talk opened, and under each the ideas people raised, with who raised each, what they said, what others built on it, and the to-dos, decisions and open questions caught on it (as refs for get). Returns the one running now, or else the latest; others lists the space's earlier brainstorms so you can ask for one by id. A design session comes back the same way, with design_session: the parts on its diagram, how they relate, and the to-do its draft spec is saved on. A design session's context comes back under context. Read only: people start a brainstorm in Stand, and start_design_session sets up a design session.",
       inputSchema: {
         space: z.string().describe("A space id, or part of its name"),
         brainstorm: z.string().optional().describe("One brainstorm's id (from others) or its Stand link. Leave out for the one running now, or the latest"),

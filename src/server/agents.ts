@@ -1,5 +1,6 @@
 import { changeReview, logThreadChange, quotePassage, reviewFor } from "./planReview.ts";
-import { shownDiagram } from "./brainstorm.ts";
+import { BrainstormError, shownDiagram, startBrainstorm } from "./brainstorm.ts";
+import { CONTEXT_MAX, CONTEXT_TEXT_MAX, parseSeed } from "./designSession.ts";
 import { DesignReviewError, designReviewRecord, designReviewState, designReviewView, designReviewsRan, planChanged, requestReview } from "./designReviews.ts";
 import { designOutcomeLabel, pointsOnDeck } from "../shared/designReview.ts";
 import type { PlanBriefs } from "./planBrief.ts";
@@ -79,6 +80,8 @@ export interface AgentDeps {
   briefs?: PlanBriefs;
   /** A plan changed (a comment, a new version): a design review running on it lays its slides out again. */
   specTouched?: (note: Note & { roomId: string }) => void;
+  /** A brainstorm or design session was started or changed from outside a call: a call running in that space picks it up. */
+  brainstormTouched?: (roomId: string, focusItemId: string | null, by: string) => void;
 }
 
 type Work = Pick<ActionWork, "working" | "ready">;
@@ -1341,6 +1344,67 @@ export function agentApi(deps: AgentDeps) {
     },
 
     /** A brainstorm's map as an outline: the sentence, its directions, the ideas under each and what was caught on them. */
+    /** Sets up a design session with its background, so it's on the board when the team starts talking.
+     *  Called again with the same topic while it waits or runs, it adds to that session's context. */
+    startDesignSession(
+      caller: Caller,
+      args: { space?: string; topic: string; context?: Array<{ title: string; text: string; url?: string }>; diagram?: string; ref?: string },
+      baseUrl: string,
+    ) {
+      requireWrite(caller);
+      const r = args.ref ? resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`) : null;
+      if (r && r.note?.kind !== "action") throw new AgentError("ref is the to-do the draft spec is saved on (stand:action/...), or leave it out.");
+      if (!r && !args.space) throw new AgentError("Say which space the design session is for, or give the to-do its spec goes on.");
+      const room = r?.room ?? findSpace(caller, args.space!);
+      const given = (args.context ?? []).map((c) => ({ title: c.title?.replace(/\s+/g, " ").trim().slice(0, 120) ?? "", text: (c.text ?? "").trim().slice(0, CONTEXT_TEXT_MAX), url: /^https?:\/\//.test(c.url?.trim() ?? "") ? c.url!.trim() : null }));
+      if (given.some((c) => !c.title || !c.text)) throw new AgentError("Each piece of context needs a title and its text.");
+      const topic = args.topic.replace(/\s+/g, " ").trim();
+      const running = db.brainstormLive(room.id);
+      const same = running?.kind === "design" && running.prompt.toLowerCase() === topic.toLowerCase() ? running : null;
+      // Starting a new one ends whatever is running, which would pull the board from under a call.
+      if (running && !same && deps.liveMeeting?.(room.id)) throw new AgentError(`A ${running.kind === "design" ? "design session" : "brainstorm"} is running in a call in ${room.name} right now ("${running.prompt}"). Wait for the call to end, or use the same topic to add context to it.`);
+      try {
+        const now = Date.now();
+        const diagram = parseSeed(args.diagram ?? "", now);
+        if (args.diagram?.trim() && !diagram.boxes.length) throw new AgentError("Couldn't read the diagram. Write one part per line as `Name: what it is`, and one relation per line as `A -> B: label`.");
+        const b = same ?? startBrainstorm(db, room.id, topic, caller.user.name, now, { diagram, seed: args.diagram?.trim() || null, taskId: r?.note?.id ?? null });
+        if (same && r?.note && !same.taskId) db.setBrainstormTask(same.id, r.note.id);
+        // A piece given again under the same title replaces the old one.
+        const by = byOf(caller);
+        const context = [...b.context];
+        for (const c of given) {
+          const at = context.findIndex((x) => x.title.toLowerCase() === c.title.toLowerCase());
+          const piece = { id: at >= 0 ? context[at].id : `c${now.toString(36)}${context.length}`, ...c, by, ts: now };
+          if (at >= 0) context[at] = piece;
+          else context.push(piece);
+        }
+        if (context.length > CONTEXT_MAX) throw new AgentError(`A design session holds up to ${CONTEXT_MAX} pieces of context. Put related notes in one piece.`);
+        if (given.length) db.saveBrainstormContext(b.id, context);
+        deps.brainstormTouched?.(room.id, same ? null : b.itemId, caller.user.name);
+        const live = deps.liveMeeting?.(room.id);
+        const d = shownDiagram(db.getBrainstorm(b.id)?.diagram ?? diagram);
+        return {
+          [same ? "updated" : "created"]: {
+            id: b.id,
+            topic: b.prompt,
+            url: `${baseUrl}/s/${room.id}/brainstorm/${b.id}`,
+            context: context.map((c) => c.title),
+            parts: d.boxes.length,
+            relations: d.arrows.length,
+            spec_on: (same?.taskId ?? r?.note?.id) ? `stand:action/${same?.taskId ?? r!.note!.id}` : undefined,
+          },
+          space: room.name,
+          shows_on: live
+            ? "It's on the board of the call running now. People open the context from the Context button on the board."
+            : `It waits for the team: when someone starts talking in ${room.name}, it's on the board, with the context behind a Context button. The link shows it before then.`,
+          how: "Call again with the same topic to add or replace context. When the call ends the diagram is saved as a draft spec on a to-do; get_brainstorm reads it.",
+        };
+      } catch (err) {
+        if (err instanceof BrainstormError) throw new AgentError(err.message);
+        throw err;
+      }
+    },
+
     getBrainstorm(caller: Caller, args: { space: string; brainstorm?: string }, baseUrl: string) {
       const room = findSpace(caller, args.space);
       const all = db.brainstorms(room.id);
@@ -1385,6 +1449,7 @@ export function agentApi(deps: AgentDeps) {
         return {
           parts: d.boxes.map((x) => ({ ...circle({ ...x, parent: "-" }), state: state(x) })),
           relations: d.arrows.map((x) => ({ from: name(x.from), relation: x.label || "relates to", to: name(x.to), state: state(x) })),
+          context: row.context.length ? row.context.map((c) => ({ title: c.title, text: c.text, url: c.url ?? undefined, by: c.by ?? undefined })) : undefined,
           spec_on: row.taskId ? `stand:action/${row.taskId}` : undefined,
           how: "When the call ends the diagram is saved as a draft spec on spec_on; get it with get.",
         };
@@ -1396,7 +1461,7 @@ export function agentApi(deps: AgentDeps) {
           id: b.id,
           url: `${baseUrl}/s/${room.id}/brainstorm/${b.id}`,
           topic: b.prompt,
-          status: b.status === "live" ? "in a call now" : "finished",
+          status: b.status !== "live" ? "finished" : !deps.liveMeeting || deps.liveMeeting(room.id) ? "in a call now" : "waiting for the team to start talking",
           started_at: day(b.startedAt),
           started_by: b.startedBy ?? undefined,
           meeting: b.meetingId ?? undefined,

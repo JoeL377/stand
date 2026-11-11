@@ -1047,3 +1047,38 @@ test("get_brainstorm gives an agent the map as an outline, with what was caught 
   const stranger = db.upsertUser({ googleSub: "g-x", email: "x@example.com", name: "X", picture: null });
   assert.throws(() => api.getBrainstorm({ user: stranger, token: db.createToken(stranger.id, "Claude Code", "read").info }, { space: room.id }, ""), AgentError);
 });
+
+test("start_design_session sets up a session with its context, and the same topic adds to it", () => {
+  const { api, db, joe, room, action } = setup();
+  const write = { user: joe, token: db.createToken(joe.id, "Claude Code", "write").info };
+  type Made = { created?: { id: string; url: string; context: string[]; parts: number; relations: number; spec_on?: string }; updated?: { id: string; context: string[]; spec_on?: string }; shows_on: string };
+  const start = (args: Parameters<typeof api.startDesignSession>[1]) => api.startDesignSession(write, args, "https://stand.test") as Made;
+
+  const made = start({
+    space: room.id,
+    topic: "Stand's primitives",
+    diagram: "Task: a to-do with an owner\nProject: a group of tasks\nTask -> Project: belongs to",
+    context: [{ title: "Projects spec", text: "# Projects\n\nOne layer above tasks.", url: "https://example.com/spec" }],
+  });
+  assert.deepEqual([made.created?.parts, made.created?.relations, made.created?.context], [2, 1, ["Projects spec"]]);
+  assert.match(made.shows_on, /waits for the team/);
+  const b = db.brainstormLive(room.id)!;
+  assert.equal(b.kind, "design");
+  assert.equal(made.created?.url, `https://stand.test/s/${room.id}/brainstorm/${b.id}`);
+  assert.deepEqual(b.context.map((c) => [c.title, c.url, c.by]), [["Projects spec", "https://example.com/spec", "Joe Liang via Claude Code"]]);
+
+  // The same topic again: more context on the same session, a piece with the same title replaced, the to-do set.
+  const more = start({ space: room.id, topic: "stand's primitives", ref: `stand:action/${action.id}`, context: [{ title: "projects spec", text: "Rewritten." }, { title: "Review notes", text: "Not too generative." }] });
+  assert.equal(more.updated?.id, b.id);
+  assert.equal(more.updated?.spec_on, `stand:action/${action.id}`);
+  const after = db.getBrainstorm(b.id)!;
+  assert.deepEqual(after.context.map((c) => [c.title, c.text]), [["projects spec", "Rewritten."], ["Review notes", "Not too generative."]]);
+  assert.equal(db.brainstorms(room.id).length, 1);
+
+  // People see it on the session, and an agent reads it back.
+  const read = api.getBrainstorm(write, { space: room.id }, "https://stand.test") as { brainstorm: { design_session: { context: Array<{ title: string }> } } };
+  assert.deepEqual(read.brainstorm.design_session.context.map((c) => c.title), ["projects spec", "Review notes"]);
+
+  assert.throws(() => start({ space: room.id, topic: "Other", context: [{ title: "", text: "x" }] }), AgentError);
+  assert.throws(() => api.startDesignSession({ user: joe, token: db.createToken(joe.id, "Claude Code", "read").info }, { space: room.id, topic: "Other" }, ""), AgentError);
+});

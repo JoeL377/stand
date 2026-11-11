@@ -43,7 +43,7 @@ import { costOf, type UsageRow } from "./usage.ts";
 import type { Settled } from "./spaceSettle.ts";
 import type { ListItem } from "./liveList.ts";
 import type { BrainstormRow } from "./brainstorm.ts";
-import type { BrainNode, DesignDiagram } from "../shared/protocol.ts";
+import type { BrainNode, DesignContext, DesignDiagram } from "../shared/protocol.ts";
 import { initGithub } from "./github.ts";
 import { initProjects } from "./projects.ts";
 import { initConxt, enqueueConxtMeeting } from "./conxt.ts";
@@ -565,6 +565,7 @@ const toBrainstorm = (r: Row): BrainstormRow => ({
   diagram: r.diagram_json ? (JSON.parse(r.diagram_json as string) as DesignDiagram) : null,
   seed: (r.seed as string) ?? null,
   taskId: (r.task_id as string) ?? null,
+  context: r.context_json ? (JSON.parse(r.context_json as string) as DesignContext[]) : [],
 });
 const toReviewSlide = (r: Row): ReviewSlideRow => ({
   id: r.id as string,
@@ -746,6 +747,7 @@ export function openDb(file?: string) {
   const brainCols = (db.prepare("PRAGMA table_info(brainstorms)").all() as Row[]).map((c) => c.name);
   if (!brainCols.includes("kind"))
     db.exec("ALTER TABLE brainstorms ADD COLUMN kind TEXT NOT NULL DEFAULT 'map'; ALTER TABLE brainstorms ADD COLUMN diagram_json TEXT; ALTER TABLE brainstorms ADD COLUMN seed TEXT; ALTER TABLE brainstorms ADD COLUMN task_id TEXT;");
+  if (!brainCols.includes("context_json")) db.exec("ALTER TABLE brainstorms ADD COLUMN context_json TEXT");
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
   // What ✦ Stand did on the board (meetingAgent.ts): its cards, which are also its log.
   if (!meetingCols.includes("agent_json")) db.exec("ALTER TABLE meetings ADD COLUMN agent_json TEXT");
@@ -2171,6 +2173,10 @@ export function openDb(file?: string) {
     },
     setBrainstormTask(id: string, taskId: string) {
       db.prepare("UPDATE brainstorms SET task_id = ? WHERE id = ?").run(taskId, id);
+    },
+    /** A design session's background, as given through the MCP. */
+    saveBrainstormContext(id: string, context: DesignContext[]) {
+      db.prepare("UPDATE brainstorms SET context_json = ? WHERE id = ?").run(context.length ? JSON.stringify(context) : null, id);
     },
     setBrainstorm(id: string, patch: Partial<Pick<BrainstormRow, "status" | "meetingId" | "endedAt">>) {
       const cols: Record<string, string> = { status: "status", meetingId: "meeting_id", endedAt: "ended_at" };
