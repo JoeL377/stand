@@ -217,6 +217,8 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", "```mermaid", 
       await snap("section-with-question", rae);
     });
     check("the section's slide shows its diagram from the spec", (await rae.locator(".ds-diagram svg").innerHTML()).includes("Server capture"));
+    const fit = await rae.locator(".ds-main").evaluate((el) => ({ content: el.scrollHeight, box: el.clientHeight }));
+    check("the slide fits its box with the diagram on it: nobody has to scroll", fit.content <= fit.box, fit);
     check("the question is closed on the slide of its section", (await rae.locator(".ds-q.open").count()) === 0 && (await stageText(rae)).includes("Slide 3 of 5"), (await stageText(rae)).match(/Slide [^←→]*/)?.[0]);
     await step("the author opens the question for everyone, and the slide stays up", async () => {
       lastPage = vera;

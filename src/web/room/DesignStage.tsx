@@ -11,6 +11,7 @@ import { POINT_OUTCOMES, VERDICTS, designOutcomeLabel, type DesignOutcome, type 
 import type { PlanThread } from "../../shared/planReview.ts";
 import type { Item, Note } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
+import { useDiagramFit } from "../diagramFit.ts";
 import { CloseIcon } from "../icons.tsx";
 import { Markdown } from "../Markdown.tsx";
 import { Mermaid } from "../Mermaid.tsx";
@@ -77,6 +78,8 @@ export function DesignStage(props: {
   const caught = props.notes.filter((n) => n.itemId && ids.has(n.itemId) && KINDS.some((k) => k.kind === n.kind));
   const outcomes = asked ? POINT_OUTCOMES : design.role === "verdict" ? VERDICTS : [];
   const parts = shown.parts ?? [];
+  const main = useRef<HTMLDivElement>(null);
+  useDiagramFit(main);
 
   return (
     <div className={`design-stage ${props.className ?? ""}`}>
@@ -93,7 +96,7 @@ export function DesignStage(props: {
           </button>
         </header>
         <div className="ds-body">
-          <div className={`ds-main${asked ? " asking" : ""}`}>
+          <div ref={main} className={`ds-main${asked ? " asking" : ""}`}>
             {shown.role === "overview" && (
               <>
                 <h1 dir="auto">{page.title}</h1>

@@ -435,7 +435,7 @@ function specContext(db: DB, briefs: PlanBriefs | null, rows: ReviewSlideRow[], 
       case "section": {
         const group = (groups.find((g) => g[0] === row.section) ?? []).flatMap((h) => sections.find((x) => x.heading === h) ?? []);
         if (!group.length) return null;
-        const shown = linesShown(group.length);
+        const shown = linesShown(group.length, group.filter((x) => diagrams.has(x.heading)).length);
         const parts = group.map((section) => {
           const written = brief.sections.find((x) => x.heading === section.heading);
           const diagram = diagrams.get(section.heading);

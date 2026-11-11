@@ -9,8 +9,10 @@ export const BRIEF_LINE_MAX = 200;
 export const DESIGN_QUESTIONS_MAX = 12;
 /** A spec's sections go on at most this many slides: past it, adjacent sections share one. */
 export const SECTION_SLIDES_MAX = 8;
-/** How many lines of each section a slide shows, by how many sections share it. */
-export const linesShown = (sections: number) => Math.max(1, Math.min(BRIEF_LINES_MAX, Math.floor(6 / Math.max(1, sections))));
+/** How many lines of each section a slide shows, by how many sections share it. On a shared slide
+ *  a diagram takes the room of a section, so the diagrams stay large enough to read. */
+export const linesShown = (sections: number, diagrams = 0) =>
+  Math.max(1, Math.min(BRIEF_LINES_MAX, Math.floor(6 / Math.max(1, sections > 1 ? sections + diagrams : sections))));
 
 /** One `##` section of the spec as its slide shows it. The heading and the order come from the spec. */
 export interface BriefSection {
