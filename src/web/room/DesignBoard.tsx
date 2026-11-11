@@ -276,13 +276,10 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
 function Said({ quote }: { quote: DesignBox["quote"] }) {
   if (!quote) return null;
   return (
-    <blockquote>
-      <span dir="auto">“{quote.text}”</span>
-      <cite>
-        <Face name={quote.speaker} />
-        {quote.speaker.split(" ")[0]} · {clock(quote.ts)}
-      </cite>
-    </blockquote>
+    <cite>
+      <Face name={quote.speaker} />
+      {quote.speaker.split(" ")[0]} · {clock(quote.ts)}
+    </cite>
   );
 }
 

@@ -433,13 +433,11 @@ function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas:
       <h3 dir="auto">{node.label}</h3>
       {node.detail && <p dir="auto">{node.detail}</p>}
       {node.quote && (
-        <blockquote>
-          <span dir="auto">“{node.quote.text}”</span>
-          <cite>
-            <Face name={node.quote.speaker} />
-            {node.quote.speaker.split(" ")[0]} · {clock(node.quote.ts)}
-          </cite>
-        </blockquote>
+        // Who raised it and when; the words themselves are in the transcript.
+        <cite>
+          <Face name={node.quote.speaker} />
+          {node.quote.speaker.split(" ")[0]} · {clock(node.quote.ts)}
+        </cite>
       )}
       {node.points.length > 0 && (
         <section>
