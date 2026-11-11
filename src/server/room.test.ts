@@ -284,13 +284,13 @@ test("action items stay open on their item across meetings until someone checks 
     { source: "linear" as const, externalId: "ENG-7", title: "Search latency", url: "https://linear.app/acme/issue/ENG-7", description: null },
   ]);
   const first = db.startMeeting(room.id);
-  const [dash, alerts] = db.replaceNotes(first.id, ticket.id, [
+  const [dash, alerts] = db.syncNotes(first.id, ticket.id, [
     { kind: "action", text: "Add a dashboard", owner: "Priya" },
     { kind: "action", text: "Page on p95", owner: null },
   ]);
   // Notes regenerate while the meeting runs; a checked-off action stays checked.
   assert.ok(db.setActionDone(room.id, alerts.id, "Joe"));
-  const again = db.replaceNotes(first.id, ticket.id, [
+  const again = db.syncNotes(first.id, ticket.id, [
     { kind: "action", text: "Add a dashboard", owner: "Priya" },
     { kind: "action", text: "Page on p95", owner: null },
   ]);
@@ -612,7 +612,7 @@ test("spaces: every space is listed with its open to-dos, the ones for you, and 
   db.touchMembership(a.id, joe.id);
   const [item] = db.addItems(a.id, [{ source: "agenda" as const, externalId: null, title: "Apple Pay", url: null, description: null }]);
   const m = db.startMeeting(a.id);
-  db.replaceNotes(m.id, item.id, [
+  db.syncNotes(m.id, item.id, [
     { kind: "decision", text: "Guest checkout stays for v1", owner: null },
     { kind: "action", text: "Set up the Apple Pay sandbox", owner: "Joe" },
     { kind: "action", text: "Write the copy", owner: "Sam" },
@@ -1072,7 +1072,7 @@ test("tasks: done needs what closed it, drop keeps why and leaves open lists, an
   const db = openDb(":memory:");
   const room = db.createRoom("Tasks");
   const m = db.startMeeting(room.id);
-  const [fix, docs, q] = db.replaceNotes(m.id, null, [
+  const [fix, docs, q] = db.syncNotes(m.id, null, [
     { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
     { kind: "action", text: "Write the docs", owner: "Huy" },
     { kind: "question", text: "Do we keep SQLite?", owner: null },
@@ -1082,7 +1082,7 @@ test("tasks: done needs what closed it, drop keeps why and leaves open lists, an
   assert.deepEqual([dropped.state, dropped.dropReason, dropped.doneBy, !!dropped.doneAt], ["dropped", "Conxt has them", "Andy", true]);
   assert.equal(db.setTaskState(room.id, q.id, { state: "done", by: "Joe" })?.state, "done");
   // The live notes rewrite the item: each task keeps where it stood.
-  const again = db.replaceNotes(m.id, null, [
+  const again = db.syncNotes(m.id, null, [
     { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
     { kind: "action", text: "Write the docs", owner: "Huy" },
     { kind: "question", text: "Do we keep SQLite?", owner: null },
@@ -1096,7 +1096,7 @@ test("tasks: done needs what closed it, drop keeps why and leaves open lists, an
   assert.deepEqual([reopened.state, reopened.doneAt, reopened.dropReason, !!reopened.checkedAt], [null, null, null, true]);
   assert.equal(db.setTaskState(room.id, docs.id, { state: "open", by: "Huy", checked: false })?.checkedAt, null);
   // A decision is a closed Decide task; it can't be moved, and another space can't move anything.
-  const [dec] = db.replaceNotes(db.startMeeting(room.id).id, null, [{ kind: "decision", text: "Keep SQLite", owner: null }]);
+  const [dec] = db.syncNotes(db.startMeeting(room.id).id, null, [{ kind: "decision", text: "Keep SQLite", owner: null }]);
   assert.equal(db.setTaskState(room.id, dec.id, { state: "dropped", by: "Joe" }), null);
   assert.equal(db.setTaskState(db.createRoom("Other").id, docs.id, { state: "done", by: "Mallory" }), null);
 });
@@ -1105,7 +1105,7 @@ test("since last time: carried tasks open the meeting, Stand hears one called do
   const db = openDb(":memory:");
   const room = db.createRoom("Check-in");
   const last = db.startMeeting(room.id);
-  const [railway, docs, pr] = db.replaceNotes(last.id, null, [
+  const [railway, docs, pr] = db.syncNotes(last.id, null, [
     { kind: "action", text: "Fix the Railway deploy", owner: "Joe" },
     { kind: "action", text: "Write the docs", owner: "Huy" },
     { kind: "action", text: "Ship the bar fix", owner: "Andy" },

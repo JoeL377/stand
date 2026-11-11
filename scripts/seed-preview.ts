@@ -96,7 +96,7 @@ function meeting(daysAgo: number, minutes: number, summary: string, topics: Topi
       chapters.push({ key: discussions[i].id, crux: t.crux, moments: [{ segmentId: first.id, ts: first.ts, text: t.crux }] });
     });
     notes.push(
-      ...db.replaceNotes(
+      ...db.syncNotes(
         m.id,
         item.id,
         here.flatMap((t, i) =>

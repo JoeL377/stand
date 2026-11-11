@@ -7,11 +7,33 @@ import { newId } from "../ids.ts";
 import { DISCUSSION_SELECT, type DraftDiscussion, type Row, TASK_COLS, toDiscussion, toNote } from "./rows.ts";
 import type { Tx } from "./tx.ts";
 
+/** Whether a person or an agent did something with a note, so a notes run must not delete it: it
+ *  was ticked, edited, given a topic or a task state, added by someone, or something hangs on it
+ *  (a plan, an update or comment, a mention, a screenshot, a link, a check, a slide, an agenda item). */
+function actedOnBy(db: DatabaseSync) {
+  const own = db.prepare(
+    `SELECT 1 FROM notes WHERE id = ? AND (done_at IS NOT NULL OR edited_by IS NOT NULL OR topic IS NOT NULL OR added_actor_json IS NOT NULL
+       OR state IS NOT NULL OR done_when IS NOT NULL OR parent_id IS NOT NULL OR closed_by IS NOT NULL OR said_done_json IS NOT NULL OR checked_at IS NOT NULL)`,
+  );
+  const hangs = db.prepare(
+    `SELECT 1 WHERE EXISTS (SELECT 1 FROM task_plans WHERE note_id = ?1) OR EXISTS (SELECT 1 FROM updates WHERE note_id = ?1)
+       OR EXISTS (SELECT 1 FROM mentions WHERE note_id = ?1) OR EXISTS (SELECT 1 FROM work_shots WHERE note_id = ?1)
+       OR EXISTS (SELECT 1 FROM links WHERE from_id = ?1 OR to_id = ?1) OR EXISTS (SELECT 1 FROM decision_checks WHERE note_id = ?1)
+       OR EXISTS (SELECT 1 FROM review_slides WHERE note_id = ?1) OR EXISTS (SELECT 1 FROM items WHERE note_id = ?1)
+       OR EXISTS (SELECT 1 FROM brainstorms WHERE task_id = ?1)`,
+  );
+  return (id: string) => !!own.get(id) || !!hangs.get(id);
+}
+
 export function notesStore(db: DatabaseSync, tx: Tx) {
+  const actedOn = actedOnBy(db);
   return {
-    /** Notes for one item in one meeting are regenerated as a whole. An action
-     *  someone already checked off stays checked when its wording comes back. */
-    replaceNotes(
+    /** Writes a notes run for one item in one meeting. Each note updates the row it continues (by
+     *  its id, else by its exact wording) or is added, so a note keeps its id, its tick, where its
+     *  task stands, its topic and who did what through every run, reworded or not. A row the run
+     *  left out goes only if nobody acted on it (see actedOn). Returns the item's notes: the run's,
+     *  in its order, then the ones kept for what was done with them. */
+    syncNotes(
       meetingId: string,
       itemId: string | null,
       notes: Array<
@@ -27,109 +49,55 @@ export function notesStore(db: DatabaseSync, tx: Tx) {
       >,
     ): Note[] {
       return tx(() => {
-        const done = new Map(
-          (
-            db
-              .prepare("SELECT text, done_at, done_by FROM notes WHERE meeting_id = ? AND item_id IS ? AND done_at IS NOT NULL")
-              .all(meetingId, itemId) as Row[]
-          ).map((r) => [r.text as string, { doneAt: r.done_at as number, doneBy: (r.done_by as string) ?? null }]),
-        );
-        // Where a task stands comes back with it: by its id when a rewording kept it, else by its wording.
-        const task = new Map(
-          (
-            db
-              .prepare(
-                `SELECT id, kind, text, ${TASK_COLS} FROM notes WHERE meeting_id = ? AND item_id IS ?
-                 AND (state IS NOT NULL OR done_when IS NOT NULL OR parent_id IS NOT NULL OR closed_by IS NOT NULL OR said_done_json IS NOT NULL OR checked_at IS NOT NULL)`,
-              )
-              .all(meetingId, itemId) as Row[]
-          ).flatMap((r) => [[`id:${r.id}`, r], [`${r.kind}:${r.text}`, r]] as const),
-        );
-        // A note that comes back with the same wording keeps its id, so references
-        // agents hold (stand:question/<id>) survive the agent rewriting the notes.
-        const sameText = new Map(
-          (db.prepare("SELECT id, kind, text FROM notes WHERE meeting_id = ? AND item_id IS ?").all(meetingId, itemId) as Row[]).map((r) => [
-            `${r.kind}:${r.text}`,
-            r.id as string,
-          ]),
-        );
-        // Who closed or added a note comes back the same way.
-        const actors = new Map(
-          (
-            db
-              .prepare(
-                `SELECT id, kind, text, done_actor_json, added_actor_json FROM notes WHERE meeting_id = ? AND item_id IS ?
-                 AND (done_actor_json IS NOT NULL OR added_actor_json IS NOT NULL)`,
-              )
-              .all(meetingId, itemId) as Row[]
-          ).flatMap((r) => [[`id:${r.id}`, r], [`${r.kind}:${r.text}`, r]] as const),
-        );
-        // User grouping survives live note redrafts independently of the model's fields.
-        const topics = db.prepare("SELECT id, kind, text, topic FROM notes WHERE meeting_id = ? AND item_id IS ? AND topic IS NOT NULL").all(meetingId, itemId) as Row[];
-        db.prepare("DELETE FROM notes WHERE meeting_id = ? AND item_id IS ?").run(meetingId, itemId);
-        const st = db.prepare(
-          "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by, quote_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        );
-        const ts = Date.now();
+        const rows = db.prepare("SELECT id, kind, text FROM notes WHERE meeting_id = ? AND item_id IS ?").all(meetingId, itemId) as Row[];
+        const here = new Set(rows.map((r) => r.id as string));
+        const sameText = new Map(rows.map((r) => [`${r.kind}:${r.text}`, r.id as string]));
         // A run can write the same note twice under one topic: keep one, the one already kept if either was.
         const keyOf = (n: (typeof notes)[number]) => `${n.discussionId ?? ""}\n${n.kind}\n${n.text}`;
         const one = new Map<string, (typeof notes)[number]>();
         for (const n of notes) if (!one.has(keyOf(n)) || (!one.get(keyOf(n))!.id && n.id)) one.set(keyOf(n), n);
-        // Each id once: notes kept as they were hold theirs, and only one note can take an old wording's id.
-        const taken = new Set(notes.flatMap((n) => (n.id ? [n.id] : [])));
+        // Each row once: notes that name theirs hold it, and only one note can take an old wording's row.
+        const named = new Set(notes.flatMap((n) => (n.id && here.has(n.id) ? [n.id] : [])));
         const used = new Set<string>();
-        const idFor = (n: (typeof notes)[number]) => {
-          if (n.id && !used.has(n.id)) return n.id;
+        const rowFor = (n: (typeof notes)[number]) => {
+          if (n.id && here.has(n.id) && !used.has(n.id)) return n.id;
           const old = sameText.get(`${n.kind}:${n.text}`);
-          return old && !taken.has(old) && !used.has(old) ? old : newId(12);
+          return old && !named.has(old) && !used.has(old) ? old : null;
         };
-        return notes.flatMap((n) => {
-          if (one.get(keyOf(n)) !== n) return [];
-          const d = n.doneAt ? { doneAt: n.doneAt, doneBy: n.doneBy ?? null } : n.kind === "action" ? done.get(n.text) : undefined;
-          const id = idFor(n);
-          used.add(id);
-          const note: Note = {
-            id,
-            meetingId,
-            itemId,
-            kind: n.kind,
-            text: n.text,
-            owner: n.owner ?? null,
-            ts: n.ts ?? ts,
-            doneAt: d?.doneAt ?? null,
-            doneBy: d?.doneBy ?? null,
-            discussionId: n.discussionId ?? null,
-            editedBy: n.editedBy ?? null,
-            quote: n.quote ?? null,
-          };
-          st.run(
-            note.id,
-            meetingId,
-            itemId,
-            note.kind,
-            note.text,
-            note.owner,
-            note.ts,
-            note.doneAt,
-            note.doneBy,
-            note.discussionId,
-            note.editedBy ?? null,
-            note.quote ? JSON.stringify(note.quote) : null,
-          );
-          // By the note's id when it kept one through a rewording, else by its wording.
-          const a = actors.get(`id:${note.id}`) ?? actors.get(`${note.kind}:${note.text}`);
-          if (a) db.prepare("UPDATE notes SET done_actor_json = ?, added_actor_json = ? WHERE id = ?").run(a.done_actor_json as string | null, a.added_actor_json as string | null, note.id);
-          const t = task.get(`id:${note.id}`) ?? task.get(`${note.kind}:${note.text}`);
-          if (t) {
-            db.prepare(`UPDATE notes SET ${TASK_COLS.split(", ").map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).run(
-              ...TASK_COLS.split(", ").map((c) => (t[c] as string | number | null) ?? null),
-              note.id,
-            );
+        // People own a tick, an edit and what a task's state is: a run carries them, never takes them off.
+        const update = db.prepare(
+          `UPDATE notes SET kind = ?, text = ?, owner = ?, ts = COALESCE(?, ts), discussion_id = ?,
+             edited_by = COALESCE(?, edited_by), quote_json = COALESCE(?, quote_json),
+             done_at = COALESCE(done_at, ?), done_by = CASE WHEN done_at IS NULL THEN ? ELSE done_by END
+           WHERE id = ?`,
+        );
+        const insert = db.prepare(
+          "INSERT INTO notes (id, meeting_id, item_id, kind, text, owner, ts, done_at, done_by, discussion_id, edited_by, quote_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        );
+        const now = Date.now();
+        const ids: string[] = [];
+        for (const n of notes) {
+          if (one.get(keyOf(n)) !== n) continue;
+          const quote = n.quote ? JSON.stringify(n.quote) : null;
+          let id = rowFor(n);
+          if (id) update.run(n.kind, n.text, n.owner ?? null, n.ts ?? null, n.discussionId ?? null, n.editedBy ?? null, quote, n.doneAt ?? null, n.doneBy ?? null, id);
+          else {
+            // A new row keeps an id the note brings from elsewhere (a carried note), when it's free.
+            id = n.id && !db.prepare("SELECT 1 FROM notes WHERE id = ?").get(n.id) ? n.id : newId(12);
+            insert.run(id, meetingId, itemId, n.kind, n.text, n.owner ?? null, n.ts ?? now, n.doneAt ?? null, n.doneAt ? (n.doneBy ?? null) : null, n.discussionId ?? null, n.editedBy ?? null, quote);
           }
-          const grouping = topics.find((r) => r.id === note.id) ?? topics.find((r) => r.kind === note.kind && r.text === note.text);
-          if (grouping) db.prepare("UPDATE notes SET topic = ? WHERE id = ?").run(grouping.topic as string, note.id);
-          return [t || a || grouping ? toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(note.id) as Row) : note];
-        });
+          used.add(id);
+          ids.push(id);
+        }
+        const kept: string[] = [];
+        for (const r of rows) {
+          const id = r.id as string;
+          if (used.has(id)) continue;
+          if (actedOn(id)) kept.push(id);
+          else db.prepare("DELETE FROM notes WHERE id = ?").run(id);
+        }
+        const read = db.prepare("SELECT * FROM notes WHERE id = ?");
+        return [...ids, ...kept].map((id) => toNote(read.get(id) as Row));
       });
     },
     /** The host's own wording for a note. Edited notes stay as written when the agent redrafts. */
@@ -240,7 +208,7 @@ export function notesStore(db: DatabaseSync, tx: Tx) {
     replaceDiscussions(meetingId: string, itemId: string | null, drafts: DraftDiscussion[]): Discussion[] {
       return tx(() => {
         // A topic that comes back keeps its id, so references agents hold and the board's place in it
-        // survive (see replaceNotes): by its name, or, when a run renamed it, by holding most of its lines.
+        // survive (see syncNotes): by its name, or, when a run renamed it, by holding most of its lines.
         const prior = (
           db.prepare("SELECT id, topic, segment_ids_json FROM discussions WHERE meeting_id = ? AND item_id IS ?").all(meetingId, itemId) as Row[]
         ).map((r) => ({ id: r.id as string, name: (r.topic as string).trim().toLowerCase(), lines: new Set(JSON.parse(r.segment_ids_json as string) as string[]) }));

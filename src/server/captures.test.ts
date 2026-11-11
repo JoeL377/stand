@@ -89,7 +89,7 @@ test("the feed has the space's meetings as rows, and what's decided and open", a
   const room = db.createRoom("Growth");
   const m = db.startMeeting(room.id);
   db.addSegment({ meetingId: m.id, itemId: null, speakerId: "u", speakerName: "Joe", kind: "speech", text: "Ship invites Friday", ts: Date.now() });
-  db.replaceNotes(m.id, null, [
+  db.syncNotes(m.id, null, [
     { kind: "decision", text: "Ship invites on Friday", owner: null },
     { kind: "action", text: "Get the SSO quote", owner: "Andy" },
     { kind: "question", text: "Who owns pricing?", owner: null },
