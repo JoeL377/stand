@@ -11,6 +11,8 @@ import type { ChapterRecap, DiscussionOutcome, Item, Note, NoteKind, Position, Q
 import { agentApi } from "../src/server/agents.ts";
 import { openDb } from "../src/server/db.ts";
 import { addSlide, finishReview, setOutcome, startReview } from "../src/server/reviews.ts";
+import { finishBrainstorm, startBrainstorm } from "../src/server/brainstorm.ts";
+import type { BrainNode } from "../src/shared/protocol.ts";
 import { upNextView } from "../src/server/upNextPolish.ts";
 import { UploadLinks } from "../src/server/workLog.ts";
 
@@ -253,6 +255,42 @@ setOutcome(db, slideItems[1].id, "ship", priya.name);
 setOutcome(db, slideItems[2].id, "not_yet", sam.name);
 db.endMeeting(reviewCall.id, "The team reviewed three checkout features. Saved cards ship now, one-page checkout ships with a fix to the summary, and the confirmation email needs another pass.", null, reviewStarted + 18 * MIN, []);
 finishReview(db, room.id, reviewCall.id, reviewStarted + 18 * MIN);
+
+// A brainstorm that ran three days ago, so its page shows a finished map.
+{
+  const at = now - 3 * DAY;
+  const b = startBrainstorm(db, room.id, "How do we get more shoppers through guest checkout?", sam.name, at);
+  const call = db.startMeeting(room.id);
+  let n = 0;
+  const q = (who: { name: string }, text: string) => ({ segmentId: `bs${++n}`, ts: at + n * 40_000, speaker: who.name, text });
+  const node = (id: string, parent: string | null, label: string, detail: string, who: { name: string }, said: string, extra: Partial<BrainNode> = {}): BrainNode => {
+    const quote = q(who, said);
+    return { id, parent, label, detail, by: who.name.split(" ")[0], ts: quote.ts, quote, points: [], caught: [], ...extra };
+  };
+  db.saveBrainstormMap(b.id, [
+    node("d1", null, "Fewer steps", "Cut what a guest has to fill in before paying.", priya, "Honestly the biggest thing is how much we ask for before they can pay."),
+    node("i1", "d1", "Skip account prompt", "Don't ask a guest to make an account until after the order is placed.", priya, "We shouldn't ask them to sign up until the order's done.", {
+      points: [{ text: "Offer it on the confirmation page instead", by: "Leo", ts: at + 5 * MIN, quote: q(leo, "Put the sign-up offer on the confirmation page, they've already typed everything.") }],
+      caught: [{ id: "bc1", kind: "action", text: "Move the account prompt to the confirmation page", owner: leo.name, done: false }],
+    }),
+    node("i2", "d1", "Autofill the address", "Use the browser's saved address and a postcode lookup.", leo, "Postcode lookup would save half the typing."),
+    node("i3", "d1", "One page, not three", "Address, shipping and payment on a single page.", maya, "If it's all on one page people can see how close they are."),
+    node("d2", null, "Trust", "Reasons a first-time shopper hesitates to pay.", maya, "A lot of drop-off is people not being sure about us."),
+    node("i4", "d2", "Show delivery date early", "Put the expected delivery date beside the total.", maya, "Show when it arrives right next to the price.", { caught: [{ id: "bc2", kind: "question", text: "Can we promise a delivery date before the address is in?", owner: null, done: false }] }),
+    node("i5", "d2", "Returns line by the button", "One line on free returns next to Pay.", sam, "Just say free returns right by the pay button."),
+    node("i6", "d2", "Known payment logos", "Show Apple Pay and card logos before the payment step.", priya, "People look for the Apple Pay logo before they commit."),
+    node("d3", null, "Faster payment", "Ways to pay without typing a card number.", leo, "Typing a card on a phone is where we lose them."),
+    node("i7", "d3", "Apple Pay on the cart", "A pay button on the cart page that skips the form.", leo, "Put Apple Pay on the cart itself.", {
+      points: [{ text: "Needs its own button on the summary bar", by: "Maya", ts: at + 9 * MIN, quote: q(maya, "Then it needs its own button on the sticky summary bar on mobile.") }],
+    }),
+    node("i8", "d3", "Pay by link", "Text a payment link to finish on another device.", sam, "What if they could finish on their laptop from a link?"),
+    node("d4", null, "Bring them back", "Recover people who leave partway.", sam, "And what about the ones who leave, can we get them back?"),
+    node("i9", "d4", "Save the cart by email", "Ask for an email first and send the cart back to them.", sam, "If we get the email first we can send them their cart.", { caught: [{ id: "bc3", kind: "decision", text: "Email comes first on the form", owner: null, done: false }] }),
+    node("i10", "d4", "Remember the address", "Keep what a guest typed on this device for next time.", priya, "At least remember what they typed if they come back on the same phone."),
+  ]);
+  db.endMeeting(call.id, "The team brainstormed ways to get more shoppers through guest checkout.", null, at + 22 * MIN, []);
+  finishBrainstorm(db, room.id, call.id, at + 22 * MIN);
+}
 
 // Done, closed by the PR that shipped it, with a summary in its log.
 api.postUpdate(leosAgent, { ref: ref(key), status: "working", text: "Adding the key to the charge call" });

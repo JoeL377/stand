@@ -1,6 +1,8 @@
 import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type {
+  BrainstormSummary,
+  BrainstormView,
   ReviewSummary,
   ReviewView,
   ActionWork,
@@ -157,6 +159,9 @@ export const api = {
   meeting: (id: string) => call<MeetingRecap>("GET", `/api/meetings/${id}`),
   review: (roomId: string, reviewId: string) =>
     call<{ roomName: string; review: ReviewView | null; reviews: ReviewSummary[] }>("GET", `/api/rooms/${roomId}/reviews/${encodeURIComponent(reviewId)}`),
+  startBrainstorm: (roomId: string, prompt: string) => call<{ brainstorm: BrainstormView }>("POST", `/api/rooms/${roomId}/brainstorm/start`, { prompt }),
+  brainstorm: (roomId: string, id: string) =>
+    call<{ roomName: string; brainstorm: BrainstormView; brainstorms: BrainstormSummary[] }>("GET", `/api/rooms/${roomId}/brainstorms/${encodeURIComponent(id)}`),
   startReview: (roomId: string) => call<{ review: ReviewView | null; firstItemId: string }>("POST", `/api/rooms/${roomId}/review/start`),
   removeReviewSlide: (roomId: string, slideId: string) => call<{ review: ReviewView | null }>("DELETE", `/api/rooms/${roomId}/review/slides/${slideId}`),
   suggested: (roomId: string) => call<{ upNext: UpNext }>("GET", `/api/rooms/${roomId}/suggested.json`),

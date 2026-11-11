@@ -192,6 +192,68 @@ export type TaskState = "open" | "doing" | "done" | "dropped";
 /** depends_on: this to-do waits on that one. It's a signal for whoever picks either up; it blocks nothing. */
 export type LinkRelation = "leaves" | "replaces" | "not_replaced" | "serves" | "conflicts" | "objects" | "depends_on";
 
+/** A to-do, decision or open question linked to a circle of a brainstorm's map. */
+export interface BrainCaught {
+  id: string;
+  kind: "action" | "decision" | "question";
+  text: string;
+  owner: string | null;
+  done: boolean;
+}
+
+/** Something someone added to a circle that was already on the map. */
+export interface BrainPoint {
+  text: string;
+  by: string | null;
+  ts: number;
+  quote: Quote | null;
+}
+
+/** A circle on a brainstorm's map (server/brainstorm.ts): a direction (parent null) or an idea under one. */
+export interface BrainNode {
+  /** d3 for a direction, i12 for an idea. */
+  id: string;
+  parent: string | null;
+  label: string;
+  detail: string | null;
+  /** First name of who raised it. */
+  by: string | null;
+  ts: number;
+  quote: Quote | null;
+  points: BrainPoint[];
+  caught: BrainCaught[];
+  /** Someone took it off the map. Kept on the server so it isn't added again; never sent. */
+  removed?: boolean;
+}
+
+/** A brainstorm: one sentence in the middle and the map the talk drew around it. */
+export interface BrainstormView {
+  id: string;
+  roomId: string;
+  /** The topic or question it started from. */
+  prompt: string;
+  status: "live" | "done";
+  /** The agenda item its talk is filed under while it runs. */
+  itemId: string | null;
+  meetingId: string | null;
+  startedBy: string | null;
+  startedAt: number;
+  endedAt: number | null;
+  nodes: BrainNode[];
+  /** A pass is reading the latest talk right now. */
+  busy?: boolean;
+}
+
+export interface BrainstormSummary {
+  id: string;
+  prompt: string;
+  status: "live" | "done";
+  startedAt: number;
+  meetingId: string | null;
+  directions: number;
+  ideas: number;
+}
+
 /** A line on the board's running list (server/liveList.ts), in the shape of a note so the board's
  *  tabs read either. Lines are only added, changed by id or closed, never regrouped. */
 export interface ListNote extends Note {
@@ -800,6 +862,8 @@ export type ClientMessage = (
   // Host only: fix what the agent wrote down for the item in focus.
   | { type: "note.edit"; noteId: string; text: string; owner?: string | null }
   | { type: "note.remove"; noteId: string }
+  /** Take a circle off the brainstorm's map (anyone in the call: Stand got it wrong). */
+  | { type: "brainstorm.remove"; id: string }
   | { type: "note.add"; itemId: string | null; kind: "action" | "decision" | "question"; text: string; owner?: string | null }
   | { type: "demo.play" }
   /** Anyone: ask ✦ Stand for options on an open question on the board's list. */
@@ -901,6 +965,7 @@ export type ServerMessage =
   | { type: "cost"; cost: MeetingCost }
   /** The board's running list, after every change. Null when there's no model to keep one: the tabs read the live notes. */
   | { type: "list"; items: ListNote[] | null }
+  | { type: "brainstorm"; brainstorm: BrainstormView | null }
   /** What ✦ Stand, the meeting's own agent, has put on the board so far (meetingAgent.ts). */
   | { type: "agent"; cards: AgentCard[] }
   /** Who pilots ✦ Stand, and who's asking to (server/pilot.ts), after every change. */
@@ -947,6 +1012,8 @@ export interface MeetingRecap {
   cost?: MeetingCost | null;
   /** The product review that ran in this meeting, if one did. */
   review?: ReviewSummary | null;
+  /** The brainstorm that ran in it, if one did. */
+  brainstorm?: BrainstormSummary | null;
 }
 
 /** What a meeting's Claude calls cost, in dollars, most expensive task first (server/usage.ts). */
@@ -1015,6 +1082,8 @@ export interface SpaceFeed {
   review?: ReviewView | null;
   /** Reviews that ran, newest first: each keeps its page. */
   reviews?: ReviewSummary[];
+  /** The space's brainstorms, newest first, the one running now included. */
+  brainstorms?: BrainstormSummary[];
   /** Snaps saved straight to the space, newest first. */
   captures: Snap[];
   /** Notes saved straight to the space, newest first. */

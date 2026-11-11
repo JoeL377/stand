@@ -2,7 +2,8 @@ import { usePersonColors } from "../PersonColors.tsx";
 import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ReviewStage } from "./ReviewStage.tsx";
-import type { AgentCard, Board, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import { BrainMap } from "./BrainMap.tsx";
+import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { initials, keyOf } from "../util.ts";
@@ -41,6 +42,8 @@ export function Stage(props: {
   board: Board | null;
   /** The board's running list (server/liveList.ts); null when the server keeps none. */
   list: ListNote[] | null;
+  /** The brainstorm running in this space (server/brainstorm.ts); its map has the middle while its sentence is in focus. */
+  brainstorm?: BrainstormView | null;
   /** What ✦ Stand has put on the board (server/meetingAgent.ts); null when the server runs no agent. */
   agentCards: AgentCard[] | null;
   notes: Note[];
@@ -158,6 +161,7 @@ export function Stage(props: {
   const shownTask = following ? hostView?.task : ownTask;
   const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask);
   // A review slide's pictures: the host's choice is everyone's, and a look of your own lasts until the host moves.
+  const brainUp = !!props.brainstorm && props.brainstorm.status === "live" && !!focusItem && focusItem.id === props.brainstorm.itemId;
   const reviewUp = deckUp && focusItem?.slide?.layout === "review";
   const [myShot, setMyShot] = useState(0);
   useEffect(() => setMyShot(0), [focusItem?.id]);
@@ -489,6 +493,8 @@ export function Stage(props: {
               {sharer.isHost ? "; the agent still reads it." : ". The agent follows only the host's screen."}
             </p>
           </div>
+        ) : brainUp ? (
+          <BrainMap brainstorm={props.brainstorm!} onRemove={props.offline || props.ending ? undefined : (id) => send({ type: "brainstorm.remove", id })} />
         ) : reviewUp && focusItem ? (
           <div className="screen-empty">
             <ReviewStage
