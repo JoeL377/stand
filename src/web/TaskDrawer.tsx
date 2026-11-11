@@ -6,6 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import type { DesignReviewState } from "../shared/designReview.ts";
+import type { Note } from "../shared/protocol.ts";
 import { TASK_COMMENT_MAX, type TaskDetail, type TaskLink, type TaskMention } from "../shared/protocol.ts";
 import { STATE_LABEL, VERB_LABEL, stateOf, verbOf } from "../shared/tasks.ts";
 import { api } from "./api.ts";
@@ -19,7 +20,9 @@ import { errorToast } from "./Toasts.tsx";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
 
-export function TaskDrawer({ id, onOpen, onClose, onMentionsChange }: {
+export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, acts }: {
+  /** What a phone's row no longer shows (topic, drop, archive); the drawer shows it on phones only. */
+  acts?: (note: Note) => React.ReactNode;
   id: string;
   onOpen: (id: string) => void;
   onClose: () => void;
@@ -121,6 +124,7 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange }: {
         {task && n && (
           <div className="td-body">
             <h2 className="td-title">{n.text}</h2>
+            {acts && <div className="td-phone-acts">{acts(n)}</div>}
             {task.mentionsYou.length > 0 && (
               <MentionNotice
                 mentions={task.mentionsYou}
