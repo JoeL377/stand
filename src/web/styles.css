@@ -3319,3 +3319,29 @@ button.ds-q:focus-visible { outline: 2px solid var(--accent); }
 .sh-kinds .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
 .sh-kinds .rp-pill.on .muted { color: inherit; opacity: 0.7; }
 .sh-row > a.rp-pill { flex: none; }
+.rp-head .dr-again { flex: none; height: 32px; padding: 0 14px; font-size: 13px; }
+
+/* What came out of a circle: marks for to-dos, decisions and open questions, and pills that show one kind. */
+.brain-kind { font-style: normal; flex: none; display: inline-flex; align-items: center; gap: 2px; font-size: 10.5px; font-weight: 600; line-height: 1; }
+.brain-kind.action, .brain-kind-pill.action svg { color: var(--accent); }
+.brain-kind.decision, .brain-kind-pill.decision svg { color: var(--ok); }
+.brain-kind.question, .brain-kind-pill.question svg { color: var(--warn); }
+.brain-node.dim { filter: opacity(0.22); }
+.brain-node.dim:hover, .brain-node.dim.on { filter: none; }
+.brain-kinds { position: absolute; top: 10px; left: 12px; z-index: 4; display: flex; gap: 6px; }
+.brain-kind-pill { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.brain-kind-pill > span { color: var(--muted); }
+.brain-kind-pill:hover { background: var(--panel-2); }
+.brain-kind-pill.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.brain.narrow .brain-kinds { top: 8px; left: 8px; right: 8px; overflow-x: auto; scrollbar-width: none; }
+.brain.narrow .brain-kind-pill { flex: none; height: 30px; }
+.brain-zoom { position: absolute; right: 12px; bottom: 12px; z-index: 4; display: flex; align-items: center; height: 30px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 2px 8px rgb(0 0 0 / 0.12); overflow: hidden; }
+.brain-zoom button { all: unset; box-sizing: border-box; min-width: 30px; height: 30px; padding: 0 6px; display: grid; place-items: center; font-size: 15px; color: var(--text); cursor: pointer; }
+.brain-zoom button:hover:not(:disabled) { background: var(--panel-2); }
+.brain-zoom button:disabled { color: var(--muted); opacity: 0.5; cursor: default; }
+.brain-zoom .brain-zoom-pct { min-width: 46px; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.brain:not(.narrow) { cursor: grab; }
+.brain:not(.narrow):active { cursor: grabbing; }
+.brain:not(.narrow) .brain-canvas { will-change: transform; }
+.brain { user-select: none; -webkit-user-select: none; }
+.brain-card { user-select: text; -webkit-user-select: text; cursor: auto; }

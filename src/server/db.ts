@@ -2160,6 +2160,10 @@ export function openDb(file?: string) {
       db.prepare("INSERT INTO reviews (id, room_id, status, created_at, kind) VALUES (?, ?, 'draft', ?, ?)").run(id, roomId, Date.now(), kind);
       return this.getReview(id)!;
     },
+    /** Removes a review with no slides left (one that went back to waiting). */
+    deleteReview(id: string) {
+      db.prepare("DELETE FROM reviews WHERE id = ? AND NOT EXISTS (SELECT 1 FROM review_slides WHERE review_id = ?)").run(id, id);
+    },
     setReview(id: string, patch: Partial<Pick<ReviewRow, "status" | "deckId" | "meetingId" | "startedAt" | "endedAt">>) {
       const cols: Record<string, string> = { status: "status", deckId: "deck_id", meetingId: "meeting_id", startedAt: "started_at", endedAt: "ended_at" };
       for (const [k, v] of Object.entries(patch)) db.prepare(`UPDATE reviews SET ${cols[k]} = ? WHERE id = ?`).run(v ?? null, id);
