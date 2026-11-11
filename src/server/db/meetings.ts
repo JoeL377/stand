@@ -180,7 +180,7 @@ export function meetingsStore(db: DatabaseSync) {
                (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'decision') AS decided,
                (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'question') AS open
              FROM meetings m
-             WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND EXISTS (SELECT 1 FROM segments s WHERE s.meeting_id = m.id)
+             WHERE m.room_id = ? AND m.kind IS NULL AND m.ended_at IS NOT NULL AND EXISTS (SELECT 1 FROM segments s WHERE s.meeting_id = m.id)
              ORDER BY m.started_at DESC LIMIT ?`,
           )
           .all(roomId, limit) as Row[]
@@ -200,7 +200,7 @@ export function meetingsStore(db: DatabaseSync) {
       const r = db
         .prepare(
           `SELECT m.id, m.started_at, m.ended_at FROM meetings m
-           WHERE m.room_id = ? AND m.started_at < ? AND m.ended_at IS NOT NULL
+           WHERE m.room_id = ? AND m.kind IS NULL AND m.started_at < ? AND m.ended_at IS NOT NULL
              AND (SELECT COUNT(DISTINCT s.speaker_name) FROM segments s WHERE s.meeting_id = m.id AND s.kind != 'chat') >= 2
            ORDER BY m.started_at DESC LIMIT 1`,
         )

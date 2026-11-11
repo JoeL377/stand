@@ -47,7 +47,10 @@ export function initConxt(sql: DatabaseSync) {
       meeting_id TEXT PRIMARY KEY REFERENCES meetings(id),
       connection_id TEXT NOT NULL REFERENCES conxt_connections(id)
     );
-    CREATE TRIGGER IF NOT EXISTS conxt_meeting_started AFTER INSERT ON meetings BEGIN
+    -- A chat session (chat.ts) is a meetings row too, and is not sent. The trigger is made again at
+    -- each start, so a database from before chat gets the rule.
+    DROP TRIGGER IF EXISTS conxt_meeting_started;
+    CREATE TRIGGER conxt_meeting_started AFTER INSERT ON meetings WHEN NEW.kind IS NOT 'chat' BEGIN
       INSERT INTO conxt_meetings(meeting_id,connection_id)
       SELECT NEW.id,id FROM conxt_connections WHERE room_id=NEW.room_id AND enabled=1;
     END;
