@@ -261,6 +261,8 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
 
   const [openId, setOpenId] = useState<string | null>(null);
   const open = openId === "root" ? null : (nodes.find((n) => n.id === openId) ?? null);
+  // A "+N more" pill opens a card of just the ideas it stands for.
+  const moreOf = openId?.startsWith("more:") ? (nodes.find((n) => n.id === openId.slice(5)) ?? null) : null;
   useEffect(() => {
     if (!openId) return;
     const key = (e: KeyboardEvent) => e.key === "Escape" && setOpenId(null);
@@ -356,12 +358,35 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
                 )}
               </button>
             ) : (
-              <button key={p.id} type="button" className={`brain-node idea more${only ? " dim" : ""}`} style={{ left: p.x, top: p.y }} onClick={(e) => (e.stopPropagation(), pick(p.from))}>
+              <button key={p.id} type="button" className={`brain-node idea more${only ? " dim" : ""}${openId === p.id ? " on" : ""}`} style={{ left: p.x, top: p.y }} onClick={(e) => (e.stopPropagation(), pick(p.id))}>
                 +{p.more} more
               </button>
             ),
           )}
       </div>
+      {moreOf && (
+        <aside className={`brain-card ${!narrow && (at.get(openId!)?.x ?? 0) > cx ? "left" : "right"}`} role="dialog" aria-label={`More ideas on ${moreOf.label}`} onClick={(e) => e.stopPropagation()}>
+          <header>
+            <button type="button" className="brain-crumb" onClick={() => setOpenId(moreOf.id)}>
+              {moreOf.label}
+            </button>
+            <button type="button" className="brain-x" aria-label="Close" onClick={() => setOpenId(null)}>
+              ✕
+            </button>
+          </header>
+          <section>
+            <h4>Not on the map · {ideas.filter((i) => i.parent === moreOf.id && !at.has(i.id)).length}</h4>
+            {ideas
+              .filter((i) => i.parent === moreOf.id && !at.has(i.id))
+              .map((i) => (
+                <button key={i.id} type="button" className="brain-point link" onClick={() => setOpenId(i.id)}>
+                  {i.by && <Face name={i.by} />}
+                  <span dir="auto">{i.label}</span>
+                </button>
+              ))}
+          </section>
+        </aside>
+      )}
       {open && (
         <BrainDetails
           node={open}
