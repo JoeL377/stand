@@ -969,3 +969,33 @@ test("an agent comments on a passage of a plan by quoting it, and the to-do's lo
   assert.ok(log.includes('Commented on the plan, at "Keep the browser fallback for a week": Is a week enough for the mobile clients?'));
   assert.ok(log.includes('Resolved a comment on the plan: "Is a week enough for the mobile clients?"'));
 });
+
+test("an agent asks for a design review of its plan, with the questions the team has to decide", () => {
+  const { api, db, joe, room, action, notified } = setup();
+  const caller = { user: joe, token: db.createToken(joe.id, "Claude Code", "write").info };
+  const ref = `stand:action/${action.id}`;
+  assert.throws(() => api.requestDesignReview(caller, { ref }), /no plan yet/);
+  assert.throws(() => api.requestDesignReview({ ...caller, token: { ...caller.token, scope: "read" } }, { ref }), AgentError);
+  api.attachPlan(caller, { ref, plan: "# Capture\n\n## Where it runs\n\nRun it on the server.\n\n## Fallback\n\nKeep the browser fallback for a week." });
+
+  assert.throws(() => api.requestDesignReview(caller, { ref, questions: [{ quote: "Run it in the cloud", question: "Why?" }] }), /isn't in the latest plan/);
+  const out = api.requestDesignReview(caller, { ref, questions: [{ quote: "fallback for a week", question: "Is a week enough?" }] }, "https://stand.test") as Record<string, unknown>;
+  assert.equal(out.requested, ref);
+  assert.equal(out.questions_added, 1);
+  assert.equal(out.points, 1);
+  assert.equal(out.review_url, `https://stand.test/s/${room.id}/design-review`);
+  assert.ok(notified.includes(`${room.id}:updates`));
+  assert.equal((api.requestDesignReview(caller, { ref }) as Record<string, unknown>).already_requested, ref);
+  assert.match((api.get(caller, ref, "") as { design_review?: string }).design_review ?? "", /next design review/);
+  const thread = db.planThreads(action.id)[0];
+  assert.equal(thread.messages[0].by, "Joe Liang via Claude Code");
+  const requested = db.noteUpdates(action.id).find((u) => u.text.startsWith("Review requested"))!;
+  assert.equal(requested.status, "comment");
+  assert.equal(requested.actor?.kind, "agent");
+
+  // A new version of the plan: the review is of that one.
+  api.attachPlan(caller, { ref, plan: "# Capture\n\n## Fallback\n\nKeep the browser fallback for a week." });
+  const draft = db.reviewIn(room.id, ["draft"], "design")!;
+  assert.equal(db.reviewSlides(draft.id)[0].planVersion, db.planVersions(action.id).at(-1)!.id);
+  assert.equal(db.reviewIn(room.id, ["draft"]), null);
+});

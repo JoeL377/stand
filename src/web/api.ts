@@ -1,4 +1,5 @@
 import type { PlanReview, PlanThread } from "../shared/planReview.ts";
+import type { BriefChange, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type {
   BrainstormSummary,
@@ -179,7 +180,12 @@ export const api = {
   commentOnTask: (id: string, text: string) =>
     call<TaskDetail["work"]["log"][number]>("POST", `/api/tasks/${id}/comments`, { text }),
   presentationTasks: (roomId: string) => call<Note[]>("GET", `/api/rooms/${roomId}/presentation-tasks`),
-  taskBrief: (id: string) => call<import("../shared/protocol.ts").TaskBrief>("POST", `/api/tasks/${id}/presentation-brief`, {}, SLOW_REQUEST_MS),
+  taskBrief: (id: string, retry = false) => call<PlanBrief>("POST", `/api/tasks/${id}/presentation-brief`, { retry }, SLOW_REQUEST_MS),
+  designReview: (roomId: string) => call<{ roomName: string; review: DesignReviewView | null }>("GET", `/api/rooms/${roomId}/design-review`),
+  designReviewState: (taskId: string) => call<DesignReviewState>("GET", `/api/tasks/${taskId}/design-review`),
+  requestDesignReview: (taskId: string) => call<DesignReviewState>("POST", `/api/tasks/${taskId}/design-review`),
+  removeDesignReview: (taskId: string) => call<DesignReviewState>("DELETE", `/api/tasks/${taskId}/design-review`),
+  prepareDesignReview: (taskId: string, change: BriefChange) => call<{ spec: DesignSpec | null }>("PATCH", `/api/tasks/${taskId}/design-review`, change),
   task: (id: string) => call<TaskDetail>("GET", `/api/tasks/${id}`),
   token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };

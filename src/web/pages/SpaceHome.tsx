@@ -25,7 +25,9 @@ import { useDismiss } from "../useDismiss.ts";
 import { fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { BrainstormPicker, brainstormHref } from "./BrainstormPage.tsx";
+import { designReviewHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
+import type { DesignReviewSummary } from "../../shared/designReview.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { TaskDrawer } from "../TaskDrawer.tsx";
@@ -367,6 +369,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               deck={topicFilter ? null : deck}
               review={topicFilter ? null : (feed?.review ?? null)}
               reviews={topicFilter ? [] : (feed?.reviews ?? [])}
+              designReview={topicFilter ? null : (feed?.designReview ?? null)}
               onStartReview={async () => {
                 try {
                   await api.startReview(room.id);
@@ -702,6 +705,8 @@ function TasksTab(props: {
   review: ReviewView | null;
   /** Reviews that ran, newest first. */
   reviews: ReviewSummary[];
+  /** The specs waiting on the next design review. */
+  designReview: DesignReviewSummary | null;
   onStartReview: () => Promise<void>;
   onRemoveSlide: (slideId: string) => void;
   /** The space's brainstorms, newest first. */
@@ -845,6 +850,16 @@ function TasksTab(props: {
             <ChevronIcon />
           </Link>
         )
+      )}
+      {props.designReview && (
+        <Link className="sh-done-since sh-review" to={designReviewHref(props.roomId)}>
+          <strong>Design review</strong>
+          <span className="sh-done-since-summary">{props.designReview.titles.join(" · ")}</span>
+          <span className="count">
+            {props.designReview.specs} {props.designReview.specs === 1 ? "spec" : "specs"} · {props.designReview.points} {props.designReview.points === 1 ? "point" : "points"}
+          </span>
+          <ChevronIcon />
+        </Link>
       )}
       <BrainstormRow roomId={props.roomId} all={props.brainstorms} onStart={props.onStartBrainstorm} onJoin={props.onJoin} />
       {showReview && props.review && (

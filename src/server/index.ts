@@ -1,5 +1,6 @@
 import { normalizeTopic, TOPIC_MAX } from "../shared/topics.ts";
-import { TaskBriefs } from "./taskPresentation.ts";
+import { PlanBriefs } from "./planBrief.ts";
+import { DesignReviewError, designReviewState, designReviewView, isAuthor, prepare, removeSpec, requestReview, requested, specView } from "./designReviews.ts";
 import { changeReview, logThreadChange, reviewFor } from "./planReview.ts";
 import fs from "node:fs";
 import http from "node:http";
@@ -58,7 +59,7 @@ const db = openDb(path.join(config.dataDir, "standup.db"));
 setUsageSink((row) => db.addUsage(row));
 configureAppDefault(db.raw, conxtDestinations, process.env.CONXT_DEFAULT_DESTINATION, process.env.CONXT_DEFAULT_OPERATOR_EMAIL);
 const agent = createAgent();
-const taskBriefs = new TaskBriefs(agent);
+const planBriefs = new PlanBriefs(db, agent);
 const sessions = new Map<string, RoomSession>();
 const live = (roomId: string) => {
   const s = sessions.get(roomId);
@@ -198,6 +199,7 @@ app.use(oauthRoutes(db));
 const uploadLinks = new UploadLinks();
 const agents = agentApi({
   db,
+  briefs: planBriefs,
   uploads: uploadLinks,
   readyToShip: () => void shipWatch.check(),
   liveMeeting: (roomId) => {
@@ -371,12 +373,10 @@ app.get("/api/rooms/:id/presentation-tasks", route((req, res) => {
 app.post("/api/tasks/:id/presentation-brief", route(async (req, res) => {
   const task = db.getNote(req.params.id);
   if (!task || !["action", "question"].includes(task.kind) || !db.isMember(task.roomId, req.user!.id)) return notFound(res);
-  const plan = db.notePlan(task.id);
-  try {
-    res.json(await taskBriefs.get(task.id, task.text, plan?.text ?? ""));
-  } catch (error) {
-    res.status(422).json({ error: (error as Error).message });
-  }
+  if (!db.notePlan(task.id)) return res.status(422).json({ error: "Attach a spec to this task to get a discussion brief." });
+  let brief = await planBriefs.ensure(task);
+  if (brief?.status === "failed" && req.body?.retry) brief = await planBriefs.ensure(task, true);
+  res.json(brief);
 }));
 
 app.post(
@@ -1107,6 +1107,82 @@ app.delete(
     if (!db.isMember(req.params.id, req.user!.id)) return notFound(res, "Space not found");
     if (!removeSlide(db, req.params.id, req.params.slideId)) return notFound(res);
     res.json({ review: reviewView(db, req.params.id) });
+  }),
+);
+
+// ---- design reviews: a call that goes through a spec, one slide per section and per open comment ----
+
+// The space's next design review, as its page shows it.
+app.get(
+  "/api/rooms/:id/design-review",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    res.json({ roomName: room.name, review: designReviewView(db, planBriefs, room.id, req.user!) });
+  }),
+);
+
+/** The to-do a design review route is about, when it is one this person can see. */
+const reviewedTask = (req: express.Request) => {
+  const task = db.getNote(String(req.params.id));
+  return task && task.kind === "action" && db.isMember(task.roomId, req.user!.id) ? task : null;
+};
+const personBy = (req: express.Request) => ({ userId: req.user!.id, userName: req.user!.name, client: null });
+const designError = (res: express.Response, err: unknown) => {
+  if (err instanceof DesignReviewError) return res.status(400).json({ error: err.message });
+  throw err;
+};
+
+// Whether a to-do's plan waits on the next design review.
+app.get(
+  "/api/tasks/:id/design-review",
+  route((req, res) => {
+    const task = reviewedTask(req);
+    if (!task) return notFound(res);
+    res.json(designReviewState(db, task));
+  }),
+);
+
+// Request review: the plan joins the space's next design review.
+app.post(
+  "/api/tasks/:id/design-review",
+  route((req, res) => {
+    const task = reviewedTask(req);
+    if (!task) return notFound(res);
+    try {
+      requestReview(db, planBriefs, task, personBy(req));
+      res.json(designReviewState(db, task));
+    } catch (err) {
+      designError(res, err);
+    }
+  }),
+);
+
+// Takes the plan off the next design review: its author, or whoever asked for the review.
+app.delete(
+  "/api/tasks/:id/design-review",
+  route((req, res) => {
+    const task = reviewedTask(req);
+    if (!task) return notFound(res);
+    if (!isAuthor(db, task, req.user!) && !requested(db, task, req.user!)) return res.status(403).json({ error: "Only the spec's author takes it off the review." });
+    if (!removeSpec(db, task, personBy(req))) return notFound(res);
+    res.json(designReviewState(db, task));
+  }),
+);
+
+// The author prepares the spec: what its slides say, which sections and points go to the call.
+app.patch(
+  "/api/tasks/:id/design-review",
+  route((req, res) => {
+    const task = reviewedTask(req);
+    if (!task) return notFound(res);
+    if (!isAuthor(db, task, req.user!)) return res.status(403).json({ error: "Only the spec's author prepares it for the review." });
+    try {
+      prepare(db, planBriefs, task, personBy(req), req.body ?? {});
+      res.json({ spec: specView(db, planBriefs, task, req.user!) });
+    } catch (err) {
+      designError(res, err);
+    }
   }),
 );
 

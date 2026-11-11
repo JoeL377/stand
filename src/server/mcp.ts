@@ -19,7 +19,7 @@ At the start of a session, call whats_new for the space you're working in and wo
 Before starting on a to-do, call start_work with its ref: one call marks it as yours and returns why it exists, its plan, what it depends on and what else is in progress. Tell your person about any heads_up before going on; nothing stops you.
 
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
-If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
+If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. When your person asks for a review of that plan, or it has a question the team must decide, request_design_review puts it on the space's next design review with your questions; don't ask for one otherwise. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one.
@@ -273,6 +273,31 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: WRITE,
     },
     ({ ref, plan, model }) => run(() => api.attachPlan(as(model), { ref, plan }, baseUrl)),
+  );
+
+  server.registerTool(
+    "request_design_review",
+    {
+      title: "Ask the team to review a to-do's plan",
+      description:
+        "Puts a to-do's plan on the space's next design review: a call where the team goes through the spec, one slide per section and one per open comment thread, and ends with a verdict. Call it after attach_plan, and only when your person asks for a review or the plan has a question the team must decide. Give those questions: each one becomes a comment thread on the passage it quotes, and a slide in the call. Calling it again for the same to-do adds questions and changes nothing else.",
+      inputSchema: {
+        ref: z.string().describe("The to-do's reference, stand:action/<id>"),
+        questions: z
+          .array(
+            z.object({
+              question: z.string().describe("What the team has to decide, in a sentence or two"),
+              quote: z.string().optional().describe("The passage it is about, copied exactly from the latest plan. Left out, the question is about the whole plan"),
+            }),
+          )
+          .max(12)
+          .optional()
+          .describe("The choices in the plan you are not sure of. Leave out what the plan already settles"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ ref, questions, model }) => run(() => api.requestDesignReview(as(model), { ref, questions }, baseUrl)),
   );
 
   server.registerTool(

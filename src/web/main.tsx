@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import "./styles.css";
 import { Home } from "./pages/Home.tsx";
 import { ReviewPage } from "./pages/ReviewPage.tsx";
+import { DesignReviewPage } from "./pages/DesignReviewPage.tsx";
 import { BrainstormPage } from "./pages/BrainstormPage.tsx";
 import { RoomPage } from "./pages/RoomPage.tsx";
 import { ManageSpaces } from "./pages/ManageSpaces.tsx";
@@ -25,6 +26,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/s/:roomId" element={<RoomPage />} />
           <Route path="/r/:roomId" element={<RoomPage />} />
           <Route path="/s/:roomId/review/:reviewId" element={<ReviewPage />} />
+          <Route path="/s/:roomId/design-review" element={<DesignReviewPage />} />
           <Route path="/s/:roomId/brainstorm/:brainstormId" element={<BrainstormPage />} />
           <Route path="/spaces/manage" element={<ManageSpaces />} />
           <Route path="/agents" element={<ConnectAgentPage />} />
