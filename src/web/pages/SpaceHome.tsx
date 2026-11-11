@@ -27,6 +27,7 @@ import { ModeNote } from "./RoomPage.tsx";
 import { brainstormHref } from "./BrainstormPage.tsx";
 import { VerdictCounts, designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
+import { ShotZoom } from "../room/ReviewStage.tsx";
 import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
@@ -1066,11 +1067,14 @@ const reviewDay = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString([
 function ReviewPop(props: { roomId: string; review: ReviewView; reviews: ReviewSummary[]; onStart: () => Promise<void>; onRemove: (slideId: string) => void; onClose: () => void }) {
   const { review } = props;
   const [starting, setStarting] = useState(false);
+  // A slide's picture, bigger, over this pop-up. Escape closes the picture first.
+  const [zoomed, setZoomed] = useState<{ url: string; alt: string } | null>(null);
   useEffect(() => {
+    if (zoomed) return;
     const key = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [props.onClose]);
+  }, [props.onClose, zoomed]);
   const live = review.status === "live";
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
@@ -1098,9 +1102,15 @@ function ReviewPop(props: { roomId: string; review: ReviewView; reviews: ReviewS
         <div className="review-grid">
           {review.slides.map((s, i) => (
             <div key={s.id} className="review-card">
-              <Link className="review-card-pic" to={reviewHref(props.roomId, "next", i + 1)} aria-label={`Open "${s.title}"`}>
-                {s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : "No picture yet"}
-              </Link>
+              {s.shots[0] ? (
+                <button type="button" className="review-card-pic" title="See it bigger" aria-label={`See "${s.title}" bigger`} onClick={() => setZoomed({ url: s.shots[0].url, alt: s.shots[0].caption ?? s.title })}>
+                  <img src={s.shots[0].url} alt="" loading="lazy" />
+                </button>
+              ) : (
+                <Link className="review-card-pic" to={reviewHref(props.roomId, "next", i + 1)} aria-label={`Open "${s.title}"`}>
+                  No picture yet
+                </Link>
+              )}
               <strong dir="auto">{s.title}</strong>
               <span className="muted">{[s.owner, !s.addedBy || s.addedBy === "Stand" ? null : `added by ${s.addedBy.split(" via ").at(-1)}`].filter(Boolean).join(" · ")}</span>
               {!live && !s.id.startsWith("task:") && (
@@ -1123,6 +1133,7 @@ function ReviewPop(props: { roomId: string; review: ReviewView; reviews: ReviewS
           </div>
         )}
       </div>
+      {zoomed && <ShotZoom url={zoomed.url} alt={zoomed.alt} onClose={() => setZoomed(null)} />}
     </div>
   );
 }

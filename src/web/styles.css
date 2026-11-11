@@ -3334,3 +3334,4 @@ a.sh-review { text-decoration: none; color: inherit; }
 .brain { user-select: none; -webkit-user-select: none; }
 .brain-card { user-select: text; -webkit-user-select: text; cursor: auto; }
 .brain-node.idea.more.dim { color: color-mix(in srgb, var(--muted) 35%, var(--panel)); }
+button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%; }
