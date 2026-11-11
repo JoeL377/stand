@@ -107,9 +107,9 @@ export function ReviewPage() {
 
   return (
     <div className="rp">
-      <header className="rp-head">
+      <header className={ideas ? "rp-head ideas" : "rp-head"}>
         <Link className="rp-back" to={spaceHref(roomId)}>
-          ← {data.roomName}
+          ← <span className="rp-back-name">{data.roomName}</span>
         </Link>
         <strong>{ideas ? "Idea review" : "Product review"}</strong>
         {ideas ? (
@@ -242,7 +242,7 @@ export function ReviewPage() {
           <div className="rp-strip" ref={strip} role="tablist" aria-label="Slides">
             {review.slides.map((s, i) => (
               <button key={s.id} type="button" role="tab" aria-selected={i === at} className={i === at ? "on" : undefined} title={s.title} onClick={() => go(i)}>
-                <span className="rp-thumb">{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
+                <span className={s.shots[0] ? "rp-thumb" : "rp-thumb text"}>{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
                 <span className="rp-thumb-foot">
                   {s.shots[0] && <span className="rp-n">{s.name ?? i + 1}</span>}
                   {endOf(s).outcome && <span className={`rp-dot ${endOf(s).outcome}`} title={outcomeLabel(endOf(s).outcome!)} />}

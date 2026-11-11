@@ -3280,6 +3280,25 @@ button.ds-q:focus-visible { outline: 2px solid var(--accent); }
   .rp-line > span:not(.rv-who) { white-space: normal; }
   .rp-strip { position: sticky; bottom: 0; background: var(--bg); padding: 8px 12px 10px; }
   .rp-strip > button { width: 84px; }
+  /* A phone keeps the header to one row and the slide to what it says: where a review came from
+     and who raised an idea are a tap away on the brainstorm's page. */
+  .rp-head.ideas { flex-wrap: nowrap; }
+  .rp-head.ideas > * { flex: none; }
+  .rp-head.ideas > .rp-grow { flex: 1; }
+  .rp-back-name, .rp-head .rp-from { display: none; }
+  .rp-head button.primary { height: 32px; padding: 0 12px; font-size: 13px; }
+  .rp-pic:has(> .idea-card) { background: none; }
+  .rp-pic > .idea-card { padding: 16px; gap: 10px; border: 1px solid var(--line); }
+  .idea-card .idea-from > :not(.idea-star) { display: none; }
+  .idea-card .idea-from:not(:has(.idea-star)) { display: none; }
+  .idea-card.slide-main { padding: 16px; gap: 10px; }
+  .rv-pos { white-space: nowrap; }
+  .rv-bar { gap: 6px; }
+  .rv-bar .rv-outcome { padding-inline: 10px; }
+  /* A slide with no picture is a name: one line in the strip, not a box. */
+  .rp-strip > button:has(.rp-thumb.text) { width: auto; max-width: 168px; }
+  .rp-thumb.text { aspect-ratio: auto; height: 30px; border-radius: 999px; padding: 0 12px; }
+  .rp-thumb.text > span { display: block; padding: 0; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; max-width: 100%; }
 }
 .rp-picker .rp-pill svg { rotate: 90deg; }
 @media (max-width: 720px) {
