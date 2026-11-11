@@ -23,6 +23,7 @@ If the change shows on screen, attach screenshots before you report: screenshot_
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
+What a brainstorm came up with -> get_brainstorm: the map as an outline, with the ideas under each direction and the to-dos, decisions and open questions caught on them.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }] });
@@ -488,6 +489,21 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: READ,
     },
     ({ space }) => run(() => api.getReview(caller, { space }, baseUrl)),
+  );
+
+  server.registerTool(
+    "get_brainstorm",
+    {
+      title: "Read a space's brainstorm map",
+      description:
+        "A brainstorm's map as an outline: the sentence it started from, the directions the talk opened, and under each the ideas people raised, with who raised each, what they said, what others built on it, and the to-dos, decisions and open questions caught on it (as refs for get). Returns the one running now, or else the latest; others lists the space's earlier brainstorms so you can ask for one by id. Read only: people start a brainstorm in Stand.",
+      inputSchema: {
+        space: z.string().describe("A space id, or part of its name"),
+        brainstorm: z.string().optional().describe("One brainstorm's id (from others) or its Stand link. Leave out for the one running now, or the latest"),
+      },
+      annotations: READ,
+    },
+    ({ space, brainstorm }) => run(() => api.getBrainstorm(caller, { space, brainstorm }, baseUrl)),
   );
 
   server.registerTool(
