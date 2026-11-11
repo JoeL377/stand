@@ -445,6 +445,7 @@ const toItem = (r: Row): Item => ({
   deckId: (r.deck_id as string) ?? null,
   slideNo: (r.slide_no as number) ?? null,
   slide: r.slide_json ? JSON.parse(r.slide_json as string) : null,
+  taskId: (r.note_id as string) ?? null,
 });
 
 const toDeck = (r: Row): Deck => ({
@@ -675,6 +676,8 @@ export function openDb(file?: string) {
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);
   if (!itemCols.includes("deck_id")) db.exec("ALTER TABLE items ADD COLUMN deck_id TEXT; ALTER TABLE items ADD COLUMN slide_no INTEGER;");
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
+  // "Present task" (room.ts): the to-do an agenda item walks through.
+  if (!itemCols.includes("note_id")) db.exec("ALTER TABLE items ADD COLUMN note_id TEXT");
   const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
   // A product review's deck (reviews.ts).
@@ -939,6 +942,25 @@ export function openDb(file?: string) {
       db.prepare("UPDATE items SET archived = 1 WHERE id = ?").run(id);
       // Its slides stay on the agenda, now on their own.
       db.prepare("UPDATE decks SET parent_item_id = NULL WHERE parent_item_id = ?").run(id);
+    },
+    /** The agenda item a presented to-do is talked through on, at the end of the list. One per to-do:
+     *  presenting it again brings the same item back, so its history carries over. */
+    taskItem(roomId: string, noteId: string, title: string, description: string | null): Item {
+      const existing = db.prepare("SELECT * FROM items WHERE room_id = ? AND note_id = ?").get(roomId, noteId) as Row | undefined;
+      const end = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM items WHERE room_id = ? AND archived = 0").get(roomId) as Row).p as number;
+      const id = (existing?.id as string) ?? newId();
+      if (existing) {
+        db.prepare("UPDATE items SET archived = 0, title = ?, description = ?, position = ? WHERE id = ?")
+          .run(title, description, existing.archived ? end + 1 : (existing.position as number), id);
+      } else {
+        db.prepare("INSERT INTO items (id, room_id, source, title, description, position, note_id, created_at) VALUES (?, ?, 'agenda', ?, ?, ?, ?, ?)")
+          .run(id, roomId, title, description, end + 1, noteId, Date.now());
+      }
+      return this.getItem(id)!;
+    },
+    /** The meeting is over: the to-dos presented in it leave the agenda, with what was said on them kept. */
+    archiveTaskItems(roomId: string) {
+      db.prepare("UPDATE items SET archived = 1 WHERE room_id = ? AND note_id IS NOT NULL").run(roomId);
     },
 
     createDeck(roomId: string, title: string, pageCount: number, kind: Deck["kind"] = "pdf", theme: DeckTheme = "paper"): Deck {

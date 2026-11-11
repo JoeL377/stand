@@ -1213,26 +1213,46 @@ test("Pilot: only the pilot asks Stand; a typed follow-up lands on its card; ask
   await session.end();
 });
 
-test("task presentation is shared, host-controlled and restricted to the meeting's space", async () => {
+test("presenting a task moves the meeting to an item for it, so what's said is filed under the task", async () => {
   const { db, session, meetingId, items } = setup();
   const joe = await join(session, { id: "u1", name: "Joe" });
   const ann = await join(session, { id: "u2", name: "Ann" });
   const task = db.addNote(meetingId, items[0].id, { kind: "action", text: "Review rollout", owner: "Joe" }, null);
-  const view = { tab: "main" as const, rewind: null, task: { id: task.id, mode: "brief" as const } };
-  await say(joe, { type: "host.view", view });
-  assert.deepEqual(session.state().hostView, view);
-  await say(ann, { type: "host.view", view: { ...view, task: null } });
-  assert.deepEqual(session.state().hostView, view);
+  db.addPlan(session.state().roomId, task.id, "# Rollout\n\nShip to ten percent first.", "Joe");
+  session.setFocus(items[1].id, "Joe", "manual");
+
+  // Only the host presents, and only a task of this space.
+  await say(ann, { type: "task.present", taskId: task.id });
+  assert.equal(session.state().focusItemId, items[1].id);
   const otherRoom = db.createRoom("Private");
-  const otherMeeting = db.startMeeting(otherRoom.id);
-  const privateTask = db.addNote(otherMeeting.id, null, { kind: "action", text: "Private task", owner: null }, null);
-  await say(joe, { type: "host.view", view: { ...view, task: { id: privateTask.id, mode: "spec" } } });
-  assert.deepEqual(session.state().hostView, view);
-  await say(joe, { type: "host.view", view: { ...view, task: { id: task.id, mode: "bad" as never } } });
-  assert.deepEqual(session.state().hostView, view);
-  await say(joe, { type: "host.view", view: { ...view, task: { id: task.id, mode: "spec" } } });
-  assert.equal(session.state().hostView?.task?.mode, "spec");
-  await say(joe, { type: "host.view", view: { tab: "main", rewind: null } });
-  assert.equal(session.state().hostView?.task, undefined);
+  const privateTask = db.addNote(db.startMeeting(otherRoom.id).id, null, { kind: "action", text: "Private task", owner: null }, null);
+  await say(joe, { type: "task.present", taskId: privateTask.id });
+  assert.equal(session.state().focusItemId, items[1].id);
+
+  await say(joe, { type: "task.present", taskId: task.id });
+  const shown = session.state().items.find((i) => i.id === session.state().focusItemId);
+  assert.equal(shown?.taskId, task.id);
+  assert.equal(shown?.title, "Review rollout");
+  assert.match(shown?.description ?? "", /Ship to ten percent first/);
+  session.addSpeech("u2", "Ann", "Ten percent is too many for the first day", Date.now());
+  assert.equal(db.meetingSegments(meetingId).at(-1)?.itemId, shown?.id);
+
+  // The brief or the full spec is the host's choice for everyone.
+  await say(ann, { type: "host.view", view: { tab: "main", rewind: null, taskMode: "spec" } });
+  assert.equal(session.state().hostView?.taskMode, undefined);
+  await say(joe, { type: "host.view", view: { tab: "main", rewind: null, taskMode: "bad" as never } });
+  assert.equal(session.state().hostView?.taskMode, undefined);
+  await say(joe, { type: "host.view", view: { tab: "main", rewind: null, taskMode: "spec" } });
+  assert.equal(session.state().hostView?.taskMode, "spec");
+
+  // Presenting it again is the same item; stopping goes back to where the meeting was.
+  await say(joe, { type: "task.present", taskId: task.id });
+  assert.equal(session.state().items.filter((i) => i.taskId === task.id).length, 1);
+  await say(joe, { type: "task.present", taskId: null });
+  assert.equal(session.state().focusItemId, items[1].id);
+
+  // After the meeting it is off the agenda, and comes back with its history when presented again.
   await session.end();
+  assert.equal(db.listItems(session.state().roomId).some((i) => i.taskId), false);
+  assert.equal(db.taskItem(session.state().roomId, task.id, "Review rollout", null).id, shown?.id);
 });
