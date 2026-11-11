@@ -3300,8 +3300,7 @@ a.sh-review { text-decoration: none; color: inherit; }
 .sh-kinds .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
 .sh-kinds .rp-pill.on .muted { color: inherit; opacity: 0.7; }
 .sh-row > a.rp-pill { flex: none; }
-.dr-record button.rp-pill { cursor: pointer; font-family: inherit; }
-.dr-record button.rp-pill:disabled { cursor: default; opacity: 0.6; }
+.rp-head .dr-again { flex: none; height: 30px; padding: 0 14px; font-size: 13px; }
 
 /* What came out of a circle: marks for to-dos, decisions and open questions, and pills that show one kind. */
 .brain-kind { font-style: normal; flex: none; display: inline-flex; align-items: center; gap: 2px; font-size: 10.5px; font-weight: 600; line-height: 1; }
