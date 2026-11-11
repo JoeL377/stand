@@ -36,6 +36,11 @@ export const config = {
   mapModel: env("MAP_MODEL") ?? "claude-sonnet-5-5",
   /** ✦ Stand's options for an open question (meetingAgent.ts), with web search, on a click. */
   agentModel: env("AGENT_MODEL") ?? "claude-sonnet-5-5",
+  /** Off for now (joe, 2026-11-11), to cut Claude calls between meetings. DONE_SINCE=on brings back
+   *  the Done since pages (doneDeck.ts); SUGGESTED_AGENDA=on brings back the suggested agenda and its
+   *  Claude pass (upNextPolish.ts). */
+  doneSince: env("DONE_SINCE") === "on",
+  suggestedAgenda: env("SUGGESTED_AGENDA") === "on",
   /** Small, frequent calls: captions for snaps and Mac bar captures, filing a bar note under an
    *  item, and matching a shared screen to the agenda. Haiku is about 40x cheaper than Opus. */
   quickModel: env("QUICK_MODEL") ?? "claude-haiku-5-5",

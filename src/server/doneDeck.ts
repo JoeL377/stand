@@ -9,14 +9,14 @@
 import { createHash } from "node:crypto";
 import type { DoneDeck, DoneSlide, ItemUpdate, Note, WorkShot } from "../shared/protocol.ts";
 import { closedLabel, closedPr } from "../shared/tasks.ts";
+import { config } from "./config.ts";
 import type { DB } from "./db.ts";
 import type { Agent, DoneDeckDraft } from "./llm.ts";
 import { prOf, shotUrl } from "./workLog.ts";
 
-/** Off for now (joe, 2026-11-11): the pages cost a Claude call after every report between meetings,
- *  and may come back as something his own agent writes over the MCP. Nothing is written, nothing is
- *  shown, and the pages already saved stay in the database. Set to true to bring it back. */
-export const DONE_SINCE_ON = false;
+// Off unless DONE_SINCE=on (config.ts): the pages cost a Claude call after every report between
+// meetings, and may come back as something an agent writes over the MCP. While off, nothing is
+// written or shown, and the pages already saved stay in the database.
 
 /** Reports and closes between meetings are batched: the first one starts the wait, later ones join
  *  it, so a space gets at most one pass this often however busy its agents are. Each pass is a
@@ -220,7 +220,7 @@ export function plainSlides(input: DoneInput, notes: Note[], title = "Done"): Do
 /** The pages as they stand for a meeting starting at `before` (or now): only when they count from the
  *  last meeting before it, and have something on them. */
 export function currentDoneDeck(db: DB, roomId: string, before?: number): DoneDeck | null {
-  if (!DONE_SINCE_ON) return null;
+  if (!config.doneSince) return null;
   const last = db.lastRealMeeting(roomId, before);
   const deck = db.getDoneDeck(roomId);
   if (!deck || !last || deck.since !== last.endedAt || !deck.slides.length) return null;
@@ -245,7 +245,7 @@ export class DoneDecks {
   /** A task in the space closed or moved: rewrite the pages in a while. A pass already waiting keeps
    *  its time unless this asks for sooner, so a stream of reports never pushes it back. */
   schedule(roomId: string, delayMs = DONE_BATCH_MS) {
-    if (!DONE_SINCE_ON) return;
+    if (!config.doneSince) return;
     const due = Date.now() + delayMs;
     const waiting = this.timers.get(roomId);
     if (waiting && waiting.due <= due) return;
@@ -261,7 +261,7 @@ export class DoneDecks {
   /** Every space with something closed lately, now and every so often: picks up what nothing told us about,
    *  and on the first start fills in the pages for closes from before this existed. */
   start() {
-    if (!DONE_SINCE_ON) return;
+    if (!config.doneSince) return;
     const sweep = () => {
       // A space with a batch already waiting is left to it. Elsewhere this only calls Claude when
       // something changed since the pages were written (run() compares the basis).

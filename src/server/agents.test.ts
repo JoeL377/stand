@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { config } from "./config.ts";
 import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, UploadLinks, WORKING_QUIET_MS, prOf, readyToShip, workLog, workingOn } from "./workLog.ts";
 import { ShipWatch, githubPrState, type PrState } from "./shipWatch.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
@@ -11,6 +12,9 @@ import { openDb } from "./db.ts";
 import { parseActor } from "../shared/actors.ts";
 import { addUpNext } from "./upNext.ts";
 import { upNextView } from "./upNextPolish.ts";
+
+// These tests cover the suggested agenda itself, which production has off for now (config.ts).
+config.suggestedAgenda = true;
 
 function setup(deps: { readyToShip?: () => void; liveMeeting?: (roomId: string) => { meeting_id: string; people: string[] } | null } = {}) {
   const db = openDb(":memory:");
