@@ -89,6 +89,8 @@ export interface DesignSpec {
   brief: PlanBrief;
   /** The section slides of the call: the headings on each, in the spec's order. */
   groups: string[][];
+  /** The first mermaid diagram the spec has under a heading: its slide shows it. */
+  diagrams?: Record<string, string>;
   points: DesignPoint[];
   /** The review it went through before this one, when it did. */
   last?: LastDesignReview | null;
@@ -216,8 +218,9 @@ export interface DesignSlideInfo {
   stand?: boolean;
   /** A section's heading in the spec (the first, when sections share the slide), also on the points under it. */
   section?: string | null;
-  /** Section: each section on the slide, with the lines of it the slide shows. */
-  parts?: Array<{ heading: string; lines: string[]; stand: boolean }>;
+  /** Section: each section on the slide, with the lines of it the slide shows and the first
+   *  mermaid diagram the spec has under it. */
+  parts?: Array<{ heading: string; lines: string[]; stand: boolean; diagram?: string }>;
   /** Where the slide's part of the spec is, for Full spec to open on. */
   passage?: { start: number; end: number } | null;
   /** Overview: the section slides the call goes through. */

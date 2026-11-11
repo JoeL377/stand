@@ -1,11 +1,14 @@
 import type { Passage } from "../shared/planReview.ts";
 // Markdown as people and agents write it in plans, specs and reports: GitHub-flavored (tables,
 // task lists, strikethrough, bare links), never raw HTML. Stand refs like stand:action/<id> open
-// the thing they point at.
+// the thing they point at. A ```mermaid code block is drawn as its diagram.
+
+import { Children, isValidElement, type HTMLAttributes } from "react";
 
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Link } from "react-router-dom";
+import { Mermaid } from "./Mermaid.tsx";
 
 const REF_RE = /\bstand:(action|decision|question|context|topic)\/([a-z0-9]{4,24})\b/gi;
 
@@ -60,6 +63,19 @@ const components: Components = {
         {children}
       </a>
     ),
+  // A mermaid block keeps what its <pre> carried (a plan's passage marks), so it can be commented on.
+  pre: ({ node: _node, children, ...rest }) => {
+    const code = Children.toArray(children)[0];
+    const props = isValidElement<{ className?: string; children?: unknown }>(code) ? code.props : null;
+    if (props && /\blanguage-mermaid\b/i.test(props.className ?? "")) {
+      return (
+        <div {...(rest as HTMLAttributes<HTMLDivElement>)}>
+          <Mermaid code={String(props.children ?? "").trim()} />
+        </div>
+      );
+    }
+    return <pre {...rest}>{children}</pre>;
+  },
 };
 
 type RenderedNode = {
