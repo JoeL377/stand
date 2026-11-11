@@ -245,12 +245,13 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
   server.registerTool(
     "update_plan_review",
     {
-      description: "Reply to, resolve, or reopen an existing passage comment thread on a to-do.",
+      description: "Comment on a passage of a to-do’s plan, or reply to, resolve, or reopen an existing comment thread. To comment (action create), give quote: the passage copied exactly from the plan as get_plan_review returns it, and text. The other actions need thread.",
       inputSchema: {
         ref: z.string(),
-        thread: z.string(),
-        action: z.enum(["reply", "resolve", "reopen"]),
-        text: z.string().optional(),
+        thread: z.string().optional().describe("The thread's id. Needed for reply, resolve and reopen"),
+        action: z.enum(["create", "reply", "resolve", "reopen"]),
+        text: z.string().optional().describe("The comment or the reply"),
+        quote: z.string().optional().describe("create only: the passage the comment is about, copied exactly from the latest plan"),
         model: modelField,
       },
       annotations: WRITE,

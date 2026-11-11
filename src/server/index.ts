@@ -1,6 +1,6 @@
 import { normalizeTopic, TOPIC_MAX } from "../shared/topics.ts";
 import { TaskBriefs } from "./taskPresentation.ts";
-import { changeReview, reviewFor } from "./planReview.ts";
+import { changeReview, logThreadChange, reviewFor } from "./planReview.ts";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -418,6 +418,7 @@ app.post("/api/tasks/:id/plan-review", route((req, res) => {
   if (!task || task.kind !== "action" || !db.isMember(task.roomId, req.user!.id)) return notFound(res);
   const thread = changeReview(db, task.id, req.user!.name, req.body ?? {});
   if (!thread) return res.status(400).json({ error: "Select a passage or enter a valid comment." });
+  logThreadChange(db, task, thread, req.body?.action, { userId: req.user!.id, userName: req.user!.name, client: null });
   res.json(thread);
 }));
 

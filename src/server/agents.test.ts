@@ -945,3 +945,27 @@ test("agent reads stay light: one line per to-do in whats_new, and a brief leave
   const full = api.meetingBrief(caller, { meetingId: m, carriedOver: true }, "") as Record<string, unknown>;
   assert.equal((full.carriedOver as unknown[]).length, 2);
 });
+
+test("an agent comments on a passage of a plan by quoting it, and the to-do's log says so", () => {
+  const { api, db, joe, action } = setup();
+  const caller = { user: joe, token: db.createToken(joe.id, "Claude Code", "write").info };
+  const ref = `stand:action/${action.id}`;
+  assert.throws(() => api.updatePlanReview(caller, { ref, action: "create", quote: "Run it", text: "Why?" }), /no plan/);
+  api.attachPlan(caller, { ref, plan: "# Capture\n\nRun it on the server.\n\n- Keep the browser path\n- Keep the browser fallback for a week" });
+
+  assert.throws(() => api.updatePlanReview(caller, { ref, action: "create", quote: "Run it in the cloud", text: "Why?" }), /isn't in the latest plan/);
+  assert.throws(() => api.updatePlanReview(caller, { ref, action: "create", quote: "Keep the browser", text: "Why?" }), /more than once/);
+  assert.throws(() => api.updatePlanReview(caller, { ref, action: "create", quote: "Run it", text: " " }), /Say what/);
+
+  const thread = api.updatePlanReview(caller, { ref, action: "create", quote: "fallback for a week", text: "Is a week enough for the mobile clients?" });
+  assert.equal(thread.original.quote, "- Keep the browser fallback for a week");
+  assert.equal(thread.messages[0].by, "Joe Liang via Claude Code");
+  const got = api.get(caller, ref, "") as { plan_review_threads?: Array<{ id: string }> };
+  assert.deepEqual(got.plan_review_threads?.map((t) => t.id), [thread.id]);
+
+  api.updatePlanReview(caller, { ref, thread: thread.id, action: "resolve" });
+  const log = db.noteUpdates(action.id).filter((u) => u.status === "comment").map((u) => u.text);
+  assert.equal(log.length, 2);
+  assert.ok(log.includes('Commented on the plan, at "Keep the browser fallback for a week": Is a week enough for the mobile clients?'));
+  assert.ok(log.includes('Resolved a comment on the plan: "Is a week enough for the mobile clients?"'));
+});

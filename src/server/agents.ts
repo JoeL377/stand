@@ -1,4 +1,4 @@
-import { changeReview, reviewFor } from "./planReview.ts";
+import { changeReview, logThreadChange, quotePassage, reviewFor } from "./planReview.ts";
 // What agents see of Stand, shared by the MCP server (mcp.ts) and the
 // "Copy for agent" button: references to single to-dos, decisions, questions
 // and topics, the context to act on them, and the two ways to report back.
@@ -776,11 +776,23 @@ export function agentApi(deps: AgentDeps) {
       return review;
     },
 
-    updatePlanReview(caller: Caller, args: { ref: string; thread: string; action: "reply" | "resolve" | "reopen"; text?: string }) {
+    updatePlanReview(caller: Caller, args: { ref: string; thread?: string; action: "create" | "reply" | "resolve" | "reopen"; text?: string; quote?: string }) {
       requireWrite(caller);
       const r = resolve(caller, args.ref);
-      const thread = r.note?.kind === "action" && changeReview(db, r.note.id, byOf(caller), args);
-      if (!thread) throw new AgentError("Thread not found or invalid reply.");
+      if (r.note?.kind !== "action") throw new AgentError("Plans are on to-dos (stand:action/...).");
+      let input: Parameters<typeof changeReview>[3] = args;
+      if (args.action === "create") {
+        const review = reviewFor(db, r.note.id);
+        if (!review) throw new AgentError("This to-do has no plan yet.");
+        if (!args.text?.trim()) throw new AgentError("Say what the comment is, in text.");
+        const passage = quotePassage(review.plan.text, args.quote ?? "");
+        if (passage === "missing") throw new AgentError("That quote isn't in the latest plan. Copy the passage exactly as get_plan_review returns it.");
+        if (passage === "ambiguous") throw new AgentError("The plan says that more than once. Quote more of the passage so it is the only one.");
+        input = { action: "create", version: review.plan.id, text: args.text, ...passage };
+      }
+      const thread = changeReview(db, r.note.id, byOf(caller), input);
+      if (!thread) throw new AgentError(args.action === "create" ? "That passage or comment is too long." : "Thread not found or invalid reply.");
+      logThreadChange(db, r.note, thread, args.action, { userId: caller.user.id, userName: caller.user.name, client: caller.token?.label ?? null, actor: actorOf(caller) });
       return thread;
     },
 

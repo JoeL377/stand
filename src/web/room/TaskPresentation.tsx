@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import type { HostView, Note, TaskBrief, TaskDetail } from "../../shared/protocol.ts";
+import type { Note, TaskBrief, TaskDetail } from "../../shared/protocol.ts";
 import { STATE_LABEL, stateOf } from "../../shared/tasks.ts";
 import { api } from "../api.ts";
-import { Markdown } from "../Markdown.tsx";
+import { PlanReviewBody } from "../PlanReview.tsx";
 
-type Presentation = NonNullable<HostView["task"]>;
+type Presentation = { id: string; mode: "brief" | "spec" };
 
 export function TaskPicker({ roomId, notes, disabled, onPick }: {
   roomId: string; notes: Note[]; disabled?: boolean; onPick: (task: Presentation) => void;
@@ -66,13 +66,17 @@ export function TaskPresentation({ presentation, canSteer, disabled, onChange }:
     </header>
     {error && <p className="error">{error}</p>}
     {!task && !error && <p role="status">Loading task…</p>}
-    {task && <article className="task-presentation-body">
+    {task?.work.plan && presentation.mode === "spec" ? <>
+      <div className="task-presentation-spec">
+        <strong>{task.note.text}</strong>
+        <span className="muted small">{task.note.owner ?? "Unassigned"} · {STATE_LABEL[stateOf(task.note, task.work)]} · Spec by {task.work.plan.by}</span>
+      </div>
+      <PlanReviewBody task={task.note.id} />
+    </> : task && <article className="task-presentation-body">
       <p className="muted small">{task.note.owner ?? "Unassigned"} · {STATE_LABEL[stateOf(task.note, task.work)]}</p>
       <h1>{task.note.text}</h1>
       {task.note.doneWhen && <p><strong>Done when:</strong> {task.note.doneWhen}</p>}
-      {!task.work.plan ? <p className="muted">No spec attached to this task yet.</p> : presentation.mode === "spec" ? <>
-        <p className="muted small">Spec by {task.work.plan.by}</p><Markdown text={task.work.plan.text} />
-      </> : <>
+      {!task.work.plan ? <p className="muted">No spec attached to this task yet.</p> : <>
         <p className="muted small">✦ AI-generated from the attached spec · Questions are suggestions for discussion</p>
         {briefError ? <p className="error">{briefError} <button onClick={() => retry((n) => n + 1)}>Try again</button></p> : !brief ? <p role="status">Preparing summary and discussion questions…</p> : <>
           <h2>Summary</h2><p>{brief.summary}</p>

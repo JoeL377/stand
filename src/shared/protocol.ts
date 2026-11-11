@@ -19,6 +19,8 @@ export interface Item {
   slideNo: number | null;
   /** Content of a slide made in Stand's own editor; null for PDF pages. */
   slide: SlideContent | null;
+  /** The to-do this item walks through ("Present task"): what's said on it is filed under that to-do's item. */
+  taskId?: string | null;
 }
 
 export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote" | "review";
@@ -722,8 +724,8 @@ export interface TaskBrief {
 }
 
 export interface HostView {
-  /** Task on the meeting stage; the host chooses the brief or full spec. */
-  task?: { id: string; mode: "brief" | "spec" } | null;
+  /** While the item in focus presents a to-do (Item.taskId): the brief or the full spec, as the host chose. */
+  taskMode?: "brief" | "spec";
   tab: "main" | "board";
   /** Which picture of the review slide in focus is up, from 0. */
   shot?: number;
@@ -855,6 +857,8 @@ export type ClientMessage = (
   | { type: "checkin"; open: boolean; page?: number }
   /** The host: what their middle screen shows now, for everyone following them. */
   | { type: "host.view"; view: HostView }
+  /** The host: present this to-do (it gets an agenda item and the meeting moves there); null goes back to where the meeting was. */
+  | { type: "task.present"; taskId: string | null }
   /** Anyone: turn the opening board to a page, for everyone. */
   | { type: "checkin.page"; page: number }
   /** Anyone: how the review slide on screen ended (null takes it back). */

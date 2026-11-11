@@ -116,7 +116,7 @@ export function Stage(props: {
   };
   const flipRef = useRef(flip);
   flipRef.current = flip;
-  const presenting = !state.hostView?.task && canSteer && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
+  const presenting = canSteer && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
   useEffect(() => {
     if (!presenting) return;
     const onKey = (e: KeyboardEvent) => {
@@ -148,7 +148,10 @@ export function Stage(props: {
   // Everyone's middle screen follows the host's: the board's tab, and a chapter they open on the bar.
   // Opening anything yourself goes your own way, until Follow, or until the host comes to where you are.
   const hostView = state.hostView ?? null;
-  const [ownTask, setOwnTask] = useState<HostView["task"]>(hostView?.task ?? null);
+  // A presented to-do is the item in focus; the host chooses its brief or its full spec for everyone.
+  const [myTaskMode, setMyTaskMode] = useState<"brief" | "spec">("brief");
+  const taskId = focusItem?.taskId ?? null;
+  useEffect(() => setMyTaskMode("brief"), [taskId]);
   const [own, setOwn] = useState(false);
   const following = !canSteer && !!host && !own;
   const tab = following ? (hostView?.tab === "board" ? "board" : null) : ownTab;
@@ -158,7 +161,7 @@ export function Stage(props: {
   };
   // What this screen's board has open on its bar (null: live), as it last said.
   const [myRewind, setMyRewind] = useState<Rewind | null>(null);
-  const shownTask = following ? hostView?.task : ownTask;
+  const shownTask = taskId ? { id: taskId, mode: canSteer ? myTaskMode : (hostView?.taskMode ?? "brief") } : null;
   const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask);
   // A review slide's pictures: the host's choice is everyone's, and a look of your own lasts until the host moves.
   const brainUp = !!props.brainstorm && props.brainstorm.status === "live" && !!focusItem && focusItem.id === props.brainstorm.itemId;
@@ -168,16 +171,12 @@ export function Stage(props: {
   useEffect(() => {
     if (!canSteer) setMyShot(hostView?.shot ?? 0);
   }, [canSteer, hostView?.shot]);
-  const myView: HostView = { ...(ownTask && { task: ownTask }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind };
-  const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind) && JSON.stringify(a?.task ?? null) === JSON.stringify(b.task ?? null);
+  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind };
+  const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
   const hostKey = JSON.stringify(hostView);
   useEffect(() => {
     if (own && sameView(hostView, myView)) setOwn(false);
   }, [hostKey]);
-  // Keep a local copy of the presentation while following the host.
-  useEffect(() => {
-    if (!canSteer) setOwnTask(hostView?.task ?? null);
-  }, [canSteer, hostKey]);
   const myKey = JSON.stringify(myView);
   useEffect(() => {
     if (canSteer && !props.offline) send({ type: "host.view", view: myView });
@@ -334,7 +333,7 @@ export function Stage(props: {
   return (
     <main className="stage">
       <div className="now">
-        {canSteer && <TaskPicker roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { setOwnTask(task); pickTab(null); }} />}
+        {canSteer && <TaskPicker roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { if (send({ type: "task.present", taskId: task.id })) pickTab(null); }} />}
         <span className="now-label">Now discussing</span>
         <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && <span className="key">{keyOf(focusItem)}</span>}
@@ -473,7 +472,7 @@ export function Stage(props: {
           </div>
         )}
         {shownTask && !boardOpen && !openSnap ? (
-          <TaskPresentation key={shownTask.id} presentation={shownTask} canSteer={canSteer} disabled={props.offline || props.ending} onChange={setOwnTask} />
+          <TaskPresentation key={shownTask.id} presentation={shownTask} canSteer={canSteer} disabled={props.offline || props.ending} onChange={(next) => (next ? setMyTaskMode(next.mode) : send({ type: "task.present", taskId: null }))} />
         ) : localScreen ? (
           <Video
             stream={localScreen}
