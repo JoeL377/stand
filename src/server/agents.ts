@@ -11,7 +11,7 @@ import type { PlanBriefs } from "./planBrief.ts";
 
 import { parseActor, type Actor } from "../shared/actors.ts";
 import { REVIEW_OUTCOMES } from "../shared/protocol.ts";
-import type { ActionWork, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
+import type { ActionWork, BrainCaught, BrainNode, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
@@ -1305,6 +1305,63 @@ export function agentApi(deps: AgentDeps) {
           : null,
         how: "add_review_slide puts a feature on the next review. Finished to-dos nobody made a slide for are added when the review starts.",
         design_review: designReviewInfo(room.id, baseUrl),
+      };
+    },
+
+    /** A brainstorm's map as an outline: the sentence, its directions, the ideas under each and what was caught on them. */
+    getBrainstorm(caller: Caller, args: { space: string; brainstorm?: string }, baseUrl: string) {
+      const room = findSpace(caller, args.space);
+      const all = db.brainstorms(room.id);
+      // A brainstorm page's link works as well as its id.
+      const wanted = args.brainstorm?.trim().split(/[/?#]/).filter(Boolean).at(-1);
+      const b = wanted ? all.find((x) => x.id === wanted) ?? null : all.find((x) => x.status === "live") ?? all[0] ?? null;
+      if (wanted && !b) throw new AgentError(`No brainstorm ${wanted} in ${room.name}. Leave brainstorm out for the latest one, or pick an id from others.`);
+      const day = (ts: number) => new Date(ts).toISOString();
+      const others = all
+        .filter((x) => x.id !== b?.id)
+        .map((x) => {
+          const nodes = x.nodes.filter((n) => !n.removed);
+          return { id: x.id, topic: x.prompt, started_at: day(x.startedAt), directions: nodes.filter((n) => !n.parent).length, ideas: nodes.filter((n) => n.parent).length };
+        });
+      if (!b) return { space: room.name, brainstorm: null, others, how: "Nobody has run a brainstorm in this space yet. People start one in Stand from the arrow beside Start talking." };
+      // What was caught may have been reworded or ticked off since the map was saved.
+      const now = new Map((b.meetingId ? db.meetingNotes(b.meetingId) : []).map((n) => [n.id, n]));
+      const nodes = b.nodes.filter((n) => !n.removed);
+      const circle = (n: BrainNode): Record<string, unknown> => {
+        const caught = n.caught.map((c) => {
+          const note = now.get(c.id);
+          return note ? { ...c, text: note.text, owner: note.owner ?? null, done: !!note.doneAt } : c;
+        });
+        const of = (kind: BrainCaught["kind"]) => caught.filter((c) => c.kind === kind);
+        const list = <T,>(xs: T[]) => (xs.length ? xs : undefined);
+        return {
+          label: n.label,
+          detail: n.detail ?? undefined,
+          by: n.by ?? undefined,
+          said: n.quote ? `${n.quote.speaker}: ${n.quote.text}` : undefined,
+          built_on: list(n.points.map((p) => ({ text: p.text, by: p.by ?? undefined }))),
+          todos: list(of("action").map((c) => ({ ref: `stand:action/${c.id}`, text: c.text, owner: c.owner ?? undefined, done: c.done }))),
+          decisions: list(of("decision").map((c) => ({ ref: `stand:decision/${c.id}`, text: c.text }))),
+          questions: list(of("question").map((c) => ({ ref: `stand:question/${c.id}`, text: c.text }))),
+          ideas: n.parent ? undefined : nodes.filter((x) => x.parent === n.id).map(circle),
+        };
+      };
+      const count = (kind: BrainCaught["kind"]) => new Set(nodes.flatMap((n) => n.caught.filter((c) => c.kind === kind).map((c) => c.id))).size;
+      return {
+        space: room.name,
+        brainstorm: {
+          id: b.id,
+          url: `${baseUrl}/s/${room.id}/brainstorm/${b.id}`,
+          topic: b.prompt,
+          status: b.status === "live" ? "in a call now" : "finished",
+          started_at: day(b.startedAt),
+          started_by: b.startedBy ?? undefined,
+          meeting: b.meetingId ?? undefined,
+          counts: { directions: nodes.filter((n) => !n.parent).length, ideas: nodes.filter((n) => n.parent).length, todos: count("action"), decisions: count("decision"), questions: count("question") },
+          directions: nodes.filter((n) => !n.parent).map(circle),
+        },
+        others,
+        how: "get takes a ref for the full story of a to-do, decision or question. get_meeting_brief with meeting gives everything else the call caught, on the map or not.",
       };
     },
 

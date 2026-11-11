@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, UploadLinks, WORKING_QUIET_MS, prOf, readyToShip, workLog, workingOn } from "./workLog.ts";
 import { ShipWatch, githubPrState, type PrState } from "./shipWatch.ts";
 import { agentApi, AgentError, parseRef } from "./agents.ts";
+import { finishBrainstorm, startBrainstorm } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
 import { parseActor } from "../shared/actors.ts";
 import { addUpNext } from "./upNext.ts";
@@ -1004,4 +1005,45 @@ test("an agent asks for a design review of its plan, with the questions the team
   const draft = db.reviewIn(room.id, ["draft"], "design")!;
   assert.equal(db.reviewSlides(draft.id)[0].planVersion, db.planVersions(action.id).at(-1)!.id);
   assert.equal(db.reviewIn(room.id, ["draft"]), null);
+});
+
+test("get_brainstorm gives an agent the map as an outline, with what was caught on each circle", () => {
+  const { api, db, joe, room, action } = setup();
+  const caller = { user: joe, token: db.createToken(joe.id, "Claude Code", "read").info };
+  type Circle = { label: string; by?: string; said?: string; built_on?: Array<{ text: string }>; todos?: Array<{ ref: string; text: string; owner?: string; done: boolean }>; ideas?: Circle[] };
+  type Out = { brainstorm: { id: string; url: string; topic: string; status: string; meeting?: string; counts: Record<string, number>; directions: Circle[] } | null; others: Array<{ id: string; topic: string; ideas: number }> };
+  const read = (brainstorm?: string) => api.getBrainstorm(caller, { space: room.id, brainstorm }, "https://stand.test") as Out;
+  assert.equal(read().brainstorm, null);
+
+  const first = startBrainstorm(db, room.id, "Pricing", "Joe Liang", 1000);
+  db.saveBrainstormMap(first.id, [{ id: "d1", parent: null, label: "Plans", detail: null, by: "Joe", ts: 1000, quote: null, points: [], caught: [] }]);
+  const b = startBrainstorm(db, room.id, "Where should capture run?", "Joe Liang", 2000);
+  db.saveBrainstormMap(b.id, [
+    { id: "d1", parent: null, label: "On the server", detail: "One place to fix", by: "Joe", ts: 2000, quote: { segmentId: "s1", ts: 2000, speaker: "Joe Liang", text: "Let's run it on the server." }, points: [], caught: [] },
+    { id: "i1", parent: "d1", label: "Move capture", detail: null, by: "Andy", ts: 2001, quote: null, points: [{ text: "Keep a fallback", by: "Joe", ts: 2002, quote: null }], caught: [{ id: action.id, kind: "action", text: "An older wording", owner: null, done: false }] },
+    { id: "i2", parent: "d1", label: "Taken off", detail: null, by: null, ts: 2003, quote: null, points: [], caught: [], removed: true },
+    { id: "d2", parent: null, label: "In the browser", detail: null, by: null, ts: 2004, quote: null, points: [], caught: [] },
+  ]);
+  // While it runs it is the one returned, and the earlier one is listed.
+  assert.equal(read().brainstorm?.status, "in a call now");
+  finishBrainstorm(db, room.id, action.meetingId, 3000);
+
+  const out = read();
+  const got = out.brainstorm!;
+  assert.deepEqual([got.topic, got.status, got.meeting, got.url], ["Where should capture run?", "finished", action.meetingId, `https://stand.test/s/${room.id}/brainstorm/${b.id}`]);
+  assert.deepEqual(got.counts, { directions: 2, ideas: 1, todos: 1, decisions: 0, questions: 0 });
+  assert.deepEqual(got.directions.map((d) => [d.label, d.ideas?.map((i) => i.label)]), [["On the server", ["Move capture"]], ["In the browser", []]]);
+  assert.equal(got.directions[0].said, "Joe Liang: Let's run it on the server.");
+  const idea = got.directions[0].ideas![0];
+  assert.deepEqual(idea.built_on, [{ text: "Keep a fallback", by: "Joe" }]);
+  // The to-do reads as it does now, not as it did when the map was saved.
+  assert.deepEqual(idea.todos, [{ ref: `stand:action/${action.id}`, text: action.text, owner: action.owner ?? undefined, done: false }]);
+  assert.deepEqual(out.others.map((o) => [o.id, o.topic]), [[first.id, "Pricing"]]);
+
+  // An earlier one by its id or its link; not another space's, and not one that isn't there.
+  assert.equal(read(first.id).brainstorm?.topic, "Pricing");
+  assert.equal(read(`https://stand.test/s/${room.id}/brainstorm/${first.id}`).brainstorm?.id, first.id);
+  assert.throws(() => read("nope"), AgentError);
+  const stranger = db.upsertUser({ googleSub: "g-x", email: "x@example.com", name: "X", picture: null });
+  assert.throws(() => api.getBrainstorm({ user: stranger, token: db.createToken(stranger.id, "Claude Code", "read").info }, { space: room.id }, ""), AgentError);
 });

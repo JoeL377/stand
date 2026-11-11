@@ -367,6 +367,7 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
           node={open}
           parent={open.parent ? (nodes.find((n) => n.id === open.parent) ?? null) : null}
           ideas={ideas.filter((i) => i.parent === open.id)}
+          onMap={(id) => at.has(id)}
           // It opens on the side away from the circle, so the circle stays in view.
           side={!narrow && (at.get(open.id)?.x ?? 0) > cx ? "left" : "right"}
           onPick={setOpenId}
@@ -387,8 +388,9 @@ function Face({ name }: { name: string }) {
   );
 }
 
-function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas: BrainNode[]; side: "left" | "right"; onPick: (id: string) => void; onClose: () => void; onRemove?: () => void }) {
+function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas: BrainNode[]; onMap: (id: string) => boolean; side: "left" | "right"; onPick: (id: string) => void; onClose: () => void; onRemove?: () => void }) {
   const { node } = props;
+  const hidden = props.ideas.filter((i) => !props.onMap(i.id));
   return (
     <aside className={`brain-card ${props.side}`} role="dialog" aria-label={node.label} onClick={(e) => e.stopPropagation()}>
       <header>
@@ -440,16 +442,25 @@ function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas:
           })}
         </section>
       )}
-      {props.ideas.length > 0 && (
-        <section>
-          <h4>Ideas · {props.ideas.length}</h4>
-          {props.ideas.map((i) => (
-            <button key={i.id} type="button" className="brain-point link" onClick={() => props.onPick(i.id)}>
-              {i.by && <Face name={i.by} />}
-              <span dir="auto">{i.label}</span>
-            </button>
-          ))}
-        </section>
+      {/* The ideas the map had no room for come first, under their own heading: they're what "+N more" stands for. */}
+      {[
+        { title: hidden.length ? "Not on the map" : "Ideas", list: hidden.length ? hidden : props.ideas },
+        { title: "On the map", list: hidden.length ? props.ideas.filter((i) => props.onMap(i.id)) : [] },
+      ].map(
+        (g) =>
+          g.list.length > 0 && (
+            <section key={g.title}>
+              <h4>
+                {g.title} · {g.list.length}
+              </h4>
+              {g.list.map((i) => (
+                <button key={i.id} type="button" className="brain-point link" onClick={() => props.onPick(i.id)}>
+                  {i.by && <Face name={i.by} />}
+                  <span dir="auto">{i.label}</span>
+                </button>
+              ))}
+            </section>
+          ),
       )}
       {props.onRemove && (
         <footer>

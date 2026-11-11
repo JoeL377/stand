@@ -287,6 +287,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   <PersonColors.Provider value={colorFor}>
     <SpacesShell spaces={spaces}>
       <main className="sh-main">
+        {/* Stays at the top while the lists scroll. On a phone only the tabs stay. */}
+        <div className="sh-top">
         <header className="sh-head">
           <h1>{room.name}</h1>
           {room.purpose && <span className="sh-purpose">{room.purpose}</span>}
@@ -340,6 +342,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               {counts[t.key] > 0 && <span className="count">{counts[t.key]}</span>}
             </button>
           ))}
+        </div>
         </div>
 
         {showReview && feed?.review && (
