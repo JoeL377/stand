@@ -165,6 +165,11 @@ export const api = {
     call<{ brainstorm: BrainstormView }>("POST", `/api/rooms/${roomId}/brainstorm/start`, { prompt, design }),
   brainstorm: (roomId: string, id: string) =>
     call<{ roomName: string; brainstorm: BrainstormView; brainstorms: BrainstormSummary[] }>("GET", `/api/rooms/${roomId}/brainstorms/${encodeURIComponent(id)}`),
+  /** Sets up the idea review of a brainstorm, or rebuilds the one waiting. */
+  setUpIdeaReview: (roomId: string, brainstormId: string) => call<{ reviewId: string; slides: number }>("POST", `/api/rooms/${roomId}/brainstorms/${encodeURIComponent(brainstormId)}/review`),
+  startIdeaReview: (roomId: string, review?: string) => call<{ reviewId: string; firstItemId: string }>("POST", `/api/rooms/${roomId}/idea-review/start`, { review }),
+  starIdea: (roomId: string, id: string, idea: string, on: boolean) =>
+    call<{ brainstorm: BrainstormView }>("POST", `/api/rooms/${roomId}/brainstorms/${encodeURIComponent(id)}/star`, { idea, on }),
   /** "Finish this" in a call: ends the review, brainstorm or design session on its board. */
   finishExperience: (roomId: string) => call<{ finished: string[] }>("POST", `/api/rooms/${roomId}/experience/finish`),
   startReview: (roomId: string) => call<{ review: ReviewView | null; firstItemId: string }>("POST", `/api/rooms/${roomId}/review/start`),

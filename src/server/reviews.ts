@@ -11,7 +11,8 @@
 // slide ends with an outcome anyone can click: Ship, Ship with fixes, or Not yet.
 
 import type { DesignRole } from "../shared/designReview.ts";
-import type { Item, ItemUpdate, Note, ReviewCaught, ReviewOutcome, ReviewShot, ReviewSlideInfo, ReviewSummary, ReviewView, SlideContent } from "../shared/protocol.ts";
+import { IDEA_OUTCOMES, REVIEW_OUTCOMES } from "../shared/protocol.ts";
+import type { IdeaOutcome, Item, ItemUpdate, Note, ReviewCaught, ReviewOutcome, ReviewShot, ReviewSlideInfo, ReviewSummary, ReviewView, SlideContent } from "../shared/protocol.ts";
 import type { DB, ReviewRow, ReviewSlideRow } from "./db.ts";
 import { newId } from "./ids.ts";
 import { prOf, shotUrl } from "./workLog.ts";
@@ -62,8 +63,10 @@ const infoOf = (db: DB, s: ReviewSlideRow, baseUrl = ""): ReviewSlideInfo => ({
   addedBy: s.addedBy,
   pr: s.pr,
   shots: shotsOf(db, s, baseUrl),
-  outcome: s.outcome as ReviewOutcome | null,
-  outcomeBy: s.outcomeBy,
+  // An idea review's slide (ideaReview.ts) ends in its own words, kept with the idea.
+  outcome: s.idea ? null : (s.outcome as ReviewOutcome | null),
+  outcomeBy: s.idea ? null : s.outcomeBy,
+  ...(s.idea ? { idea: { ...s.idea, outcome: s.outcome as IdeaOutcome | null, outcomeBy: s.outcomeBy } } : {}),
 });
 
 /** What the next review counts from: when the last one started, else the last real meeting, else two weeks. */
@@ -101,8 +104,9 @@ export function pendingSlides(db: DB, roomId: string, have: ReviewSlideRow[], no
   });
 }
 
-const toView = (db: DB, review: ReviewRow, slides: ReviewSlideRow[], pending: Pending[], baseUrl = ""): ReviewView => ({
+export const toView = (db: DB, review: ReviewRow, slides: ReviewSlideRow[], pending: Pending[], baseUrl = ""): ReviewView => ({
   id: review.id,
+  ...(review.kind === "ideas" ? { kind: "ideas" as const, title: review.title, brainstormId: review.sourceId } : {}),
   status: review.status,
   deckId: review.deckId,
   meetingId: review.meetingId,
@@ -139,7 +143,7 @@ export function reviewView(db: DB, roomId: string, baseUrl = "", now = Date.now(
   const slides = draft ? db.reviewSlides(draft.id) : [];
   const pending = pendingSlides(db, roomId, slides, now);
   if (!slides.length && !pending.length) return null;
-  return toView(db, draft ?? { id: "", roomId, kind: "product", status: "draft", deckId: null, meetingId: null, createdAt: now, startedAt: null, endedAt: null }, slides, pending, baseUrl);
+  return toView(db, draft ?? { id: "", roomId, kind: "product", status: "draft", deckId: null, meetingId: null, createdAt: now, startedAt: null, endedAt: null, title: null, sourceId: null }, slides, pending, baseUrl);
 }
 
 /** The last review that finished, with how each slide ended. */
@@ -156,7 +160,9 @@ const caughtOf = (n: Note): ReviewCaught => ({ id: n.id, kind: n.kind as ReviewC
 export function reviewPage(db: DB, roomId: string, idOrNext: string, baseUrl = "", now = Date.now()): ReviewView | null {
   if (idOrNext === "next") return reviewView(db, roomId, baseUrl, now);
   const review = db.getReview(idOrNext);
-  if (!review || review.roomId !== roomId || review.kind !== "product") return null;
+  if (!review || review.roomId !== roomId || review.kind === "design") return null;
+  // An idea review has its own page from the moment it is set up.
+  if (review.kind === "ideas" && review.status !== "done") return toView(db, review, db.reviewSlides(review.id), [], baseUrl);
   if (review.status !== "done") return reviewView(db, roomId, baseUrl, now);
   const rows = db.reviewSlides(review.id);
   const view = toView(db, review, rows, [], baseUrl);
@@ -229,7 +235,7 @@ export function removeSlide(db: DB, roomId: string, slideId: string): boolean {
   return true;
 }
 
-const contentOf = (db: DB, s: ReviewSlideRow): SlideContent => ({ layout: "review", body: s.body, image: null, notes: "", review: infoOf(db, s) });
+export const contentOf = (db: DB, s: ReviewSlideRow): SlideContent => ({ layout: "review", body: s.body, image: null, notes: "", review: infoOf(db, s) });
 
 /** Starts the space's next review: finished work with no slide joins it, the slides become a deck at
  *  the top of the agenda, and the first slide is where the call opens. A review already running is
@@ -260,10 +266,13 @@ export function startReview(db: DB, roomId: string, now = Date.now()): { review:
 }
 
 /** How a slide ended, by anyone's click; null takes it back. Returns the slide's item, or null if it isn't one in a running review. */
-export function setOutcome(db: DB, itemId: string, outcome: ReviewOutcome | null, by: string, now = Date.now()) {
+export function setOutcome(db: DB, itemId: string, asked: string | null, by: string, now = Date.now()) {
   const slide = db.reviewSlideByItem(itemId);
   const review = slide && db.getReview(slide.reviewId);
-  if (!slide || review?.kind !== "product" || review.status !== "live") return null;
+  if (!slide || !review || review.kind === "design" || review.status !== "live") return null;
+  // Each kind of review ends its slides in its own words; anything else takes the outcome back.
+  const allowed: Array<{ id: string }> = review.kind === "ideas" ? IDEA_OUTCOMES : REVIEW_OUTCOMES;
+  const outcome = (allowed.some((o) => o.id === asked) ? asked : null) as ReviewOutcome | IdeaOutcome | null;
   db.updateReviewSlide(slide.id, { outcome, outcomeBy: outcome ? by : null, outcomeAt: outcome ? now : null });
   db.setSlideContent(itemId, contentOf(db, db.getReviewSlide(slide.id)!));
   return db.getItem(itemId);

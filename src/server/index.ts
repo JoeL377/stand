@@ -42,8 +42,9 @@ import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
-import { BrainstormError, brainstormOfMeeting, brainstormPage, brainstormsOf, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
+import { BrainstormError, brainstormOfMeeting, brainstormPage, brainstormsOf, starIdea, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { SEED_MAX, isDiagramText, mermaidIn, parseSeed, seedFromAnswer } from "./designSession.ts";
+import { ideaReviewOfMeeting, setUpIdeaReview, startIdeaReview } from "./ideaReview.ts";
 import { ReviewError, removeSlide, reviewOfMeeting, reviewPage, reviewView, reviewsDone, startReview } from "./reviews.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { ownedBy, toSpaceSummary } from "./spaces.ts";
@@ -1133,6 +1134,18 @@ app.get(
   }),
 );
 
+// Star an idea on a brainstorm's page, or take the star off.
+app.post(
+  "/api/rooms/:id/brainstorms/:brainstormId/star",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    const brainstorm = starIdea(db, room.id, req.params.brainstormId, String(req.body?.idea ?? ""), req.body?.on !== false);
+    if (!brainstorm) return notFound(res, "Idea not found");
+    res.json({ brainstorm });
+  }),
+);
+
 // ---- product reviews: a call that goes through what was built, one slide per feature ----
 
 // The space's next review, as its page shows it.
@@ -1169,6 +1182,46 @@ app.post(
         s.setFocus(started.firstItemId, req.user!.name, "manual");
       }
       res.json({ review: reviewView(db, room.id), firstItemId: started.firstItemId });
+    } catch (err) {
+      if (err instanceof ReviewError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+  }),
+);
+
+// ---- idea reviews: a review whose slides are a brainstorm's ideas (ideaReview.ts) ----
+
+// Sets one up from a brainstorm, or rebuilds the one waiting from the map as it is now.
+app.post(
+  "/api/rooms/:id/brainstorms/:brainstormId/review",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    try {
+      const made = setUpIdeaReview(db, room.id, req.params.brainstormId, req.user!.name);
+      sessions.get(room.id)?.itemsChanged();
+      res.json({ reviewId: made.review.id, slides: made.slides });
+    } catch (err) {
+      if (err instanceof ReviewError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+  }),
+);
+
+// Starts one: its ideas become a deck at the top of the agenda, and a call that's running goes to the first.
+app.post(
+  "/api/rooms/:id/idea-review/start",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    try {
+      const started = startIdeaReview(db, room.id, typeof req.body?.review === "string" ? req.body.review : null);
+      const s = sessions.get(room.id);
+      if (s) {
+        s.itemsChanged();
+        s.setFocus(started.firstItemId, req.user!.name, "manual");
+      }
+      res.json({ reviewId: started.review.id, firstItemId: started.firstItemId });
     } catch (err) {
       if (err instanceof ReviewError) return res.status(400).json({ error: err.message });
       throw err;
@@ -1556,6 +1609,7 @@ app.get(
       chapters: m.chapters,
       cost: db.meetingCost(m.id),
       review: reviewOfMeeting(db, m.id),
+      ideaReview: ideaReviewOfMeeting(db, m.id),
       designReview: designReviewOfMeeting(db, m.id),
       brainstorm: brainstormOfMeeting(db, m.id),
     };

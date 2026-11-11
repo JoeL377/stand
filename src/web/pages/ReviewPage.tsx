@@ -4,7 +4,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { REVIEW_OUTCOMES, type ReviewCaught, type ReviewOutcome, type ReviewSummary, type ReviewView } from "../../shared/protocol.ts";
+import { IDEA_OUTCOMES, REVIEW_OUTCOMES, type IdeaOutcome, type ReviewCaught, type ReviewOutcome, type ReviewSummary, type ReviewView } from "../../shared/protocol.ts";
+import { IdeaCard } from "../room/IdeaCard.tsx";
+import { brainstormHref } from "./BrainstormPage.tsx";
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
@@ -22,7 +24,9 @@ const KINDS = [
 ] as const;
 
 const day = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" }) : "");
-const outcomeLabel = (o: ReviewOutcome) => REVIEW_OUTCOMES.find((x) => x.id === o)!.label;
+const outcomeLabel = (o: ReviewOutcome | IdeaOutcome) => [...REVIEW_OUTCOMES, ...IDEA_OUTCOMES].find((x) => x.id === o)!.label;
+/** How a slide ended, in the words of its kind of review. */
+const endOf = (s: ReviewView["slides"][number]) => (s.idea ? { outcome: s.idea.outcome, by: s.idea.outcomeBy } : { outcome: s.outcome, by: s.outcomeBy });
 const prLabel = (url: string) => {
   const m = /\/pull\/(\d+)/.exec(url);
   return m ? `PR #${m[1]}` : "Link";
@@ -98,6 +102,8 @@ export function ReviewPage() {
   const shot = shots[Math.min(shotAt, shots.length - 1)] ?? null;
   const ran = review?.status === "done";
   const live = review?.status === "live";
+  const ideas = review?.kind === "ideas";
+  const end = slide ? endOf(slide) : null;
 
   return (
     <div className="rp">
@@ -105,9 +111,29 @@ export function ReviewPage() {
         <Link className="rp-back" to={spaceHref(roomId)}>
           ← {data.roomName}
         </Link>
-        <strong>Product review</strong>
-        <ReviewPicker roomId={roomId} current={review} reviews={data.reviews} />
-        {review && ran && <OutcomeCounts outcomes={countOutcomes(review)} />}
+        <strong>{ideas ? "Idea review" : "Product review"}</strong>
+        {ideas ? (
+          <>
+            <span className="rp-pill">{ran ? day(review!.startedAt) : live ? "On now" : "Waiting"}</span>
+            {review!.brainstormId && (
+              <Link className="rp-pill rp-from" to={`${brainstormHref(roomId, review!.brainstormId)}?view=ideas`} title="The brainstorm these ideas came from" dir="auto">
+                {review!.title}
+              </Link>
+            )}
+            {ran && (
+              <span className="rp-counts">
+                {IDEA_OUTCOMES.filter((o) => review!.slides.some((s) => s.idea?.outcome === o.id)).map((o) => (
+                  <span key={o.id} className={`rp-count ${o.id}`}>
+                    {review!.slides.filter((s) => s.idea?.outcome === o.id).length} {o.label}
+                  </span>
+                ))}
+              </span>
+            )}
+          </>
+        ) : (
+          <ReviewPicker roomId={roomId} current={review} reviews={data.reviews} />
+        )}
+        {review && ran && !ideas && <OutcomeCounts outcomes={countOutcomes(review)} />}
         {ran && !!review?.general?.length && <OffSlide caught={review.general} />}
         <span className="rp-grow" />
         {ran && review?.meetingId && (
@@ -123,7 +149,7 @@ export function ReviewPage() {
               if (live) return navigate(joinHref(roomId));
               setStarting(true);
               try {
-                await api.startReview(roomId);
+                await (ideas ? api.startIdeaReview(roomId, review.id) : api.startReview(roomId));
                 navigate(joinHref(roomId));
               } catch (err) {
                 errorToast("Couldn't start the review")(err);
@@ -148,6 +174,8 @@ export function ReviewPage() {
                 <button type="button" className="rp-shot" title="See it bigger" onClick={() => setZoomed(true)}>
                   <img key={shot.url} src={shot.url} alt={shot.caption ?? slide.title} />
                 </button>
+              ) : slide.idea ? (
+                <IdeaCard title={slide.title} detail={slide.body} idea={slide.idea} />
               ) : (
                 <div className="rp-nopic">
                   <h2 dir="auto">{slide.title}</h2>
@@ -173,10 +201,15 @@ export function ReviewPage() {
             <div className="rp-about">
               <div className="rp-title">
                 <h1 dir="auto">{slide.title}</h1>
-                {slide.outcome && (
-                  <span className={`rv-wrap-outcome ${slide.outcome}`} title={slide.outcomeBy ? `${slide.outcomeBy} said so` : undefined}>
-                    {outcomeLabel(slide.outcome)}
+                {end?.outcome && (
+                  <span className={`rv-wrap-outcome ${end.outcome}`} title={end.by ? `${end.by} said so` : undefined}>
+                    {outcomeLabel(end.outcome)}
                   </span>
+                )}
+                {slide.idea?.became && (
+                  <Link className="rp-pill" to={`/ref/${slide.idea.became.kind}/${slide.idea.became.id}`}>
+                    {slide.idea.became.kind === "action" ? "To-do" : "Open question"}
+                  </Link>
                 )}
                 {slide.owner && <span className="rp-pill">{slide.owner}</span>}
                 {slide.pr && (
@@ -190,7 +223,7 @@ export function ReviewPage() {
                   </Link>
                 )}
               </div>
-              {slide.body && (
+              {slide.body && !slide.idea && (
                 <p className="rp-body" dir="auto">
                   {slide.body}
                 </p>
@@ -211,7 +244,7 @@ export function ReviewPage() {
                 <span className="rp-thumb">{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
                 <span className="rp-thumb-foot">
                   <span className="rp-n">{s.name ?? i + 1}</span>
-                  {s.outcome && <span className={`rp-dot ${s.outcome}`} title={outcomeLabel(s.outcome)} />}
+                  {endOf(s).outcome && <span className={`rp-dot ${endOf(s).outcome}`} title={outcomeLabel(endOf(s).outcome!)} />}
                   {!!s.caught?.length && <span className="count" title={`${s.caught.length} raised on this slide`}>{s.caught.length}</span>}
                 </span>
               </button>

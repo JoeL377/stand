@@ -227,6 +227,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   for (const b of sessions) if (b.meetingId) kindOf.set(b.meetingId, { name: "Design session", open: "Diagram", to: brainstormHref(room.id, b.id) });
   for (const r of designReviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Design review", open: "Spec", to: designRecordHref(room.id, r.id) });
   for (const r of reviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Product review", open: "Slides", to: reviewHref(room.id, r.id) });
+  for (const r of feed?.ideaReviews ?? []) if (r.meetingId && r.status === "done") kindOf.set(r.meetingId, { name: "Idea review", open: "Ideas", to: reviewHref(room.id, r.id) });
   const startReview = async () => {
     try {
       await api.startReview(room.id);
@@ -309,6 +310,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               label={wrapping ? "Join" : live ? "Join them" : "Start talking"}
               review={feed?.review ?? null}
               designReview={feed?.designReview ?? null}
+              ideaReviews={(feed?.ideaReviews ?? []).filter((r) => r.status !== "done").map((r) => ({ ...r, href: reviewHref(room.id, r.id) }))}
               brainstorm={(feed?.brainstorms ?? []).find((b) => b.status === "live") ?? null}
               onSession={() => setShowSession(true)}
               designHref={designReviewHref(room.id)}
@@ -971,6 +973,8 @@ function StartMenu(props: {
   label: string;
   review: ReviewView | null;
   designReview: DesignReviewSummary | null;
+  /** Idea reviews waiting or in a call, each with its page. */
+  ideaReviews: Array<{ id: string; title: string; slides: number; status: string; href: string }>;
   brainstorm: BrainstormSummary | null;
   designHref: string;
   onTalk: () => void;
@@ -1015,6 +1019,14 @@ function StartMenu(props: {
               <span className="muted">no spec waiting</span>
             </button>
           )}
+          {props.ideaReviews.slice(0, 3).map((r) => (
+            <Link key={r.id} role="menuitem" to={r.href} onClick={() => setOpen(false)}>
+              <strong>Idea review</strong>
+              <span className="muted xp-idea" dir="auto">
+                {r.status === "live" ? "on now" : `${r.slides} ${r.slides === 1 ? "idea" : "ideas"}`} · {r.title}
+              </span>
+            </Link>
+          ))}
           <button type="button" role="menuitem" onClick={pick(props.brainstorm && !props.brainstorm.design ? props.onTalk : props.onBrainstorm)}>
             <strong>Brainstorm</strong>
             {props.brainstorm && !props.brainstorm.design && <span className="muted">on now</span>}

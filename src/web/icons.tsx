@@ -138,6 +138,12 @@ export const MoreIcon = ({ size = 14 }: { size?: number }) => (
   </Svg>
 );
 
+export const StarIcon = ({ size = 15, on }: { size?: number; on?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={on ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" />
+  </svg>
+);
+
 export const ChevronIcon = ({ size = 12 }: { size?: number }) => (
   <Svg size={size}>
     <path d="m9 6 6 6-6 6" />
