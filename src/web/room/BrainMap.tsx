@@ -81,7 +81,72 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const placed = useMemo(() => layout(nodes, size.w, size.h), [nodes, size.w, size.h]);
+  const narrow = size.w > 0 && size.w < 620;
+  // A phone draws the whole map on a canvas bigger than its screen, fitted to it, and you drag and pinch.
+  const cw = narrow ? Math.max(860, size.w * 2.2) : size.w;
+  const ch = narrow ? cw * (size.h / Math.max(1, size.w)) : size.h;
+  const fit = narrow ? size.w / cw : 1;
+  /** Where you've dragged and pinched to; null is the whole map fitted to the screen. */
+  const [view, setView] = useState<{ k: number; x: number; y: number } | null>(null);
+  const v = narrow ? (view ?? { k: fit, x: 0, y: 0 }) : { k: 1, x: 0, y: 0 };
+  const clampView = (k: number, x: number, y: number) => {
+    const kk = Math.min(1.5, Math.max(fit, k));
+    const lim = (pos: number, screen: number, canvas: number) => (canvas * kk <= screen ? (screen - canvas * kk) / 2 : Math.min(0, Math.max(screen - canvas * kk, pos)));
+    return kk <= fit * 1.02 ? null : { k: kk, x: lim(x, size.w, cw), y: lim(y, size.h, ch) };
+  };
+  /** Zooms by `by` keeping the point (px, py) of the screen where it is. */
+  const zoomAt = (from: { k: number; x: number; y: number }, by: number, px: number, py: number, dx = 0, dy = 0) => {
+    const k = Math.min(1.5, Math.max(fit, from.k * by));
+    const r = k / from.k;
+    return clampView(k, px - (px - from.x) * r + dx, py - (py - from.y) * r + dy);
+  };
+  const touches = useRef(new Map<number, { x: number; y: number }>());
+  const moved = useRef(false);
+  const gestures = narrow
+    ? {
+        onPointerDown: (e: React.PointerEvent) => {
+          if ((e.target as HTMLElement).closest(".brain-card, .brain-fit")) return;
+          touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          if (touches.current.size === 1) moved.current = false;
+        },
+        onPointerMove: (e: React.PointerEvent) => {
+          const was = touches.current.get(e.pointerId);
+          if (!was) return;
+          const rect = box.current!.getBoundingClientRect();
+          const others = [...touches.current].filter(([id]) => id !== e.pointerId).map(([, p]) => p);
+          const dx = e.clientX - was.x;
+          const dy = e.clientY - was.y;
+          if (!moved.current && !others.length && Math.hypot(dx, dy) < 6) return;
+          moved.current = true;
+          touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          if (!others.length) return setView(clampView(v.k, v.x + dx, v.y + dy));
+          // Two fingers: the map follows the point between them, and scales with how far apart they are.
+          const o = others[0];
+          const before = Math.hypot(was.x - o.x, was.y - o.y) || 1;
+          const after = Math.hypot(e.clientX - o.x, e.clientY - o.y) || 1;
+          setView(zoomAt(v, after / before, (e.clientX + o.x) / 2 - rect.left, (e.clientY + o.y) / 2 - rect.top, dx / 2, dy / 2));
+        },
+        onPointerUp: (e: React.PointerEvent) => void touches.current.delete(e.pointerId),
+        onPointerCancel: (e: React.PointerEvent) => void touches.current.delete(e.pointerId),
+        onPointerLeave: (e: React.PointerEvent) => void touches.current.delete(e.pointerId),
+        // A drag that ends on a circle isn't a tap on it.
+        onClickCapture: (e: React.MouseEvent) => {
+          if (!moved.current) return;
+          moved.current = false;
+          e.stopPropagation();
+        },
+        onWheel: (e: React.WheelEvent) => {
+          const rect = box.current!.getBoundingClientRect();
+          setView(zoomAt(v, Math.exp(-e.deltaY / 300), e.clientX - rect.left, e.clientY - rect.top));
+        },
+        onDoubleClick: (e: React.MouseEvent) => {
+          if ((e.target as HTMLElement).closest(".brain-node, .brain-card")) return;
+          const rect = box.current!.getBoundingClientRect();
+          setView(view ? null : zoomAt(v, 1 / fit, e.clientX - rect.left, e.clientY - rect.top));
+        },
+      }
+    : {};
+  const placed = useMemo(() => layout(nodes, cw, ch), [nodes, cw, ch]);
   const at = new Map(placed.map((p) => [p.id, p]));
 
   // A circle that arrives while you watch glows for a few seconds with who raised it.
@@ -107,41 +172,22 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
     return () => window.removeEventListener("keydown", key);
   }, [openId]);
 
-  const narrow = size.w > 0 && size.w < 620;
   const dirs = nodes.filter((n) => !n.parent);
   const ideas = nodes.filter((n) => n.parent);
-  const cx = size.w / 2;
-  const cy = size.h / 2;
+  const cx = cw / 2;
+  const cy = ch / 2;
   const pick = (id: string) => setOpenId((cur) => (cur === id ? null : id));
   const extra = (n: BrainNode) => n.points.length + n.caught.length;
 
   return (
-    <div className={`brain${narrow ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} ref={box} onClick={() => setOpenId(null)}>
-      {narrow ? (
-        // On a phone the map reads as an outline: the sentence, then each direction with its ideas.
-        <div className="brain-outline">
-          <h2 dir="auto">{brainstorm.prompt}</h2>
-          {!dirs.length && <p className="muted">{brainstorm.status === "live" ? "✦ Ideas branch out here as people talk" : "Nothing came up in this one."}</p>}
-          {dirs.map((d) => (
-            <section key={d.id}>
-              <button type="button" className={`brain-node dir${fresh(d.id) ? " fresh" : ""}${openId === d.id ? " on" : ""}`} onClick={(e) => (e.stopPropagation(), pick(d.id))}>
-                {d.label}
-              </button>
-              <div className="brain-outline-ideas">
-                {ideas
-                  .filter((i) => i.parent === d.id)
-                  .map((i) => (
-                    <button key={i.id} type="button" className={`brain-node idea${fresh(i.id) ? " fresh" : ""}${openId === i.id ? " on" : ""}`} onClick={(e) => (e.stopPropagation(), pick(i.id))}>
-                      {i.label}
-                    </button>
-                  ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <>
-          <svg className="brain-lines" width={size.w} height={size.h} aria-hidden>
+    <div className={`brain${narrow ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} ref={box} onClick={() => setOpenId(null)} {...gestures}>
+      {narrow && view && (
+        <button type="button" className="brain-fit" onClick={(e) => (e.stopPropagation(), setView(null))}>
+          See it all
+        </button>
+      )}
+      <div className="brain-canvas" style={narrow ? { width: cw, height: ch, transform: `translate(${v.x}px, ${v.y}px) scale(${v.k})` } : undefined}>
+          <svg className="brain-lines" width={cw} height={ch} aria-hidden>
             {placed.map((p) => {
               const from = p.from === "root" ? { x: cx, y: cy } : at.get(p.from);
               return from ? <line key={p.id} x1={from.x} y1={from.y} x2={p.x} y2={p.y} className={p.from === "root" ? "trunk" : undefined} /> : null;
@@ -171,8 +217,7 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
               </button>
             ),
           )}
-        </>
-      )}
+      </div>
       {open && (
         <BrainDetails
           node={open}
