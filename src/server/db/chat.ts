@@ -84,6 +84,16 @@ export function chatStore(db: DatabaseSync) {
     channelSessions(channelId: string, limit = 50): ChatSession[] {
       return (db.prepare(`${SESSION_SELECT} WHERE m.channel_id = ? ORDER BY m.started_at DESC, m.rowid DESC LIMIT ?`).all(channelId, limit) as Row[]).map(toSession);
     },
+    /** A space's sessions, in all its channels, that had a message at or after a time. Newest first. */
+    roomChatSessions(roomId: string, since = 0, limit = 30): ChatSession[] {
+      return (
+        db.prepare(`${SESSION_SELECT} WHERE m.room_id = ? AND m.kind = 'chat' AND m.ended_at >= ? ORDER BY m.started_at DESC, m.rowid DESC LIMIT ?`).all(roomId, since, limit) as Row[]
+      ).map(toSession);
+    },
+    /** A session's messages, oldest first. */
+    sessionMessages(sessionId: string): ChatMessage[] {
+      return (db.prepare(`${MESSAGE_SELECT} WHERE s.meeting_id = ? ORDER BY c.seq`).all(sessionId) as Row[]).map(toMessage);
+    },
     /** What chat keeps about a message that is already a segment of its session. externalId: the
      *  key it was sent with, which a channel holds once. */
     addChatMessage(m: { segmentId: string; sessionId: string; channelId: string; externalId: string | null; replyTo: string | null; ts: number }): ChatMessage {

@@ -183,6 +183,39 @@ const thread = (page) => page.locator(".chat-thread");
     check("the chat is not listed as a meeting of the space", room.meetings.length === 0, room.meetings.length);
     const feed = await vera.request.get(`${base}/api/rooms/${roomId}/feed`).then((r) => r.json());
     check("the chat is not in the space's feed of meetings", feed.meetings.length === 0, feed.meetings.length);
+    // An agent reads the chat over the MCP, with a token made the way the Connect an agent page makes one.
+    const { token } = await vera.request.post(`${base}/api/tokens`, { data: { label: "verify", scope: "read" } }).then((r) => r.json());
+    const mcp = async (id, method, params) => {
+      const r = await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+      });
+      const text = await r.text();
+      return text.startsWith("{") ? JSON.parse(text) : JSON.parse(text.split("\ndata: ").pop());
+    };
+    const tool = async (id, name, args) => {
+      const res = await mcp(id, "tools/call", { name, arguments: args });
+      fs.writeFileSync(path.join(out, `mcp-${name}-${id}.json`), JSON.stringify(res, null, 2));
+      return res.result?.isError || res.error ? null : JSON.parse(res.result.content[0].text);
+    };
+    await step("an agent reads the chat over the MCP", async () => {
+      await mcp(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "verify", version: "1" } });
+      const names = ((await mcp(2, "tools/list", {})).result?.tools ?? []).map((t) => t.name);
+      check("the MCP lists get_chat", names.includes("get_chat"));
+      const status = await tool(3, "get_chat", { space: roomId });
+      check("get_chat shows the stretch going on now, with both people", status?.live?.length === 1 && status.live[0].messages === 4 && status.live[0].people.length === 2, status?.live);
+      const one = await tool(4, "get_chat", { chat_id: status.live[0].chat_id, transcript: true });
+      const said = (one?.transcript ?? []).map((m) => m.text);
+      check("its transcript has what was written, without the deleted message", said.length === 3 && said.includes(ANSWER) && said.includes(CHANGED) && !said.includes(FIRST), said);
+      const news = await tool(5, "whats_new", { space: roomId });
+      check("whats_new lists the chat apart from meetings", news?.chats?.length === 1 && news.meetings.length === 0, { chats: news?.chats?.length, meetings: news?.meetings?.length });
+      const brief = await tool(6, "get_meeting_brief", { meeting_id: status.live[0].chat_id, transcript: true });
+      check("the brief of the stretch says it is chat", brief?.meeting?.kind === "chat" && brief.meeting.channel === "Chat", brief?.meeting);
+      const spaces = await tool(7, "list_spaces", {});
+      check("list_spaces says when the space's chat last had a message", !!spaces?.find((s) => s.id === roomId)?.chat?.last_message_at);
+    });
+
     await step("a long thread opens on its newest messages, and earlier ones load when asked for", async () => {
       for (let i = 1; i <= 120; i++) await vera.request.post(`${base}/api/rooms/${roomId}/chat/messages`, { data: { text: `Line ${i}` } });
       await bo.reload();
