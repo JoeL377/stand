@@ -342,7 +342,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
           ))}
           {/* One pill at the end of the tab row filters Tasks and Decisions by topic. */}
           {(tab === "tasks" || tab === "decisions") && (
-            <label className={topicFilter ? "sh-topic-filter on" : "sh-topic-filter"}>
+            <label className={topicFilter ? "sh-topic-filter on" : "sh-topic-filter"} title="Filter by topic">
+              {/* A phone has room for the mark only; the menu opens from it. */}
+              <svg className="sh-topic-mark" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+                <path d="M2.5 4h11M4.5 8h7M6.5 12h3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
               <select aria-label="Filter by topic" value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)}>
                 <option value="">All topics</option>
                 <option value="none">No topic</option>

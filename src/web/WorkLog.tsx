@@ -118,6 +118,9 @@ const asSnaps = (e: Entry): Snap[] =>
 export function WorkCard({ work, noPlan }: { work: ActionWork; noPlan?: boolean }) {
   const [all, setAll] = useState(false);
   const [viewing, setViewing] = useState<{ entry: Entry; at: number } | null>(null);
+  // A long report shows its first lines; "More" opens the rest.
+  const [whole, setWhole] = useState<Set<string>>(new Set());
+  const long = (e: Entry) => e.text.length > 320 || e.text.split("\n").length > 6;
   const shown = all ? work.log : work.log.slice(0, FIRST);
   return (
     <div className="fu-log">
@@ -141,7 +144,16 @@ export function WorkCard({ work, noPlan }: { work: ActionWork; noPlan?: boolean 
               </a>
             ))}
           </div>
-          {e.text && <Markdown className="wl-text" text={e.text} breaks />}
+          {e.text && <Markdown className={long(e) && !whole.has(e.id) ? "wl-text clamp" : "wl-text"} text={e.text} breaks />}
+          {e.text && long(e) && (
+            <button
+              type="button"
+              className="wl-more"
+              onClick={() => setWhole((w) => { const n = new Set(w); if (!n.delete(e.id)) n.add(e.id); return n; })}
+            >
+              {whole.has(e.id) ? "Less" : "More"}
+            </button>
+          )}
           {e.shots.length > 0 && (
             <div className="wl-shots">
               {e.shots.map((s, k) => (
