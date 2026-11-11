@@ -7,7 +7,7 @@ A call where the team goes through a spec and leaves with a verdict on it. A to-
 - Prepare: the review's page (`/s/<space>/design-review`) lists each spec as its slides. The author rewrites the summary and the lines, takes sections and questions off the call, asks questions, and accepts or dismisses Stand's suggestions. A spec of more than eight sections has short adjacent sections on one slide; the author regroups with **Combine with the slide above** and **Give it its own slide**, and **Let Stand group them** undoes that.
 - The call: **Start design review** on that page, or **Present task** on a to-do with a spec (a review of that one spec). The arrows go through each slide and then each of its questions; the host or the author can also click a question to open it. Questions end **Settled** or **Still open**; the Verdict takes **Approve**, **Approve with changes** or **Not yet**. **Full spec** opens the plan at the slide's part.
 - Write back: Settled resolves the thread with what was decided, Still open leaves it open; at the end the to-do's log gets the verdict in a line and the to-do waits on the to-dos the review raised.
-- The record: `/s/<space>/design-review/<id>`, linked from the Tasks tab row, the recap and the plan viewer. `get_review` returns it under `design_review`.
+- The record: `/s/<space>/design-review/<id>`, linked from the Meetings tab (the Design reviews pill), the recap and the plan viewer. `get_review` returns it under `design_review`.
 
 - Diagrams: a ` ```mermaid ` block in a plan is drawn as its diagram wherever the plan shows (web/Mermaid.tsx, loaded on demand). A section's slide shows the first diagram the spec has under that heading. A block that doesn't parse stays code.
 
