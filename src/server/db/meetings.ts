@@ -1,0 +1,297 @@
+// Meetings: what was said (segments), where the focus was, the live board's saved state, and cost.
+import type { DatabaseSync } from "node:sqlite";
+import type { AgentCard, Board, ChapterRecap, MeetingCost, Segment } from "../../shared/protocol.ts";
+import { enqueueConxtMeeting } from "../conxt.ts";
+import { newId } from "../ids.ts";
+import type { ListItem } from "../liveList.ts";
+import { costOf, type UsageRow } from "../usage.ts";
+import { DISCUSSION_SELECT, type OpenMeeting, type Row, toDiscussion, toNote, toSegment } from "./rows.ts";
+
+export function meetingsStore(db: DatabaseSync) {
+  return {
+    startMeeting(roomId: string) {
+      const id = newId();
+      const startedAt = Date.now();
+      db.prepare("INSERT INTO meetings (id, room_id, started_at) VALUES (?, ?, ?)").run(id, roomId, startedAt);
+      return { id, startedAt };
+    },
+    endMeeting(id: string, summary: string | null, synthesis: string | null = null, at = Date.now(), chapters: ChapterRecap[] = []) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ?, chapters_json = ? WHERE id = ?").run(
+          at,
+          summary,
+          synthesis,
+          chapters.length ? JSON.stringify(chapters) : null,
+          id,
+        );
+        enqueueConxtMeeting(db, id);
+        db.exec("COMMIT");
+      } catch (err) { db.exec("ROLLBACK"); throw err; }
+    },
+    /** Someone pressed End meeting; the recap is being written. A restart before it's done finishes the job instead of resuming. */
+    meetingEnding(id: string) {
+      db.prepare("UPDATE meetings SET end_requested_at = COALESCE(end_requested_at, ?) WHERE id = ?").run(Date.now(), id);
+    },
+    setMeetingHost(id: string, hostId: string | null) {
+      db.prepare("UPDATE meetings SET host_id = ? WHERE id = ?").run(hostId, id);
+    },
+    /** Meetings that were never ended (the server stopped while they ran), with
+     *  when anything last happened in them. Newest first. */
+    openMeetings(roomId?: string): OpenMeeting[] {
+      return (
+        db
+          .prepare(
+            `SELECT m.id, m.room_id, m.started_at, m.host_id, m.end_requested_at,
+               (SELECT COUNT(*) FROM segments s WHERE s.meeting_id = m.id) AS n,
+               MAX(m.started_at,
+                 COALESCE((SELECT MAX(ts) FROM segments s WHERE s.meeting_id = m.id), 0),
+                 COALESCE((SELECT MAX(ts) FROM focus_events f WHERE f.meeting_id = m.id), 0),
+                 COALESCE((SELECT MAX(ts) FROM notes n WHERE n.meeting_id = m.id), 0)) AS active_at
+             FROM meetings m WHERE m.ended_at IS NULL AND (? IS NULL OR m.room_id = ?) ORDER BY m.started_at DESC`,
+          )
+          .all(roomId ?? null, roomId ?? null) as Row[]
+      ).map((r) => ({
+        id: r.id as string,
+        roomId: r.room_id as string,
+        startedAt: r.started_at as number,
+        hostId: (r.host_id as string) ?? null,
+        endRequestedAt: (r.end_requested_at as number) ?? null,
+        segmentCount: r.n as number,
+        activeAt: r.active_at as number,
+      }));
+    },
+    /** Where the meeting's focus went, in order, for picking up after a restart. */
+    focusHistory(meetingId: string): Array<{ ts: number; itemId: string | null }> {
+      return (db.prepare("SELECT item_id, ts FROM focus_events WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map((r) => ({
+        ts: r.ts as number,
+        itemId: (r.item_id as string) ?? null,
+      }));
+    },
+    getMeeting(id: string) {
+      const r = db.prepare("SELECT * FROM meetings WHERE id = ?").get(id) as Row | undefined;
+      if (!r) return null;
+      return {
+        id: r.id as string,
+        roomId: r.room_id as string,
+        startedAt: r.started_at as number,
+        endedAt: (r.ended_at as number) ?? null,
+        summary: (r.summary as string) ?? null,
+        /** What the space's synthesis instructions asked for, as Markdown; null without instructions. */
+        synthesis: (r.synthesis as string) ?? null,
+        /** What the recap wrote about each chapter. */
+        chapters: (r.chapters_json ? JSON.parse(r.chapters_json as string) : []) as ChapterRecap[],
+        /** Not a meeting: the holder of a to-do someone added by hand (see addTask). */
+        added: r.kind === "added",
+      };
+    },
+    listMeetings(roomId: string) {
+      return (
+        db
+          .prepare(
+            `SELECT m.*, (SELECT COUNT(*) FROM segments s WHERE s.meeting_id = m.id) AS n
+             FROM meetings m WHERE room_id = ? AND kind IS NULL ORDER BY started_at DESC LIMIT 50`,
+          )
+          .all(roomId) as Row[]
+      ).map((r) => ({
+        id: r.id as string,
+        startedAt: r.started_at as number,
+        endedAt: (r.ended_at as number) ?? null,
+        summary: (r.summary as string) ?? null,
+        segmentCount: r.n as number,
+      }));
+    },
+    addSegment(s: Omit<Segment, "id">): Segment {
+      const seg = { ...s, id: newId(12) };
+      db.prepare(
+        "INSERT INTO segments (id, meeting_id, item_id, speaker_id, speaker_name, kind, text, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(seg.id, seg.meetingId, seg.itemId, seg.speakerId, seg.speakerName, seg.kind, seg.text, seg.ts);
+      return seg;
+    },
+    appendSegmentText(id: string, text: string): Segment | null {
+      db.prepare("UPDATE segments SET text = text || ' ' || ? WHERE id = ?").run(text, id);
+      const r = db.prepare("SELECT * FROM segments WHERE id = ?").get(id) as Row | undefined;
+      return r ? toSegment(r) : null;
+    },
+    moveSegment(id: string, itemId: string | null): Segment | null {
+      db.prepare("UPDATE segments SET item_id = ? WHERE id = ?").run(itemId, id);
+      const r = db.prepare("SELECT * FROM segments WHERE id = ?").get(id) as Row | undefined;
+      return r ? toSegment(r) : null;
+    },
+    /** Re-pins speech in [from, now] that was attached to `fromItem` onto `toItem`.
+     *  Used when someone confirms an agent suggestion: the screen changed at
+     *  `from`, so what was said since then belongs to the new item. */
+    repinSince(meetingId: string, from: number, fromItem: string | null, toItem: string | null): Segment[] {
+      const rows = db
+        .prepare("SELECT * FROM segments WHERE meeting_id = ? AND ts >= ? AND item_id IS ?")
+        .all(meetingId, from, fromItem) as Row[];
+      const st = db.prepare("UPDATE segments SET item_id = ? WHERE id = ?");
+      return rows.map((r) => {
+        st.run(toItem, r.id as string);
+        return { ...toSegment(r), itemId: toItem };
+      });
+    },
+    saveList(meetingId: string, items: ListItem[]) {
+      db.prepare("UPDATE meetings SET list_json = ? WHERE id = ?").run(JSON.stringify(items), meetingId);
+    },
+    meetingList(meetingId: string): ListItem[] | null {
+      const r = db.prepare("SELECT list_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
+      return r?.list_json ? (JSON.parse(r.list_json as string) as ListItem[]) : null;
+    },
+    saveAgentCards(meetingId: string, cards: AgentCard[]) {
+      db.prepare("UPDATE meetings SET agent_json = ? WHERE id = ?").run(JSON.stringify(cards), meetingId);
+    },
+    meetingAgentCards(meetingId: string): AgentCard[] | null {
+      const r = db.prepare("SELECT agent_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
+      return r?.agent_json ? (JSON.parse(r.agent_json as string) as AgentCard[]) : null;
+    },
+    saveBoard(meetingId: string, board: Board) {
+      db.prepare("UPDATE meetings SET board_json = ? WHERE id = ?").run(JSON.stringify({ ...board, busy: false }), meetingId);
+    },
+    meetingBoard(meetingId: string): Board | null {
+      const r = db.prepare("SELECT board_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
+      return r?.board_json ? (JSON.parse(r.board_json as string) as Board) : null;
+    },
+    meetingSegments(meetingId: string): Segment[] {
+      return (db.prepare("SELECT * FROM segments WHERE meeting_id = ? ORDER BY ts").all(meetingId) as Row[]).map(toSegment);
+    },
+    itemSegments(meetingId: string, itemId: string | null): Segment[] {
+      return (db.prepare("SELECT * FROM segments WHERE meeting_id = ? AND item_id IS ? ORDER BY ts").all(meetingId, itemId) as Row[]).map(
+        toSegment,
+      );
+    },
+    logFocus(meetingId: string, itemId: string | null, actor: string, reason: string) {
+      db.prepare("INSERT INTO focus_events (id, meeting_id, item_id, actor, reason, ts) VALUES (?, ?, ?, ?, ?, ?)").run(
+        newId(12),
+        meetingId,
+        itemId,
+        actor,
+        reason,
+        Date.now(),
+      );
+    },
+    /** A space's finished meetings that had talk, newest first, with what came out of each. */
+    feedMeetings(roomId: string, limit = 30) {
+      return (
+        db
+          .prepare(
+            `SELECT m.id, m.started_at, m.ended_at, m.summary,
+               (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'action') AS todos,
+               (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'decision') AS decided,
+               (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'question') AS open
+             FROM meetings m
+             WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND EXISTS (SELECT 1 FROM segments s WHERE s.meeting_id = m.id)
+             ORDER BY m.started_at DESC LIMIT ?`,
+          )
+          .all(roomId, limit) as Row[]
+      ).map((r) => ({
+        id: r.id as string,
+        startedAt: r.started_at as number,
+        endedAt: r.ended_at as number,
+        summary: (r.summary as string) ?? null,
+        todos: r.todos as number,
+        decided: r.decided as number,
+        open: r.open as number,
+      }));
+    },
+    /** The last finished meeting in a space before a time that more than one person talked in, so a
+     *  quick test on your own doesn't count as "last time". */
+    lastRealMeeting(roomId: string, before = Number.MAX_SAFE_INTEGER): { id: string; startedAt: number; endedAt: number } | null {
+      const r = db
+        .prepare(
+          `SELECT m.id, m.started_at, m.ended_at FROM meetings m
+           WHERE m.room_id = ? AND m.started_at < ? AND m.ended_at IS NOT NULL
+             AND (SELECT COUNT(DISTINCT s.speaker_name) FROM segments s WHERE s.meeting_id = m.id AND s.kind != 'chat') >= 2
+           ORDER BY m.started_at DESC LIMIT 1`,
+        )
+        .get(roomId, before) as Row | undefined;
+      return r ? { id: r.id as string, startedAt: r.started_at as number, endedAt: r.ended_at as number } : null;
+    },
+    addUsage(r: UsageRow) {
+      db.prepare("INSERT INTO llm_usage (meeting_id, task, model, input, cache_read, cache_write, output, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+        r.meetingId,
+        r.task,
+        r.model,
+        r.input,
+        r.cacheRead,
+        r.cacheWrite,
+        r.output,
+        r.at,
+      );
+    },
+    /** What a meeting's Claude calls cost, in dollars, in all and by task; null when none were recorded. */
+    meetingCost(meetingId: string): MeetingCost | null {
+      const rows = db
+        .prepare("SELECT task, model, SUM(input) AS input, SUM(cache_read) AS cache_read, SUM(cache_write) AS cache_write, SUM(output) AS output, COUNT(*) AS calls FROM llm_usage WHERE meeting_id = ? GROUP BY task, model")
+        .all(meetingId) as Row[];
+      if (!rows.length) return null;
+      const byTask = new Map<string, { usd: number; calls: number }>();
+      for (const r of rows) {
+        const usd = costOf({ model: r.model as string, input: r.input as number, cacheRead: r.cache_read as number, cacheWrite: r.cache_write as number, output: r.output as number });
+        const t = byTask.get(r.task as string) ?? { usd: 0, calls: 0 };
+        byTask.set(r.task as string, { usd: t.usd + usd, calls: t.calls + (r.calls as number) });
+      }
+      const tasks = [...byTask].map(([task, t]) => ({ task, ...t })).sort((a, b) => b.usd - a.usd);
+      return { usd: tasks.reduce((s, t) => s + t.usd, 0), calls: tasks.reduce((s, t) => s + t.calls, 0), tasks };
+    },
+    getSegments(ids: string[]): Segment[] {
+      if (!ids.length) return [];
+      const st = db.prepare("SELECT * FROM segments WHERE id = ?");
+      return ids
+        .map((id) => st.get(id) as Row | undefined)
+        .filter((r): r is Row => !!r)
+        .map(toSegment);
+    },
+    latestMeeting(roomId: string) {
+      const r = db.prepare("SELECT id FROM meetings WHERE room_id = ? AND kind IS NULL ORDER BY started_at DESC LIMIT 1").get(roomId) as Row | undefined;
+      return r ? (r.id as string) : null;
+    },
+    /** When the meeting before this one ended: what closed after that is news at this one's check-in. */
+    previousMeetingEnd(roomId: string, before: number): number | null {
+      const r = db.prepare("SELECT MAX(ended_at) AS t FROM meetings WHERE room_id = ? AND started_at < ? AND ended_at IS NOT NULL AND kind IS NULL").get(roomId, before) as
+        | Row
+        | undefined;
+      return (r?.t as number) ?? null;
+    },
+    /** When the meeting before this one started: "since last time" starts there. */
+    previousMeetingStart(roomId: string, before: number): number | null {
+      const r = db.prepare("SELECT MAX(started_at) AS t FROM meetings WHERE room_id = ? AND started_at < ? AND kind IS NULL").get(roomId, before) as
+        | Row
+        | undefined;
+      return (r?.t as number) ?? null;
+    },
+    itemHistory(itemId: string) {
+      const meetings = db
+        .prepare(
+          `SELECT DISTINCT m.id, m.started_at, m.ended_at FROM meetings m
+           JOIN segments s ON s.meeting_id = m.id WHERE s.item_id = ?
+           UNION
+           SELECT DISTINCT m.id, m.started_at, m.ended_at FROM meetings m
+           JOIN notes n ON n.meeting_id = m.id WHERE n.item_id = ? AND m.kind IS NULL
+           ORDER BY started_at DESC`,
+        )
+        .all(itemId, itemId) as Row[];
+      return meetings.map((m) => {
+        const segments = (
+          db.prepare("SELECT * FROM segments WHERE meeting_id = ? AND item_id = ? ORDER BY ts").all(m.id as string, itemId) as Row[]
+        ).map(toSegment);
+        const notes = (
+          db.prepare("SELECT * FROM notes WHERE meeting_id = ? AND item_id = ? ORDER BY rowid").all(m.id as string, itemId) as Row[]
+        ).map(toNote);
+        return {
+          meetingId: m.id as string,
+          startedAt: m.started_at as number,
+          endedAt: (m.ended_at as number) ?? null,
+          participants: [...new Set(segments.map((s) => s.speakerName))],
+          segments,
+          notes,
+          discussions: (
+            db
+              .prepare(`${DISCUSSION_SELECT} WHERE d.meeting_id = ? AND d.item_id = ? ORDER BY d.position`)
+              .all(m.id as string, itemId) as Row[]
+          ).map(toDiscussion),
+        };
+      });
+    },
+  };
+}
