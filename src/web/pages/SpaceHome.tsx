@@ -24,7 +24,7 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
-import { BrainstormPicker, brainstormHref } from "./BrainstormPage.tsx";
+import { brainstormHref } from "./BrainstormPage.tsx";
 import { VerdictCounts, designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
@@ -66,6 +66,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     return next;
   });
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
+  const [showReview, setShowReview] = useState(false);
+  const [showBrain, setShowBrain] = useState(false);
+  const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm">("");
   const [tab, setTab] = useState<TabKey>(() => {
     if (openTask) return "tasks";
     try {
@@ -227,6 +230,44 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const topicPicker = (n: Note) => <TopicPicker note={n} roomId={room.id} topic={topic(n)}
     inherited={topicOf({ ...n, topic: null }, room.items, room.decks)} options={topics} onSaved={load} />;
 
+  const reviews = feed?.reviews ?? [];
+  const designReviews = feed?.designReviews ?? [];
+  const brainstorms = (feed?.brainstorms ?? []).filter((b) => b.status === "done");
+  const kinds = [
+    { key: "review" as const, label: "Product reviews", n: reviews.length },
+    { key: "design" as const, label: "Design reviews", n: designReviews.length },
+    { key: "brainstorm" as const, label: "Brainstorms", n: brainstorms.length },
+  ].filter((k) => k.n > 0);
+  /** What a meeting was, with the page it left behind. */
+  const kindOf = new Map<string, { name: string; open: string; to: string }>();
+  for (const b of brainstorms) if (b.meetingId) kindOf.set(b.meetingId, { name: "Brainstorm", open: "Map", to: brainstormHref(room.id, b.id) });
+  for (const r of designReviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Design review", open: "Spec", to: designRecordHref(room.id, r.id) });
+  for (const r of reviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Product review", open: "Slides", to: reviewHref(room.id, r.id) });
+  const startReview = async () => {
+    try {
+      await api.startReview(room.id);
+      props.onJoin();
+    } catch (err) {
+      errorToast("Couldn't start the review")(err);
+    }
+  };
+  const startBrainstorm = async (prompt: string) => {
+    try {
+      await api.startBrainstorm(room.id, prompt);
+      props.onJoin();
+    } catch (err) {
+      errorToast("Couldn't start the brainstorm")(err);
+    }
+  };
+  const removeSlide = async (slideId: string) => {
+    try {
+      await api.removeReviewSlide(room.id, slideId);
+      load();
+    } catch (err) {
+      errorToast("Couldn't take the slide off")(err);
+    }
+  };
+
   const entries: Entry[] = feed
     ? [
         ...feed.captures.filter((x) => !gone.has(`snap:${x.id}`)).map((snap) => ({ kind: "snap" as const, at: snap.ts, snap })),
@@ -270,10 +311,16 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               <LinkIcon />
               {copied ? "Copied" : "Invite"}
             </button>
-            <button className="primary sh-join" onClick={props.onJoin}>
-              <MicIcon />
-              {wrapping ? "Join" : live ? "Join them" : "Start talking"}
-            </button>
+            <StartMenu
+              label={wrapping ? "Join" : live ? "Join them" : "Start talking"}
+              review={feed?.review ?? null}
+              designReview={feed?.designReview ?? null}
+              brainstorm={(feed?.brainstorms ?? []).find((b) => b.status === "live") ?? null}
+              designHref={designReviewHref(room.id)}
+              onTalk={props.onJoin}
+              onReview={() => setShowReview(true)}
+              onBrainstorm={() => setShowBrain(true)}
+            />
           </span>
         </header>
         <ModeNote caps={caps} />
@@ -293,6 +340,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </button>
           ))}
         </div>
+
+        {showReview && feed?.review && (
+          <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
+        )}
+        {showBrain && <BrainstormPop onStart={startBrainstorm} onClose={() => setShowBrain(false)} />}
 
         <section className={`sh-panel ${tab}`} role="tabpanel">
           {tab === "meetings" && (
@@ -314,7 +366,42 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                   </p>
                 </div>
               )}
-              {days.map((d) => (
+              {kinds.length > 0 && (
+                <div className="sh-kinds" role="group" aria-label="Kind of meeting">
+                  {[{ key: "" as const, label: "All", n: 0 }, ...kinds].map((k) => (
+                    <button key={k.key} type="button" className={kind === k.key ? "rp-pill on" : "rp-pill"} aria-pressed={kind === k.key} onClick={() => setKind(k.key)}>
+                      {k.label}
+                      {k.n > 0 && <span className="muted">{k.n}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {kind && (
+                <ul className="sh-rows">
+                  {kind === "review" &&
+                    reviews.map((r) => (
+                      <KindRow key={r.id} to={reviewHref(room.id, r.id)} name="Product review" at={r.startedAt}>
+                        <span className="sh-what muted">{r.slides} {r.slides === 1 ? "slide" : "slides"}</span>
+                        <OutcomeCounts outcomes={r.outcomes} />
+                      </KindRow>
+                    ))}
+                  {kind === "design" &&
+                    designReviews.map((r) => (
+                      <KindRow key={r.id} to={designRecordHref(room.id, r.id)} name="Design review" at={r.startedAt}>
+                        <span className="sh-what muted" dir="auto">{r.titles.join(" · ")}</span>
+                        <VerdictCounts verdicts={r.verdicts} />
+                      </KindRow>
+                    ))}
+                  {kind === "brainstorm" &&
+                    brainstorms.map((b) => (
+                      <KindRow key={b.id} to={brainstormHref(room.id, b.id)} name="Brainstorm" at={b.startedAt}>
+                        <span className="sh-what muted" dir="auto">{b.prompt}</span>
+                        <span className="sh-what muted">{b.ideas} {b.ideas === 1 ? "idea" : "ideas"}</span>
+                      </KindRow>
+                    ))}
+                </ul>
+              )}
+              {!kind && days.map((d) => (
                 <div key={d.label} className="sh-day">
                   <h3>{d.label}</h3>
                   <ul className="sh-rows">
@@ -341,7 +428,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                           onArchive={() => archive(`jot:${e.jot.id}`)}
                         />
                       ) : (
-                        <MeetingRow key={e.meeting.id} m={e.meeting} onArchive={() => archive(`meeting:${e.meeting.id}`)} />
+                        <MeetingRow key={e.meeting.id} m={e.meeting} kind={kindOf.get(e.meeting.id)} onArchive={() => archive(`meeting:${e.meeting.id}`)} />
                       ),
                     )}
                   </ul>
@@ -367,36 +454,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               roomId={room.id}
               me={user.name}
               deck={topicFilter ? null : deck}
-              review={topicFilter ? null : (feed?.review ?? null)}
-              reviews={topicFilter ? [] : (feed?.reviews ?? [])}
-              designReview={topicFilter ? null : (feed?.designReview ?? null)}
-              designReviews={topicFilter ? [] : (feed?.designReviews ?? [])}
-              onStartReview={async () => {
-                try {
-                  await api.startReview(room.id);
-                  props.onJoin();
-                } catch (err) {
-                  errorToast("Couldn't start the review")(err);
-                }
-              }}
-              brainstorms={topicFilter ? [] : (feed?.brainstorms ?? [])}
-              onStartBrainstorm={async (prompt) => {
-                try {
-                  await api.startBrainstorm(room.id, prompt);
-                  props.onJoin();
-                } catch (err) {
-                  errorToast("Couldn't start the brainstorm")(err);
-                }
-              }}
-              onJoin={props.onJoin}
-              onRemoveSlide={async (slideId) => {
-                try {
-                  await api.removeReviewSlide(room.id, slideId);
-                  load();
-                } catch (err) {
-                  errorToast("Couldn't take the slide off")(err);
-                }
-              }}
               open={[...todos, ...questions].filter(matching)}
               closed={[...done, ...closedQuestions].filter(matching)}
               topicPicker={topicPicker}
@@ -652,7 +709,7 @@ function ItemPill(props: {
   );
 }
 
-function MeetingRow({ m, onArchive }: { m: SpaceFeed["meetings"][number]; onArchive: () => void }) {
+function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; kind?: { name: string; open: string; to: string }; onArchive: () => void }) {
   const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
   // What came out of it, in the tabs' order and colors.
@@ -668,7 +725,7 @@ function MeetingRow({ m, onArchive }: { m: SpaceFeed["meetings"][number]; onArch
           <MicIcon />
         </span>
         <span className="sh-row-text">
-          <span className="sh-who">Meeting</span>
+          <span className="sh-who">{kind?.name ?? "Meeting"}</span>
           <span className="sh-what muted">{minutes} min</span>
           {counts.length > 0 && (
             <span className="sh-counts">
@@ -683,6 +740,11 @@ function MeetingRow({ m, onArchive }: { m: SpaceFeed["meetings"][number]; onArch
         </span>
         <time className="sh-time">{fmtTime(m.endedAt)}</time>
       </Link>
+      {kind && (
+        <Link className="rp-pill" to={kind.to}>
+          {kind.open}
+        </Link>
+      )}
       <ArchiveButton onClick={onArchive} />
     </li>
   );
@@ -702,20 +764,6 @@ function TasksTab(props: {
   me: string;
   /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
   deck: DoneDeck | null;
-  /** The next product review: the features there are to show. */
-  review: ReviewView | null;
-  /** Reviews that ran, newest first. */
-  reviews: ReviewSummary[];
-  /** The specs waiting on the next design review. */
-  designReview: DesignReviewSummary | null;
-  /** Design reviews that ran, newest first. */
-  designReviews: DesignReviewRan[];
-  onStartReview: () => Promise<void>;
-  onRemoveSlide: (slideId: string) => void;
-  /** The space's brainstorms, newest first. */
-  brainstorms: BrainstormSummary[];
-  onStartBrainstorm: (prompt: string) => Promise<void>;
-  onJoin: () => void;
   open: TaskNote[];
   closed: TaskNote[];
   onArchive: (n: Note) => void;
@@ -725,7 +773,6 @@ function TasksTab(props: {
 }) {
   const colorFor = usePersonColors();
   const [showDeck, setShowDeck] = useState(false);
-  const [showReview, setShowReview] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
   const work = useWork(props.open.filter((n) => n.kind === "action").map((n) => n.id));
@@ -833,55 +880,6 @@ function TasksTab(props: {
         </button>
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
-      {props.review && props.review.slides.length > 0 ? (
-        <button type="button" className="sh-done-since sh-review" onClick={() => setShowReview(true)}>
-          <strong>{props.review.status === "live" ? "Product review, on now" : "Product review"}</strong>
-          <span className="sh-done-since-summary">{props.review.slides.map((s) => s.title).join(" · ")}</span>
-          <span className="count">{props.review.slides.length}</span>
-          <ChevronIcon />
-        </button>
-      ) : (
-        // With no next one yet, the row stays on the last review that ran.
-        props.reviews[0] && (
-          <Link className="sh-done-since sh-review" to={reviewHref(props.roomId, props.reviews[0].id)}>
-            <strong>Product review</strong>
-            <span className="sh-done-since-summary">
-              {reviewDay(props.reviews[0].startedAt)}
-              <OutcomeCounts outcomes={props.reviews[0].outcomes} />
-            </span>
-            <span className="count">{props.reviews[0].slides}</span>
-            <ChevronIcon />
-          </Link>
-        )
-      )}
-      {/* With no next one, the row stays on the last design review that ran. */}
-      {!props.designReview && props.designReviews[0] && (
-        <Link className="sh-done-since sh-review" to={designRecordHref(props.roomId, props.designReviews[0].id)}>
-          <strong>Design review</strong>
-          <span className="sh-done-since-summary">
-            {reviewDay(props.designReviews[0].startedAt)} · {props.designReviews[0].titles.join(" · ")}
-            <VerdictCounts verdicts={props.designReviews[0].verdicts} />
-          </span>
-          <span className="count">
-            {props.designReviews[0].titles.length} {props.designReviews[0].titles.length === 1 ? "spec" : "specs"}
-          </span>
-          <ChevronIcon />
-        </Link>
-      )}
-      {props.designReview && (
-        <Link className="sh-done-since sh-review" to={designReviewHref(props.roomId)}>
-          <strong>{props.designReview.live ? "Design review, on now" : "Design review"}</strong>
-          <span className="sh-done-since-summary">{props.designReview.titles.join(" · ")}</span>
-          <span className="count">
-            {props.designReview.specs} {props.designReview.specs === 1 ? "spec" : "specs"} · {props.designReview.points} {props.designReview.points === 1 ? "question" : "questions"}
-          </span>
-          <ChevronIcon />
-        </Link>
-      )}
-      <BrainstormRow roomId={props.roomId} all={props.brainstorms} onStart={props.onStartBrainstorm} onJoin={props.onJoin} />
-      {showReview && props.review && (
-        <ReviewPop roomId={props.roomId} review={props.review} reviews={props.reviews} onStart={props.onStartReview} onRemove={props.onRemoveSlide} onClose={() => setShowReview(false)} />
-      )}
       {!props.open.length && <p className="sh-card-empty">{props.filtered ? "No open tasks in this topic." : "Nothing open. New tasks come from meetings and what people save here."}</p>}
       {waiting.length > 0 && (
         <div className="sh-task-group">
@@ -947,43 +945,118 @@ function DonePop({ deck, onClose }: { deck: DoneDeck; onClose: () => void }) {
   );
 }
 
-/** Starts a brainstorm from one sentence, or joins the one running; earlier ones sit behind a pill. */
-function BrainstormRow(props: { roomId: string; all: BrainstormSummary[]; onStart: (prompt: string) => Promise<void>; onJoin: () => void }) {
+/** Start talking, with the kinds of call the space can open behind the arrow beside it. */
+function StartMenu(props: {
+  label: string;
+  review: ReviewView | null;
+  designReview: DesignReviewSummary | null;
+  brainstorm: BrainstormSummary | null;
+  designHref: string;
+  onTalk: () => void;
+  onReview: () => void;
+  onBrainstorm: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const slides = props.review?.slides.length ?? 0;
+  const dr = props.designReview;
+  const pick = (run: () => void) => () => {
+    setOpen(false);
+    run();
+  };
+  return (
+    <div className="sh-start" ref={box}>
+      <button className="primary sh-join" onClick={props.onTalk}>
+        <MicIcon />
+        {props.label}
+      </button>
+      <button className="primary sh-start-more" aria-label="Kinds of call" title="Kinds of call" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <ChevronIcon size={11} />
+      </button>
+      {open && (
+        <div className="rp-menu sh-start-menu" role="menu">
+          <button type="button" role="menuitem" onClick={pick(props.onTalk)}>
+            <strong>Just talk</strong>
+          </button>
+          <button type="button" role="menuitem" disabled={!slides} onClick={pick(props.onReview)}>
+            <strong>Product review</strong>
+            <span className="muted">{props.review?.status === "live" ? "on now" : slides ? `${slides} ${slides === 1 ? "slide" : "slides"}` : "nothing to show yet"}</span>
+          </button>
+          {dr ? (
+            <Link role="menuitem" to={props.designHref} onClick={() => setOpen(false)}>
+              <strong>Design review</strong>
+              <span className="muted">{dr.live ? "on now" : `${dr.specs} ${dr.specs === 1 ? "spec" : "specs"}`}</span>
+            </Link>
+          ) : (
+            <button type="button" role="menuitem" disabled>
+              <strong>Design review</strong>
+              <span className="muted">no spec waiting</span>
+            </button>
+          )}
+          <button type="button" role="menuitem" onClick={pick(props.brainstorm ? props.onTalk : props.onBrainstorm)}>
+            <strong>Brainstorm</strong>
+            {props.brainstorm && <span className="muted">on now</span>}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One sentence, a topic or a question, starts a brainstorm. */
+function BrainstormPop(props: { onStart: (prompt: string) => Promise<void>; onClose: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [starting, setStarting] = useState(false);
-  const live = props.all.find((b) => b.status === "live");
-  const earlier = props.all.filter((b) => b.status === "done");
-  if (live)
-    return (
-      <div className="sh-done-since sh-brain">
-        <strong>Brainstorm, on now</strong>
-        <Link className="sh-done-since-summary" to={brainstormHref(props.roomId, live.id)} dir="auto">
-          {live.prompt}
-        </Link>
-        <span className="count">{live.ideas}</span>
-        <button type="button" className="primary" onClick={props.onJoin}>
-          Join
-        </button>
-      </div>
-    );
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [props.onClose]);
   return (
-    <form
-      className="sh-done-since sh-brain"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (!prompt.trim() || starting) return;
-        setStarting(true);
-        await props.onStart(prompt);
-        setStarting(false);
-      }}
-    >
-      <strong>Brainstorm</strong>
-      <input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A topic or a question to start from" aria-label="What the brainstorm is about" maxLength={160} dir="auto" />
-      <BrainstormPicker roomId={props.roomId} current={null} all={earlier} label={`Earlier · ${earlier.length}`} />
-      <button type="submit" className="primary" disabled={!prompt.trim() || starting}>
-        {starting ? "Starting…" : "Start"}
-      </button>
-    </form>
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
+      <form
+        className="dialog brain-pop"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Brainstorm"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!prompt.trim() || starting) return;
+          setStarting(true);
+          await props.onStart(prompt);
+          setStarting(false);
+        }}
+      >
+        <h2>Brainstorm</h2>
+        <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A topic or a question to start from" aria-label="What the brainstorm is about" maxLength={160} dir="auto" />
+        <div className="brain-pop-end">
+          <button type="button" onClick={props.onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="primary" disabled={!prompt.trim() || starting}>
+            {starting ? "Starting…" : "Start"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** A review or brainstorm that ran, as a row that opens its page. */
+function KindRow(props: { to: string; name: string; at: number | null; children: React.ReactNode }) {
+  return (
+    <li className="sh-row">
+      <Link to={props.to} className="sh-row-link">
+        <span className="sh-icon" aria-hidden>
+          <MicIcon />
+        </span>
+        <span className="sh-row-text">
+          <span className="sh-who">{props.name}</span>
+          {props.children}
+        </span>
+        <time className="sh-time">{reviewDay(props.at)}</time>
+      </Link>
+    </li>
   );
 }
 
