@@ -3385,3 +3385,21 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
   .chat-compose { position: sticky; bottom: 0; margin: 0 -16px; padding: 8px 16px 12px; background: var(--bg); }
   .chat-compose .chat-send { right: 24px; bottom: 20px; }
 }
+
+.sh-topic-mark { display: none; }
+/* A to-do's log sits on its own line under the row: indented under the text on a wide screen,
+   the full row on a phone. A long report is cut to its first lines until "More". */
+.followups li:has(> .fu-log) { flex-wrap: wrap; }
+.followups li > .fu-log { flex: 0 0 calc(100% - 30px); order: 99; min-width: 0; margin: 2px 0 4px 30px; }
+.wl-text.clamp { max-height: 7.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+@media (max-width: 760px) {
+  .followups li > .fu-log { flex-basis: 100%; margin-left: 0; padding: 4px 10px; }
+  .fu-log .wl-entry { padding-left: 16px; }
+  /* Four tabs and the topic pill fit a phone when only the open tab shows its count. */
+  .sh-tab:not(.on) .count { display: none; }
+  .sh-tab { padding: 8px 7px 7px; }
+  .sh-topic-filter { position: relative; flex: none; min-width: 0; width: 30px; height: 26px; margin-left: auto; padding: 0; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+  .sh-topic-filter.on { color: var(--bg); background: var(--text); border-color: var(--text); }
+  .sh-topic-filter .sh-topic-mark { display: block; }
+  .sh-topic-filter select, .sh-topic-filter.on select { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; padding: 0; opacity: 0; font-size: 16px; }
+}
