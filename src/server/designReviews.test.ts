@@ -10,7 +10,7 @@ import {
 import type { Agent } from "./llm.ts";
 import { PlanBriefs, slideGroups } from "./planBrief.ts";
 import { changeReview, planDiagrams, planSections, reviewFor } from "./planReview.ts";
-import { addSlide, reviewView, startReview } from "./reviews.ts";
+import { addSlide, refilePrompt, refileReview, reviewView, startReview } from "./reviews.ts";
 
 const SPEC = [
   "# Rollout of server capture",
@@ -479,6 +479,42 @@ test("what the review decides goes back: onto each point's thread, the spec's to
   assert.equal(designReviewView(db, briefs, room.id, sam)!.specs[0].last!.reviewId, record.id);
   // The point settled last time is resolved, so it isn't a point again; the open one is.
   assert.deepEqual(designReviewView(db, briefs, room.id, sam)!.specs[0].points.map((p) => p.text), ["Why ten percent?"]);
+});
+
+test("after a design review each capture goes under the slide it was about, before what was caught goes back to the spec", async () => {
+  const { db, sam, room, task, by } = space();
+  const briefs = new PlanBriefs(db, {});
+  const [standing] = db.addItems(room.id, [{ source: "agenda", externalId: null, title: "Standing item", url: null, description: null }]);
+  const capture = task("Move capture to the server");
+  requestReview(db, briefs, capture, by(sam), [{ quote: "fallback for a week", text: "Is a week enough?" }]);
+  startDesignReview(db, briefs, room.id);
+  const m = db.startMeeting(room.id);
+  const slides = db.listItems(room.id).filter((it) => it.slide?.layout === "design");
+  const week = slides.find((it) => it.title === "Is a week enough?")!;
+  const steps = slides.find((it) => it.title === "Steps")!;
+  // The answer to the question was said after the author moved on to the next section.
+  const [late] = db.replaceNotes(m.id, steps.id, [{ kind: "decision", text: "Keep the fallback for two weeks", owner: null }]);
+  const [kept] = db.replaceNotes(m.id, standing.id, [{ kind: "action", text: "Book the offsite", owner: null }]);
+  setDesignOutcome(db, briefs, week.id, "settled", "Ann Lee", m.id);
+  finishDesignReview(db, room.id, m.id);
+
+  const { text, noteOf, slideOf } = refilePrompt(db.reviewSlides(db.reviewByMeeting(m.id, "design")!.id), db.meetingNotes(m.id), (id) => db.getItem(id));
+  const keyOf = (itemId: string) => [...slideOf].find(([, s]) => s.itemId === itemId)![0];
+  assert.match(text, new RegExp(`${keyOf(week.id)} "Question 1" \\(question for the team of the spec "Move capture to the server"\\): Is a week enough\\?`));
+  assert.match(text, /About this passage of the spec: "[^"]*fallback for a week/);
+  assert.match(text, new RegExp(`${keyOf(steps.id)} "Steps" \\(section of the spec`));
+  const key = (id: string) => [...noteOf].find(([, n]) => n.id === id)![0];
+
+  const done = await refileReview(db, m.id, async () => [
+    { note: key(late.id), to: keyOf(week.id) },
+    // One under another agenda item that no slide is about stays there.
+    { note: key(kept.id), to: "none" },
+  ]);
+  assert.deepEqual(done, { moved: 1, dropped: 0 });
+  assert.equal(db.meetingNotes(m.id).find((n) => n.id === kept.id)!.itemId, standing.id);
+  writeBackReview(db, m.id);
+  const thread = db.planThreads(capture.id).find((t) => t.messages[0].text === "Is a week enough?")!;
+  assert.match(thread.messages.at(-1)!.text, /Decided:\n- Keep the fallback for two weeks/);
 });
 
 /** A spec of twelve sections, some long and some short. Section 4's text can be quoted. */

@@ -10,7 +10,8 @@
 // notes agent writes that slide's to-dos, decisions and open questions as it does for any item. A
 // slide ends with an outcome anyone can click: Ship, Ship with fixes, or Not yet.
 
-import type { ItemUpdate, Note, ReviewCaught, ReviewOutcome, ReviewShot, ReviewSlideInfo, ReviewSummary, ReviewView, SlideContent } from "../shared/protocol.ts";
+import type { DesignRole } from "../shared/designReview.ts";
+import type { Item, ItemUpdate, Note, ReviewCaught, ReviewOutcome, ReviewShot, ReviewSlideInfo, ReviewSummary, ReviewView, SlideContent } from "../shared/protocol.ts";
 import type { DB, ReviewRow, ReviewSlideRow } from "./db.ts";
 import { newId } from "./ids.ts";
 import { prOf, shotUrl } from "./workLog.ts";
@@ -288,7 +289,9 @@ export const isReviewDeck = (item: { slide: SlideContent | null } | null | undef
 // During a review, what's said is filed under the slide on screen. People talk past a flip, open
 // with something general, or come back to an earlier feature, so once the meeting's notes are tidy
 // one pass reads every to-do, decision and open question against the slides and says where each
-// belongs. It only moves notes; it writes none.
+// belongs. It only moves notes; it writes none. A design review's slides (a spec's overview,
+// sections, questions and verdict) go through the same pass, before what was caught on them goes
+// back to the spec.
 
 export interface Refile {
   note: string;
@@ -299,9 +302,28 @@ export interface Refile {
 
 const KIND_WORD: Record<string, string> = { action: "to-do", decision: "decision", question: "open question" };
 
+const DESIGN_ROLE: Record<DesignRole, string> = { overview: "overview", section: "section", point: "question for the team", verdict: "verdict" };
+
+/** One slide as the filing pass reads it. A design review's slide says it from its agenda item:
+ *  which spec, what part of it, and the passage a question is about. */
+function slideLine(key: string, s: ReviewSlideRow, item: Item | null): string {
+  const flat = (t: string) => t.replace(/\s*\n\s*/g, " / ");
+  const design = item?.slide?.design;
+  if (!design) return `${key} "${slideName(s)}": ${s.title}${s.body ? `\n   On the slide: ${flat(s.body)}` : ""}`;
+  const body = item!.slide!.body;
+  return [
+    `${key} "${design.name}" (${DESIGN_ROLE[design.role]} of the spec "${design.spec}"): ${item!.title}`,
+    ...(body ? [`   On the slide: ${flat(body)}`] : []),
+    ...(design.quote ? [`   About this passage of the spec: "${clip(flat(design.quote), 300)}"`] : []),
+  ].join("\n");
+}
+
 /** What the filing pass reads: the slides, then every capture with where it sits now. Empty when
- *  there is nothing to file. */
-export function refilePrompt(slides: ReviewSlideRow[], notes: Note[]): { text: string; noteOf: Map<string, Note>; slideOf: Map<string, ReviewSlideRow> } {
+ *  there is nothing to file. `itemOf` finds a slide's agenda item, which is what a design review's
+ *  slide says. */
+export function refilePrompt(
+  slides: ReviewSlideRow[], notes: Note[], itemOf: (id: string) => Item | null = () => null,
+): { text: string; noteOf: Map<string, Note>; slideOf: Map<string, ReviewSlideRow> } {
   const live = slides.filter((s) => s.itemId);
   const slideOf = new Map(live.map((s, i) => [`S${i + 1}`, s]));
   const keyOfItem = new Map([...slideOf].map(([k, s]) => [s.itemId!, k]));
@@ -309,8 +331,8 @@ export function refilePrompt(slides: ReviewSlideRow[], notes: Note[]): { text: s
   const noteOf = new Map(caught.map((n, i) => [`N${i + 1}`, n]));
   if (!live.length || !caught.length) return { text: "", noteOf, slideOf };
   const text = [
-    "Slides of the product review, in the order they were shown:",
-    ...[...slideOf].map(([k, s]) => `${k} "${slideName(s)}": ${s.title}${s.body ? `\n   On the slide: ${s.body.replace(/\s*\n\s*/g, " / ")}` : ""}`),
+    "Slides of the review, in the order they were shown:",
+    ...[...slideOf].map(([k, s]) => slideLine(k, s, itemOf(s.itemId!))),
     "",
     "What was caught, with the slide that was on screen at the time:",
     ...[...noteOf].map(([k, n]) => {
@@ -328,6 +350,7 @@ export function applyRefile(db: DB, moves: Refile[], noteOf: Map<string, Note>, 
   let moved = 0;
   let dropped = 0;
   const seen = new Set<string>();
+  const onSlide = new Set([...slideOf.values()].map((s) => s.itemId));
   for (const m of moves) {
     const note = noteOf.get(m.note);
     if (!note || seen.has(m.note)) continue;
@@ -340,6 +363,8 @@ export function applyRefile(db: DB, moves: Refile[], noteOf: Map<string, Note>, 
       }
       continue;
     }
+    // One under another agenda item of the meeting, not about a slide, stays under that item.
+    if (m.to === "none" && note.itemId && !onSlide.has(note.itemId)) continue;
     const target = m.to === "none" ? null : slideOf.get(m.to)?.itemId;
     if (target === undefined || target === note.itemId) continue;
     db.moveNote(note.id, target);
@@ -348,12 +373,16 @@ export function applyRefile(db: DB, moves: Refile[], noteOf: Map<string, Note>, 
   return { moved, dropped };
 }
 
-/** Files a finished review's captures under the slides they were about. `ask` is the model call
- *  (Agent.refileReview); it returning null leaves everything where it was. */
+/** Files the captures of the reviews a meeting ran (product, design or both) under the slides they
+ *  were about. `ask` is the model call (Agent.refileReview); it returning null leaves everything
+ *  where it was. */
 export async function refileReview(db: DB, meetingId: string, ask: (prompt: string) => Promise<Refile[] | null>): Promise<{ moved: number; dropped: number }> {
-  const review = db.reviewByMeeting(meetingId);
-  if (!review) return { moved: 0, dropped: 0 };
-  const { text, noteOf, slideOf } = refilePrompt(db.reviewSlides(review.id), db.meetingNotes(meetingId));
+  const reviews = [db.reviewByMeeting(meetingId), db.reviewByMeeting(meetingId, "design")]
+    .filter((r): r is ReviewRow => !!r)
+    .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+  if (!reviews.length) return { moved: 0, dropped: 0 };
+  const slides = reviews.flatMap((r) => db.reviewSlides(r.id));
+  const { text, noteOf, slideOf } = refilePrompt(slides, db.meetingNotes(meetingId), (id) => db.getItem(id));
   if (!text) return { moved: 0, dropped: 0 };
   const moves = await ask(text);
   return moves ? applyRefile(db, moves, noteOf, slideOf) : { moved: 0, dropped: 0 };
