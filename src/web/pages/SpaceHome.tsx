@@ -529,6 +529,35 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             id={openTask}
             onOpen={showTask}
             onClose={closeTask}
+            // A phone's rows carry only the title, so what the row's pills and icons do is offered here.
+            acts={(n) => (
+              <>
+                {topicPicker(n)}
+                {!n.doneAt && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void api.setTask(room.id, n.id, { state: "dropped" }).then(() => {
+                        closeTask();
+                        load();
+                        toast({ text: "Dropped", action: { label: "Undo", run: () => void api.setTask(room.id, n.id, { state: "open" }).then(load, errorToast("Couldn't undo it")) } });
+                      }, errorToast("Couldn't drop it"))
+                    }
+                  >
+                    Drop
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeTask();
+                    archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`);
+                  }}
+                >
+                  Archive
+                </button>
+              </>
+            )}
             onMentionsChange={() => {
               load();
               api.spaces().then(setSpaces, () => {});
@@ -836,7 +865,7 @@ function TasksTab(props: {
               </span>
             </span>
           )}
-          {n.from && <FromChip from={n.from} />}
+          {n.from && <span className="task-from"><FromChip from={n.from} /></span>}
         </>
       )}
       tail={(n: TaskNote) => (
@@ -902,7 +931,7 @@ function TasksTab(props: {
         </div>
       )}
       {owners.map((o) => (
-        <div key={o || "nobody"} className="sh-task-group">
+        <div key={o || "nobody"} className="sh-task-group by-owner">
           <p className="sh-group">
             {o === me ? "You" : o || "No owner"} · {groups.get(o)!.length}
           </p>

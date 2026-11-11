@@ -3407,3 +3407,16 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
   .sh-topic-filter .sh-topic-mark { display: block; }
   .sh-topic-filter select, .sh-topic-filter.on select { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; padding: 0; opacity: 0; font-size: 16px; }
 }
+
+/* Tasks on a phone: a row is its checkbox, its title and what's happening on it. The topic, the date,
+   drop, archive and copy are in the task's own view (TaskDrawer's td-phone-acts), a tap on the title away. */
+.td-phone-acts { display: none; }
+@media (max-width: 760px) {
+  .sh-panel.tasks .followups li > .sh-archive, .sh-panel.tasks .followups li > .cfa { display: none; }
+  .sh-panel.tasks .by-owner .followups li > .rc-face { display: none; }
+  .sh-panel.tasks .followups .topic-picker:has(.unset), .sh-panel.tasks .followups .task-from { display: none; }
+  .sh-panel.tasks .followups .topic-picker { margin-left: 0; }
+  .sh-panel.tasks .followups .topic-pill { padding: 0; margin-left: 6px; border: 0; background: none; box-shadow: none; height: auto; min-height: 0; font-size: 12px; font-weight: 400; color: var(--muted); max-width: 140px; }
+  .td-phone-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
+  .td-phone-acts > button { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; }
+}
