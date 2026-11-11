@@ -13,6 +13,7 @@ import type { Item, Note } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { CloseIcon } from "../icons.tsx";
 import { Markdown } from "../Markdown.tsx";
+import { Mermaid } from "../Mermaid.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { PlanReviewBody } from "../PlanReview.tsx";
 import { AddLine } from "./ReviewStage.tsx";
@@ -136,6 +137,7 @@ export function DesignStage(props: {
                           ))}
                         </ul>
                       )}
+                      {p.diagram && <Mermaid className="ds-diagram" code={p.diagram} />}
                     </section>
                   ))}
                 </div>
@@ -153,8 +155,9 @@ export function DesignStage(props: {
                       ))}
                     </ul>
                   ) : (
-                    <p className="muted">Open Full spec to go through this section.</p>
+                    !parts[0]?.diagram && <p className="muted">Open Full spec to go through this section.</p>
                   )}
+                  {parts[0]?.diagram && <Mermaid className="ds-diagram" code={parts[0].diagram} />}
                 </>
               ))}
             {shown.role !== "verdict" && steps.length > 0 && (

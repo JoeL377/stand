@@ -1680,6 +1680,10 @@ button.link.synth-line.set:hover:not(:disabled) { color: var(--text); }
 .md ul, .md ol { margin: 0 0 10px; padding-left: 22px; }
 .md li + li { margin-top: 3px; }
 .md blockquote { margin: 0 0 10px; padding: 2px 0 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+/* A mermaid block drawn as its diagram (Mermaid.tsx); one that doesn't parse stays code. */
+.mermaid-diagram { margin: 0 0 10px; overflow-x: auto; }
+.mermaid-diagram svg { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+.mermaid-diagram pre { margin: 0; font-size: 12.5px; white-space: pre-wrap; }
 .md code { font-size: 13px; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
 
 /* ---- the latest snap, small in the corner of the middle screen ---- */
@@ -3162,6 +3166,12 @@ a.sh-review { text-decoration: none; color: inherit; }
 .ds-parts .ds-lines { font-size: clamp(14px, 1.35vw, 17px); gap: 4px; }
 .ds-main.asking > h1, .ds-main.asking .ds-parts h1 { font-size: 16px; }
 .ds-main.asking .ds-lines, .ds-main.asking .ds-summary { font-size: 14px; color: var(--muted); gap: 2px; }
+.ds-diagram { margin: 4px 0 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.ds-diagram svg { max-height: 46vh; }
+.ds-parts .ds-diagram svg { max-height: 30vh; }
+.ds-main.asking .ds-diagram svg { max-height: 20vh; }
+.dr-diagram > summary { cursor: pointer; }
+.dr-diagram .mermaid-diagram { margin-top: 8px; }
 .ds-questions { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .ds-q { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
 .ds-q > span:nth-child(2) { flex: 1; min-width: 0; }

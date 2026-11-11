@@ -58,6 +58,13 @@ const PLAN = [
   "- Keep the browser fallback for a week",
   "- Remove the flag",
   "",
+  "```mermaid",
+  "flowchart LR",
+  "  browser[Browser capture] --> flag{Flag on?}",
+  "  flag -- yes --> server[Server capture]",
+  "  flag -- no --> browser",
+  "```",
+  "",
   "## Risks",
   "",
   "| Risk | Answer |",
@@ -68,7 +75,7 @@ const PLAN = [
 // A spec of twelve sections, some long and some short: more than the eight section slides a spec gets.
 const BIG_TASK = "Design the billing export";
 const BIG_SIZES = [10, 500, 20, 30, 400, 15, 600, 25, 35, 700, 12, 18];
-const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", ...BIG_SIZES.flatMap((n, i) => [`## Part ${i + 1}`, "", `Body ${i + 1}: ${"x".repeat(n)}`, ""])].join("\n");
+const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", "```mermaid", "this is not a diagram", "```", "", ...BIG_SIZES.flatMap((n, i) => [`## Part ${i + 1}`, "", `Body ${i + 1}: ${"x".repeat(n)}`, ""])].join("\n");
 
 (async () => {
   const browser = await chromium.launch({ headless: true, channel: process.env.STAND_VERIFY_CHANNEL || undefined, args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
@@ -161,6 +168,17 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", ...BIG_SIZES.f
       await vera.getByRole("heading", { name: TASK }).waitFor();
     });
 
+    await step("the plan viewer draws a mermaid block as a diagram, and leaves one that doesn't parse as code", async () => {
+      await vera.goto(`${spaceUrl}?task=${taskId}&view=plan`);
+      await vera.locator(".md .mermaid-diagram svg").waitFor({ timeout: 30_000 });
+      await snap("plan-viewer-diagram", vera);
+      const big = (await tool("list_actions", { space })).text.match(new RegExp(`stand:action/([a-z0-9]+)[^}]*${BIG_TASK}|${BIG_TASK}[^}]*stand:action/([a-z0-9]+)`));
+      if (!big) throw new Error("the big spec's to-do isn't in list_actions");
+      await vera.goto(`${spaceUrl}?task=${big[1] ?? big[2]}&view=plan`);
+      await vera.locator(".md .mermaid-diagram pre", { hasText: "this is not a diagram" }).waitFor({ timeout: 30_000 });
+    });
+    check("the broken diagram left no error drawing on the page", (await vera.locator(".md .mermaid-diagram svg").count()) === 0 && !(await vera.locator("body").innerText()).includes("Syntax error"));
+
     await step("the host starts the meeting; the host is not the author", async () => {
       lastPage = rae;
       await rae.goto(spaceUrl);
@@ -195,8 +213,10 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", ...BIG_SIZES.f
       await rae.getByRole("button", { name: "Next slide" }).click();
       await rae.locator(".design-stage h1", { hasText: "Steps" }).waitFor();
       await rae.locator(".ds-q", { hasText: "Is a week enough for the mobile clients?" }).waitFor();
+      await rae.locator(".ds-diagram svg").waitFor({ timeout: 30_000 });
       await snap("section-with-question", rae);
     });
+    check("the section's slide shows its diagram from the spec", (await rae.locator(".ds-diagram svg").innerHTML()).includes("Server capture"));
     check("the question is closed on the slide of its section", (await rae.locator(".ds-q.open").count()) === 0 && (await stageText(rae)).includes("Slide 3 of 5"), (await stageText(rae)).match(/Slide [^←→]*/)?.[0]);
     await step("the author opens the question for everyone, and the slide stays up", async () => {
       lastPage = vera;
@@ -244,6 +264,7 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", ...BIG_SIZES.f
       await rae.getByRole("dialog", { name: "Full spec" }).waitFor();
       await vera.getByRole("dialog", { name: "Full spec" }).waitFor({ timeout: 10_000 });
       await vera.getByRole("dialog", { name: "Full spec" }).getByText("Is a week enough for the mobile clients?").first().waitFor();
+      await vera.getByRole("dialog", { name: "Full spec" }).locator(".mermaid-diagram svg").waitFor({ timeout: 30_000 });
       await snap("full-spec-for-all", vera);
     });
     check("the spec opens on the question's thread", (await vera.locator("[data-plan-highlight]").count()) > 0, await vera.locator("[data-plan-highlight]").allInnerTexts());

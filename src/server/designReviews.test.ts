@@ -9,7 +9,7 @@ import {
 } from "./designReviews.ts";
 import type { Agent } from "./llm.ts";
 import { PlanBriefs, slideGroups } from "./planBrief.ts";
-import { changeReview, planSections, reviewFor } from "./planReview.ts";
+import { changeReview, planDiagrams, planSections, reviewFor } from "./planReview.ts";
 import { addSlide, reviewView, startReview } from "./reviews.ts";
 
 const SPEC = [
@@ -569,4 +569,49 @@ test("in the call sections that share a slide are one slide, and a question is a
   prepare(db, briefs, note, by(sam), { regroup: true });
   specChanged(db, briefs, note);
   assert.equal(deckOf(db, room.id).filter((t) => t.startsWith("section:")).length, 8);
+});
+
+test("a section's slide shows the first mermaid diagram the spec has under it", () => {
+  const { db, sam, room, task, by } = space();
+  const flow = "flowchart LR\n  browser --> server\n  server --> notes";
+  const spec = [
+    "# Capture",
+    "",
+    "```mermaid",
+    "flowchart LR\n  before --> headings",
+    "```",
+    "",
+    "## Flow",
+    "",
+    "Capture moves to the server.",
+    "",
+    "```mermaid",
+    flow,
+    "```",
+    "",
+    "- A list with a second diagram:",
+    "",
+    "  ```Mermaid",
+    "  sequenceDiagram\n    a->>b: hi",
+    "  ```",
+    "",
+    "## Code",
+    "",
+    "```sql",
+    "SELECT 1;",
+    "```",
+    "",
+    "```mermaid",
+    "```",
+  ].join("\n");
+  assert.deepEqual(planDiagrams(spec).map((d) => d.code.split("\n")[0]), ["flowchart LR", "flowchart LR", "sequenceDiagram"]);
+  const note = task("Move capture to the server", "Sam", spec);
+  const briefs = new PlanBriefs(db, {});
+  requestReview(db, briefs, note, by(sam));
+  // The review page knows which sections have one, and each slide carries its own.
+  assert.deepEqual(designReviewView(db, briefs, room.id, sam)!.specs[0].diagrams, { Flow: flow });
+  startDesignReview(db, briefs, room.id);
+  const [, flowSlide, code] = db.listItems(room.id);
+  assert.deepEqual(flowSlide.slide!.design!.parts, [{ heading: "Flow", lines: [], stand: false, diagram: flow }]);
+  assert.deepEqual(code.slide!.design!.parts, [{ heading: "Code", lines: [], stand: false }]);
 });

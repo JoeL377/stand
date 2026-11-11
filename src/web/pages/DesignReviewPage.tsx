@@ -13,6 +13,7 @@ import {
 import { TASK_COMMENT_MAX } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
+import { Mermaid } from "../Mermaid.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { errorToast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
@@ -282,7 +283,16 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
                 )}
               </header>
               {row.sections.map((s, i) => (
-                <SectionPart key={s.heading} section={s} points={of(s)} mine={mine} change={change} shares={row.sections.length} join={i > 0 ? "split" : row.at > 0 ? "join" : undefined} />
+                <SectionPart
+                  key={s.heading}
+                  section={s}
+                  points={of(s)}
+                  mine={mine}
+                  change={change}
+                  shares={row.sections.length}
+                  join={i > 0 ? "split" : row.at > 0 ? "join" : undefined}
+                  diagram={spec.diagrams?.[s.heading]}
+                />
               ))}
             </li>
           );
@@ -345,6 +355,8 @@ function SectionPart(props: {
   shares: number;
   /** What the author can do with its place: join the slide above, or leave the one it shares. */
   join?: "join" | "split";
+  /** The section's diagram in the spec: the slide shows it under the lines. */
+  diagram?: string;
 }) {
   const { section: s, points, mine, change } = props;
   const shown = linesShown(props.shares);
@@ -381,6 +393,12 @@ function SectionPart(props: {
             empty="No lines: the slide shows the heading."
             onSave={(text) => change({ section: s.heading, lines: text.split("\n") })}
           />
+          {props.diagram && (
+            <details className="dr-diagram">
+              <summary className="muted small">The slide shows this section's diagram from the spec</summary>
+              <Mermaid code={props.diagram} />
+            </details>
+          )}
           <Points points={points} mine={mine} change={change} />
           {mine && <Ask label={`Ask the team a question about ${s.heading}`} onAsk={(question) => change({ question, section: s.heading })} />}
         </>

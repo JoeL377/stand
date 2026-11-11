@@ -22,10 +22,22 @@ import { TASK_COMMENT_MAX, type Item, type Note, type SlideContent } from "../sh
 import type { DB, ReviewRow, ReviewSlideRow } from "./db.ts";
 import { newId } from "./ids.ts";
 import { slideGroups, type PlanBriefs } from "./planBrief.ts";
-import { changeReview, logThreadChange, passageAround, planBlocks, planSections, quotePassage, reviewFor } from "./planReview.ts";
+import { changeReview, logThreadChange, passageAround, planBlocks, planDiagrams, planSections, quotePassage, reviewFor } from "./planReview.ts";
 
 const MAX_SPECS = 20;
 const QUOTE_MAX = 600;
+const DIAGRAM_MAX = 8000;
+
+/** The first mermaid diagram the plan has under each `##` heading, for that section's slide. */
+function sectionDiagrams(text: string): Map<string, string> {
+  const sections = planSections(text);
+  const out = new Map<string, string>();
+  for (const d of planDiagrams(text)) {
+    const heading = sections.find((s) => s.start <= d.start && d.start < s.end)?.heading;
+    if (heading && !out.has(heading) && d.code.length <= DIAGRAM_MAX) out.set(heading, d.code);
+  }
+  return out;
+}
 
 export class DesignReviewError extends Error {}
 
@@ -106,6 +118,7 @@ function specOf(db: DB, briefs: PlanBriefs | null, slide: ReviewSlideRow, user: 
     mine: !!user && isAuthor(db, note, user),
     brief: brief ?? emptyBrief(plan.id),
     groups: slideGroups(briefFor(db, briefs, note.id, plan), plan.text),
+    diagrams: Object.fromEntries(sectionDiagrams(plan.text)),
     points: pointsOf(db, note.id),
     last: lastReviewOf(db, note.id),
   };
@@ -403,6 +416,7 @@ function specContext(db: DB, briefs: PlanBriefs | null, rows: ReviewSlideRow[], 
   const numbered = rows.filter((r) => r.role === "point").map((r) => r.id);
   const groups = slideGroups(brief, plan.text);
   const titleOf = (group: string[]) => group.join(" · ");
+  const diagrams = sectionDiagrams(plan.text);
   const base = { taskId: note.id, spec: note.text, owner: note.owner ?? null, planBy: written?.by ?? plan.by, planById: written?.actor?.personId ?? null };
   return (row: ReviewSlideRow): ({ title: string } & SlideContent) | null => {
     const info = (i: Omit<DesignSlideInfo, keyof typeof base | "outcome" | "outcomeBy">): DesignSlideInfo => ({
@@ -424,7 +438,8 @@ function specContext(db: DB, briefs: PlanBriefs | null, rows: ReviewSlideRow[], 
         const shown = linesShown(group.length);
         const parts = group.map((section) => {
           const written = brief.sections.find((x) => x.heading === section.heading);
-          return { heading: section.heading, lines: (written?.lines ?? []).slice(0, shown), stand: !!written?.lines.length && !written.edited };
+          const diagram = diagrams.get(section.heading);
+          return { heading: section.heading, lines: (written?.lines ?? []).slice(0, shown), stand: !!written?.lines.length && !written.edited, ...(diagram && { diagram }) };
         });
         const one = group.length === 1;
         const under = group.map((x) => `${one ? "" : `${x.heading}\n`}${clip(plan.text.slice(x.headingEnd, x.end).trim(), Math.floor(PASSAGE_MAX / group.length))}`).join("\n\n");

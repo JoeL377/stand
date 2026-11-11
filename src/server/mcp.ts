@@ -264,7 +264,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Attach a plan or spec to a Stand to-do",
       description:
-        "Keeps the plan or spec for a to-do on the to-do, as markdown, so nobody needs it in the repo and anyone can see how it's being done. Attaching again adds a new version. It doesn't have to stay perfectly current: attach when you have a plan and again when it changes a lot. get returns the latest.",
+        "Keeps the plan or spec for a to-do on the to-do, as markdown, so nobody needs it in the repo and anyone can see how it's being done. Attaching again adds a new version. It doesn't have to stay perfectly current: attach when you have a plan and again when it changes a lot. get returns the latest. A ```mermaid code block shows as its diagram, in the plan and on that section's slide in a design review: put one under the heading where a flow, a sequence or a data model is easier to see than to read.",
       inputSchema: {
         ref: z.string().describe("The to-do's reference, stand:action/<id>"),
         plan: z.string().describe("The plan or spec, as markdown, up to 100,000 characters"),

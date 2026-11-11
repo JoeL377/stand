@@ -7,7 +7,7 @@ import { TASK_COMMENT_MAX, type Note } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { newId } from "./ids.ts";
 
-type MdNode = { type: string; depth?: number; value?: string; position?: { start: { offset?: number }; end: { offset?: number } }; children?: MdNode[] };
+type MdNode = { type: string; depth?: number; lang?: string | null; value?: string; position?: { start: { offset?: number }; end: { offset?: number } }; children?: MdNode[] };
 
 const parse = (text: string) => (unified().use(remarkParse).use(remarkGfm).parse(text) as MdNode).children ?? [];
 
@@ -43,6 +43,18 @@ export function quotePassage(text: string, quote: string): Passage | "missing" |
   if (at < 0) return "missing";
   if (text.indexOf(q, at + 1) >= 0) return "ambiguous";
   return passageAround(text, at, q.length) ?? "missing";
+}
+
+/** The mermaid diagrams a plan has, in its order: where each code block starts, and its code. */
+export function planDiagrams(text: string): Array<{ start: number; code: string }> {
+  const found: Array<{ start: number; code: string }> = [];
+  const walk = (node: MdNode) => {
+    const start = node.position?.start.offset;
+    if (node.type === "code" && node.lang?.toLowerCase() === "mermaid" && start !== undefined && node.value?.trim()) found.push({ start, code: node.value.trim() });
+    node.children?.forEach(walk);
+  };
+  parse(text).forEach(walk);
+  return found;
 }
 
 export interface PlanSection {
