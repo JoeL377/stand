@@ -13,6 +13,8 @@ const INSTRUCTIONS = `Stand records team meetings and pins what was said to the 
 
 Between meetings people also save notes to a space from the Stand bar on their Mac (typed or dictated), often with snaps of their screen pinned to them.
 
+People in a space also write to each other in its chat between meetings. Stand keeps that talk in stretches, each with an id, the way it keeps meetings.
+
 References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:context/<id>, stand:topic/<id> and stand:note/<id>. When the user pastes one (or a Stand /ref/ link), call get with it first and work from the decision and the reasons, not just the title.
 
 At the start of a session, call whats_new for the space you're working in and work from what it says. It covers the last 7 days and what's being worked on right now, so nobody has to re-explain.
@@ -25,6 +27,7 @@ Stand keeps who did what: the person, their agent and its connection. When you w
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
 When your person wants to design something with the team in a call -> start_design_session, with the context they should have to hand.
 When your person wants to go back through a brainstorm's ideas and pick which to pursue -> start_idea_review sets up a review call with one slide per idea.
+What people wrote in a space's chat -> get_chat: where the chat stands, or one stretch of it with what was written. whats_new lists the stretches since a date under chats.
 What a brainstorm came up with -> get_brainstorm: the map as an outline, with the ideas under each direction and the to-dos, decisions and open questions caught on them.
 Something true about the project that nobody had to choose, and the next person or agent should know -> add_context, with replaces when it corrects an older line. What the space holds as true -> list_context.`;
 
@@ -327,7 +330,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "See what changed in a Stand space",
       description:
-        "Everything that changed in a Stand space since a date, in one call: meetings with their summaries, decisions, open questions, context, what's being worked on right now, to-dos added and closed with their summaries, and the latest word on everything else. Call it first when catching up. Then use get_meeting_brief for a meeting's detail or transcript.",
+        "Everything that changed in a Stand space since a date, in one call: meetings with their summaries, stretches of chat between meetings, decisions, open questions, context, what's being worked on right now, to-dos added and closed with their summaries, and the latest word on everything else. Call it first when catching up. Then use get_meeting_brief for a meeting's detail or transcript, and get_chat for what was written in a chat.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         since: z.string().optional().describe("From this date or time, like 2026-10-11. Default: the last 7 days"),
@@ -336,6 +339,27 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: READ,
     },
     ({ space, since, all_updates }) => run(() => api.whatsNew(caller, { space, since, allUpdates: all_updates }, baseUrl)),
+  );
+
+  server.registerTool(
+    "get_chat",
+    {
+      title: "Read a Stand space's chat",
+      description:
+        "What people in a Stand space wrote to each other between meetings. With a space: its channels, the stretch of chat going on now (live) and the recent ones, each with who wrote, how many messages and what came out of it. With a chat_id (from here or whats_new): that stretch, with its topics, to-dos, decisions and open questions, and with transcript the messages themselves. A live stretch is still being written, so read it as talk in progress.",
+      inputSchema: {
+        space: z.string().optional().describe("The space's id or name (from list_spaces). Needed when there is no chat_id"),
+        chat_id: z.string().optional().describe("One stretch of chat"),
+        transcript: z.boolean().optional().describe("With a chat_id: include what was written. Default false"),
+      },
+      annotations: READ,
+    },
+    ({ space, chat_id, transcript }) =>
+      run(() => {
+        if (chat_id) return api.getChat(caller, { chatId: chat_id, transcript }, baseUrl);
+        if (!space) throw new AgentError("Give a space, or a chat_id for one stretch of chat.");
+        return api.chatStatus(caller, space);
+      }),
   );
 
   server.registerTool(

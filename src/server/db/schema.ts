@@ -415,6 +415,13 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS chat_messages_channel ON chat_messages(channel_id, seq);
 CREATE UNIQUE INDEX IF NOT EXISTS chat_messages_external ON chat_messages(channel_id, external_id) WHERE external_id IS NOT NULL;
+-- How far each person has read a channel: the seq of the last message they saw.
+CREATE TABLE IF NOT EXISTS channel_reads (
+  channel_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  read_up_to INTEGER NOT NULL,
+  PRIMARY KEY (channel_id, user_id)
+);
 `;
 
 /** Makes the tables a new database needs, and adds what later versions added to an older one.
