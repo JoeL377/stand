@@ -853,7 +853,7 @@ function TasksTab(props: {
       )}
       {props.designReview && (
         <Link className="sh-done-since sh-review" to={designReviewHref(props.roomId)}>
-          <strong>Design review</strong>
+          <strong>{props.designReview.live ? "Design review, on now" : "Design review"}</strong>
           <span className="sh-done-since-summary">{props.designReview.titles.join(" · ")}</span>
           <span className="count">
             {props.designReview.specs} {props.designReview.specs === 1 ? "spec" : "specs"} · {props.designReview.points} {props.designReview.points === 1 ? "point" : "points"}

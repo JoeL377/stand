@@ -182,6 +182,7 @@ export const api = {
   presentationTasks: (roomId: string) => call<Note[]>("GET", `/api/rooms/${roomId}/presentation-tasks`),
   taskBrief: (id: string, retry = false) => call<PlanBrief>("POST", `/api/tasks/${id}/presentation-brief`, { retry }, SLOW_REQUEST_MS),
   designReview: (roomId: string) => call<{ roomName: string; review: DesignReviewView | null }>("GET", `/api/rooms/${roomId}/design-review`),
+  startDesignReview: (roomId: string) => call<{ review: DesignReviewView | null; firstItemId: string }>("POST", `/api/rooms/${roomId}/design-review/start`),
   designReviewState: (taskId: string) => call<DesignReviewState>("GET", `/api/tasks/${taskId}/design-review`),
   requestDesignReview: (taskId: string) => call<DesignReviewState>("POST", `/api/tasks/${taskId}/design-review`),
   removeDesignReview: (taskId: string) => call<DesignReviewState>("DELETE", `/api/tasks/${taskId}/design-review`),

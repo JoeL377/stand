@@ -1,13 +1,13 @@
 import { normalizeTopic, TOPIC_MAX } from "../shared/topics.ts";
 import { PlanBriefs } from "./planBrief.ts";
-import { DesignReviewError, designReviewState, designReviewView, isAuthor, prepare, removeSpec, requestReview, requested, specView } from "./designReviews.ts";
+import { DesignReviewError, designReviewState, designReviewView, isAuthor, prepare, removeSpec, requestReview, requested, specChanged, specView, startDesignReview, whenBriefed } from "./designReviews.ts";
 import { changeReview, logThreadChange, reviewFor } from "./planReview.ts";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { type WebSocket, WebSocketServer } from "ws";
-import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, GithubStatus, ItemHistory, Jot, MeetingRecap, ProjectsStatus, SlideLayout, TaskDetail, TaskLink } from "../shared/protocol.ts";
+import type { ActionWork, DeckDraft, DeckHistory, DeckTheme, GithubStatus, ItemHistory, Jot, MeetingRecap, Note, ProjectsStatus, SlideLayout, TaskDetail, TaskLink } from "../shared/protocol.ts";
 import { stateOf } from "../shared/tasks.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { MAX_SHOT_BYTES, UploadLinks, readyToShip, saveShotFile, shotFile, workLog, workingOn } from "./workLog.ts";
@@ -108,6 +108,7 @@ function session(roomId: string): RoomSession | null {
     capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r, () => keytermsFor(roomId, room.name)) : undefined,
     polisher,
     resume,
+    planBriefs,
   );
   sessions.set(roomId, s);
   // Warm the Conxt vocabulary before anyone speaks; the meeting never waits on it.
@@ -197,9 +198,17 @@ app.use(oauthRoutes(db));
 // ---- agents: the Stand MCP and the Copy for agent button ---------------------
 
 const uploadLinks = new UploadLinks();
+/** A plan in a running design review changed (a comment, a new version, the author's edit): its
+ *  slides are laid out again for the people in the call. A new point follows the slide on screen. */
+function specTouched(task: Note & { roomId: string }) {
+  const s = sessions.get(task.roomId);
+  if (specChanged(db, planBriefs, task, s?.state().focusItemId)) s?.itemsChanged();
+}
+
 const agents = agentApi({
   db,
   briefs: planBriefs,
+  specTouched,
   uploads: uploadLinks,
   readyToShip: () => void shipWatch.check(),
   liveMeeting: (roomId) => {
@@ -419,6 +428,8 @@ app.post("/api/tasks/:id/plan-review", route((req, res) => {
   const thread = changeReview(db, task.id, req.user!.name, req.body ?? {});
   if (!thread) return res.status(400).json({ error: "Select a passage or enter a valid comment." });
   logThreadChange(db, task, thread, req.body?.action, { userId: req.user!.id, userName: req.user!.name, client: null });
+  // A comment made while the plan's design review runs is a point: it gets a slide.
+  if (req.body?.action === "create") specTouched(task);
   res.json(thread);
 }));
 
@@ -1133,6 +1144,31 @@ const designError = (res: express.Response, err: unknown) => {
   throw err;
 };
 
+// Starts it: each spec becomes slides at the top of the agenda, and a call that's running goes to the first one.
+app.post(
+  "/api/rooms/:id/design-review/start",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    try {
+      const started = startDesignReview(db, planBriefs, room.id);
+      const s = sessions.get(room.id);
+      if (s) {
+        s.itemsChanged();
+        s.setFocus(started.firstItemId, req.user!.name, "manual");
+      }
+      // A spec Stand is still writing the slides of: they fill in when it has.
+      for (const spec of designReviewView(db, planBriefs, room.id, req.user!)?.specs ?? []) {
+        const task = db.getNote(spec.taskId);
+        if (task) whenBriefed(db, planBriefs, task, () => sessions.get(room.id)?.itemsChanged());
+      }
+      res.json({ review: designReviewView(db, planBriefs, room.id, req.user!), firstItemId: started.firstItemId });
+    } catch (err) {
+      designError(res, err);
+    }
+  }),
+);
+
 // Whether a to-do's plan waits on the next design review.
 app.get(
   "/api/tasks/:id/design-review",
@@ -1179,6 +1215,8 @@ app.patch(
     if (!isAuthor(db, task, req.user!)) return res.status(403).json({ error: "Only the spec's author prepares it for the review." });
     try {
       prepare(db, planBriefs, task, personBy(req), req.body ?? {});
+      specTouched(task);
+      whenBriefed(db, planBriefs, task, () => sessions.get(task.roomId)?.itemsChanged());
       res.json({ spec: specView(db, planBriefs, task, req.user!) });
     } catch (err) {
       designError(res, err);

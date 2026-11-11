@@ -36,7 +36,7 @@ export function SidePanel(props: {
   const shown = segments.filter((s) => s.itemId === state.focusItemId && s.kind !== "chat");
   // The running list sits out a product review (the notes agent files what's said under the slide),
   // so on a review slide what was caught comes from the notes.
-  const captures = (focus?.slide?.layout === "review" ? props.notes : (props.list ?? props.notes)).filter(
+  const captures = (focus?.slide?.layout === "review" || focus?.slide?.layout === "design" ? props.notes : (props.list ?? props.notes)).filter(
     (n) => n.meetingId === state.meetingId && n.itemId === state.focusItemId && n.kind !== "summary" && !("closed" in n && (n as ListNote).closed?.how === "wrong"),
   );
   const transcriptCount = shown.length + captures.length;

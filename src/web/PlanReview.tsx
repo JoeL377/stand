@@ -11,14 +11,15 @@ function passageAt(element: Node, document: HTMLElement) {
   return block && document.contains(block) ? block : null;
 }
 
-export function PlanReviewBody({ task }: { task: string }) {
+/** `initial`: where the plan opens, as a comment thread or a passage (a design review slide's part of the spec). */
+export function PlanReviewBody({ task, initial }: { task: string; initial?: { thread?: string | null; passage?: Passage | null } }) {
   const [review, setReview] = useState<PlanReview | null>(null);
   const version = useRef<string | undefined>(undefined);
   const request = useRef(0);
   const switching = useRef(false);
   const document = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<Passage | null>(null);
-  const [active, setActive] = useState<string | null>(null);
+  const [active, setActive] = useState<string | null>(initial?.thread ?? null);
   const [filter, setFilter] = useState<"open" | "resolved">("open");
   const [notice, setNotice] = useState("");
   const [mobilePanel, setMobilePanel] = useState<"plan" | "comments">("plan");
@@ -127,6 +128,7 @@ export function PlanReviewBody({ task }: { task: string }) {
 
   function openThread(id: string) {
     if (busy) return;
+    setOpened(true);
     setMobilePanel("comments");
     setFilter("open");
     setNotice("");
@@ -135,7 +137,8 @@ export function PlanReviewBody({ task }: { task: string }) {
     setSelection(null);
   }
 
-  const highlight = selection ?? thread?.placement ?? null;
+  const [opened, setOpened] = useState(false);
+  const highlight = selection ?? thread?.placement ?? (!opened && !active ? (initial?.passage ?? null) : null);
   const marked = review?.threads.flatMap((entry) => entry.placement && !entry.resolved
     ? [{ ...entry.placement, id: entry.id }] : []);
   useEffect(() => {

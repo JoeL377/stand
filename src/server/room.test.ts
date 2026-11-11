@@ -9,6 +9,7 @@ import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, type NotesOptio
 import type { ClientMessage, Item, Note, Segment, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
+import { changeReview } from "./planReview.ts";
 import { outlineToSlides } from "../shared/outline.ts";
 import { config } from "./config.ts";
 import { ConxtOpenItems, refreshRoomOpenItems, setConxtOpenItems } from "./conxtOpenItems.ts";
@@ -1213,12 +1214,62 @@ test("Pilot: only the pilot asks Stand; a typed follow-up lands on its card; ask
   await session.end();
 });
 
+test("presenting a task with a spec starts a design review of it: slides to walk through, points to call, a verdict", async () => {
+  const { db, session, meetingId, items } = setup();
+  const roomId = session.state().roomId;
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  const bob = await join(session, { id: "u3", name: "Bob" });
+  const task = db.addNote(meetingId, items[0].id, { kind: "action", text: "Review rollout", owner: "Ann" }, null);
+  const spec = "# Rollout\n\n## Stages\n\nShip to ten percent first.\n\n## Risks\n\nThe bill may double.";
+  db.addPlan(roomId, task.id, spec, "Ann");
+  const plan = db.planVersions(task.id)[0];
+  const at = (q: string) => ({ start: spec.indexOf(q), end: spec.indexOf(q) + q.length });
+  changeReview(db, task.id, "Ann", { action: "create", version: plan.id, text: "Is ten percent too many?", ...at("Ship to ten percent first.") });
+
+  await say(joe, { type: "task.present", taskId: task.id });
+  const deck = () => session.state().items.filter((i) => i.slide?.layout === "design");
+  const on = () => session.state().items.find((i) => i.id === session.state().focusItemId)!;
+  assert.deepEqual(deck().map((i) => i.slide!.design!.role), ["overview", "section", "point", "section", "verdict"]);
+  assert.equal(on().slide!.design!.role, "overview");
+  assert.equal(session.state().items[0].id, on().id, "the review leads the agenda");
+  assert.ok(db.noteUpdates(task.id).some((u) => u.text.startsWith("Review requested")));
+
+  // What's said is filed under the slide on screen.
+  const [, stages, point, risks, verdict] = deck();
+  await say(joe, { type: "focus", itemId: point.id });
+  session.addSpeech("u3", "Bob", "Ten percent is too many for the first day", Date.now());
+  assert.equal(db.meetingSegments(meetingId).at(-1)?.itemId, point.id);
+
+  // The spec's author moves between its slides for everyone; nobody else who isn't the host does.
+  await say(bob, { type: "design.go", itemId: risks.id });
+  assert.equal(on().id, point.id);
+  await say(ann, { type: "design.go", itemId: risks.id });
+  assert.equal(on().id, risks.id);
+  await say(ann, { type: "design.go", itemId: items[1].id });
+  assert.equal(on().id, risks.id);
+
+  // Anyone calls a point and the verdict, with the outcomes each takes.
+  await say(bob, { type: "design.outcome", itemId: point.id, outcome: "approve" });
+  assert.equal(deck()[2].slide!.design!.outcome, null);
+  await say(bob, { type: "design.outcome", itemId: point.id, outcome: "settled" });
+  assert.deepEqual([deck()[2].slide!.design!.outcome, deck()[2].slide!.design!.outcomeBy], ["settled", "Bob"]);
+  await say(ann, { type: "design.outcome", itemId: verdict.id, outcome: "changes" });
+  assert.equal(deck()[4].slide!.design!.outcome, "changes");
+  assert.equal(stages.slide!.design!.section, "Stages");
+
+  // The review ends with the meeting: its slides leave the agenda.
+  await session.end();
+  assert.equal(db.listItems(roomId).some((i) => i.slide?.layout === "design"), false);
+  assert.equal(db.reviewIn(roomId, ["live"], "design"), null);
+  assert.equal(db.reviewIn(roomId, ["done"], "design")!.meetingId, meetingId);
+});
+
 test("presenting a task moves the meeting to an item for it, so what's said is filed under the task", async () => {
   const { db, session, meetingId, items } = setup();
   const joe = await join(session, { id: "u1", name: "Joe" });
   const ann = await join(session, { id: "u2", name: "Ann" });
   const task = db.addNote(meetingId, items[0].id, { kind: "action", text: "Review rollout", owner: "Joe" }, null);
-  db.addPlan(session.state().roomId, task.id, "# Rollout\n\nShip to ten percent first.", "Joe");
   session.setFocus(items[1].id, "Joe", "manual");
 
   // Only the host presents, and only a task of this space.
@@ -1233,7 +1284,7 @@ test("presenting a task moves the meeting to an item for it, so what's said is f
   const shown = session.state().items.find((i) => i.id === session.state().focusItemId);
   assert.equal(shown?.taskId, task.id);
   assert.equal(shown?.title, "Review rollout");
-  assert.match(shown?.description ?? "", /Ship to ten percent first/);
+  assert.match(shown?.description ?? "", /Walking through the to-do "Review rollout" \(Joe\)/);
   session.addSpeech("u2", "Ann", "Ten percent is too many for the first day", Date.now());
   assert.equal(db.meetingSegments(meetingId).at(-1)?.itemId, shown?.id);
 

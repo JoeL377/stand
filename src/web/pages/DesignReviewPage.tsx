@@ -3,12 +3,12 @@
 // sections and points off the call, asks the questions the team has to decide.
 
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { BRIEF_LINES_MAX, BRIEF_LINE_MAX, BRIEF_SUMMARY_MAX, pointsOnDeck, type BriefChange, type BriefSection, type DesignPoint, type DesignReviewView, type DesignSpec } from "../../shared/designReview.ts";
 import { TASK_COMMENT_MAX } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { errorToast } from "../Toasts.tsx";
-import { spaceHref } from "./SpacesShell.tsx";
+import { joinHref, spaceHref } from "./SpacesShell.tsx";
 
 export const designReviewHref = (roomId: string, taskId?: string) => `/s/${roomId}/design-review${taskId ? `?spec=${taskId}` : ""}`;
 const planHref = (roomId: string, taskId: string) => `/s/${roomId}?task=${taskId}&view=plan`;
@@ -22,6 +22,8 @@ export function DesignReviewPage() {
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState<{ roomName: string; review: DesignReviewView | null } | null>(null);
   const [failed, setFailed] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const navigate = useNavigate();
 
   const load = () => api.designReview(roomId).then(setData, () => setFailed(true));
   useEffect(() => {
@@ -50,6 +52,7 @@ export function DesignReviewPage() {
   const specs = data.review?.specs ?? [];
   const spec = specs.find((s) => s.taskId === params.get("spec")) ?? specs[0];
   const points = specs.reduce((n, s) => n + pointsOnDeck(s.points).length, 0);
+  const live = data.review?.status === "live";
   const change = async (taskId: string, c: BriefChange) => {
     try {
       const { spec: next } = await api.prepareDesignReview(taskId, c);
@@ -66,11 +69,31 @@ export function DesignReviewPage() {
           ← {data.roomName}
         </Link>
         <strong>Design review</strong>
-        <span className="rp-pill">Next</span>
+        <span className="rp-pill">{live ? "On now" : "Next"}</span>
         {specs.length > 0 && (
           <span className="muted small">
             {plural(specs.length, "spec")} · {plural(points, "point")}
           </span>
+        )}
+        <span className="rp-grow" />
+        {specs.length > 0 && (
+          <button
+            className="primary"
+            disabled={starting}
+            onClick={async () => {
+              if (live) return navigate(joinHref(roomId));
+              setStarting(true);
+              try {
+                await api.startDesignReview(roomId);
+                navigate(joinHref(roomId));
+              } catch (err) {
+                errorToast("Couldn't start the review")(err);
+                setStarting(false);
+              }
+            }}
+          >
+            {live ? "Join the review" : starting ? "Starting…" : "Start design review"}
+          </button>
         )}
       </header>
       {!spec ? (
@@ -95,6 +118,7 @@ export function DesignReviewPage() {
             key={spec.taskId}
             roomId={roomId}
             spec={spec}
+            live={live}
             change={(c) => change(spec.taskId, c)}
             onRemove={async () => {
               try {
@@ -111,7 +135,7 @@ export function DesignReviewPage() {
   );
 }
 
-function SpecPrep({ roomId, spec, change, onRemove }: { roomId: string; spec: DesignSpec; change: (c: BriefChange) => Promise<void>; onRemove: () => void }) {
+function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; spec: DesignSpec; live: boolean; change: (c: BriefChange) => Promise<void>; onRemove: () => void }) {
   const { brief, mine } = spec;
   const whole = spec.points.filter((p) => p.placed && !p.section);
   const lost = spec.points.filter((p) => !p.placed);
@@ -126,7 +150,7 @@ function SpecPrep({ roomId, spec, change, onRemove }: { roomId: string; spec: De
           Open the spec
         </Link>
         <span className="rp-grow" />
-        {mine && (
+        {mine && !live && (
           <button type="button" className="ghost small" onClick={onRemove}>
             Take off the review
           </button>

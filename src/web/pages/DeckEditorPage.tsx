@@ -17,6 +17,7 @@ const BODY_LABEL: Record<SlideLayout, string> = {
   image: "Bullets beside the image, one per line",
   quote: "Quote",
   review: "Summary",
+  design: "Lines",
 };
 
 /** Stand's own slide editor. Every change saves on its own, and a meeting

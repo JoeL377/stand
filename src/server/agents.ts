@@ -74,6 +74,8 @@ export interface AgentDeps {
   readyToShip?: () => void;
   /** Writes what a design review shows of a plan (planBrief.ts). Without it, a review still takes requests. */
   briefs?: PlanBriefs;
+  /** A plan changed (a comment, a new version): a design review running on it lays its slides out again. */
+  specTouched?: (note: Note & { roomId: string }) => void;
 }
 
 type Work = Pick<ActionWork, "working" | "ready">;
@@ -98,7 +100,7 @@ export function agentApi(deps: AgentDeps) {
     return {
       id: item.id,
       title: item.title,
-      key: item.externalId ?? item.slide?.review?.name ?? (item.slideNo ? `Slide ${item.slideNo}` : undefined),
+      key: item.externalId ?? item.slide?.review?.name ?? item.slide?.design?.name ?? (item.slideNo ? `Slide ${item.slideNo}` : undefined),
       deck: deck?.title,
       ticket: item.url ?? undefined,
       stand_url: `${baseUrl}/items/${item.id}`,
@@ -798,6 +800,7 @@ export function agentApi(deps: AgentDeps) {
       const thread = changeReview(db, r.note.id, byOf(caller), input);
       if (!thread) throw new AgentError(args.action === "create" ? "That passage or comment is too long." : "Thread not found or invalid reply.");
       logThreadChange(db, r.note, thread, args.action, { userId: caller.user.id, userName: caller.user.name, client: caller.token?.label ?? null, actor: actorOf(caller) });
+      if (args.action === "create") deps.specTouched?.(r.note);
       return thread;
     },
 
@@ -826,6 +829,7 @@ export function agentApi(deps: AgentDeps) {
       });
       // A plan waiting on a design review is reviewed at this version.
       planChanged(db, deps.briefs ?? null, r.note);
+      deps.specTouched?.(r.note);
       deps.notify(r.room.id, "updates");
       return { attached: updateInfo(update, baseUrl), versions: db.notePlan(r.note.id)?.versions, shows_on: "the to-do in Stand, and in get" };
     },
@@ -838,6 +842,7 @@ export function agentApi(deps: AgentDeps) {
       try {
         const by = { userId: caller.user.id, userName: caller.user.name, client: caller.token?.label ?? null, actor: actorOf(caller) };
         const out = requestReview(db, deps.briefs ?? null, r.note, by, (args.questions ?? []).map((q) => ({ quote: q.quote, text: q.question })));
+        deps.specTouched?.(r.note);
         deps.notify(r.room.id, "updates");
         return {
           [out.added ? "requested" : "already_requested"]: refOf("action", r.note.id),

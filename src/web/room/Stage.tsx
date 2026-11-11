@@ -2,6 +2,8 @@ import { usePersonColors } from "../PersonColors.tsx";
 import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ReviewStage } from "./ReviewStage.tsx";
+import { DesignStage } from "./DesignStage.tsx";
+import { specAuthor } from "../../shared/designReview.ts";
 import { BrainMap } from "./BrainMap.tsx";
 import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
@@ -166,12 +168,21 @@ export function Stage(props: {
   // A review slide's pictures: the host's choice is everyone's, and a look of your own lasts until the host moves.
   const brainUp = !!props.brainstorm && props.brainstorm.status === "live" && !!focusItem && focusItem.id === props.brainstorm.itemId;
   const reviewUp = deckUp && focusItem?.slide?.layout === "review";
+  // A design review slide: Full spec is each person's own look, and the host's is everyone's until they close it.
+  const design = deckUp && focusItem?.slide?.layout === "design" ? (focusItem.slide.design ?? null) : null;
+  const [mySpec, setMySpec] = useState<boolean | null>(null);
+  useEffect(() => setMySpec(null), [focusItem?.id]);
+  useEffect(() => {
+    if (!canSteer) setMySpec(null);
+  }, [hostView?.taskMode]);
+  const specOpen = !!design && (mySpec ?? (canSteer ? false : hostView?.taskMode === "spec"));
+  const myDesign = !!design && !!props.me && specAuthor(design, props.me);
   const [myShot, setMyShot] = useState(0);
   useEffect(() => setMyShot(0), [focusItem?.id]);
   useEffect(() => {
     if (!canSteer) setMyShot(hostView?.shot ?? 0);
   }, [canSteer, hostView?.shot]);
-  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind };
+  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), ...(design && { taskMode: mySpec ? ("spec" as const) : ("brief" as const) }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind };
   const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
   const hostKey = JSON.stringify(hostView);
   useEffect(() => {
@@ -453,7 +464,7 @@ export function Stage(props: {
         )}
         {!props.ending && <ConxtNudges cards={state.conxt ?? []} me={props.participantId} offline={props.offline} send={send} />}
         {/* A share or a deck has the middle: the topic stays in view as one line over it. */}
-        {middleTaken && !boardOpen && !openSnap && !(reviewUp && !showingScreen && !sharer && !shownTask) && (
+        {middleTaken && !boardOpen && !openSnap && !((reviewUp || design) && !showingScreen && !sharer && !shownTask) && (
           <BoardStrip board={props.board} focusItemId={state.focusItemId} onOpen={() => pickTab("board")} />
         )}
         </div>
@@ -513,6 +524,31 @@ export function Stage(props: {
               onOutcome={(outcome) => send({ type: "review.outcome", itemId: focusItem.id, outcome })}
               onRemove={canSteer ? removeNote : undefined}
               onAdd={canSteer ? (kind, text) => send({ type: "note.add", itemId: focusItem.id, kind, text }) : undefined}
+            />
+          </div>
+        ) : design && focusItem ? (
+          <div className="screen-empty">
+            <DesignStage
+              key={focusItem.deckId}
+              className={`slide-stage${arrive}`}
+              item={focusItem}
+              slides={deckSlides}
+              notes={props.notes}
+              busy={props.notesBusy.includes(focusItem.id)}
+              canSteer={canSteer}
+              author={myDesign}
+              disabled={Boolean(props.offline || props.ending)}
+              specOpen={specOpen}
+              onSpec={setMySpec}
+              onFlip={(delta) => {
+                if (canSteer) return flip(delta);
+                // The author moves within their own spec.
+                const mine = deckSlides.filter((s) => s.slide?.design?.taskId === design.taskId);
+                const next = mine[mine.findIndex((s) => s.id === focusItem.id) + delta];
+                if (next) send({ type: "design.go", itemId: next.id });
+              }}
+              onOutcome={(outcome) => send({ type: "design.outcome", itemId: focusItem.id, outcome })}
+              onRemove={canSteer ? removeNote : undefined}
             />
           </div>
         ) : focusItem?.deckId && (focusItem.slideNo || focusItem.slide) ? (

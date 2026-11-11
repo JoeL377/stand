@@ -3130,6 +3130,46 @@ a.sh-review { text-decoration: none; color: inherit; }
 .dr-ask input { flex: 1; min-width: 0; font-size: 13px; }
 .dr-suggest { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .dr-suggest .dr-point { border-left-style: dashed; }
+/* A design review slide in the call: a part of the spec on a card, with what Stand caught beside it. */
+.design-stage { text-align: left; min-width: 0; width: 100%; }
+.screen-empty:has(.design-stage) { grid-template-columns: minmax(0, 1fr); }
+.ds-card { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; border-radius: 10px; background: var(--bg); color: var(--text); overflow: hidden; }
+.ds-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); min-width: 0; }
+.ds-spec { font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 30%); }
+.ds-main { overflow-y: auto; padding: clamp(16px, 3vw, 36px); display: flex; flex-direction: column; gap: 12px; }
+.ds-main h1 { font-size: clamp(20px, 2.4vw, 30px); line-height: 1.2; margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.ds-main h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 8px 0 0; display: flex; align-items: center; gap: 8px; }
+.ds-summary { font-size: clamp(15px, 1.5vw, 19px); line-height: 1.45; margin: 0; }
+.ds-sections { margin: 0; padding-left: 22px; font-size: 15px; line-height: 1.6; columns: 2; column-gap: 32px; }
+.ds-lines { margin: 0; padding-left: 22px; font-size: clamp(16px, 1.7vw, 22px); line-height: 1.45; display: flex; flex-direction: column; gap: 8px; }
+.ds-passage { margin: 0; padding: 10px 14px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--panel-2); font-size: 14px; max-height: 45%; overflow-y: auto; }
+.ds-passage > div > :first-child { margin-top: 0; }
+.ds-passage > div > :last-child { margin-bottom: 0; }
+.ds-thread { display: flex; flex-direction: column; gap: 6px; }
+.ds-question { font-size: clamp(18px, 2vw, 26px); line-height: 1.3; font-weight: 550; margin: 0; white-space: pre-line; }
+.ds-reply { border-top: 1px solid var(--line); padding-top: 6px; font-size: 14px; }
+.ds-results, .ds-lost { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
+.ds-results li { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.ds-results li > span:nth-child(2) { flex: 1; min-width: 0; }
+.ds-result { flex: none; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
+.ds-result.ship { background: #15803d; color: #fff; }
+.ds-result.fixes { background: #b45309; color: #fff; }
+.ds-result.not_yet { background: #b91c1c; color: #fff; }
+.ds-suggest { display: flex; flex-direction: column; gap: 6px; }
+.ds-caught { overflow-y: auto; padding: 14px 14px 18px; border-left: 1px solid var(--line); background: var(--panel-2); display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+.ds-group h3 { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; margin: 0 0 4px; }
+.ds-group p { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 4px 0; }
+.ds-group p > span:first-child { flex: 1; min-width: 0; }
+.ds-group p.done > span:first-child { text-decoration: line-through; opacity: 0.6; }
+.ds-spec-pane { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--bg); }
+.ds-spec-pane > header { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); min-width: 0; }
+@media (max-width: 760px) {
+  .ds-body { grid-template-columns: minmax(0, 1fr); grid-auto-rows: min-content; overflow-y: auto; }
+  .ds-main, .ds-caught { overflow: visible; }
+  .ds-caught { border-left: 0; border-top: 1px solid var(--line); }
+  .ds-sections { columns: 1; }
+}
 @media (max-width: 760px) {
   .dr-body { flex-direction: column; }
   .dr-specs { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
