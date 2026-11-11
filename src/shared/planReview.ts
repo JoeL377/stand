@@ -8,6 +8,10 @@ export type PlanThread = {
   placements: PlanAnchor[];
   resolved: boolean;
   messages: ReviewMessage[];
+  /** The author took it off the design review; it stays open on the plan. */
+  offDeck?: boolean;
+  /** Where a thread made for a design review came from: the author's question, or one Stand suggested. */
+  origin?: { review: string | null; source: "author" | "stand" };
 };
 export type PlanReview = {
   plan: PlanVersion;

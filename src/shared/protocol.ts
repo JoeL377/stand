@@ -1,4 +1,5 @@
 import type { Actor } from "./actors.ts";
+import type { DesignReviewSummary } from "./designReview.ts";
 // Types shared by the server and the browser. The WebSocket at /ws/rooms/:id
 // carries ClientMessage up and ServerMessage down as JSON.
 
@@ -717,12 +718,6 @@ export interface DoneSlide {
 }
 
 /** The host's middle screen: the board's tab beside a share or deck, and a chapter they opened on the bar. */
-export interface TaskBrief {
-  summary: string;
-  takeaways: string[];
-  questions: string[];
-}
-
 export interface HostView {
   /** While the item in focus presents a to-do (Item.taskId): the brief or the full spec, as the host chose. */
   taskMode?: "brief" | "spec";
@@ -1086,6 +1081,8 @@ export interface SpaceFeed {
   review?: ReviewView | null;
   /** Reviews that ran, newest first: each keeps its page. */
   reviews?: ReviewSummary[];
+  /** The specs waiting on the space's next design review; null when there are none. */
+  designReview?: DesignReviewSummary | null;
   /** The space's brainstorms, newest first, the one running now included. */
   brainstorms?: BrainstormSummary[];
   /** Snaps saved straight to the space, newest first. */

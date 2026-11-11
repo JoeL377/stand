@@ -5,11 +5,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
+import type { DesignReviewState } from "../shared/designReview.ts";
 import { TASK_COMMENT_MAX, type TaskDetail, type TaskLink } from "../shared/protocol.ts";
 import { STATE_LABEL, VERB_LABEL, stateOf, verbOf } from "../shared/tasks.ts";
 import { api } from "./api.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { CloseIcon } from "./icons.tsx";
+import { designReviewHref } from "./pages/DesignReviewPage.tsx";
 import { PlanReviewBody } from "./PlanReview.tsx";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
@@ -238,9 +240,54 @@ function PlanViewer({ task, onClose }: { task: TaskDetail | null; onClose: () =>
           <button type="button" onClick={() => void copyLink()}>Copy link</button>
           <button type="button" onClick={() => setExpanded(!expanded)}>{expanded ? "Restore size" : "Expand"}</button>
           <span role="status">{copyStatus}</span>
+          {task && <RequestReview taskId={task.note.id} roomId={task.roomId} />}
         </footer>
       )}
     </dialog>
+  );
+}
+
+/** Puts the plan on the space's next design review; once it is there, the way to that review. */
+function RequestReview({ taskId, roomId }: { taskId: string; roomId: string }) {
+  const [state, setState] = useState<DesignReviewState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    api.designReviewState(taskId).then((next) => { if (active) setState(next); }, () => {});
+    return () => { active = false; };
+  }, [taskId]);
+  if (!state) return null;
+  if (state.queued) {
+    return (
+      <Link className="td-plan-review" to={designReviewHref(roomId, taskId)}>
+        In the next design review{state.points > 0 && ` · ${state.points} ${state.points === 1 ? "point" : "points"}`}
+      </Link>
+    );
+  }
+  return (
+    <span className="td-plan-review">
+      {error && <span className="error" role="alert">{error}</span>}
+      <button
+        type="button"
+        className="primary"
+        disabled={busy}
+        title="Put this plan on the space's next design review"
+        onClick={async () => {
+          setBusy(true);
+          setError("");
+          try {
+            setState(await api.requestDesignReview(taskId));
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Requesting…" : "Request review"}
+      </button>
+    </span>
   );
 }
 

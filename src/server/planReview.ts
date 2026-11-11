@@ -7,7 +7,9 @@ import { TASK_COMMENT_MAX, type Note } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { newId } from "./ids.ts";
 
-type MdNode = { type: string; position?: { start: { offset?: number }; end: { offset?: number } }; children?: MdNode[] };
+type MdNode = { type: string; depth?: number; value?: string; position?: { start: { offset?: number }; end: { offset?: number } }; children?: MdNode[] };
+
+const parse = (text: string) => (unified().use(remarkParse).use(remarkGfm).parse(text) as MdNode).children ?? [];
 
 /** The passages of a plan that can carry a comment: each top-level block and each list item, the
  *  same ones the plan viewer marks (web/Markdown.tsx). */
@@ -19,23 +21,59 @@ export function planBlocks(text: string): Passage[] {
     if ((top || node.type === "listItem") && start !== undefined && end !== undefined) blocks.push({ start, end });
     node.children?.forEach((child) => walk(child, false));
   };
-  (unified().use(remarkParse).use(remarkGfm).parse(text) as MdNode).children?.forEach((node) => walk(node, true));
+  parse(text).forEach((node) => walk(node, true));
   return blocks;
 }
 
-/** Where a quote from the plan sits, widened to whole passages as a selection in the plan viewer is.
- *  "missing": the plan doesn't say that; "ambiguous": it says it more than once. */
+/** A stretch of the plan widened to whole passages, as a selection in the plan viewer is. */
+export function passageAround(text: string, at: number, length: number): Passage | null {
+  const blocks = planBlocks(text);
+  const around = (pos: number) =>
+    blocks.filter((b) => b.start <= pos && pos < b.end).sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+  const first = around(at);
+  const last = around(at + Math.max(1, length) - 1);
+  return first && last ? { start: first.start, end: last.end } : null;
+}
+
+/** Where a quote from the plan sits, as whole passages. "missing": the plan doesn't say that;
+ *  "ambiguous": it says it more than once. */
 export function quotePassage(text: string, quote: string): Passage | "missing" | "ambiguous" {
   const q = quote.trim();
   const at = q ? text.indexOf(q) : -1;
   if (at < 0) return "missing";
   if (text.indexOf(q, at + 1) >= 0) return "ambiguous";
-  const blocks = planBlocks(text);
-  const around = (pos: number) =>
-    blocks.filter((b) => b.start <= pos && pos < b.end).sort((a, b) => a.end - a.start - (b.end - b.start))[0];
-  const first = around(at);
-  const last = around(at + q.length - 1);
-  return first && last ? { start: first.start, end: last.end } : "missing";
+  return passageAround(text, at, q.length) ?? "missing";
+}
+
+export interface PlanSection {
+  heading: string;
+  /** From the heading to the next heading of its level or above. */
+  start: number;
+  end: number;
+  /** Where the heading's own passage ends. */
+  headingEnd: number;
+}
+
+const plain = (node: MdNode): string => node.value ?? (node.children ?? []).map(plain).join("");
+
+/** The plan's main sections: each `##` heading with the text under it, in the plan's order. A
+ *  heading that repeats gets a number, so each section has a name of its own. */
+export function planSections(text: string): PlanSection[] {
+  const nodes = parse(text);
+  const sections: PlanSection[] = [];
+  const seen = new Map<string, number>();
+  nodes.forEach((node, i) => {
+    const start = node.position?.start.offset;
+    const headingEnd = node.position?.end.offset;
+    if (node.type !== "heading" || node.depth !== 2 || start === undefined || headingEnd === undefined) return;
+    const name = plain(node).replace(/\s+/g, " ").trim();
+    if (!name) return;
+    const n = (seen.get(name.toLowerCase()) ?? 0) + 1;
+    seen.set(name.toLowerCase(), n);
+    const next = nodes.slice(i + 1).find((x) => x.type === "heading" && (x.depth ?? 9) <= 2);
+    sections.push({ heading: n > 1 ? `${name} (${n})` : name, start, end: next?.position?.start.offset ?? text.length, headingEnd });
+  });
+  return sections;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -85,6 +123,8 @@ export function reviewFor(db: DB, task: string, version?: string): PlanReview | 
 export function changeReview(
   db: DB, task: string, by: string,
   input: { version?: unknown; thread?: unknown; action?: unknown; start?: unknown; end?: unknown; text?: unknown },
+  /** A thread made for a design review says where it came from (designReviews.ts). */
+  origin?: PlanThread["origin"],
 ): PlanThread | null {
   const text = typeof input.text === "string" ? input.text.trim() : "";
   const message = () => ({ id: newId(12), by, text, ts: Date.now() });
@@ -99,7 +139,7 @@ export function changeReview(
   if (input.action === "create") {
     const original = anchor();
     if (!original || !validMessage) return null;
-    const created = { id: newId(12), original, placements: [], resolved: false, messages: [message()] };
+    const created: PlanThread = { id: newId(12), original, placements: [], resolved: false, messages: [message()], ...(origin && { origin }) };
     db.savePlanThread(task, created);
     return created;
   }

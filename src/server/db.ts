@@ -1,4 +1,5 @@
 import type { PlanThread, PlanVersion } from "../shared/planReview.ts";
+import type { PlanBrief } from "../shared/designReview.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -259,6 +260,15 @@ CREATE TABLE IF NOT EXISTS review_slides (
   name TEXT
 );
 CREATE INDEX IF NOT EXISTS review_slides_review ON review_slides(review_id, position);
+-- What Stand wrote for one version of a plan ahead of its design review (planBrief.ts), with the
+-- author's edits, as JSON.
+CREATE TABLE IF NOT EXISTS plan_briefs (
+  note_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  brief_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (note_id, version)
+);
 -- Brainstorms (brainstorm.ts): one sentence and the map the talk drew around it.
 CREATE TABLE IF NOT EXISTS brainstorms (
   id TEXT PRIMARY KEY,
@@ -475,10 +485,13 @@ const toDeck = (r: Row): Deck => ({
   reviewId: (r.review_id as string) ?? null,
 });
 
-/** A product review and one of its slides, as stored (reviews.ts turns them into what people see). */
+/** A product review and one of its slides, as stored (reviews.ts turns them into what people see).
+ *  A design review (designReviews.ts) is kept the same way, with a spec where a feature would be. */
+export type ReviewKind = "product" | "design";
 export interface ReviewRow {
   id: string;
   roomId: string;
+  kind: ReviewKind;
   status: "draft" | "live" | "done";
   deckId: string | null;
   meetingId: string | null;
@@ -503,10 +516,15 @@ export interface ReviewSlideRow {
   outcomeBy: string | null;
   outcomeAt: number | null;
   createdAt: number;
+  /** Design reviews: what the slide is. A spec waiting on the next review is its overview. */
+  role: "overview" | null;
+  /** Design reviews: the plan version the spec was at when it was last looked at. */
+  planVersion: string | null;
 }
 const toReview = (r: Row): ReviewRow => ({
   id: r.id as string,
   roomId: r.room_id as string,
+  kind: ((r.kind as string) ?? "product") as ReviewKind,
   status: r.status as ReviewRow["status"],
   deckId: (r.deck_id as string) ?? null,
   meetingId: (r.meeting_id as string) ?? null,
@@ -542,6 +560,8 @@ const toReviewSlide = (r: Row): ReviewSlideRow => ({
   outcomeBy: (r.outcome_by as string) ?? null,
   outcomeAt: (r.outcome_at as number) ?? null,
   createdAt: r.created_at as number,
+  role: ((r.role as string) ?? null) as ReviewSlideRow["role"],
+  planVersion: (r.plan_version as string) ?? null,
 });
 
 type NewItem = Pick<Item, "source" | "externalId" | "title" | "url" | "description"> & { deckId?: string; slideNo?: number };
@@ -712,6 +732,9 @@ export function openDb(file?: string) {
   if (!deckCols.includes("review_id")) db.exec("ALTER TABLE decks ADD COLUMN review_id TEXT;");
   const reviewSlideCols = (db.prepare("PRAGMA table_info(review_slides)").all() as Row[]).map((c) => c.name as string);
   if (!reviewSlideCols.includes("name")) db.exec("ALTER TABLE review_slides ADD COLUMN name TEXT;");
+  // Design reviews (designReviews.ts) share the review tables: a review has a kind, and a slide a role.
+  if (!reviewSlideCols.includes("role")) db.exec("ALTER TABLE review_slides ADD COLUMN role TEXT; ALTER TABLE review_slides ADD COLUMN plan_version TEXT;");
+  if (!(db.prepare("PRAGMA table_info(reviews)").all() as Row[]).some((c) => c.name === "kind")) db.exec("ALTER TABLE reviews ADD COLUMN kind TEXT NOT NULL DEFAULT 'product';");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
@@ -2103,29 +2126,29 @@ export function openDb(file?: string) {
     saveBrainstormMap(id: string, nodes: BrainNode[]) {
       db.prepare("UPDATE brainstorms SET map_json = ? WHERE id = ?").run(JSON.stringify(nodes), id);
     },
-    // ---- product reviews (reviews.ts) ----
-    /** The space's review in one of these states, newest first. */
-    reviewIn(roomId: string, statuses: Array<ReviewRow["status"]>): ReviewRow | null {
+    // ---- product reviews (reviews.ts) and design reviews (designReviews.ts) ----
+    /** The space's review of one kind in one of these states, newest first. */
+    reviewIn(roomId: string, statuses: Array<ReviewRow["status"]>, kind: ReviewKind = "product"): ReviewRow | null {
       const r = db
-        .prepare(`SELECT * FROM reviews WHERE room_id = ? AND status IN (${statuses.map(() => "?").join(",")}) ORDER BY created_at DESC, rowid DESC LIMIT 1`)
-        .get(roomId, ...statuses) as Row | undefined;
+        .prepare(`SELECT * FROM reviews WHERE room_id = ? AND kind = ? AND status IN (${statuses.map(() => "?").join(",")}) ORDER BY created_at DESC, rowid DESC LIMIT 1`)
+        .get(roomId, kind, ...statuses) as Row | undefined;
       return r ? toReview(r) : null;
     },
     /** The space's reviews that ran, newest first. */
-    reviewsDone(roomId: string, limit = 30): ReviewRow[] {
-      return (db.prepare("SELECT * FROM reviews WHERE room_id = ? AND status = 'done' ORDER BY started_at DESC, rowid DESC LIMIT ?").all(roomId, limit) as Row[]).map(toReview);
+    reviewsDone(roomId: string, limit = 30, kind: ReviewKind = "product"): ReviewRow[] {
+      return (db.prepare("SELECT * FROM reviews WHERE room_id = ? AND kind = ? AND status = 'done' ORDER BY started_at DESC, rowid DESC LIMIT ?").all(roomId, kind, limit) as Row[]).map(toReview);
     },
-    reviewByMeeting(meetingId: string): ReviewRow | null {
-      const r = db.prepare("SELECT * FROM reviews WHERE meeting_id = ? ORDER BY rowid DESC LIMIT 1").get(meetingId) as Row | undefined;
+    reviewByMeeting(meetingId: string, kind: ReviewKind = "product"): ReviewRow | null {
+      const r = db.prepare("SELECT * FROM reviews WHERE meeting_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1").get(meetingId, kind) as Row | undefined;
       return r ? toReview(r) : null;
     },
     getReview(id: string): ReviewRow | null {
       const r = db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
       return r ? toReview(r) : null;
     },
-    createReview(roomId: string): ReviewRow {
+    createReview(roomId: string, kind: ReviewKind = "product"): ReviewRow {
       const id = newId();
-      db.prepare("INSERT INTO reviews (id, room_id, status, created_at) VALUES (?, ?, 'draft', ?)").run(id, roomId, Date.now());
+      db.prepare("INSERT INTO reviews (id, room_id, status, created_at, kind) VALUES (?, ?, 'draft', ?, ?)").run(id, roomId, Date.now(), kind);
       return this.getReview(id)!;
     },
     setReview(id: string, patch: Partial<Pick<ReviewRow, "status" | "deckId" | "meetingId" | "startedAt" | "endedAt">>) {
@@ -2143,7 +2166,7 @@ export function openDb(file?: string) {
     reviewedNoteIds(roomId: string): string[] {
       return (
         db
-          .prepare("SELECT s.note_id FROM review_slides s JOIN reviews r ON r.id = s.review_id WHERE r.room_id = ? AND r.status != 'draft' AND s.note_id IS NOT NULL")
+          .prepare("SELECT s.note_id FROM review_slides s JOIN reviews r ON r.id = s.review_id WHERE r.room_id = ? AND r.kind = 'product' AND r.status != 'draft' AND s.note_id IS NOT NULL")
           .all(roomId) as Row[]
       ).map((r) => r.note_id as string);
     },
@@ -2151,20 +2174,33 @@ export function openDb(file?: string) {
       const r = db.prepare("SELECT * FROM review_slides WHERE item_id = ?").get(itemId) as Row | undefined;
       return r ? toReviewSlide(r) : null;
     },
-    addReviewSlide(reviewId: string, s: Pick<ReviewSlideRow, "title" | "body" | "noteId" | "owner" | "addedBy" | "pr"> & { name?: string | null }): ReviewSlideRow {
+    addReviewSlide(
+      reviewId: string,
+      s: Pick<ReviewSlideRow, "title" | "body" | "noteId" | "owner" | "addedBy" | "pr"> & { name?: string | null; role?: ReviewSlideRow["role"]; planVersion?: string | null },
+    ): ReviewSlideRow {
       const id = newId();
       const pos = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM review_slides WHERE review_id = ?").get(reviewId) as Row).p as number;
       db.prepare(
-        "INSERT INTO review_slides (id, review_id, position, title, body, note_id, owner, added_by, pr, created_at, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      ).run(id, reviewId, pos + 1, s.title, s.body, s.noteId, s.owner, s.addedBy, s.pr, Date.now(), s.name ?? null);
+        "INSERT INTO review_slides (id, review_id, position, title, body, note_id, owner, added_by, pr, created_at, name, role, plan_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(id, reviewId, pos + 1, s.title, s.body, s.noteId, s.owner, s.addedBy, s.pr, Date.now(), s.name ?? null, s.role ?? null, s.planVersion ?? null);
       return this.getReviewSlide(id)!;
     },
-    updateReviewSlide(id: string, patch: Partial<Pick<ReviewSlideRow, "title" | "name" | "body" | "owner" | "addedBy" | "pr" | "itemId" | "outcome" | "outcomeBy" | "outcomeAt">>) {
-      const cols: Record<string, string> = { title: "title", name: "name", body: "body", owner: "owner", addedBy: "added_by", pr: "pr", itemId: "item_id", outcome: "outcome", outcomeBy: "outcome_by", outcomeAt: "outcome_at" };
+    updateReviewSlide(id: string, patch: Partial<Pick<ReviewSlideRow, "title" | "name" | "body" | "owner" | "addedBy" | "pr" | "itemId" | "outcome" | "outcomeBy" | "outcomeAt" | "planVersion">>) {
+      const cols: Record<string, string> = { title: "title", name: "name", body: "body", owner: "owner", addedBy: "added_by", pr: "pr", itemId: "item_id", outcome: "outcome", outcomeBy: "outcome_by", outcomeAt: "outcome_at", planVersion: "plan_version" };
       for (const [k, v] of Object.entries(patch)) db.prepare(`UPDATE review_slides SET ${cols[k]} = ? WHERE id = ?`).run(v ?? null, id);
     },
     removeReviewSlide(id: string) {
       db.prepare("DELETE FROM review_slides WHERE id = ?").run(id);
+    },
+    /** What Stand wrote for one version of a to-do's plan, with the author's edits (planBrief.ts). */
+    planBrief(noteId: string, version: string): PlanBrief | null {
+      const r = db.prepare("SELECT brief_json FROM plan_briefs WHERE note_id = ? AND version = ?").get(noteId, version) as Row | undefined;
+      return r ? (JSON.parse(r.brief_json as string) as PlanBrief) : null;
+    },
+    savePlanBrief(noteId: string, brief: PlanBrief) {
+      db.prepare(`INSERT INTO plan_briefs (note_id, version, brief_json, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(note_id, version) DO UPDATE SET brief_json = excluded.brief_json, updated_at = excluded.updated_at`)
+        .run(noteId, brief.version, JSON.stringify(brief), Date.now());
     },
     setDeckReview(deckId: string, reviewId: string) {
       db.prepare("UPDATE decks SET review_id = ? WHERE id = ?").run(reviewId, deckId);

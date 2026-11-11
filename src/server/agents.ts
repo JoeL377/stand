@@ -1,4 +1,6 @@
 import { changeReview, logThreadChange, quotePassage, reviewFor } from "./planReview.ts";
+import { DesignReviewError, designReviewState, planChanged, requestReview } from "./designReviews.ts";
+import type { PlanBriefs } from "./planBrief.ts";
 // What agents see of Stand, shared by the MCP server (mcp.ts) and the
 // "Copy for agent" button: references to single to-dos, decisions, questions
 // and topics, the context to act on them, and the two ways to report back.
@@ -70,6 +72,8 @@ export interface AgentDeps {
   uploads: UploadLinks;
   /** A to-do was just reported ready to ship: look at its PR now rather than on the next round. */
   readyToShip?: () => void;
+  /** Writes what a design review shows of a plan (planBrief.ts). Without it, a review still takes requests. */
+  briefs?: PlanBriefs;
 }
 
 type Work = Pick<ActionWork, "working" | "ready">;
@@ -428,6 +432,7 @@ export function agentApi(deps: AgentDeps) {
         plan: plan ? { text: plan.text, by: plan.by, actor: plan.actor, at: new Date(plan.ts).toISOString(), versions: plan.versions } : undefined,
         ...(review ? { plan_version: review.plan.id } : {}),
         ...(openThreads.length ? { plan_review_threads: openThreads } : {}),
+        ...(plan && designReviewState(db, n).queued ? { design_review: "The plan is on the space's next design review." } : {}),
         ...(n.kind === "action" ? dependenciesOf(n) : {}),
         done_by: n.doneBy ?? undefined,
         ...(n.kind === "decision" ? decisionInfo(settledView(db, r.room.id).decided.find((x) => x.id === n.id)) : {}),
@@ -819,8 +824,33 @@ export function agentApi(deps: AgentDeps) {
         text: clip(plan.replace(/^[#\s]+/, "").split("\n")[0], 160),
         links: [],
       });
+      // A plan waiting on a design review is reviewed at this version.
+      planChanged(db, deps.briefs ?? null, r.note);
       deps.notify(r.room.id, "updates");
       return { attached: updateInfo(update, baseUrl), versions: db.notePlan(r.note.id)?.versions, shows_on: "the to-do in Stand, and in get" };
+    },
+
+    /** Puts a to-do's plan on the space's next design review, with the questions the team has to decide. */
+    requestDesignReview(caller: Caller, args: { ref: string; questions?: Array<{ quote?: string; question: string }> }, baseUrl = "") {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`);
+      if (!r.note || r.note.kind !== "action") throw new AgentError("A design review is of a to-do's plan (stand:action/...).");
+      try {
+        const by = { userId: caller.user.id, userName: caller.user.name, client: caller.token?.label ?? null, actor: actorOf(caller) };
+        const out = requestReview(db, deps.briefs ?? null, r.note, by, (args.questions ?? []).map((q) => ({ quote: q.quote, text: q.question })));
+        deps.notify(r.room.id, "updates");
+        return {
+          [out.added ? "requested" : "already_requested"]: refOf("action", r.note.id),
+          questions_added: out.questions,
+          points: designReviewState(db, r.note).points,
+          space: r.room.name,
+          review_url: `${baseUrl}/s/${r.room.id}/design-review`,
+          shows_on: "The space's next design review. Each open comment thread on the plan is a point with a slide of its own; the author can take one off the call on the review page.",
+        };
+      } catch (err) {
+        if (err instanceof DesignReviewError) throw new AgentError(err.message);
+        throw err;
+      }
     },
 
     /** Says one to-do waits on another, or takes that back. It's a signal: nothing waits because of it. */

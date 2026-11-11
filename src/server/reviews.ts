@@ -138,7 +138,7 @@ export function reviewView(db: DB, roomId: string, baseUrl = "", now = Date.now(
   const slides = draft ? db.reviewSlides(draft.id) : [];
   const pending = pendingSlides(db, roomId, slides, now);
   if (!slides.length && !pending.length) return null;
-  return toView(db, draft ?? { id: "", roomId, status: "draft", deckId: null, meetingId: null, createdAt: now, startedAt: null, endedAt: null }, slides, pending, baseUrl);
+  return toView(db, draft ?? { id: "", roomId, kind: "product", status: "draft", deckId: null, meetingId: null, createdAt: now, startedAt: null, endedAt: null }, slides, pending, baseUrl);
 }
 
 /** The last review that finished, with how each slide ended. */
@@ -155,7 +155,7 @@ const caughtOf = (n: Note): ReviewCaught => ({ id: n.id, kind: n.kind as ReviewC
 export function reviewPage(db: DB, roomId: string, idOrNext: string, baseUrl = "", now = Date.now()): ReviewView | null {
   if (idOrNext === "next") return reviewView(db, roomId, baseUrl, now);
   const review = db.getReview(idOrNext);
-  if (!review || review.roomId !== roomId) return null;
+  if (!review || review.roomId !== roomId || review.kind !== "product") return null;
   if (review.status !== "done") return reviewView(db, roomId, baseUrl, now);
   const rows = db.reviewSlides(review.id);
   const view = toView(db, review, rows, [], baseUrl);
@@ -223,7 +223,7 @@ export function addSlide(db: DB, roomId: string, s: NewSlide): { slide: ReviewSl
 export function removeSlide(db: DB, roomId: string, slideId: string): boolean {
   const slide = db.getReviewSlide(slideId);
   const review = slide && db.getReview(slide.reviewId);
-  if (!slide || !review || review.roomId !== roomId || review.status !== "draft") return false;
+  if (!slide || !review || review.roomId !== roomId || review.kind !== "product" || review.status !== "draft") return false;
   db.removeReviewSlide(slideId);
   return true;
 }
@@ -262,7 +262,7 @@ export function startReview(db: DB, roomId: string, now = Date.now()): { review:
 export function setOutcome(db: DB, itemId: string, outcome: ReviewOutcome | null, by: string, now = Date.now()) {
   const slide = db.reviewSlideByItem(itemId);
   const review = slide && db.getReview(slide.reviewId);
-  if (!slide || review?.status !== "live") return null;
+  if (!slide || review?.kind !== "product" || review.status !== "live") return null;
   db.updateReviewSlide(slide.id, { outcome, outcomeBy: outcome ? by : null, outcomeAt: outcome ? now : null });
   db.setSlideContent(itemId, contentOf(db, db.getReviewSlide(slide.id)!));
   return db.getItem(itemId);

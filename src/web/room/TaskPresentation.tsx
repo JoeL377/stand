@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { Note, TaskBrief, TaskDetail } from "../../shared/protocol.ts";
+import type { PlanBrief } from "../../shared/designReview.ts";
+import type { Note, TaskDetail } from "../../shared/protocol.ts";
 import { STATE_LABEL, stateOf } from "../../shared/tasks.ts";
 import { api } from "../api.ts";
 import { PlanReviewBody } from "../PlanReview.tsx";
@@ -38,7 +39,7 @@ export function TaskPresentation({ presentation, canSteer, disabled, onChange }:
   presentation: Presentation; canSteer: boolean; disabled?: boolean; onChange: (task: Presentation | null) => void;
 }) {
   const [task, setTask] = useState<TaskDetail | null>(null);
-  const [brief, setBrief] = useState<TaskBrief | null>(null);
+  const [brief, setBrief] = useState<PlanBrief | null>(null);
   const [error, setError] = useState("");
   const [briefError, setBriefError] = useState("");
   const [attempt, retry] = useState(0);
@@ -52,7 +53,8 @@ export function TaskPresentation({ presentation, canSteer, disabled, onChange }:
     if (!task?.work.plan || presentation.mode !== "brief") return;
     let active = true;
     setBriefError("");
-    api.taskBrief(task.note.id).then((next) => { if (active) setBrief(next); }, (e) => { if (active) setBriefError(e.message); });
+    if (attempt > 0) setBrief(null);
+    api.taskBrief(task.note.id, attempt > 0).then((next) => { if (active) setBrief(next); }, (e) => { if (active) setBriefError(e.message); });
     return () => { active = false; };
   }, [task, presentation.mode, attempt]);
   return <section className="task-presentation" aria-label="Presented task">
@@ -77,11 +79,18 @@ export function TaskPresentation({ presentation, canSteer, disabled, onChange }:
       <h1>{task.note.text}</h1>
       {task.note.doneWhen && <p><strong>Done when:</strong> {task.note.doneWhen}</p>}
       {!task.work.plan ? <p className="muted">No spec attached to this task yet.</p> : <>
-        <p className="muted small">✦ AI-generated from the attached spec · Questions are suggestions for discussion</p>
-        {briefError ? <p className="error">{briefError} <button onClick={() => retry((n) => n + 1)}>Try again</button></p> : !brief ? <p role="status">Preparing summary and discussion questions…</p> : <>
-          <h2>Summary</h2><p>{brief.summary}</p>
-          <h2>Key takeaways</h2><ul>{brief.takeaways.map((t, i) => <li key={i}>{t}</li>)}</ul>
-          <h2>Open questions to discuss</h2>{brief.questions.length ? <ol>{brief.questions.map((q, i) => <li key={i}>{q}</li>)}</ol> : <p>No open questions identified in the spec.</p>}
+        {briefError ? <p className="error">{briefError} <button onClick={() => retry((n) => n + 1)}>Try again</button></p> : !brief ? <p role="status">Preparing the summary and the sections…</p> : <>
+          {brief.status === "failed" && <p className="error">Stand couldn’t write the brief. <button onClick={() => retry((n) => n + 1)}>Try again</button></p>}
+          {brief.status === "none" && <p className="muted small">AI briefs are unavailable. These are the sections of the spec; open Full spec to read them.</p>}
+          {brief.summary && <><h2>Summary</h2><p>{brief.summary}</p></>}
+          {brief.sections.filter((s) => !s.off).map((s) => <section key={s.heading}>
+            <h2>{s.heading}{!s.edited && s.lines.length > 0 && <span className="muted small" title="Written by Stand from the spec"> ✦</span>}</h2>
+            {s.lines.length > 0 && <ul>{s.lines.map((line, i) => <li key={i}>{line}</li>)}</ul>}
+          </section>)}
+          {brief.suggestions.some((q) => q.state === "open") && <>
+            <h2>Questions Stand suggests <span className="muted small">✦</span></h2>
+            <ol>{brief.suggestions.filter((q) => q.state === "open").map((q) => <li key={q.id}>{q.text}</li>)}</ol>
+          </>}
         </>}
       </>}
     </article>}

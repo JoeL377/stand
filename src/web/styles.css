@@ -3094,6 +3094,48 @@ a.rp-pill:hover, button.rp-pill:hover { background: var(--panel-2); text-decorat
 a.review-card-pic { color: var(--muted); }
 a.sh-review { text-decoration: none; color: inherit; }
 .sh-review .rp-counts { margin-left: 8px; }
+/* The plan viewer's way onto the next design review. */
+.td-plan-review { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; font-size: 13px; }
+/* The next design review's page: each spec as the slides the call goes through. */
+.dr-body { flex: 1; min-height: 0; display: flex; }
+.dr-specs { flex: none; width: 260px; overflow-y: auto; padding: 10px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.dr-specs > button { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+.dr-specs > button:hover, .dr-specs > button[aria-current="true"] { background: var(--panel-2); }
+.dr-specs > button:focus-visible { outline: 2px solid var(--accent); }
+.dr-spec { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 24px 40px; display: flex; flex-direction: column; gap: 10px; }
+.dr-spec > * { width: 100%; max-width: 860px; margin-inline: auto; }
+.dr-note { font-size: 13px; padding: 8px 12px; border-radius: 8px; background: var(--panel-2); }
+.dr-slides { list-style: none; margin: 4px auto 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.dr-slide { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+.dr-slide.off { background: transparent; border-style: dashed; }
+.dr-slide.off h2 { color: var(--muted); }
+.dr-slide > header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.dr-slide h2, .dr-suggest h2 { font-size: 15px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; }
+.dr-kind { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.dr-stand { font-size: 11px; color: var(--accent); white-space: nowrap; font-weight: 500; }
+.dr-changed { font-size: 12px; color: #b45309; }
+.dr-text { font-size: 14px; line-height: 1.45; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.dr-text ul { margin: 0; padding-left: 20px; }
+.dr-text p { margin: 0; white-space: pre-line; }
+.dr-edit { display: flex; flex-direction: column; gap: 6px; }
+.dr-edit textarea { width: 100%; font: inherit; font-size: 14px; line-height: 1.45; resize: vertical; }
+.dr-row { display: flex; align-items: center; gap: 8px; }
+.dr-points { display: flex; flex-direction: column; gap: 6px; }
+.dr-point { border-left: 3px solid var(--accent); padding: 6px 10px; border-radius: 0 8px 8px 0; background: var(--panel-2); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 13.5px; }
+.dr-point.off { border-left-color: var(--line); }
+.dr-point.off > p, .dr-point.off > blockquote { opacity: 0.6; }
+.dr-point blockquote { margin: 0; color: var(--muted); font-size: 12.5px; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.dr-point p { margin: 0; }
+.dr-ask { display: flex; gap: 8px; }
+.dr-ask input { flex: 1; min-width: 0; font-size: 13px; }
+.dr-suggest { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.dr-suggest .dr-point { border-left-style: dashed; }
+@media (max-width: 760px) {
+  .dr-body { flex-direction: column; }
+  .dr-specs { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .dr-specs > button { flex: none; max-width: 220px; }
+  .dr-spec { padding: 14px 12px 32px; }
+}
 .rc-review { align-self: flex-start; }
 @media (max-width: 720px) {
   .rp { height: auto; min-height: 100dvh; }
