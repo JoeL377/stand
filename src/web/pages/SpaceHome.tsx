@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { matchesTopic, topicKey, topicOf, topicOptions } from "../../shared/topics.ts";
 import { TopicPicker } from "../TopicPicker.tsx";
 import { stateOf } from "../../shared/tasks.ts";
@@ -45,7 +45,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const { user, caps } = useAuth();
   const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
-  const [upNext, setUpNext] = useState<UpNext | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The snap open big: one on its own, or a note's pictures with the note.
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
@@ -75,7 +74,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     if (openTask) return "tasks";
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
-      // To do and Questions became one Tasks tab, and Done since moved into it.
+      // To do and Questions became one Tasks tab, and Done since moved into it. Up next is gone: saved "next" falls through to Tasks.
       if (saved === "todo" || saved === "questions" || saved === "done") return "tasks";
       if (saved && TABS.some((t) => t.key === saved)) return saved as TabKey;
     } catch {}
@@ -96,10 +95,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         setError(null);
       },
       (e: Error) => setError(e.message),
-    );
-    api.suggested(room.id).then(
-      (s) => setUpNext(s.upNext),
-      () => {},
     );
   }, [room.id, reload]);
 
@@ -193,23 +188,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     else show();
   };
 
-  // The agenda as the meeting shows it, a deck as one line, then what the agent would add.
-  const agenda: Array<{ key: string; ref: string; title: string; href: string; open: number }> = [];
-  for (const it of room.items) {
-    const key = it.deckId ?? it.id;
-    if (agenda.some((a) => a.key === key)) continue;
-    const deck = it.deckId ? room.decks.find((d) => d.id === it.deckId) : null;
-    const ref = deck ? `deck:${deck.id}` : `item:${it.id}`;
-    if (gone.has(ref)) continue;
-    agenda.push({ key, ref, title: deck ? deck.title : it.title, href: deck ? `/decks/${deck.id}` : `/items/${it.id}`, open: 0 });
-  }
   const todos = room.followUps.filter((f) => !gone.has(`todo:${f.id}`));
-  for (const f of todos) {
-    const it = room.items.find((i) => i.id === f.itemId);
-    const row = it && agenda.find((a) => a.key === (it.deckId ?? it.id));
-    if (row) row.open++;
-  }
-  const suggested = (upNext?.suggestions ?? []).filter((s) => !gone.has(`suggestion:${s.key}`));
   const questions = (feed?.open ?? []).filter((n) => !gone.has(`question:${n.id}`));
   const decisions = (feed?.decided ?? []).filter((n) => !gone.has(`decision:${n.id}`));
   const context = feed?.context ?? [];
@@ -218,7 +197,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
     meetings: meetings.length,
     tasks: todos.length + questions.length,
     decisions: decisions.filter((n) => !n.replacedBy).length,
-    next: agenda.length + suggested.length,
   };
   const deck = feed?.doneDeck ?? null;
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
@@ -358,6 +336,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               {counts[t.key] > 0 && <span className="count">{counts[t.key]}</span>}
             </button>
           ))}
+          {/* One pill at the end of the tab row filters Tasks and Decisions by topic. */}
+          {(tab === "tasks" || tab === "decisions") && (
+            <label className={topicFilter ? "sh-topic-filter on" : "sh-topic-filter"}>
+              <select aria-label="Filter by topic" value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)}>
+                <option value="">All topics</option>
+                <option value="none">No topic</option>
+                {topics.map((t) => <option key={topicKey(t)} value={`topic:${topicKey(t)}`}>{t}</option>)}
+                {topicFilter.startsWith("topic:") && !topics.some((t) => `topic:${topicKey(t)}` === topicFilter) && <option value={topicFilter}>{topicFilter.slice(6)}</option>}
+              </select>
+            </label>
+          )}
         </div>
         </div>
         {/* The lists scroll in here, under the header, which is a fixed part of the page. */}
@@ -467,18 +456,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </>
           )}
 
-          {(tab === "tasks" || tab === "decisions") && (
-            <div className="sh-topic-filter">
-              <label htmlFor="space-topic-filter">Topic</label>
-              <select id="space-topic-filter" value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)}>
-                <option value="">All topics</option>
-                <option value="none">No topic</option>
-                {topics.map((t) => <option key={topicKey(t)} value={`topic:${topicKey(t)}`}>{t}</option>)}
-                {topicFilter.startsWith("topic:") && !topics.some((t) => `topic:${topicKey(t)}` === topicFilter) && <option value={topicFilter}>{topicFilter.slice(6)}</option>}
-              </select>
-              {topicFilter && <button type="button" className="link" onClick={() => setTopicFilter("")}>Clear</button>}
-            </div>
-          )}
           {tab === "tasks" && (
             <TasksTab
               roomId={room.id}
@@ -519,39 +496,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               )}
             </>
           )}
-
-          {tab === "next" &&
-            (agenda.length + suggested.length ? (
-              <>
-                <ul className="sh-list">
-                  {agenda.map((e) => (
-                    <li key={e.key}>
-                      <Link to={e.href}>{e.title}</Link>
-                      {e.open > 0 && <span className="sh-open-count">{e.open} open</span>}
-                      <ArchiveButton onClick={() => archive(e.ref)} />
-                    </li>
-                  ))}
-                </ul>
-                {suggested.length > 0 && (
-                  <>
-                    <p className="sh-group" title="What the agent suggests adding when the next meeting starts">
-                      <span className="sh-mark">✦</span>Suggested · {suggested.length}
-                    </p>
-                    <ul className="sh-list suggested">
-                      {suggested.map((s) => (
-                        <li key={s.key} title={s.reason}>
-                          {s.kind === "capture" && (s.key.startsWith("jot:") ? <EditIcon size={12} /> : <CameraIcon size={12} />)}
-                          <span>{s.title}</span>
-                          <ArchiveButton onClick={() => archive(`suggestion:${s.key}`, { title: s.title, keys: s.merged })} />
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </>
-            ) : (
-              <p className="sh-card-empty">Nothing on the agenda yet. Suggestions come from meetings and what people save here.</p>
-            ))}
 
           {(!(tab === "tasks" || tab === "decisions") || !topicFilter) && <ArchivedList
             rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
@@ -1298,7 +1242,7 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "tasks" | "meetings" | "decisions" | "next";
+type TabKey = "tasks" | "meetings" | "decisions";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
@@ -1323,7 +1267,6 @@ const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
   tasks: ["todo", "question"],
   meetings: ["meeting", "snap", "jot"],
   decisions: ["decision"],
-  next: ["item", "deck", "suggestion"],
 };
 
 /** A tab's archived rows, folded at its bottom like Done, each with Restore. */
@@ -1360,7 +1303,6 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
   { key: "decisions", label: "Decisions", icon: <DecidedIcon size={14} /> },
-  { key: "next", label: "Up next" },
 ];
 
 /** Decisions or open questions across the space's meetings, as the recap lists them. A decision a
