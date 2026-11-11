@@ -3207,7 +3207,11 @@ a.sh-review { text-decoration: none; color: inherit; }
 .brain-lines line { stroke: var(--line); stroke-width: 1.5; transition: all 0.5s ease; }
 .brain-lines line.trunk { stroke: color-mix(in srgb, var(--accent) 45%, var(--line)); stroke-width: 2; }
 .brain-node { all: unset; box-sizing: border-box; position: absolute; translate: -50% -50%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-align: center; cursor: pointer; transition: left 0.5s ease, top 0.5s ease, box-shadow 0.3s, border-color 0.3s, background 0.3s; animation: brain-in 0.45s ease both; }
-.brain-node > span { overflow-wrap: break-word; min-width: 0; }
+.brain-node.dir, .brain-node.idea { flex-direction: column; gap: 4px; }
+.brain-label { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; max-width: 100%; }
+.brain-label > span { overflow-wrap: break-word; min-width: 0; }
+.brain-marks { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.brain-node.root > span { overflow-wrap: break-word; min-width: 0; }
 .brain-node.dir, .brain-node.idea { width: max-content; }
 .brain-node.root { cursor: default; flex-direction: column; gap: 4px; width: clamp(180px, 24%, 290px); min-height: 84px; padding: 14px 20px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 16px; font-weight: 600; line-height: 1.25; box-shadow: 0 6px 22px color-mix(in srgb, var(--accent) 30%, transparent); z-index: 2; animation: none; }
 .brain-node.root small { font-size: 11.5px; font-weight: 400; opacity: 0.85; }
@@ -3307,8 +3311,11 @@ a.sh-review { text-decoration: none; color: inherit; }
 .brain-kind.action, .brain-kind-pill.action svg { color: var(--accent); }
 .brain-kind.decision, .brain-kind-pill.decision svg { color: var(--ok); }
 .brain-kind.question, .brain-kind-pill.question svg { color: var(--warn); }
-.brain-node.dim { filter: opacity(0.22); }
-.brain-node.dim:hover, .brain-node.dim.on { filter: none; }
+/* A dimmed circle stays solid, so the lines behind it don't show through its words. */
+.brain-node.dim { color: color-mix(in srgb, var(--text) 26%, var(--panel)); border-color: color-mix(in srgb, var(--line) 55%, var(--panel)); }
+.brain-node.dim .brain-marks { opacity: 0.3; }
+.brain-node.dim:hover, .brain-node.dim.on { color: var(--text); }
+.brain-node.dim:hover .brain-marks, .brain-node.dim.on .brain-marks { opacity: 1; }
 .brain-kinds { position: absolute; top: 10px; left: 12px; z-index: 4; display: flex; gap: 6px; }
 .brain-kind-pill { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; }
 .brain-kind-pill > span { color: var(--muted); }
@@ -3326,3 +3333,4 @@ a.sh-review { text-decoration: none; color: inherit; }
 .brain:not(.narrow) .brain-canvas { will-change: transform; }
 .brain { user-select: none; -webkit-user-select: none; }
 .brain-card { user-select: text; -webkit-user-select: text; cursor: auto; }
+.brain-node.idea.more.dim { color: color-mix(in srgb, var(--muted) 35%, var(--panel)); }
