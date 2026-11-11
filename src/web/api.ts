@@ -179,6 +179,7 @@ export const api = {
     call<PlanThread>("POST", `/api/tasks/${id}/plan-review`, input),
   commentOnTask: (id: string, text: string) =>
     call<TaskDetail["work"]["log"][number]>("POST", `/api/tasks/${id}/comments`, { text }),
+  clearMentions: (id: string) => call<{ ok: true }>("POST", `/api/tasks/${id}/mentions/clear`),
   presentationTasks: (roomId: string) => call<Note[]>("GET", `/api/rooms/${roomId}/presentation-tasks`),
   taskBrief: (id: string, retry = false) => call<PlanBrief>("POST", `/api/tasks/${id}/presentation-brief`, { retry }, SLOW_REQUEST_MS),
   designReview: (roomId: string) => call<{ roomName: string; review: DesignReviewView | null; reviews: DesignReviewRan[] }>("GET", `/api/rooms/${roomId}/design-review`),

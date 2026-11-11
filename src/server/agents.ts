@@ -16,6 +16,7 @@ import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
+import { recordMentions } from "./mentions.ts";
 import { settledView } from "./spaceSettle.ts";
 import { CHECK_INSTRUCTIONS, CHECK_LEASE_MS, CHECK_VERSION, SHOW_FROM } from "./decisionCheck.ts";
 
@@ -363,6 +364,27 @@ export function agentApi(deps: AgentDeps) {
     return { waits_on: waitsOn.length ? waitsOn : undefined, waiting_on_this: waitingOnThis.length ? waitingOnThis : undefined };
   };
 
+  /** Comments that tag the caller and wait on them, one line per task, newest first. */
+  function mentionsOf(caller: Caller, roomId: string | undefined, baseUrl: string) {
+    const seen = new Set<string>();
+    return db.openMentions(caller.user.id, roomId).flatMap((u) => {
+      if (seen.has(u.noteId)) return [];
+      seen.add(u.noteId);
+      const n = db.getNote(u.noteId);
+      if (!n) return [];
+      const kind = NOTE_KINDS[n.kind];
+      return [{
+        roomId: u.roomId,
+        ref: refOf(kind, n.id),
+        task: clip(n.text, 160),
+        by: u.client ? `${u.userName} via ${u.client}` : u.userName,
+        comment: clip(u.text, 400),
+        at: new Date(u.ts).toISOString(),
+        url: refUrl(baseUrl, kind, n.id),
+      }];
+    });
+  }
+
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
   function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number; addedByHand?: boolean }>, baseUrl: string) {
     const items = new Map<string, Item | null>();
@@ -667,9 +689,12 @@ export function agentApi(deps: AgentDeps) {
         .filter((n) => (status === "all" ? true : status === "done" ? !!n.doneAt : !n.doneAt));
       const mine = all.filter((n) => ownedBy(n.owner, caller.user.name) || (opts.includeUnassigned && !n.owner));
       const work = workRows(mine.slice(0, 50), baseUrl);
+      const inSpace = (roomId: string) => !q || roomId === opts.space || (db.getRoom(roomId)?.name.toLowerCase().includes(q) ?? false);
+      const mentions = status === "done" ? [] : mentionsOf(caller, undefined, baseUrl).filter((m) => inSpace(m.roomId)).map(({ roomId: _r, ...m }) => m);
       return {
         you: caller.user.name,
         count: mine.length,
+        mentions_you: mentions.length ? mentions : undefined,
         work,
         note: work.length
           ? undefined
@@ -770,12 +795,14 @@ export function agentApi(deps: AgentDeps) {
         links: cleanLinks(args.links),
       });
       if (note && status !== "comment") db.claimWorkShots(note.id, caller.user.id, update.id);
+      const tagged = recordMentions(db, update, caller.user.id);
       deps.notify(roomId, "updates");
       const pr = update.links.find((l) => prOf(l));
       if (status === "ready" && pr) deps.readyToShip?.();
       return {
         posted: updateInfo(update, baseUrl),
         shows_on: note?.kind === "action" ? "the to-do in Stand, in its log" : itemId ? "the item in Stand, under Since last time" : "the space in Stand",
+        tagged: tagged.length ? `${tagged.join(", ")}: the task shows first in their task list until they comment on it or dismiss it.` : undefined,
         working:
           note?.kind === "action" && (status === "working" || status === "progress")
             ? "The to-do shows as being worked on until you complete it, post ready, blocked or needs_decision, or go 30 minutes without an update."
@@ -1127,6 +1154,10 @@ export function agentApi(deps: AgentDeps) {
       return {
         space: { id: room.id, name: room.name },
         since: new Date(since).toISOString(),
+        mentions_you: (() => {
+          const m = mentionsOf(caller, room.id, baseUrl).map(({ roomId: _r, ...x }) => x);
+          return m.length ? m : undefined;
+        })(),
         meetings: db
           .feedMeetings(room.id)
           .filter((m) => m.startedAt >= since)

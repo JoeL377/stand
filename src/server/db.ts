@@ -379,6 +379,18 @@ CREATE TABLE IF NOT EXISTS updates (
 CREATE INDEX IF NOT EXISTS updates_room ON updates(room_id, ts);
 CREATE INDEX IF NOT EXISTS updates_item ON updates(item_id, ts);
 CREATE INDEX IF NOT EXISTS updates_note ON updates(note_id);
+-- People tagged with @Name in a task comment (mentions.ts). Open until they comment on the task,
+-- dismiss it, or the task closes.
+CREATE TABLE IF NOT EXISTS mentions (
+  update_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  cleared_at INTEGER,
+  PRIMARY KEY (update_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS mentions_user ON mentions(user_id, cleared_at);
 -- Screenshots an agent attaches to a to-do's work log. They join the next
 -- update it posts on that to-do (update_id); until then they show on their own.
 CREATE TABLE IF NOT EXISTS work_shots (
@@ -2585,6 +2597,33 @@ export function openDb(file?: string) {
     },
     noteUpdates(noteId: string): ItemUpdate[] {
       return (db.prepare("SELECT * FROM updates WHERE note_id = ? ORDER BY ts DESC, rowid DESC LIMIT 50").all(noteId) as Row[]).map(toUpdate);
+    },
+    /** The people in a space, as an @mention can name them. */
+    roomPeople(roomId: string): Array<{ id: string; name: string }> {
+      return (db.prepare("SELECT u.id, u.name FROM room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? ORDER BY u.name").all(roomId) as Row[])
+        .map((r) => ({ id: r.id as string, name: r.name as string }))
+        .filter((p) => p.name);
+    },
+    addMentions(u: Pick<ItemUpdate, "id" | "roomId" | "noteId" | "ts">, userIds: string[]) {
+      if (!u.noteId) return;
+      const st = db.prepare("INSERT OR IGNORE INTO mentions (update_id, user_id, room_id, note_id, ts) VALUES (?, ?, ?, ?, ?)");
+      for (const id of userIds) st.run(u.id, id, u.roomId, u.noteId, u.ts);
+    },
+    /** The comments that tag this person and still wait on them, newest first: on tasks still open. */
+    openMentions(userId: string, roomId?: string): Array<ItemUpdate & { noteId: string }> {
+      return (
+        db
+          .prepare(
+            `SELECT u.* FROM mentions x JOIN updates u ON u.id = x.update_id JOIN notes n ON n.id = x.note_id
+             WHERE x.user_id = ? AND x.cleared_at IS NULL AND n.done_at IS NULL ${roomId ? "AND x.room_id = ?" : ""}
+             ORDER BY x.ts DESC LIMIT 200`,
+          )
+          .all(...(roomId ? [userId, roomId] : [userId])) as Row[]
+      ).map((r) => toUpdate(r) as ItemUpdate & { noteId: string });
+    },
+    /** This person has seen to the mentions on a task: they replied, or dismissed them. */
+    clearMentions(noteId: string, userId: string): number {
+      return db.prepare("UPDATE mentions SET cleared_at = ? WHERE note_id = ? AND user_id = ? AND cleared_at IS NULL").run(Date.now(), noteId, userId).changes as number;
     },
     /** When the meeting before this one ended: what closed after that is news at this one's check-in. */
     previousMeetingEnd(roomId: string, before: number): number | null {

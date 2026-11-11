@@ -212,9 +212,15 @@ function SpaceCard({ s }: { s: SpaceSummary }) {
 }
 
 function StateChips({ s }: { s: SpaceSummary }) {
-  if (!s.toDecide && !s.todos) return null;
+  const mentions = s.mentions ?? 0;
+  if (!s.toDecide && !s.todos && !mentions) return null;
   return (
     <span className="sp-states">
+      {mentions > 0 && (
+        <span className="sp-state mention" title="Open tasks where a comment tags you">
+          Tagged in {mentions} {mentions === 1 ? "task" : "tasks"}
+        </span>
+      )}
       {s.toDecide > 0 && <span className="sp-state decide">{s.toDecide} to decide</span>}
       {s.todos > 0 && (
         <span className="sp-state todo">

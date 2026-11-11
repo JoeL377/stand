@@ -513,6 +513,21 @@ export interface TaskDetail {
   waitsOn: TaskLink[];
   /** To-dos that wait on this one. */
   blocking: TaskLink[];
+  /** The people in its space, whom a comment can tag with @Name. */
+  people: Array<{ id: string; name: string }>;
+  /** Comments on it that tag you and wait on you, newest first. */
+  mentionsYou: TaskMention[];
+}
+
+/** A comment that tags someone with @Name: it puts the task first in their task list until they
+ *  comment on the task, dismiss it, or the task closes. */
+export interface TaskMention {
+  noteId: string;
+  updateId: string;
+  /** Who wrote the comment, as the log shows it. */
+  by: string;
+  text: string;
+  ts: number;
 }
 
 /** A GitHub account (person or organization) where someone installed the Stand GitHub App. */
@@ -1128,6 +1143,8 @@ export interface SpaceFeed {
   context: Note[];
   /** Questions someone answered or dropped by hand, or a later decision answered (answeredBy), newest first. */
   closedQuestions?: Array<Note & { from?: NoteFrom; answeredBy?: string }>;
+  /** Comments that tag the person asking and wait on them, newest first. */
+  mentions?: TaskMention[];
 }
 
 export interface SpaceSummary {
@@ -1151,6 +1168,8 @@ export interface SpaceSummary {
   forYou: number;
   /** Your to-dos with work in (a PR reported ready) that wait on your look. */
   waiting?: number;
+  /** Open tasks where a comment tags you and waits on you. */
+  mentions?: number;
   /** The latest decision or open question, for the card's last line. */
   last: { kind: "decision" | "question" | "action"; text: string; ts: number } | null;
   /** People who have been in it. */
