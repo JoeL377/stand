@@ -80,11 +80,11 @@ function boxOf(p: Placed): { w: number; h: number } {
   const max = dir ? 170 : 158;
   const pad = dir ? 36 : 26;
   const per = dir ? 8 : 6.9;
-  // The count of what was built on it, and a mark per kind of thing caught on it.
-  const extra = 24 + 18 * new Set(p.node?.caught.map((c) => c.kind) ?? []).size;
-  const inner = max - pad - extra;
+  const inner = max - pad;
   const lines = Math.max(1, Math.ceil((text.length * per) / inner));
-  return { w: lines > 1 ? max : Math.min(max, text.length * per + pad + extra), h: (dir ? 20 : 12) + lines * (dir ? 17 : 16) };
+  // The count of what was built on it and the marks for what was caught sit in a row underneath.
+  const marks = p.node && (p.node.points.length || p.node.caught.length) ? 20 : 0;
+  return { w: lines > 1 ? max : Math.min(max, Math.max(text.length * per + pad, marks ? 90 : 0)), h: (dir ? 20 : 12) + lines * (dir ? 17 : 16) + marks };
 }
 
 /** Nudges circles apart until none touch: each keeps GAP clear of the others and of the sentence
@@ -332,18 +332,28 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
                 aria-expanded={openId === p.id}
                 onClick={(e) => (e.stopPropagation(), pick(p.id))}
               >
-                {fresh(p.id) && p.node.by && <Face name={p.node.by} />}
-                <span dir="auto">{p.node.label}</span>
-                {p.node.points.length > 0 && <i className="brain-badge">{p.node.points.length}</i>}
-                {KINDS.filter((k) => has(p.node!, k.kind)).map(({ kind, Icon, one }) => {
-                  const n = p.node!.caught.filter((c) => c.kind === kind).length;
-                  return (
-                    <i key={kind} className={`brain-kind ${kind}`} title={n === 1 ? `1 ${one}` : `${n} ${one}s`}>
-                      <Icon size={12} />
-                      {n > 1 && n}
-                    </i>
-                  );
-                })}
+                <span className="brain-label">
+                  {fresh(p.id) && p.node.by && <Face name={p.node.by} />}
+                  <span dir="auto">{p.node.label}</span>
+                </span>
+                {(p.node.points.length > 0 || p.node.caught.length > 0) && (
+                  <span className="brain-marks">
+                    {p.node.points.length > 0 && (
+                      <i className="brain-badge" title={p.node.points.length === 1 ? "1 remark built on it" : `${p.node.points.length} remarks built on it`}>
+                        {p.node.points.length}
+                      </i>
+                    )}
+                    {KINDS.filter((k) => has(p.node!, k.kind)).map(({ kind, Icon, one }) => {
+                      const n = p.node!.caught.filter((c) => c.kind === kind).length;
+                      return (
+                        <i key={kind} className={`brain-kind ${kind}`} title={n === 1 ? `1 ${one}` : `${n} ${one}s`}>
+                          <Icon size={12} />
+                          {n > 1 && n}
+                        </i>
+                      );
+                    })}
+                  </span>
+                )}
               </button>
             ) : (
               <button key={p.id} type="button" className={`brain-node idea more${only ? " dim" : ""}`} style={{ left: p.x, top: p.y }} onClick={(e) => (e.stopPropagation(), pick(p.from))}>
