@@ -253,7 +253,8 @@ CREATE TABLE IF NOT EXISTS review_slides (
   outcome TEXT,
   outcome_by TEXT,
   outcome_at INTEGER,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  name TEXT
 );
 CREATE INDEX IF NOT EXISTS review_slides_review ON review_slides(review_id, position);
 -- Token use of every Claude call (usage.ts), with the meeting it was for (null outside a meeting).
@@ -473,6 +474,8 @@ export interface ReviewSlideRow {
   reviewId: string;
   position: number;
   title: string;
+  /** What people call it, in two or three words; null when nobody named it. */
+  name: string | null;
   body: string;
   noteId: string | null;
   owner: string | null;
@@ -499,6 +502,7 @@ const toReviewSlide = (r: Row): ReviewSlideRow => ({
   reviewId: r.review_id as string,
   position: r.position as number,
   title: r.title as string,
+  name: (r.name as string) ?? null,
   body: r.body as string,
   noteId: (r.note_id as string) ?? null,
   owner: (r.owner as string) ?? null,
@@ -675,6 +679,8 @@ export function openDb(file?: string) {
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
   // A product review's deck (reviews.ts).
   if (!deckCols.includes("review_id")) db.exec("ALTER TABLE decks ADD COLUMN review_id TEXT;");
+  const reviewSlideCols = (db.prepare("PRAGMA table_info(review_slides)").all() as Row[]).map((c) => c.name as string);
+  if (!reviewSlideCols.includes("name")) db.exec("ALTER TABLE review_slides ADD COLUMN name TEXT;");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
@@ -2067,16 +2073,16 @@ export function openDb(file?: string) {
       const r = db.prepare("SELECT * FROM review_slides WHERE item_id = ?").get(itemId) as Row | undefined;
       return r ? toReviewSlide(r) : null;
     },
-    addReviewSlide(reviewId: string, s: Pick<ReviewSlideRow, "title" | "body" | "noteId" | "owner" | "addedBy" | "pr">): ReviewSlideRow {
+    addReviewSlide(reviewId: string, s: Pick<ReviewSlideRow, "title" | "body" | "noteId" | "owner" | "addedBy" | "pr"> & { name?: string | null }): ReviewSlideRow {
       const id = newId();
       const pos = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM review_slides WHERE review_id = ?").get(reviewId) as Row).p as number;
       db.prepare(
-        "INSERT INTO review_slides (id, review_id, position, title, body, note_id, owner, added_by, pr, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      ).run(id, reviewId, pos + 1, s.title, s.body, s.noteId, s.owner, s.addedBy, s.pr, Date.now());
+        "INSERT INTO review_slides (id, review_id, position, title, body, note_id, owner, added_by, pr, created_at, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(id, reviewId, pos + 1, s.title, s.body, s.noteId, s.owner, s.addedBy, s.pr, Date.now(), s.name ?? null);
       return this.getReviewSlide(id)!;
     },
-    updateReviewSlide(id: string, patch: Partial<Pick<ReviewSlideRow, "title" | "body" | "owner" | "addedBy" | "pr" | "itemId" | "outcome" | "outcomeBy" | "outcomeAt">>) {
-      const cols: Record<string, string> = { title: "title", body: "body", owner: "owner", addedBy: "added_by", pr: "pr", itemId: "item_id", outcome: "outcome", outcomeBy: "outcome_by", outcomeAt: "outcome_at" };
+    updateReviewSlide(id: string, patch: Partial<Pick<ReviewSlideRow, "title" | "name" | "body" | "owner" | "addedBy" | "pr" | "itemId" | "outcome" | "outcomeBy" | "outcomeAt">>) {
+      const cols: Record<string, string> = { title: "title", name: "name", body: "body", owner: "owner", addedBy: "added_by", pr: "pr", itemId: "item_id", outcome: "outcome", outcomeBy: "outcome_by", outcomeAt: "outcome_at" };
       for (const [k, v] of Object.entries(patch)) db.prepare(`UPDATE review_slides SET ${cols[k]} = ? WHERE id = ?`).run(v ?? null, id);
     },
     removeReviewSlide(id: string) {
@@ -2168,7 +2174,7 @@ export function openDb(file?: string) {
       );
     },
     /** Moves a carried to-do or question onto an agenda item, so it shows (and can be checked off) there. */
-    moveNote(noteId: string, itemId: string) {
+    moveNote(noteId: string, itemId: string | null) {
       db.prepare("UPDATE notes SET item_id = ? WHERE id = ?").run(itemId, noteId);
     },
     meetingNotes(meetingId: string): Note[] {

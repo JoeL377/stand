@@ -39,7 +39,7 @@ import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
 import { applyMerges, mergePrompt, planMerge, stickyMerges, type TopicMerge } from "./topicMerge.ts";
 import { newId } from "./ids.ts";
-import { finishReview, isReviewSlide, setOutcome } from "./reviews.ts";
+import { finishReview, isReviewSlide, refileReview, setOutcome } from "./reviews.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
 import { metered } from "./usage.ts";
@@ -1981,6 +1981,17 @@ export class RoomSession implements SpeechSink {
       if (doneOnList.length) {
         for (const n of doneOnList) this.mirrorDone(n.text, n.doneBy ?? "Stand");
         for (const p of perItem) p.notes = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === (p.item?.id ?? null));
+      }
+      // A review ran: each capture goes under the slide it was about, not the one on screen when it was said.
+      const filed = await refileReview(this.db, this.meetingId, (prompt) => this.agent.refileReview(prompt)).catch((err) => {
+        console.error("[agent] review filing failed:", err);
+        return { moved: 0, dropped: 0 };
+      });
+      if (filed.moved || filed.dropped) {
+        console.log(`[agent] review filing: ${filed.moved} moved, ${filed.dropped} echoes dropped`);
+        const all = this.db.meetingNotes(this.meetingId);
+        for (const p of perItem) p.notes = all.filter((n) => n.itemId === (p.item?.id ?? null));
+        if (!perItem.some((p) => !p.item) && all.some((n) => !n.itemId)) perItem.push({ item: null, notes: all.filter((n) => !n.itemId) });
       }
       // The tidy runs rewrote the topics: place the smaller ones again, then write the recap on those chapters.
       placing = this.mergeTopics(true);

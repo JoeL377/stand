@@ -187,6 +187,8 @@ export interface Agent {
    *  the main topic it belongs to or a group title. `final`: the pass as the meeting ends, on the tidy
    *  model. Null without a model. */
   mergeTopics(prompt: string, final: boolean): Promise<Array<{ key: string; into: string }> | null>;
+  /** After a product review: which slide each to-do, decision and open question belongs under (reviews.ts). */
+  refileReview(prompt: string): Promise<Array<{ note: string; to: string }> | null>;
   /** The middle board's card (board.ts): the thread on screen brought up to date, and a move when
    *  the talk has gone elsewhere. Null without a model. */
   boardCard(context: string, talk: string): Promise<BoardAnswer | null>;
@@ -506,6 +508,9 @@ const NOTES_TIDY_TIMEOUT_MS = 240_000;
 const MERGE_TIMEOUT_MS = 60_000;
 const MergeSchema = z.object({
   merges: z.array(z.object({ key: z.string(), into: z.string().describe("a main topic's key, or the title of a group") })),
+});
+const RefileSchema = z.object({
+  filed: z.array(z.object({ note: z.string().describe("the capture's key, like N4"), to: z.string().describe("a slide's key like S3, or none, or echo") })),
 });
 /** The notes list every transcript line under its topic, so they grow with a long item, and
  *  the model thinks first within the same limit. Only what it writes is billed. */
@@ -898,6 +903,24 @@ Answer for every smaller topic exactly once.`,
       { timeout: MERGE_TIMEOUT_MS, maxTokens: 6000 },
     );
     return out?.merges ?? null;
+  }
+
+  async refileReview(prompt: string): Promise<Array<{ note: string; to: string }> | null> {
+    if (!prompt.trim()) return [];
+    const out = await this.parse(
+      RefileSchema,
+      prompt,
+      `A team just finished a product review: a call that went through features one slide at a time. Each to-do, decision and open question was filed under the slide on screen when it was said. People talk past a slide change, open with general talk, and come back to earlier features, so some sit under the wrong slide.
+For every capture, say where it belongs:
+- A slide's key, when the capture is about that feature: something to fix or build on it, a decision about it, a question about it. Go by what the capture is about, not by when it was said.
+- none, when it isn't about one feature: how the team works, the review format itself (unless a slide shows that), a chore, a new idea that no slide shows.
+- echo, only for an open question that just repeats a question written on its slide ("On the slide") and has no quote: nobody asked it, the slide did.
+When a capture fits the slide it is already under, answer with that slide. When two slides fit, prefer the one it is already under. Answer for every capture exactly once.`,
+      "low",
+      config.notesTidyModel,
+      { timeout: MERGE_TIMEOUT_MS, maxTokens: 6000 },
+    );
+    return out?.filed ?? null;
   }
 
   async boardCard(context: string, talk: string): Promise<BoardAnswer | null> {
@@ -1373,6 +1396,9 @@ export class HeuristicAgent implements Agent {
     return null;
   }
   async mergeTopics(): Promise<Array<{ key: string; into: string }> | null> {
+    return null;
+  }
+  async refileReview(): Promise<Array<{ note: string; to: string }> | null> {
     return null;
   }
 

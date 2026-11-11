@@ -1,7 +1,67 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
-import { ReviewError, addSlide, finishReview, isReviewSlide, lastReview, removeSlide, reviewOfMeeting, reviewPage, reviewView, reviewsDone, setOutcome, slideShotKey, startReview } from "./reviews.ts";
+import { ReviewError, addSlide, finishReview, isReviewSlide, lastReview, removeSlide, reviewOfMeeting, reviewPage, reviewView, refilePrompt, refileReview, reviewsDone, setOutcome, slideName, slideShotKey, startReview } from "./reviews.ts";
+
+test("a slide goes by its name: the one it was given, else the first words of its title", async () => {
+  const { db, room } = await space();
+  addSlide(db, room.id, { title: "Tasks open in a drawer: subtasks, spec and links in one place", name: "  Task   drawer ", summary: "", addedBy: "x" });
+  addSlide(db, room.id, { title: "Every product review has its own page and link", summary: "", addedBy: "x" });
+  assert.deepEqual(reviewView(db, room.id)!.slides.map((s) => s.name), ["Task drawer", "Every product review"]);
+  assert.equal(slideName({ title: "Rename: topics become projects everywhere" }), "Rename: topics become projects");
+  startReview(db, room.id);
+  // The agenda item carries it, which is what the room, the transcript and briefs label the slide with.
+  assert.deepEqual(db.listItems(room.id).slice(0, 2).map((it) => it.slide?.review?.name), ["Task drawer", "Every product review"]);
+});
+
+test("after the call each capture is filed under the slide it was about", async () => {
+  const { db, room } = await space();
+  addSlide(db, room.id, { title: "New landing page", name: "Landing page", summary: "Bigger hero.\nDoes the hero read well on phones?", addedBy: "x" });
+  addSlide(db, room.id, { title: "Dark mode", summary: "", addedBy: "x" });
+  const started = startReview(db, room.id);
+  const m = db.startMeeting(room.id);
+  const [first, second] = db.listItems(room.id);
+  const said = (text: string) => ({ segmentId: "s", speaker: "Huy Ngo", text, ts: Date.now() });
+  const [general, echo, asked] = db.replaceNotes(m.id, first.id, [
+    { kind: "action", text: "Book the offsite", owner: null, quote: said("we should book the offsite") },
+    { kind: "question", text: "Does the hero read well on phones?", owner: null },
+    { kind: "question", text: "Keep the old pricing table?", owner: null, quote: said("do we keep the pricing table") },
+    { kind: "context", text: "Huy walked through the page", owner: null },
+  ]);
+  const [late, stays] = db.replaceNotes(m.id, second.id, [
+    { kind: "action", text: "Shrink the hero on phones", owner: "Huy Ngo", quote: said("the hero is too tall on my phone") },
+    { kind: "decision", text: "Dark mode ships behind a setting", owner: null },
+  ]);
+  finishReview(db, room.id, m.id);
+
+  const { text, noteOf } = refilePrompt(db.reviewSlides(started.review.id), db.meetingNotes(m.id));
+  assert.match(text, /S1 "Landing page": New landing page/);
+  assert.match(text, /N4 \[S2\] to-do: Shrink the hero on phones \(owner Huy Ngo\) \(Huy Ngo: "the hero is too tall on my phone"\)/);
+  assert.doesNotMatch(text, /walked through/);
+  const key = (id: string) => [...noteOf].find(([, n]) => n.id === id)![0];
+
+  let asks = 0;
+  const done = await refileReview(db, m.id, async () => {
+    asks++;
+    return [
+      { note: key(late.id), to: "S1" },
+      { note: key(general.id), to: "none" },
+      { note: key(echo.id), to: "echo" },
+      // A question someone is quoted asking is never an echo, and made-up keys change nothing.
+      { note: key(asked.id), to: "echo" },
+      { note: key(stays.id), to: "S2" },
+      { note: "N99", to: "S1" },
+      { note: key(stays.id), to: "S7" },
+    ];
+  });
+  assert.deepEqual([asks, done], [1, { moved: 2, dropped: 1 }]);
+  const page = reviewPage(db, room.id, started.review.id)!;
+  assert.deepEqual(page.slides.map((s) => s.caught!.map((c) => c.text).sort()), [["Keep the old pricing table?", "Shrink the hero on phones"], ["Dark mode ships behind a setting"]]);
+  assert.deepEqual(page.general!.map((c) => c.text), ["Book the offsite"]);
+  // No answer from the model, or a meeting that wasn't a review, leaves everything alone.
+  assert.deepEqual(await refileReview(db, m.id, async () => null), { moved: 0, dropped: 0 });
+  assert.deepEqual(await refileReview(db, "nope", async () => assert.fail("asked")), { moved: 0, dropped: 0 });
+});
 
 const tick = () => new Promise((r) => setTimeout(r, 3));
 

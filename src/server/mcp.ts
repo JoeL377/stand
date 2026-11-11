@@ -437,10 +437,11 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Add a slide to the next product review",
       description:
-        "Puts a feature on the space's next product review: a call where the team goes through what was built, one slide per feature, with the slide on screen while they talk about it. Call it when you finish something people should see. Give the to-do it shows and the slide takes that to-do's screenshots and PR; the reply has a link to upload more pictures straight to the slide. Adding again for the same to-do rewrites its slide. Everyone adds to the same review, so the deck is ready when the team starts.",
+        "Puts a feature on the space's next product review: a call where the team goes through what was built, one slide per feature, with the slide on screen while they talk about it. Call it when you finish something people should see. Give the to-do it shows and the slide takes that to-do's screenshots and PR; the reply has a link to upload more pictures straight to the slide. Give it a short name too: that is what the slide is called everywhere. Adding again for the same to-do rewrites its slide. Everyone adds to the same review, so the deck is ready when the team starts. After the call, Stand files each to-do, decision and open question under the slide it was about.",
       inputSchema: {
         title: z.string().describe("The feature, in a line, as a person would say it"),
-        summary: z.string().optional().describe("What changed and what to look at, in two or three short lines"),
+        name: z.string().optional().describe("What people will call this slide, in two or three words, like \"Task drawer\". Shown in place of \"Slide 3\" on the agenda, in the transcript and on everything caught under it. Left out, the first words of the title are used"),
+        summary: z.string().optional().describe("What changed and what to look at, in two or three short lines. Write statements, not questions: a question on the slide reads as one the team asked"),
         ref: z.string().optional().describe("The to-do this shows, stand:action/<id>. Its screenshots and PR come along"),
         space: z.string().optional().describe("A space id, or part of its name. Needed when there is no ref"),
         pr: z.string().optional().describe("The PR link, if the to-do doesn't already carry it"),
@@ -448,7 +449,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       },
       annotations: WRITE,
     },
-    ({ title, summary, ref, space, pr, model }) => run(() => api.addReviewSlide(as(model), { title, summary, ref, space, pr }, baseUrl)),
+    ({ title, name, summary, ref, space, pr, model }) => run(() => api.addReviewSlide(as(model), { title, name, summary, ref, space, pr }, baseUrl)),
   );
 
   server.registerTool(

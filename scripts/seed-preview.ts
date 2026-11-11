@@ -233,9 +233,9 @@ const summaryBar = latest.note("Build the sticky order summary");
 const promo = earlier.note("Try a promo code");
 
 // A product review that ran five days ago, so its page shows how slides ended and what was raised.
-addSlide(db, room.id, { title: "One-page checkout, first cut", summary: "Address, shipping and payment on one page.\nLook at: does the order summary stay in view?", addedBy: "Priya Shah via Claude Code", owner: priya.name, pr: "https://github.com/acme-demo/checkout/pull/31" });
-addSlide(db, room.id, { title: "Saved cards at checkout", summary: "Returning shoppers pick a saved card in one tap.", addedBy: "Leo Park via Codex", owner: leo.name, pr: "https://github.com/acme-demo/checkout/pull/33" });
-addSlide(db, room.id, { title: "Order confirmation email", summary: "New layout with the delivery date at the top.", addedBy: "Maya Chen via Cursor", owner: maya.name });
+addSlide(db, room.id, { title: "One-page checkout, first cut", name: "One-page checkout", summary: "Address, shipping and payment on one page.\nLook at: does the order summary stay in view?", addedBy: "Priya Shah via Claude Code", owner: priya.name, pr: "https://github.com/acme-demo/checkout/pull/31" });
+addSlide(db, room.id, { title: "Saved cards at checkout", name: "Saved cards", summary: "Returning shoppers pick a saved card in one tap.", addedBy: "Leo Park via Codex", owner: leo.name, pr: "https://github.com/acme-demo/checkout/pull/33" });
+addSlide(db, room.id, { title: "Order confirmation email", name: "Confirmation email", summary: "New layout with the delivery date at the top.", addedBy: "Maya Chen via Cursor", owner: maya.name });
 const pastReview = startReview(db, room.id);
 const reviewStarted = now - 5 * DAY;
 const reviewCall = db.startMeeting(room.id);
@@ -246,6 +246,8 @@ db.addNote(reviewCall.id, slideItems[0].id, { kind: "question", text: "Does the 
 db.addNote(reviewCall.id, slideItems[1].id, { kind: "decision", text: "Saved cards ship to everyone this week", owner: null }, null);
 db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Put the order number in the subject line", owner: maya.name }, null);
 db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Test the email in Outlook", owner: leo.name }, null);
+db.addNote(reviewCall.id, null, { kind: "decision", text: "Reviews run every other Thursday", owner: null }, null);
+db.addNote(reviewCall.id, null, { kind: "action", text: "Invite support to the next review", owner: sam.name }, null);
 setOutcome(db, slideItems[0].id, "fixes", sam.name);
 setOutcome(db, slideItems[1].id, "ship", priya.name);
 setOutcome(db, slideItems[2].id, "not_yet", sam.name);
