@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { pointsOnDeck } from "../shared/designReview.ts";
 import { spaceFeed } from "./captures.ts";
 import { openDb } from "./db.ts";
-import { DesignReviewError, designReviewState, designReviewView, isAuthor, planChanged, prepare, removeSpec, requestReview } from "./designReviews.ts";
+import {
+  DesignReviewError, authorMay, designReviewState, designReviewView, finishDesignReview, isAuthor, planChanged, prepare, removeSpec, requestReview, setDesignOutcome,
+  specChanged, startDesignReview,
+} from "./designReviews.ts";
 import type { Agent } from "./llm.ts";
 import { PlanBriefs } from "./planBrief.ts";
 import { changeReview, planSections, reviewFor } from "./planReview.ts";
@@ -187,7 +190,7 @@ test("a spec joins the next design review only when someone asks, with the autho
   assert.deepEqual(requestReview(db, null, note, by(sam), [{ quote: "fallback for a week", text: "Is a week enough?" }, { quote: "ten percent", text: "Why ten?" }]), { added: false, questions: 1 });
   assert.equal(designReviewView(db, null, room.id, sam)!.specs.length, 1);
   assert.equal(db.noteUpdates(note.id).filter((u) => u.text.startsWith("Review requested")).length, 1);
-  assert.deepEqual(spaceFeed(db, room.id).designReview, { specs: 1, points: 3, titles: ["Move capture to the server"] });
+  assert.deepEqual(spaceFeed(db, room.id).designReview, { specs: 1, points: 3, titles: ["Move capture to the server"], live: false });
 
   // The product review knows nothing of it.
   assert.equal(reviewView(db, room.id), null);
@@ -262,4 +265,136 @@ test("a Stand suggestion is a point only after the author accepts it", async () 
   // Stand writing again leaves what the author decided.
   const again = (await briefs.ensure(note, true))!;
   assert.deepEqual(again.suggestions.map((s) => s.state), ["accepted", "dismissed"]);
+});
+
+/** The review's slides on the agenda, as "role: title". */
+const deckOf = (db: ReturnType<typeof openDb>, roomId: string) =>
+  db.listItems(roomId).filter((it) => it.slide?.layout === "design").map((it) => `${it.slide!.design!.role}: ${it.title}`);
+
+test("starting a design review lays each spec out as slides: overview, sections with their points, verdict", async () => {
+  const { db, sam, room, task, by } = space();
+  const [agenda] = db.addItems(room.id, [{ source: "agenda", externalId: null, title: "Standing item", url: null, description: null }]);
+  const briefs = new PlanBriefs(db, { taskBrief: async () => DRAFT });
+  assert.throws(() => startDesignReview(db, briefs, room.id), /No spec is waiting/);
+  const capture = task("Move capture to the server");
+  const billing = task("Design the billing export", "Sam", "# Billing export\n\nOne CSV a month.");
+  requestReview(db, briefs, capture, by(sam), [{ quote: "fallback for a week", text: "Is a week enough?" }, { text: "Is this the right quarter?" }, { quote: "Compare the two", text: "Whose transcript wins?" }]);
+  requestReview(db, briefs, billing, by(sam));
+  await briefs.ensure(capture);
+  // The author takes a section and a point off the call.
+  prepare(db, briefs, capture, by(sam), { section: "How to verify", off: true });
+  prepare(db, briefs, capture, by(sam), { point: db.planThreads(capture.id).find((t) => t.messages[0].text === "Whose transcript wins?")!.id, off: true });
+
+  const started = startDesignReview(db, briefs, room.id);
+  assert.equal(started.started, true);
+  assert.deepEqual(deckOf(db, room.id), [
+    "overview: Move capture to the server",
+    "point: Is this the right quarter?",
+    "section: Why",
+    "section: Steps",
+    "point: Is a week enough?",
+    "verdict: Verdict: Move capture to the server",
+    "overview: Design the billing export",
+    "verdict: Verdict: Design the billing export",
+  ]);
+  // The review leads the agenda, and each slide is an agenda item the notes agent can read.
+  const items = db.listItems(room.id);
+  assert.equal(items.at(-1)!.id, agenda.id);
+  assert.equal(items[0].id, started.firstItemId);
+  const [overview, , why, steps, point] = items;
+  assert.equal(overview.slide!.body, DRAFT.summary);
+  assert.deepEqual(overview.slide!.design!.sections, ["Why", "Steps"]);
+  assert.equal(overview.slide!.design!.stand, true);
+  assert.equal(why.slide!.body, "Tabs that sleep drop words");
+  assert.match(why.description ?? "", /People lose what was said while the tab slept/);
+  assert.equal(steps.slide!.design!.name, "Steps");
+  assert.deepEqual([point.slide!.design!.name, point.slide!.design!.quote, point.slide!.design!.section], ["Point 2", "- Keep the browser fallback for a week", "Steps"]);
+  assert.match(point.description ?? "", /Is a week enough\?[\s\S]*Keep the browser fallback for a week/);
+  // Starting again joins the one running, and the page shows it as on now.
+  assert.deepEqual(startDesignReview(db, briefs, room.id), { review: started.review, firstItemId: started.firstItemId, started: false });
+  assert.equal(designReviewView(db, briefs, room.id, sam)!.status, "live");
+  assert.equal(designReviewState(db, capture).live, true);
+  assert.equal(removeSpec(db, capture, by(sam)), false);
+
+  // A point ends Settled or Still open; a spec gets a verdict; other slides have no outcome.
+  const verdict = items[5];
+  assert.equal(setDesignOutcome(db, briefs, point.id, "approve", "Ann Lee"), null);
+  assert.equal(setDesignOutcome(db, briefs, why.id, "settled", "Ann Lee"), null);
+  assert.equal(setDesignOutcome(db, briefs, agenda.id, "settled", "Ann Lee"), null);
+  assert.deepEqual([setDesignOutcome(db, briefs, point.id, "settled", "Ann Lee")!.slide!.design!.outcome, db.getItem(point.id)!.slide!.design!.outcomeBy], ["settled", "Ann Lee"]);
+  assert.equal(setDesignOutcome(db, briefs, verdict.id, "changes", "Sam Hill")!.slide!.design!.outcome, "changes");
+  assert.equal(setDesignOutcome(db, briefs, point.id, null, "Ann Lee")!.slide!.design!.outcome, null);
+
+  const m = db.startMeeting(room.id);
+  const done = finishDesignReview(db, room.id, m.id)!;
+  assert.deepEqual([done.status, done.meetingId], ["done", m.id]);
+  assert.deepEqual(db.listItems(room.id).map((it) => it.id), [agenda.id]);
+  assert.equal(designReviewView(db, briefs, room.id, sam), null);
+  assert.equal(setDesignOutcome(db, briefs, point.id, "settled", "Ann Lee"), null);
+});
+
+test("in the call a new comment gets a slide after the one on screen, and the author's changes re-lay the deck", () => {
+  const { db, sam, ann, room, task, by } = space();
+  const briefs = new PlanBriefs(db, {});
+  const capture = task("Move capture to the server");
+  const other = task("Design the billing export", "Ann", "# Billing export\n\n## Format\n\nOne CSV a month.");
+  requestReview(db, briefs, other, by(ann));
+
+  // Present task: a review of that one spec, asked for now; the other keeps waiting.
+  const started = startDesignReview(db, briefs, room.id, { only: capture, by: by(sam) });
+  assert.deepEqual(deckOf(db, room.id), ["overview: Move capture to the server", "section: Why", "section: Steps", "section: How to verify", "verdict: Verdict: Move capture to the server"]);
+  assert.ok(db.noteUpdates(capture.id).some((u) => u.text.startsWith("Review requested")));
+  assert.deepEqual(db.reviewSlides(db.reviewIn(room.id, ["draft"], "design")!.id).map((r) => r.noteId), [other.id]);
+
+  // A comment on a passage of Steps, made while the Why slide is on screen: its slide follows Why.
+  const plan = reviewFor(db, capture.id)!.plan;
+  const why = db.listItems(room.id)[1];
+  const at = (s: string) => ({ start: plan.text.indexOf(s), end: plan.text.indexOf(s) + s.length });
+  const thread = changeReview(db, capture.id, "Ann Lee", { action: "create", version: plan.id, text: "Why ten percent?", ...at("- Run capture on the server for ten percent of meetings") })!;
+  assert.equal(specChanged(db, briefs, capture, why.id), true);
+  assert.deepEqual(deckOf(db, room.id).slice(1, 4), ["section: Why", "point: Why ten percent?", "section: Steps"]);
+  // With nothing of this spec on screen, a new point goes under its section.
+  changeReview(db, capture.id, "Ann Lee", { action: "create", version: plan.id, text: "How do we compare?", ...at("Compare the two transcripts.") });
+  specChanged(db, briefs, capture);
+  assert.deepEqual(deckOf(db, room.id).slice(-3), ["section: How to verify", "point: How do we compare?", "verdict: Verdict: Move capture to the server"]);
+  // The slides that were there keep their agenda items, so what was said on them stays with them.
+  assert.equal(db.listItems(room.id)[1].id, why.id);
+  assert.equal(specChanged(db, briefs, other), false);
+
+  // The author takes a section off mid-call: its slide goes, its point stays, after the section before it.
+  prepare(db, briefs, capture, by(sam), { section: "How to verify", off: true });
+  specChanged(db, briefs, capture);
+  assert.deepEqual(deckOf(db, room.id).slice(-3), ["section: Steps", "point: How do we compare?", "verdict: Verdict: Move capture to the server"]);
+  // A point the team called keeps its slide when the author takes it off; one nobody called goes.
+  const point = db.listItems(room.id).find((it) => it.title === "Why ten percent?")!;
+  setDesignOutcome(db, briefs, point.id, "open", "Ann Lee");
+  prepare(db, briefs, capture, by(sam), { point: thread.id, off: true });
+  prepare(db, briefs, capture, by(sam), { point: db.planThreads(capture.id)[1].id, off: true });
+  specChanged(db, briefs, capture);
+  assert.deepEqual(deckOf(db, room.id), ["overview: Move capture to the server", "section: Why", "point: Why ten percent?", "section: Steps", "verdict: Verdict: Move capture to the server"]);
+
+  // Presenting the other spec while this review runs: it joins after it.
+  const joined = startDesignReview(db, briefs, room.id, { only: other, by: by(ann) });
+  assert.equal(joined.started, false);
+  assert.equal(joined.review.id, started.review.id);
+  assert.deepEqual(deckOf(db, room.id).slice(-3), ["overview: Design the billing export", "section: Format", "verdict: Verdict: Design the billing export"]);
+  assert.equal(db.getItem(joined.firstItemId)!.title, "Design the billing export");
+
+  // A comment whose passage a newer version dropped has no slide: the Verdict lists it.
+  const format = reviewFor(db, other.id)!.plan;
+  const lostAt = format.text.indexOf("One CSV a month.");
+  changeReview(db, other.id, "Sam Hill", { action: "create", version: format.id, text: "Why monthly?", start: lostAt, end: lostAt + "One CSV a month.".length });
+  db.addPlan(room.id, other.id, "# Billing export\n\n## Format\n\nA CSV on request.", "Ann Lee");
+  planChanged(db, briefs, other);
+  specChanged(db, briefs, other);
+  assert.deepEqual(db.listItems(room.id).at(-1)!.slide!.design!.lost, [{ quote: "One CSV a month.", text: "Why monthly?", by: "Sam Hill" }]);
+  assert.equal(deckOf(db, room.id).filter((t) => t.startsWith("point:")).length, 1);
+
+  // An author moves between the slides of their own spec, and nowhere else.
+  const slides = db.listItems(room.id);
+  assert.equal(authorMay(db, room.id, slides[0].id, slides[3].id, sam), true);
+  assert.equal(authorMay(db, room.id, slides[0].id, slides[3].id, ann), false);
+  assert.equal(authorMay(db, room.id, slides[0].id, slides[5].id, sam), false);
+  assert.equal(authorMay(db, room.id, slides[5].id, slides[6].id, ann), true);
+  assert.equal(authorMay(db, room.id, null, slides[0].id, sam), false);
 });

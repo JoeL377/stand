@@ -1,5 +1,5 @@
 import type { PlanThread, PlanVersion } from "../shared/planReview.ts";
-import type { PlanBrief } from "../shared/designReview.ts";
+import type { DesignOutcome, DesignRole, PlanBrief } from "../shared/designReview.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -512,14 +512,20 @@ export interface ReviewSlideRow {
   addedBy: string | null;
   pr: string | null;
   itemId: string | null;
-  outcome: ReviewOutcome | null;
+  /** A product review's slide ends Ship, Ship with fixes or Not yet; a design review's point and verdict have their own. */
+  outcome: ReviewOutcome | DesignOutcome | null;
   outcomeBy: string | null;
   outcomeAt: number | null;
   createdAt: number;
-  /** Design reviews: what the slide is. A spec waiting on the next review is its overview. */
-  role: "overview" | null;
-  /** Design reviews: the plan version the spec was at when it was last looked at. */
+  /** Design reviews: what the slide is. A spec waiting on the next review is its overview; the
+   *  sections, points and verdict join when the review starts. */
+  role: DesignRole | null;
+  /** Design reviews: the plan version under review. */
   planVersion: string | null;
+  /** Design reviews: the heading of a section slide, and of the section a point is in. */
+  section: string | null;
+  /** Design reviews: the comment thread a point slide is about. */
+  threadId: string | null;
 }
 const toReview = (r: Row): ReviewRow => ({
   id: r.id as string,
@@ -556,12 +562,14 @@ const toReviewSlide = (r: Row): ReviewSlideRow => ({
   addedBy: (r.added_by as string) ?? null,
   pr: (r.pr as string) ?? null,
   itemId: (r.item_id as string) ?? null,
-  outcome: ((r.outcome as string) ?? null) as ReviewOutcome | null,
+  outcome: ((r.outcome as string) ?? null) as ReviewSlideRow["outcome"],
   outcomeBy: (r.outcome_by as string) ?? null,
   outcomeAt: (r.outcome_at as number) ?? null,
   createdAt: r.created_at as number,
   role: ((r.role as string) ?? null) as ReviewSlideRow["role"],
   planVersion: (r.plan_version as string) ?? null,
+  section: (r.section as string) ?? null,
+  threadId: (r.thread_id as string) ?? null,
 });
 
 type NewItem = Pick<Item, "source" | "externalId" | "title" | "url" | "description"> & { deckId?: string; slideNo?: number };
@@ -734,6 +742,7 @@ export function openDb(file?: string) {
   if (!reviewSlideCols.includes("name")) db.exec("ALTER TABLE review_slides ADD COLUMN name TEXT;");
   // Design reviews (designReviews.ts) share the review tables: a review has a kind, and a slide a role.
   if (!reviewSlideCols.includes("role")) db.exec("ALTER TABLE review_slides ADD COLUMN role TEXT; ALTER TABLE review_slides ADD COLUMN plan_version TEXT;");
+  if (!reviewSlideCols.includes("section")) db.exec("ALTER TABLE review_slides ADD COLUMN section TEXT; ALTER TABLE review_slides ADD COLUMN thread_id TEXT;");
   if (!(db.prepare("PRAGMA table_info(reviews)").all() as Row[]).some((c) => c.name === "kind")) db.exec("ALTER TABLE reviews ADD COLUMN kind TEXT NOT NULL DEFAULT 'product';");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
@@ -2176,13 +2185,14 @@ export function openDb(file?: string) {
     },
     addReviewSlide(
       reviewId: string,
-      s: Pick<ReviewSlideRow, "title" | "body" | "noteId" | "owner" | "addedBy" | "pr"> & { name?: string | null; role?: ReviewSlideRow["role"]; planVersion?: string | null },
+      s: Pick<ReviewSlideRow, "title" | "body" | "noteId" | "owner" | "addedBy" | "pr"> &
+        Partial<Pick<ReviewSlideRow, "name" | "role" | "planVersion" | "section" | "threadId">>,
     ): ReviewSlideRow {
       const id = newId();
       const pos = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM review_slides WHERE review_id = ?").get(reviewId) as Row).p as number;
       db.prepare(
-        "INSERT INTO review_slides (id, review_id, position, title, body, note_id, owner, added_by, pr, created_at, name, role, plan_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      ).run(id, reviewId, pos + 1, s.title, s.body, s.noteId, s.owner, s.addedBy, s.pr, Date.now(), s.name ?? null, s.role ?? null, s.planVersion ?? null);
+        "INSERT INTO review_slides (id, review_id, position, title, body, note_id, owner, added_by, pr, created_at, name, role, plan_version, section, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(id, reviewId, pos + 1, s.title, s.body, s.noteId, s.owner, s.addedBy, s.pr, Date.now(), s.name ?? null, s.role ?? null, s.planVersion ?? null, s.section ?? null, s.threadId ?? null);
       return this.getReviewSlide(id)!;
     },
     updateReviewSlide(id: string, patch: Partial<Pick<ReviewSlideRow, "title" | "name" | "body" | "owner" | "addedBy" | "pr" | "itemId" | "outcome" | "outcomeBy" | "outcomeAt" | "planVersion">>) {
@@ -2191,6 +2201,11 @@ export function openDb(file?: string) {
     },
     removeReviewSlide(id: string) {
       db.prepare("DELETE FROM review_slides WHERE id = ?").run(id);
+    },
+    /** Puts a review's slides in this order; one from another review moves over. */
+    orderReviewSlides(reviewId: string, ids: string[]) {
+      const set = db.prepare("UPDATE review_slides SET review_id = ?, position = ? WHERE id = ?");
+      ids.forEach((id, i) => set.run(reviewId, i, id));
     },
     /** What Stand wrote for one version of a to-do's plan, with the author's edits (planBrief.ts). */
     planBrief(noteId: string, version: string): PlanBrief | null {

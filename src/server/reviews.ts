@@ -61,7 +61,7 @@ const infoOf = (db: DB, s: ReviewSlideRow, baseUrl = ""): ReviewSlideInfo => ({
   addedBy: s.addedBy,
   pr: s.pr,
   shots: shotsOf(db, s, baseUrl),
-  outcome: s.outcome,
+  outcome: s.outcome as ReviewOutcome | null,
   outcomeBy: s.outcomeBy,
 });
 
@@ -174,7 +174,7 @@ export function reviewPage(db: DB, roomId: string, idOrNext: string, baseUrl = "
 export function summaryOfReview(db: DB, review: ReviewRow): ReviewSummary {
   const slides = db.reviewSlides(review.id);
   const outcomes = { ship: 0, fixes: 0, not_yet: 0 };
-  for (const s of slides) if (s.outcome) outcomes[s.outcome]++;
+  for (const s of slides) if (s.outcome && s.outcome in outcomes) outcomes[s.outcome as ReviewOutcome]++;
   return { id: review.id, startedAt: review.startedAt, endedAt: review.endedAt, meetingId: review.meetingId, slides: slides.length, outcomes };
 }
 
@@ -280,6 +280,8 @@ export function finishReview(db: DB, roomId: string, meetingId: string, now = Da
 
 /** Whether an agenda item is a slide of the review running in this space. */
 export const isReviewSlide = (item: { slide: SlideContent | null } | null | undefined) => item?.slide?.layout === "review";
+/** A slide of a product review or of a design review: the topic card and the running list sit both out. */
+export const isReviewDeck = (item: { slide: SlideContent | null } | null | undefined) => isReviewSlide(item) || item?.slide?.layout === "design";
 
 // ---- after the call: each capture goes under the slide it was about -----------------------------
 //

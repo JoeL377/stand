@@ -1,5 +1,5 @@
 import type { Actor } from "./actors.ts";
-import type { DesignReviewSummary } from "./designReview.ts";
+import type { DesignOutcome, DesignReviewSummary, DesignSlideInfo } from "./designReview.ts";
 // Types shared by the server and the browser. The WebSocket at /ws/rooms/:id
 // carries ClientMessage up and ServerMessage down as JSON.
 
@@ -24,7 +24,7 @@ export interface Item {
   taskId?: string | null;
 }
 
-export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote" | "review";
+export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote" | "review" | "design";
 
 /** How a slide of a product review ended: anyone's one click. */
 export type ReviewOutcome = "ship" | "fixes" | "not_yet";
@@ -102,6 +102,8 @@ export interface SlideContent {
   notes: string;
   /** A product review's slide (layout "review"): its pictures, the to-do behind it and how it ended. */
   review?: ReviewSlideInfo | null;
+  /** A design review's slide (layout "design"): the part of the spec it shows and how it ended. */
+  design?: DesignSlideInfo | null;
 }
 
 export type DeckTheme = "paper" | "night" | "ocean" | "sunset";
@@ -858,6 +860,10 @@ export type ClientMessage = (
   | { type: "checkin.page"; page: number }
   /** Anyone: how the review slide on screen ended (null takes it back). */
   | { type: "review.outcome"; itemId: string; outcome: ReviewOutcome | null }
+  /** Anyone: how the point on screen ended, or the verdict on its spec (null takes it back). */
+  | { type: "design.outcome"; itemId: string; outcome: DesignOutcome | null }
+  /** A spec's author: go to another slide of their spec, for everyone. */
+  | { type: "design.go"; itemId: string }
   // Host only: fix what the agent wrote down for the item in focus.
   | { type: "note.edit"; noteId: string; text: string; owner?: string | null }
   | { type: "note.remove"; noteId: string }

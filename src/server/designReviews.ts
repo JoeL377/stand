@@ -11,15 +11,16 @@
 
 import type { Actor } from "../shared/actors.ts";
 import {
-  DESIGN_QUESTIONS_MAX, pointsOnDeck,
-  type BriefChange, type DesignPoint, type DesignReviewState, type DesignReviewSummary, type DesignReviewView, type DesignSpec, type PlanBrief,
+  DESIGN_QUESTIONS_MAX, POINT_OUTCOMES, VERDICTS, pointsOnDeck, specAuthor,
+  type BriefChange, type DesignOutcome, type DesignPoint, type DesignReviewState, type DesignReviewSummary, type DesignReviewView, type DesignSlideInfo, type DesignSpec,
+  type PlanBrief,
 } from "../shared/designReview.ts";
 import type { Passage, PlanThread } from "../shared/planReview.ts";
-import { TASK_COMMENT_MAX, type Note } from "../shared/protocol.ts";
-import type { DB, ReviewSlideRow } from "./db.ts";
+import { TASK_COMMENT_MAX, type Item, type Note, type SlideContent } from "../shared/protocol.ts";
+import type { DB, ReviewRow, ReviewSlideRow } from "./db.ts";
+import { newId } from "./ids.ts";
 import type { PlanBriefs } from "./planBrief.ts";
 import { changeReview, logThreadChange, passageAround, planBlocks, planSections, quotePassage, reviewFor } from "./planReview.ts";
-import { ownedBy } from "./spaces.ts";
 
 const MAX_SPECS = 20;
 const QUOTE_MAX = 600;
@@ -39,15 +40,16 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trim
 
 /** Whether this person prepares the spec for its review: they own the to-do, or wrote its latest plan. */
 export function isAuthor(db: DB, note: Note, user: { id: string; name: string }): boolean {
-  if (ownedBy(note.owner, user.name)) return true;
   const plan = db.notePlan(note.id);
-  return !!plan && (plan.actor?.personId === user.id || plan.by === user.name || plan.by.startsWith(`${user.name} via `));
+  return specAuthor({ owner: note.owner ?? null, planBy: plan?.by ?? "", planById: plan?.actor?.personId ?? null }, user);
 }
 
-/** The spec's place on the space's next design review, if it has one. */
+const overviewIn = (db: DB, review: ReviewRow | null, noteId: string) =>
+  (review && db.reviewSlides(review.id).find((s) => s.role === "overview" && s.noteId === noteId)) ?? null;
+
+/** The spec's place on the design review in a call, else on the next one, if it has one. */
 function queued(db: DB, roomId: string, noteId: string): ReviewSlideRow | null {
-  const draft = db.reviewIn(roomId, ["draft"], "design");
-  return (draft && db.reviewSlides(draft.id).find((s) => s.role === "overview" && s.noteId === noteId)) ?? null;
+  return overviewIn(db, db.reviewIn(roomId, ["live"], "design"), noteId) ?? overviewIn(db, db.reviewIn(roomId, ["draft"], "design"), noteId);
 }
 
 /** The open threads on a to-do's latest plan, in the plan's order; ones whose passage is gone come last. */
@@ -96,24 +98,28 @@ function specOf(db: DB, briefs: PlanBriefs | null, slide: ReviewSlideRow, user: 
   };
 }
 
-/** The space's next design review as its page shows it to this person; null when no spec waits on it. */
+/** The design review in a call, else the space's next one, as its page shows it to this person; null
+ *  when no spec waits on it. */
 export function designReviewView(db: DB, briefs: PlanBriefs | null, roomId: string, user: { id: string; name: string } | null): DesignReviewView | null {
-  const draft = db.reviewIn(roomId, ["draft"], "design");
-  if (!draft) return null;
-  const specs = db.reviewSlides(draft.id).filter((s) => s.role === "overview").flatMap((s) => specOf(db, briefs, s, user) ?? []);
-  return specs.length ? { id: draft.id, status: draft.status, specs } : null;
+  for (const review of [db.reviewIn(roomId, ["live"], "design"), db.reviewIn(roomId, ["draft"], "design")]) {
+    if (!review) continue;
+    const specs = db.reviewSlides(review.id).filter((s) => s.role === "overview").flatMap((s) => specOf(db, briefs, s, user) ?? []);
+    if (specs.length) return { id: review.id, status: review.status, specs };
+  }
+  return null;
 }
 
 /** The next design review in a line, for the Tasks tab. */
 export function designReviewSummary(db: DB, roomId: string): DesignReviewSummary | null {
   const view = designReviewView(db, null, roomId, null);
   if (!view) return null;
-  return { specs: view.specs.length, points: view.specs.reduce((n, s) => n + pointsOnDeck(s.points).length, 0), titles: view.specs.map((s) => s.title) };
+  return { specs: view.specs.length, points: view.specs.reduce((n, s) => n + pointsOnDeck(s.points).length, 0), titles: view.specs.map((s) => s.title), live: view.status === "live" };
 }
 
 /** Whether a to-do's spec waits on the next design review, and with how many points. */
 export function designReviewState(db: DB, note: Task): DesignReviewState {
-  return { queued: !!queued(db, note.roomId, note.id), points: pointsOnDeck(pointsOf(db, note.id)).length };
+  const live = !!liveWith(db, note.roomId, note.id);
+  return { queued: !!queued(db, note.roomId, note.id), points: pointsOnDeck(pointsOf(db, note.id)).length, ...(live && { live }) };
 }
 
 export interface DesignQuestion {
@@ -171,9 +177,9 @@ export function requestReview(db: DB, briefs: PlanBriefs | null, note: Task, by:
   return { added: !had, questions: made };
 }
 
-/** Takes a spec off the next design review. Its threads stay on the plan. */
+/** Takes a spec off the next design review. Its threads stay on the plan. One in a call stays. */
 export function removeSpec(db: DB, note: Task, by: By): boolean {
-  const slide = queued(db, note.roomId, note.id);
+  const slide = overviewIn(db, db.reviewIn(note.roomId, ["draft"], "design"), note.id);
   if (!slide) return false;
   db.removeReviewSlide(slide.id);
   db.addUpdate({
@@ -194,7 +200,7 @@ export function planChanged(db: DB, briefs: PlanBriefs | null, note: Task) {
   const slide = queued(db, note.roomId, note.id);
   const plan = db.planVersions(note.id).at(-1);
   if (!slide || !plan) return;
-  db.updateReviewSlide(slide.id, { planVersion: plan.id });
+  for (const s of db.reviewSlides(slide.reviewId)) if (s.noteId === note.id) db.updateReviewSlide(s.id, { planVersion: plan.id });
   void briefs?.ensure(note).catch(() => {});
 }
 
@@ -244,4 +250,293 @@ export function prepare(db: DB, briefs: PlanBriefs, note: Task, by: By, change: 
 export function specView(db: DB, briefs: PlanBriefs, note: Task, user: { id: string; name: string }): DesignSpec | null {
   const slide = queued(db, note.roomId, note.id);
   return slide ? specOf(db, briefs, slide, user) : null;
+}
+
+// ---- the call -------------------------------------------------------------------------------------
+//
+// Starting a design review turns each spec into slides: its Overview, a slide for each section with
+// the points of that section after it, and its Verdict. Each slide is an agenda item, so what's said
+// while it is on screen is filed under it. The rows in review_slides hold the order; what a slide
+// says is read from the plan, its brief and its threads each time the deck is laid out again.
+
+const TITLE_MAX = 140;
+const NAME_MAX = 32;
+const PASSAGE_MAX = 1500;
+const day = (ts: number) => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const mine = (rows: ReviewSlideRow[], noteId: string) => rows.filter((r) => r.noteId === noteId);
+
+/** The brief the slides read: the saved one, else the spec's headings with nothing under them. */
+function briefFor(db: DB, briefs: PlanBriefs | null, noteId: string, plan: { id: string; text: string }): PlanBrief {
+  return (
+    briefs?.current(noteId) ??
+    db.planBrief(noteId, plan.id) ?? { ...emptyBrief(plan.id), sections: planSections(plan.text).map((s) => ({ heading: s.heading, lines: [], edited: false, off: false })) }
+  );
+}
+
+/** Makes one spec's rows match what should be on the deck now: a slide for each section still on the
+ *  call and for each point, in the plan's order. A point that already has a slide keeps its place; a
+ *  new one goes after the slide `after` (the one on screen) when that is a slide of this spec. Only
+ *  what the author took off the call leaves, and never a point the team has already called. */
+function layOut(db: DB, briefs: PlanBriefs | null, review: ReviewRow, noteId: string, after?: string | null) {
+  const note = db.getNote(noteId);
+  const plan = db.planVersions(noteId).at(-1);
+  const all = db.reviewSlides(review.id);
+  const rows = mine(all, noteId);
+  const overview = rows.find((r) => r.role === "overview");
+  if (!note || !plan || !overview) {
+    rows.forEach((r) => db.removeReviewSlide(r.id));
+    return;
+  }
+  const brief = briefFor(db, briefs, noteId, plan);
+  const points = pointsOf(db, noteId);
+  const added = new Set<string>();
+  const add = (s: Partial<ReviewSlideRow> & { role: ReviewSlideRow["role"]; title: string }) => {
+    const row = db.addReviewSlide(review.id, { body: "", noteId, owner: note.owner ?? null, addedBy: null, pr: null, planVersion: plan.id, ...s });
+    added.add(row.id);
+    return row;
+  };
+  const verdict = rows.find((r) => r.role === "verdict") ?? add({ role: "verdict", title: "Verdict" });
+  // Sections: the ones on the call. One the author took off loses its slide.
+  const on = brief.sections.filter((s) => !s.off).map((s) => s.heading);
+  for (const row of rows.filter((r) => r.role === "section" && !on.includes(r.section!))) db.removeReviewSlide(row.id);
+  const newSections = on.filter((h) => !rows.some((r) => r.role === "section" && r.section === h)).map((h) => add({ role: "section", title: h, section: h }));
+  // Points: every open one on the deck has a slide. One taken off the call loses its slide unless the team called it.
+  const had = new Map(rows.filter((r) => r.role === "point").map((r) => [r.threadId!, r]));
+  const newPoints: ReviewSlideRow[] = [];
+  for (const p of points) {
+    const row = had.get(p.threadId);
+    if (row && p.off && !row.outcome) db.removeReviewSlide(row.id);
+    else if (!row && !p.off && p.placed) newPoints.push(add({ role: "point", title: "Point", threadId: p.threadId, section: p.section }));
+  }
+  // Order. The slides that were there keep their places; a new one finds its own.
+  const before = db.reviewSlides(review.id);
+  const byId = new Map(before.map((r) => [r.id, r]));
+  const order = mine(before, noteId).filter((r) => !added.has(r.id) && r.role !== "overview" && r.role !== "verdict").map((r) => r.id);
+  order.unshift(overview.id);
+  const isPoint = (id: string | undefined) => !!id && byId.get(id)?.role === "point";
+  /** Where a block led by this slide ends: after the points that follow it. */
+  const endOf = (lead: string) => {
+    let at = order.indexOf(lead) + 1;
+    while (isPoint(order[at])) at++;
+    return at;
+  };
+  const sectionRow = (heading: string) => order.find((id) => byId.get(id)?.role === "section" && byId.get(id)?.section === heading);
+  /** The slide a section's part of the spec comes after: the nearest section before it that is on the deck, else the overview. */
+  const leadFor = (heading: string | null, self = false) => {
+    const at = heading ? brief.sections.findIndex((s) => s.heading === heading) : -1;
+    const own = self && heading ? sectionRow(heading) : undefined;
+    return own ?? brief.sections.slice(0, Math.max(0, at)).reverse().map((s) => sectionRow(s.heading)).find(Boolean) ?? overview.id;
+  };
+  // A section goes after the one before it in the plan, past that section's own points.
+  for (const row of newSections) {
+    const lead = leadFor(row.section);
+    let at = order.indexOf(lead) + 1;
+    while (isPoint(order[at]) && (byId.get(order[at])!.section ?? null) === (byId.get(lead)!.section ?? null)) at++;
+    order.splice(at, 0, row.id);
+  }
+  // A point goes after the slide on screen; else at the end of its section's points.
+  const anchor = after ? mine(before, noteId).find((r) => r.itemId === after && r.role !== "verdict") : null;
+  let next = anchor && order.includes(anchor.id) ? order.indexOf(anchor.id) + 1 : -1;
+  for (const row of newPoints) {
+    const at = next > 0 ? next++ : endOf(leadFor(row.section, true));
+    order.splice(at, 0, row.id);
+  }
+  order.push(verdict.id);
+  // The spec's slides stay one block, where its overview is among the other specs.
+  const others = before.filter((r) => r.noteId !== noteId).map((r) => r.id);
+  const lead = before.findIndex((r) => r.id === overview.id);
+  const ahead = before.slice(0, Math.max(0, lead)).filter((r) => r.noteId !== noteId).length;
+  db.orderReviewSlides(review.id, [...others.slice(0, ahead), ...order, ...others.slice(ahead)]);
+}
+
+/** What each slide of a live review says, written to its deck again. */
+function syncDeck(db: DB, briefs: PlanBriefs | null, review: ReviewRow): Item[] {
+  const deck = review.deckId ? db.getDeck(review.deckId) : null;
+  if (!deck) return [];
+  const rows = db.reviewSlides(review.id);
+  const specs = new Map<string, ReturnType<typeof specContext>>();
+  const slides = rows.flatMap((row) => {
+    if (!row.noteId) return [];
+    if (!specs.has(row.noteId)) specs.set(row.noteId, specContext(db, briefs, mine(rows, row.noteId), row.noteId));
+    const made = specs.get(row.noteId)?.(row);
+    return made ? [{ id: row.itemId ?? newId(), row, ...made }] : [];
+  });
+  const saved = db.saveDeck(deck, { title: deck.title, theme: deck.theme, slides: slides.map(({ row: _r, ...slide }) => slide) });
+  slides.forEach((s, i) => {
+    if (s.row.itemId !== saved.slides[i]?.id) db.updateReviewSlide(s.row.id, { itemId: saved.slides[i]?.id ?? null });
+  });
+  return saved.slides;
+}
+
+/** Reads a spec once, and returns what turns one of its rows into a slide. */
+function specContext(db: DB, briefs: PlanBriefs | null, rows: ReviewSlideRow[], noteId: string) {
+  const note = db.getNote(noteId);
+  const plan = db.planVersions(noteId).at(-1);
+  if (!note || !plan) return null;
+  const written = db.notePlan(noteId);
+  const brief = briefFor(db, briefs, noteId, plan);
+  const sections = planSections(plan.text);
+  const points = pointsOf(db, noteId);
+  const threads = new Map((reviewFor(db, noteId)?.threads ?? []).map((t) => [t.id, t]));
+  const numbered = rows.filter((r) => r.role === "point").map((r) => r.id);
+  const base = { taskId: note.id, spec: note.text, owner: note.owner ?? null, planBy: written?.by ?? plan.by, planById: written?.actor?.personId ?? null };
+  return (row: ReviewSlideRow): ({ title: string } & SlideContent) | null => {
+    const info = (i: Omit<DesignSlideInfo, keyof typeof base | "outcome" | "outcomeBy">): DesignSlideInfo => ({
+      ...base, ...i, outcome: (row.outcome as DesignOutcome | null) ?? null, outcomeBy: row.outcomeBy,
+    });
+    const slide = (title: string, body: string, notes: string, design: DesignSlideInfo) => ({ title: clip(title, TITLE_MAX), layout: "design" as const, body, image: null, notes, design });
+    switch (row.role) {
+      case "overview":
+        return slide(note.text, brief.summary, `The spec begins:\n${clip(plan.text, 1200)}`, info({
+          role: "overview",
+          name: "Overview",
+          stand: !!brief.summary && !brief.summaryEdited,
+          sections: rows.filter((r) => r.role === "section").map((r) => r.section!),
+          suggestions: brief.suggestions.filter((s) => s.state === "open"),
+        }));
+      case "section": {
+        const section = sections.find((s) => s.heading === row.section);
+        const lines = brief.sections.find((s) => s.heading === row.section);
+        if (!section) return null;
+        return slide(section.heading, (lines?.lines ?? []).join("\n"), `This section of the spec:\n${clip(plan.text.slice(section.headingEnd, section.end).trim(), PASSAGE_MAX)}`, info({
+          role: "section",
+          name: clip(section.heading, NAME_MAX),
+          section: section.heading,
+          stand: !!lines?.lines.length && !lines.edited,
+          passage: { start: section.start, end: section.headingEnd },
+        }));
+      }
+      case "point": {
+        const thread = threads.get(row.threadId ?? "");
+        if (!thread) return null;
+        const quote = clip(thread.placement ? plan.text.slice(thread.placement.start, thread.placement.end) : thread.original.quote, PASSAGE_MAX);
+        const question = thread.messages[0]?.text ?? "";
+        return slide(question.split("\n")[0], clip(question, QUOTE_MAX), `It is about this passage of the spec:\n${quote}`, info({
+          role: "point",
+          name: `Point ${numbered.indexOf(row.id) + 1}`,
+          section: row.section,
+          threadId: thread.id,
+          quote,
+          by: thread.messages[0]?.by ?? "",
+          passage: thread.placement,
+        }));
+      }
+      case "verdict":
+        return slide(`Verdict: ${note.text}`, "", "", info({
+          role: "verdict",
+          name: "Verdict",
+          // One that got a slide before its passage went is already among the points.
+          lost: points.filter((p) => !p.placed && !p.off && !rows.some((r) => r.threadId === p.threadId)).map((p) => ({ quote: p.quote, text: p.text, by: p.by })),
+        }));
+      default:
+        return null;
+    }
+  };
+}
+
+/** Starts the space's next design review: each spec waiting on it becomes slides at the top of the
+ *  agenda. With `only`, it is a review of that one spec (asked for now if nobody had), and the rest
+ *  keep waiting; if a review is already running, the spec joins it. Returns the slide to open on. */
+export function startDesignReview(
+  db: DB, briefs: PlanBriefs | null, roomId: string, opts: { only?: Task; by?: By } = {}, now = Date.now(),
+): { review: ReviewRow; firstItemId: string; started: boolean } {
+  const { only, by } = opts;
+  if (only && !overviewIn(db, db.reviewIn(roomId, ["live"], "design"), only.id)) {
+    if (!by) throw new DesignReviewError("Say who is asking for the review.");
+    requestReview(db, briefs, only, by);
+  }
+  const live = db.reviewIn(roomId, ["live"], "design");
+  const running = live?.deckId ? db.liveSlides(live.deckId) : [];
+  if (live && running.length) {
+    if (!only) return { review: live, firstItemId: running[0].id, started: false };
+    let overview = overviewIn(db, live, only.id);
+    if (!overview) {
+      // Asked for while a review is running: the spec joins it, after the others.
+      const waiting = overviewIn(db, db.reviewIn(roomId, ["draft"], "design"), only.id)!;
+      db.orderReviewSlides(live.id, [...db.reviewSlides(live.id).map((r) => r.id), waiting.id]);
+      layOut(db, briefs, live, only.id);
+      syncDeck(db, briefs, live);
+      overview = overviewIn(db, live, only.id)!;
+    }
+    return { review: live, firstItemId: overview.itemId!, started: false };
+  }
+  // Its slides were taken off the agenda: close it and start over.
+  if (live) db.setReview(live.id, { status: "done", endedAt: now });
+  const draft = db.reviewIn(roomId, ["draft"], "design");
+  let review = draft;
+  if (only) {
+    review = db.createReview(roomId, "design");
+    db.orderReviewSlides(review.id, [overviewIn(db, draft, only.id)!.id]);
+  }
+  const specs = review ? db.reviewSlides(review.id).filter((r) => r.role === "overview" && r.noteId) : [];
+  if (!review || !specs.length) throw new DesignReviewError("No spec is waiting for a review. Open a to-do's plan and click Request review.");
+  for (const spec of specs) layOut(db, briefs, review, spec.noteId!);
+  const count = db.reviewSlides(review.id).length;
+  if (!count) throw new DesignReviewError("The specs waiting for a review have no plan any more.");
+  const deck = db.createDeck(roomId, `Design review · ${day(now)}`, count, "native");
+  db.setDeckReview(deck.id, review.id);
+  db.setReview(review.id, { status: "live", deckId: deck.id, startedAt: now });
+  review = db.getReview(review.id)!;
+  const ids = syncDeck(db, briefs, review).map((it) => it.id);
+  // The review leads the agenda while it runs.
+  db.reorderItems(roomId, [...ids, ...db.listItems(roomId).filter((it) => it.deckId !== deck.id).map((it) => it.id)]);
+  return { review, firstItemId: ids[0], started: true };
+}
+
+/** The live design review a spec is in, if it is in one. */
+function liveWith(db: DB, roomId: string, noteId: string): ReviewRow | null {
+  const live = db.reviewIn(roomId, ["live"], "design");
+  return live && overviewIn(db, live, noteId) ? live : null;
+}
+
+/** Something about a spec changed while its review runs (a new comment, the author's edit, a brief
+ *  Stand finished writing): its slides are laid out again. `after`: the slide on screen, which a new
+ *  point follows. True when the spec is in a running review. */
+export function specChanged(db: DB, briefs: PlanBriefs | null, note: Task, after?: string | null): boolean {
+  const live = liveWith(db, note.roomId, note.id);
+  if (!live) return false;
+  layOut(db, briefs, live, note.id, after);
+  syncDeck(db, briefs, live);
+  return true;
+}
+
+/** Lays the spec's slides out again once Stand has written its brief, then says so. */
+export function whenBriefed(db: DB, briefs: PlanBriefs | null, note: Task, done: () => void) {
+  if (!briefs || briefs.current(note.id)?.status !== "writing") return;
+  void briefs.ensure(note).then(() => { if (specChanged(db, briefs, note)) done(); }).catch(() => {});
+}
+
+/** How a point ended, or the verdict on a spec, by anyone's click; null takes it back. Returns the
+ *  slide's item, or null when it isn't a slide of a running design review that takes that outcome. */
+export function setDesignOutcome(db: DB, briefs: PlanBriefs | null, itemId: string, outcome: DesignOutcome | null, by: string, now = Date.now()): Item | null {
+  const slide = db.reviewSlideByItem(itemId);
+  const review = slide && db.getReview(slide.reviewId);
+  if (!slide || review?.kind !== "design" || review.status !== "live") return null;
+  const allowed: Array<{ id: DesignOutcome }> = slide.role === "point" ? POINT_OUTCOMES : slide.role === "verdict" ? VERDICTS : [];
+  if (outcome ? !allowed.some((o) => o.id === outcome) : !allowed.length) return null;
+  db.updateReviewSlide(slide.id, { outcome, outcomeBy: outcome ? by : null, outcomeAt: outcome ? now : null });
+  syncDeck(db, briefs, review);
+  return db.getItem(itemId);
+}
+
+/** Whether this person may move the call from one slide to another: both are slides of one spec in
+ *  the running design review, and the spec is theirs. */
+export function authorMay(db: DB, roomId: string, fromItemId: string | null, toItemId: string, user: { id: string; name: string }): boolean {
+  const from = fromItemId ? db.reviewSlideByItem(fromItemId) : null;
+  const to = db.reviewSlideByItem(toItemId);
+  const review = from && db.getReview(from.reviewId);
+  if (!from || !to || !from.noteId || review?.kind !== "design" || review.status !== "live" || review.roomId !== roomId) return false;
+  if (to.reviewId !== from.reviewId || to.noteId !== from.noteId) return false;
+  const note = db.getNote(from.noteId);
+  return !!note && isAuthor(db, note, user);
+}
+
+/** The meeting a design review ran in has ended: the review is done and its slides leave the agenda,
+ *  with what was said on them kept. */
+export function finishDesignReview(db: DB, roomId: string, meetingId: string, now = Date.now()): ReviewRow | null {
+  const live = db.reviewIn(roomId, ["live"], "design");
+  if (!live) return null;
+  db.setReview(live.id, { status: "done", meetingId, endedAt: now });
+  if (live.deckId) db.archiveDeck(live.deckId);
+  return db.getReview(live.id);
 }

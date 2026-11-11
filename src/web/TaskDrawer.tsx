@@ -261,7 +261,7 @@ function RequestReview({ taskId, roomId }: { taskId: string; roomId: string }) {
   if (state.queued) {
     return (
       <Link className="td-plan-review" to={designReviewHref(roomId, taskId)}>
-        In the next design review{state.points > 0 && ` · ${state.points} ${state.points === 1 ? "point" : "points"}`}
+        {state.live ? "In the design review, on now" : "In the next design review"}{state.points > 0 && ` · ${state.points} ${state.points === 1 ? "point" : "points"}`}
       </Link>
     );
   }

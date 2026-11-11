@@ -78,7 +78,7 @@ export const initials = (name: string) =>
 /** Short label shown before an item's title: the Linear key, or "Slide 3". */
 export function keyOf(item: (Pick<Item, "externalId" | "slideNo"> & { slide?: Item["slide"] }) | null | undefined): string | null {
   if (!item) return null;
-  return item.externalId ?? item.slide?.review?.name ?? (item.slideNo ? `Slide ${item.slideNo}` : null);
+  return item.externalId ?? item.slide?.review?.name ?? item.slide?.design?.name ?? (item.slideNo ? `Slide ${item.slideNo}` : null);
 }
 
 /** Links read as "PR #12" or the site's name rather than a raw URL. */
