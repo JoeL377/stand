@@ -145,7 +145,6 @@ export function TopicBoard(props: {
   /** Words being spoken right now, before they become a remark. */
   interims: Record<string, Interim>;
   participants: Participant[];
-  items: Item[];
   focusItem: Item | null;
   focusItemId: string | null;
   meetingStartedAt: number;

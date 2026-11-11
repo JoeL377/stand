@@ -1030,10 +1030,6 @@ export function openDb(file?: string) {
       }
       return this.listItems(roomId);
     },
-    updateItem(id: string, patch: { title?: string; position?: number }) {
-      if (patch.title !== undefined) db.prepare("UPDATE items SET title = ? WHERE id = ?").run(patch.title, id);
-      if (patch.position !== undefined) db.prepare("UPDATE items SET position = ? WHERE id = ?").run(patch.position, id);
-    },
     reorderItems(roomId: string, ids: string[]) {
       const st = db.prepare("UPDATE items SET position = ? WHERE id = ? AND room_id = ?");
       ids.forEach((id, i) => st.run(i, id, roomId));

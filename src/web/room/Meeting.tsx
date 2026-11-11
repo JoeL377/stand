@@ -502,7 +502,6 @@ export function Meeting(props: {
           remoteScreen={media.remoteScreen}
           interims={room.interims}
           segments={room.segments}
-          discussions={room.discussions}
           board={room.board}
           brainstorm={room.brainstorm}
           list={room.list}

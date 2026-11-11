@@ -25,20 +25,6 @@ export interface CheckInActs {
 export const unanswered = (followUps: FollowUp[], meetingStartedAt: number) =>
   followUps.filter((f) => !f.doneAt && !((f.checkedAt ?? 0) >= meetingStartedAt));
 
-/** Whether the middle shows the check-in now. */
-export function showCheckIn(p: {
-  followUps: FollowUp[];
-  meetingStartedAt: number;
-  checkIn?: { closed: boolean; answeredAt: number | null };
-  /** When the first topic card came up; null before. */
-  cardSince: number | null;
-  now: number;
-}): boolean {
-  if (p.checkIn?.closed || !unanswered(p.followUps, p.meetingStartedAt).length) return false;
-  if (p.cardSince === null) return true;
-  return p.now - Math.max(p.cardSince, p.checkIn?.answeredAt ?? 0) < CHECKIN_IDLE_MS;
-}
-
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
 /** The tasks the check-in lists: still open, or answered on in this meeting. */

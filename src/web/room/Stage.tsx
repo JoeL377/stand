@@ -6,7 +6,7 @@ import { DesignStage } from "./DesignStage.tsx";
 import { specAuthor } from "../../shared/designReview.ts";
 import { BrainMap } from "./BrainMap.tsx";
 import { DesignBoard } from "./DesignBoard.tsx";
-import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, Discussion, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { initials, keyOf } from "../util.ts";
@@ -39,8 +39,6 @@ export function Stage(props: {
   remoteScreen: RemoteScreen | null;
   interims: Record<string, Interim>;
   segments: Segment[];
-  /** Live notes: the topics the talk is grouped into, and what came of them. */
-  discussions: Discussion[];
   /** The middle board's threads (server/board.ts). */
   board: Board | null;
   /** The board's running list (server/liveList.ts); null when the server keeps none. */
@@ -297,7 +295,6 @@ export function Stage(props: {
       segments={props.segments}
       interims={interims}
       participants={state.participants}
-      items={state.items}
       focusItem={focusItem}
       focusItemId={state.focusItemId}
       meetingStartedAt={state.meetingStartedAt}

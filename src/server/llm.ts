@@ -287,9 +287,6 @@ export function createAgent(): Agent {
   return config.anthropicKey ? new ClaudeAgent(config.anthropicKey) : new HeuristicAgent();
 }
 
-const transcriptText = (segments: Segment[]) =>
-  segments.map((s) => `${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`).join("\n");
-
 /** The space's synthesis instructions as a section of the notes prompt: they shape
  *  emphasis and wording, never the structure, and never drop a note. */
 const asked = (instructions?: string) =>
