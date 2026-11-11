@@ -302,12 +302,14 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", ...BIG_SIZES.f
     const last = review.json?.design_review?.last;
     check("get_review gives agents the verdict and how each question ended", last?.specs?.[0]?.verdict === "Approve with changes" && JSON.stringify(last.specs[0].questions.map((p) => p.outcome)) === JSON.stringify(["Settled", "Still open"]), last?.specs?.[0]);
 
-    await step("the Tasks tab keeps the review that ran, and its page", async () => {
+    await step("the Meetings tab keeps the review that ran, and its page", async () => {
       lastPage = vera;
       await vera.goto(spaceUrl);
-      await vera.getByRole("link", { name: /Design review/ }).waitFor();
-      await snap("tasks-tab-after", vera);
-      await vera.getByRole("link", { name: /Design review/ }).click();
+      await vera.getByRole("tab", { name: /Meetings/ }).click();
+      await vera.getByRole("button", { name: /Design reviews/ }).click();
+      await vera.locator(".sh-row-link", { hasText: "Design review" }).first().waitFor();
+      await snap("meetings-tab-after", vera);
+      await vera.locator(".sh-row-link", { hasText: "Design review" }).first().click();
       await vera.waitForURL(/\/design-review\/[a-z0-9]+$/);
       await vera.getByRole("heading", { name: TASK }).waitFor();
       await snap("review-record", vera);
