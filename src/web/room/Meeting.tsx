@@ -17,6 +17,7 @@ import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { MOD, meetingShortcuts } from "../shortcuts.ts";
+import { ExperienceControl, runningExperience } from "./Experiences.tsx";
 import { PilotRequest, type PilotActs, seatOf, usePilotNotices } from "./Pilot.tsx";
 
 export function Meeting(props: {
@@ -600,6 +601,7 @@ export function Meeting(props: {
               <span>Pop out</span>
             </button>
           )}
+          {canSteer && state && <ExperienceControl roomId={roomId} running={runningExperience(state.items, room.brainstorm)} disabled={writingUp || !room.connected} />}
           {canSteer && (!caps.livekit || !caps.llm) ? (
             <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this space">
               <PlayIcon />

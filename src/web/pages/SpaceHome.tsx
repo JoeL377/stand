@@ -1086,7 +1086,7 @@ function StartMenu(props: {
 }
 
 /** One sentence, a topic or a question, starts a brainstorm. */
-function BrainstormPop(props: { onStart: (prompt: string) => Promise<void>; onClose: () => void }) {
+export function BrainstormPop(props: { onStart: (prompt: string) => Promise<void>; onClose: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [starting, setStarting] = useState(false);
   useEffect(() => {
@@ -1126,7 +1126,7 @@ function BrainstormPop(props: { onStart: (prompt: string) => Promise<void>; onCl
 
 /** A design session starts from one sentence on what is being designed. It can start from notes or a
  *  diagram instead of a blank board, and its draft spec is saved on a to-do when the call ends. */
-function DesignSessionPop(props: { todos: Array<{ id: string; text: string }>; onStart: (prompt: string, seed: string, taskId: string | null) => Promise<void>; onClose: () => void }) {
+export function DesignSessionPop(props: { todos: Array<{ id: string; text: string }>; onStart: (prompt: string, seed: string, taskId: string | null) => Promise<void>; onClose: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [seed, setSeed] = useState("");
   const [taskId, setTaskId] = useState("");

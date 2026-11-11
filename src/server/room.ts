@@ -326,6 +326,46 @@ export class RoomSession implements SpeechSink {
   }
 
   /** A brainstorm was started (or replaced) from outside the call's own messages. */
+  /** The host of the call, who steers it: starts and finishes what is on the board. */
+  hostIs(userId: string) {
+    return this.hostId === userId;
+  }
+
+  /** "Finish this": the review, brainstorm or design session running in this call is over, and the
+   *  call goes on as plain talk. Each keeps what it would have kept at the end of the call; what the
+   *  meeting files afterwards (reviews.ts refileReview, designReviews.ts writeBackReview) still runs then. */
+  async finishExperience(): Promise<Array<"review" | "design-review" | "brainstorm" | "design-session">> {
+    if (this.ended) return [];
+    const done: Array<"review" | "design-review" | "brainstorm" | "design-session"> = [];
+    if (finishReview(this.db, this.roomId, this.meetingId)) done.push("review");
+    if (finishDesignReview(this.db, this.roomId, this.meetingId)) done.push("design-review");
+    if (this.brain) {
+      if (this.brainTimer) clearTimeout(this.brainTimer);
+      this.brainTimer = null;
+      // One last look at the talk no pass has read, then its map is the record.
+      await this.brainRun?.catch(() => {});
+      await Promise.race([this.runMap(true), new Promise((r) => setTimeout(r, 15_000))]).catch(() => {});
+      if (this.ended) return done;
+      const row = finishBrainstorm(this.db, this.roomId, this.meetingId);
+      if (row?.kind === "design") {
+        try {
+          saveDraftSpec(this.db, row, this.brainCaught());
+        } catch (e) {
+          console.error(`[design session] ${this.meetingId}: ${(e as Error).message}`);
+        }
+      }
+      if (row) done.push(row.kind === "design" ? "design-session" : "brainstorm");
+      this.brain = null;
+      this.broadcastBrainstorm();
+    }
+    if (done.length) {
+      // Its slides or its sentence left the agenda: the call is back on General.
+      this.itemsChanged();
+      this.followUpsChanged();
+    }
+    return done;
+  }
+
   brainstormChanged() {
     this.loadBrainstorm();
     this.broadcastBrainstorm();

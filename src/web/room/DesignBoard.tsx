@@ -276,13 +276,10 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
 function Said({ quote }: { quote: DesignBox["quote"] }) {
   if (!quote) return null;
   return (
-    <blockquote>
-      <span dir="auto">“{quote.text}”</span>
-      <cite>
-        <Face name={quote.speaker} />
-        {quote.speaker.split(" ")[0]} · {clock(quote.ts)}
-      </cite>
-    </blockquote>
+    <cite>
+      <Face name={quote.speaker} />
+      {quote.speaker.split(" ")[0]} · {clock(quote.ts)}
+    </cite>
   );
 }
 
@@ -305,21 +302,24 @@ function BoxDetails(props: { box: DesignBox; arrows: DesignArrow[]; name: (id: s
           ))}
         </section>
       )}
-      {box.caught.length > 0 && (
-        <section>
-          <h4>Caught</h4>
-          {box.caught.map((c) => {
-            const k = KIND[c.kind];
-            return (
-              <div key={c.id} className={`brain-point ${c.kind}${c.done ? " done" : ""}`} title={k.label}>
-                <k.Icon />
+      {/* What was caught, under the same marks and words as the pills and the circles. */}
+      {KINDS.map((k) => {
+        const got = box.caught.filter((c) => c.kind === k.kind);
+        return got.length ? (
+          <section key={k.kind}>
+            <h4 className={`brain-caught-h ${k.kind}`}>
+              <k.Icon />
+              {k.many}
+            </h4>
+            {got.map((c) => (
+              <div key={c.id} className={`brain-point caught ${c.kind}${c.done ? " done" : ""}`}>
                 <span dir="auto">{c.text}</span>
                 {c.owner && <small>{c.owner.split(" ")[0]}</small>}
               </div>
-            );
-          })}
-        </section>
-      )}
+            ))}
+          </section>
+        ) : null;
+      })}
       {rel.length > 0 && (
         <section>
           <h4>Relates to</h4>

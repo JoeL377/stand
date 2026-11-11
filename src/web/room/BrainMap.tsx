@@ -433,13 +433,11 @@ function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas:
       <h3 dir="auto">{node.label}</h3>
       {node.detail && <p dir="auto">{node.detail}</p>}
       {node.quote && (
-        <blockquote>
-          <span dir="auto">“{node.quote.text}”</span>
-          <cite>
-            <Face name={node.quote.speaker} />
-            {node.quote.speaker.split(" ")[0]} · {clock(node.quote.ts)}
-          </cite>
-        </blockquote>
+        // Who raised it and when; the words themselves are in the transcript.
+        <cite>
+          <Face name={node.quote.speaker} />
+          {node.quote.speaker.split(" ")[0]} · {clock(node.quote.ts)}
+        </cite>
       )}
       {node.points.length > 0 && (
         <section>
@@ -452,21 +450,24 @@ function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas:
           ))}
         </section>
       )}
-      {node.caught.length > 0 && (
-        <section>
-          <h4>Caught</h4>
-          {node.caught.map((c) => {
-            const k = KIND[c.kind];
-            return (
-              <div key={c.id} className={`brain-point ${c.kind}${c.done ? " done" : ""}`} title={k.label}>
-                <k.Icon />
+      {/* What was caught, under the same marks and words as the pills and the circles. */}
+      {KINDS.map((k) => {
+        const got = node.caught.filter((c) => c.kind === k.kind);
+        return got.length ? (
+          <section key={k.kind}>
+            <h4 className={`brain-caught-h ${k.kind}`}>
+              <k.Icon />
+              {k.many}
+            </h4>
+            {got.map((c) => (
+              <div key={c.id} className={`brain-point caught ${c.kind}${c.done ? " done" : ""}`}>
                 <span dir="auto">{c.text}</span>
                 {c.owner && <small>{c.owner.split(" ")[0]}</small>}
               </div>
-            );
-          })}
-        </section>
-      )}
+            ))}
+          </section>
+        ) : null;
+      })}
       {/* The ideas the map had no room for come first, under their own heading: they're what "+N more" stands for. */}
       {[
         { title: hidden.length ? "Not on the map" : "Ideas", list: hidden.length ? hidden : props.ideas },
