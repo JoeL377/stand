@@ -587,8 +587,9 @@ export function rangesOf(nums: number[]): string {
 
 export class ClaudeAgent implements Agent {
   private client: Anthropic;
-  constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey });
+  /** An API key, or a client made elsewhere (the replay scripts' Bedrock client, scripts/modelClient.ts). */
+  constructor(apiKey: string | Anthropic) {
+    this.client = typeof apiKey === "string" ? new Anthropic({ apiKey }) : apiKey;
   }
 
   private async parse<T>(
