@@ -287,7 +287,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   <PersonColors.Provider value={colorFor}>
     <SpacesShell spaces={spaces}>
       <main className="sh-main">
-        {/* Stays at the top while the lists scroll. On a phone only the tabs stay. */}
+        {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls and only the tabs stay. */}
         <div className="sh-top">
         <header className="sh-head">
           <h1>{room.name}</h1>
@@ -344,6 +344,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
           ))}
         </div>
         </div>
+        {/* The lists scroll in here, under the header, which is a fixed part of the page. */}
+        <div className="sh-body" onScroll={(e) => e.currentTarget.previousElementSibling?.classList.toggle("over", e.currentTarget.scrollTop > 2)}>
 
         {showReview && feed?.review && (
           <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
@@ -556,6 +558,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             }}
           />
         )}
+        </div>
       </main>
     </SpacesShell>
   </PersonColors.Provider>
