@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewView, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, UpNext } from "../../shared/protocol.ts";
 import { matchesTopic, topicKey, topicOf, topicOptions } from "../../shared/topics.ts";
 import { TopicPicker } from "../TopicPicker.tsx";
 import { stateOf } from "../../shared/tasks.ts";
@@ -24,6 +24,7 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
+import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { TaskDrawer } from "../TaskDrawer.tsx";
@@ -364,6 +365,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               me={user.name}
               deck={topicFilter ? null : deck}
               review={topicFilter ? null : (feed?.review ?? null)}
+              reviews={topicFilter ? [] : (feed?.reviews ?? [])}
               onStartReview={async () => {
                 try {
                   await api.startReview(room.id);
@@ -687,6 +689,8 @@ function TasksTab(props: {
   deck: DoneDeck | null;
   /** The next product review: the features there are to show. */
   review: ReviewView | null;
+  /** Reviews that ran, newest first. */
+  reviews: ReviewSummary[];
   onStartReview: () => Promise<void>;
   onRemoveSlide: (slideId: string) => void;
   open: TaskNote[];
@@ -806,16 +810,29 @@ function TasksTab(props: {
         </button>
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
-      {props.review && props.review.slides.length > 0 && (
+      {props.review && props.review.slides.length > 0 ? (
         <button type="button" className="sh-done-since sh-review" onClick={() => setShowReview(true)}>
           <strong>{props.review.status === "live" ? "Product review, on now" : "Product review"}</strong>
           <span className="sh-done-since-summary">{props.review.slides.map((s) => s.title).join(" · ")}</span>
           <span className="count">{props.review.slides.length}</span>
           <ChevronIcon />
         </button>
+      ) : (
+        // With no next one yet, the row stays on the last review that ran.
+        props.reviews[0] && (
+          <Link className="sh-done-since sh-review" to={reviewHref(props.roomId, props.reviews[0].id)}>
+            <strong>Product review</strong>
+            <span className="sh-done-since-summary">
+              {reviewDay(props.reviews[0].startedAt)}
+              <OutcomeCounts outcomes={props.reviews[0].outcomes} />
+            </span>
+            <span className="count">{props.reviews[0].slides}</span>
+            <ChevronIcon />
+          </Link>
+        )
       )}
       {showReview && props.review && (
-        <ReviewPop review={props.review} onStart={props.onStartReview} onRemove={props.onRemoveSlide} onClose={() => setShowReview(false)} />
+        <ReviewPop roomId={props.roomId} review={props.review} reviews={props.reviews} onStart={props.onStartReview} onRemove={props.onRemoveSlide} onClose={() => setShowReview(false)} />
       )}
       {!props.open.length && <p className="sh-card-empty">{props.filtered ? "No open tasks in this topic." : "Nothing open. New tasks come from meetings and what people save here."}</p>}
       {waiting.length > 0 && (
@@ -883,7 +900,9 @@ function DonePop({ deck, onClose }: { deck: DoneDeck; onClose: () => void }) {
 }
 
 /** The next product review's slides, and the button that starts the call on the first one. */
-function ReviewPop(props: { review: ReviewView; onStart: () => Promise<void>; onRemove: (slideId: string) => void; onClose: () => void }) {
+const reviewDay = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" }) : "");
+
+function ReviewPop(props: { roomId: string; review: ReviewView; reviews: ReviewSummary[]; onStart: () => Promise<void>; onRemove: (slideId: string) => void; onClose: () => void }) {
   const { review } = props;
   const [starting, setStarting] = useState(false);
   useEffect(() => {
@@ -900,6 +919,9 @@ function ReviewPop(props: { review: ReviewView; onStart: () => Promise<void>; on
         </button>
         <div className="review-pop-head">
           <h2>Product review</h2>
+          <Link className="rp-link" to={reviewHref(props.roomId, "next")}>
+            Look through
+          </Link>
           <button
             className="primary"
             disabled={starting}
@@ -913,9 +935,11 @@ function ReviewPop(props: { review: ReviewView; onStart: () => Promise<void>; on
           </button>
         </div>
         <div className="review-grid">
-          {review.slides.map((s) => (
+          {review.slides.map((s, i) => (
             <div key={s.id} className="review-card">
-              <div className="review-card-pic">{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : "No picture yet"}</div>
+              <Link className="review-card-pic" to={reviewHref(props.roomId, "next", i + 1)} aria-label={`Open "${s.title}"`}>
+                {s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : "No picture yet"}
+              </Link>
               <strong dir="auto">{s.title}</strong>
               <span className="muted">{[s.owner, !s.addedBy || s.addedBy === "Stand" ? null : `added by ${s.addedBy.split(" via ").at(-1)}`].filter(Boolean).join(" · ")}</span>
               {!live && !s.id.startsWith("task:") && (
@@ -926,6 +950,17 @@ function ReviewPop(props: { review: ReviewView; onStart: () => Promise<void>; on
             </div>
           ))}
         </div>
+        {props.reviews.length > 0 && (
+          <div className="review-earlier">
+            <span className="muted">Earlier</span>
+            {props.reviews.map((r) => (
+              <Link key={r.id} className="rp-pill" to={reviewHref(props.roomId, r.id)}>
+                {reviewDay(r.startedAt)}
+                <OutcomeCounts outcomes={r.outcomes} />
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

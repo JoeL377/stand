@@ -38,7 +38,7 @@ import { participantToken, startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { RoomSession } from "./room.ts";
 import { cleanJot, cleanLine, cleanScreenText, itemIn, saveCapture, saveJot, spaceFeed } from "./captures.ts";
-import { ReviewError, removeSlide, reviewView, startReview } from "./reviews.ts";
+import { ReviewError, removeSlide, reviewOfMeeting, reviewPage, reviewView, reviewsDone, startReview } from "./reviews.ts";
 import { MAX_SNAP_BYTES, linkSnaps, removeSnapFile, saveSnapFile, snapFile, type SnapRow } from "./snaps.ts";
 import { ownedBy, toSpaceSummary } from "./spaces.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
@@ -1030,6 +1030,17 @@ app.get(
   }),
 );
 
+// One review's own page: "next", or the id of one that ran.
+app.get(
+  "/api/rooms/:id/reviews/:reviewId",
+  route((req, res) => {
+    const room = db.getRoom(req.params.id);
+    if (!room || !db.isMember(room.id, req.user!.id)) return notFound(res, "Space not found");
+    const review = reviewPage(db, room.id, req.params.reviewId);
+    res.json({ roomName: room.name, review, reviews: reviewsDone(db, room.id) });
+  }),
+);
+
 // Starts it: the slides become a deck at the top of the agenda, and a call that's running goes to the first one.
 app.post(
   "/api/rooms/:id/review/start",
@@ -1315,6 +1326,7 @@ app.get(
       items: meetingGroups(m),
       chapters: m.chapters,
       cost: db.meetingCost(m.id),
+      review: reviewOfMeeting(db, m.id),
     };
     res.json(body);
   }),

@@ -1,6 +1,7 @@
 import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type {
+  ReviewSummary,
   ReviewView,
   ActionWork,
   AgentToken,
@@ -154,6 +155,8 @@ export const api = {
   itemHistory: (itemId: string) =>
     call<ItemHistory & { room: { id: string; name: string } }>("GET", `/api/items/${itemId}/history`),
   meeting: (id: string) => call<MeetingRecap>("GET", `/api/meetings/${id}`),
+  review: (roomId: string, reviewId: string) =>
+    call<{ roomName: string; review: ReviewView | null; reviews: ReviewSummary[] }>("GET", `/api/rooms/${roomId}/reviews/${encodeURIComponent(reviewId)}`),
   startReview: (roomId: string) => call<{ review: ReviewView | null; firstItemId: string }>("POST", `/api/rooms/${roomId}/review/start`),
   removeReviewSlide: (roomId: string, slideId: string) => call<{ review: ReviewView | null }>("DELETE", `/api/rooms/${roomId}/review/slides/${slideId}`),
   suggested: (roomId: string) => call<{ upNext: UpNext }>("GET", `/api/rooms/${roomId}/suggested.json`),

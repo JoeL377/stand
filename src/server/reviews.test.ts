@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
-import { ReviewError, addSlide, finishReview, isReviewSlide, lastReview, removeSlide, reviewView, setOutcome, slideShotKey, startReview } from "./reviews.ts";
+import { ReviewError, addSlide, finishReview, isReviewSlide, lastReview, removeSlide, reviewOfMeeting, reviewPage, reviewView, reviewsDone, setOutcome, slideShotKey, startReview } from "./reviews.ts";
 
 const tick = () => new Promise((r) => setTimeout(r, 3));
 
@@ -99,4 +99,41 @@ test("starting a review makes its slides the top of the agenda, and outcomes and
   assert.deepEqual(last.slides.map((s) => s.outcome), ["ship", null]);
   // The next review starts fresh: the slide added during the call, and nothing already reviewed.
   assert.deepEqual(reviewView(db, room.id)!.slides.map((s) => s.title), ["Dark mode"]);
+});
+
+test("a review that ran keeps a page: its slides, how each ended, and what was raised on it", async () => {
+  const { db, room } = await space();
+  const other = db.createRoom("Elsewhere", null, "");
+  addSlide(db, room.id, { title: "New landing page", summary: "Bigger hero.", addedBy: "Huy Ngo via Cursor", owner: "Huy Ngo" });
+  addSlide(db, room.id, { title: "Dark mode", summary: "", addedBy: "x" });
+  // Before it starts, "next" is the one being put together.
+  assert.deepEqual(reviewPage(db, room.id, "next")!.slides.map((s) => s.title), ["New landing page", "Dark mode"]);
+  assert.deepEqual(reviewsDone(db, room.id), []);
+
+  const started = startReview(db, room.id);
+  const m = db.startMeeting(room.id);
+  const [first, second] = db.listItems(room.id);
+  db.addNote(m.id, first.id, { kind: "action", text: "Shrink the hero on phones", owner: "Huy Ngo" }, null);
+  db.addNote(m.id, first.id, { kind: "question", text: "Keep the old pricing table?", owner: null }, null);
+  db.addNote(m.id, second.id, { kind: "decision", text: "Dark mode ships behind a setting", owner: null }, null);
+  db.addNote(m.id, null, { kind: "action", text: "Book the offsite", owner: null }, null);
+  setOutcome(db, first.id, "fixes", "Joe Liang");
+  await tick();
+  finishReview(db, room.id, m.id);
+
+  const page = reviewPage(db, room.id, started.review.id)!;
+  assert.equal(page.status, "done");
+  assert.equal(page.meetingId, m.id);
+  assert.deepEqual(page.slides.map((s) => [s.title, s.outcome, s.caught!.map((c) => `${c.kind}: ${c.text}`)]), [
+    ["New landing page", "fixes", ["action: Shrink the hero on phones", "question: Keep the old pricing table?"]],
+    ["Dark mode", null, ["decision: Dark mode ships behind a setting"]],
+  ]);
+  // Only its own space can open it.
+  assert.equal(reviewPage(db, other.id, started.review.id), null);
+  assert.equal(reviewPage(db, room.id, "nope"), null);
+  // It stays listed once the next one is being put together, and its meeting knows it.
+  addSlide(db, room.id, { title: "Search", summary: "", addedBy: "x" });
+  assert.deepEqual(reviewsDone(db, room.id).map((r) => [r.id, r.slides, r.outcomes]), [[started.review.id, 2, { ship: 0, fixes: 1, not_yet: 0 }]]);
+  assert.equal(reviewOfMeeting(db, m.id)!.id, started.review.id);
+  assert.deepEqual(reviewPage(db, room.id, "next")!.slides.map((s) => s.title), ["Search"]);
 });

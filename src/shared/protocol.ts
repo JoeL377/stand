@@ -61,7 +61,28 @@ export interface ReviewView {
   meetingId: string | null;
   createdAt: number;
   startedAt: number | null;
-  slides: Array<{ id: string; title: string; body: string } & Omit<ReviewSlideInfo, "slideId">>;
+  endedAt?: number | null;
+  /** A slide of a review that ran also carries what the team raised while it was on screen. */
+  slides: Array<{ id: string; title: string; body: string; caught?: ReviewCaught[] } & Omit<ReviewSlideInfo, "slideId">>;
+}
+
+/** A to-do, decision or open question raised while a review slide was on screen. */
+export interface ReviewCaught {
+  id: string;
+  kind: "action" | "decision" | "question";
+  text: string;
+  owner: string | null;
+  done: boolean;
+}
+
+/** A review that ran, in a line: when, and how its slides ended. */
+export interface ReviewSummary {
+  id: string;
+  startedAt: number | null;
+  endedAt: number | null;
+  meetingId: string | null;
+  slides: number;
+  outcomes: Record<ReviewOutcome, number>;
 }
 
 export interface SlideContent {
@@ -920,6 +941,8 @@ export interface MeetingRecap {
   chapters: ChapterRecap[];
   /** What its Claude calls cost; null for meetings from before Stand kept count. */
   cost?: MeetingCost | null;
+  /** The product review that ran in this meeting, if one did. */
+  review?: ReviewSummary | null;
 }
 
 /** What a meeting's Claude calls cost, in dollars, most expensive task first (server/usage.ts). */
@@ -986,6 +1009,8 @@ export interface SpaceFeed {
   doneDeck?: DoneDeck | null;
   /** The space's next product review, with what a start would add to it; or the one running now. */
   review?: ReviewView | null;
+  /** Reviews that ran, newest first: each keeps its page. */
+  reviews?: ReviewSummary[];
   /** Snaps saved straight to the space, newest first. */
   captures: Snap[];
   /** Notes saved straight to the space, newest first. */

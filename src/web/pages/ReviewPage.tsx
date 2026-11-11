@@ -1,0 +1,267 @@
+// A product review's own page: its slides, how each one ended and what the team raised on it.
+// The call is one way through a review; this is where it stays, before the call and after it,
+// so anyone can come back, flip through it and send someone the link.
+
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { REVIEW_OUTCOMES, type ReviewOutcome, type ReviewSummary, type ReviewView } from "../../shared/protocol.ts";
+import { api } from "../api.ts";
+import { ChevronIcon } from "../icons.tsx";
+import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
+import { ShotZoom } from "../room/ReviewStage.tsx";
+import { errorToast } from "../Toasts.tsx";
+import { useDismiss } from "../useDismiss.ts";
+import { joinHref, spaceHref } from "./SpacesShell.tsx";
+
+export const reviewHref = (roomId: string, reviewId: string, slide?: number) => `/s/${roomId}/review/${reviewId || "next"}${slide ? `?slide=${slide}` : ""}`;
+
+const KINDS = [
+  { kind: "action", label: "To do", Icon: TodoIcon },
+  { kind: "decision", label: "Decided", Icon: DecidedIcon },
+  { kind: "question", label: "Open", Icon: QuestionIcon },
+] as const;
+
+const day = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" }) : "");
+const outcomeLabel = (o: ReviewOutcome) => REVIEW_OUTCOMES.find((x) => x.id === o)!.label;
+const prLabel = (url: string) => {
+  const m = /\/pull\/(\d+)/.exec(url);
+  return m ? `PR #${m[1]}` : "Link";
+};
+
+/** How a review's slides ended, as small counts: "3 Ship · 1 Not yet". */
+export function OutcomeCounts({ outcomes }: { outcomes: ReviewSummary["outcomes"] }) {
+  const some = REVIEW_OUTCOMES.filter((o) => outcomes[o.id] > 0);
+  if (!some.length) return null;
+  return (
+    <span className="rp-counts">
+      {some.map((o) => (
+        <span key={o.id} className={`rp-count ${o.id}`}>
+          {outcomes[o.id]} {o.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export function ReviewPage() {
+  const { roomId = "", reviewId = "next" } = useParams();
+  const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [data, setData] = useState<{ roomName: string; review: ReviewView | null; reviews: ReviewSummary[] } | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [shotAt, setShotAt] = useState(0);
+  const [zoomed, setZoomed] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    setData(null);
+    setFailed(false);
+    api.review(roomId, reviewId).then(setData, () => setFailed(true));
+  }, [roomId, reviewId]);
+
+  const review = data?.review ?? null;
+  const count = review?.slides.length ?? 0;
+  const at = Math.min(Math.max(1, Number(params.get("slide")) || 1), Math.max(1, count)) - 1;
+  const go = (i: number) => {
+    if (i < 0 || i >= count) return;
+    setShotAt(0);
+    setParams(i ? { slide: String(i + 1) } : {}, { replace: true });
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (zoomed || (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (e.key === "ArrowRight") go(at + 1);
+      if (e.key === "ArrowLeft") go(at - 1);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  });
+  // The slide you're on stays in view in the strip.
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    strip.current?.querySelector(".on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [at, count]);
+
+  if (failed) {
+    return (
+      <div className="rp rp-empty">
+        <p>This review isn't here, or isn't yours to see.</p>
+        <Link to={spaceHref(roomId)}>← Back to the space</Link>
+      </div>
+    );
+  }
+  if (!data) return <div className="rp rp-empty muted">Loading…</div>;
+
+  const slide = review?.slides[at];
+  const shots = slide?.shots ?? [];
+  const shot = shots[Math.min(shotAt, shots.length - 1)] ?? null;
+  const ran = review?.status === "done";
+  const live = review?.status === "live";
+
+  return (
+    <div className="rp">
+      <header className="rp-head">
+        <Link className="rp-back" to={spaceHref(roomId)}>
+          ← {data.roomName}
+        </Link>
+        <strong>Product review</strong>
+        <ReviewPicker roomId={roomId} current={review} reviews={data.reviews} />
+        {review && ran && <OutcomeCounts outcomes={countOutcomes(review)} />}
+        <span className="rp-grow" />
+        {ran && review?.meetingId && (
+          <Link className="rp-link" to={`/meetings/${review.meetingId}`}>
+            Recap
+          </Link>
+        )}
+        {review && !ran && (
+          <button
+            className="primary"
+            disabled={starting}
+            onClick={async () => {
+              if (live) return navigate(joinHref(roomId));
+              setStarting(true);
+              try {
+                await api.startReview(roomId);
+                navigate(joinHref(roomId));
+              } catch (err) {
+                errorToast("Couldn't start the review")(err);
+                setStarting(false);
+              }
+            }}
+          >
+            {live ? "Join the review" : starting ? "Starting…" : "Start review"}
+          </button>
+        )}
+      </header>
+
+      {!review || !slide ? (
+        <div className="rp-empty muted">
+          <p>Nothing to review yet. Slides appear here as work is finished, or when an agent adds one.</p>
+        </div>
+      ) : (
+        <>
+          <main className="rp-main">
+            <div className="rp-pic">
+              {shot ? (
+                <button type="button" className="rp-shot" title="See it bigger" onClick={() => setZoomed(true)}>
+                  <img key={shot.url} src={shot.url} alt={shot.caption ?? slide.title} />
+                </button>
+              ) : (
+                <div className="rp-nopic">
+                  <h2 dir="auto">{slide.title}</h2>
+                  <span className="muted">No picture on this slide</span>
+                </div>
+              )}
+              {shots.length > 1 && (
+                <div className="rv-strip" role="tablist" aria-label="Pictures of this feature">
+                  {shots.map((s, i) => (
+                    <button key={s.url} type="button" role="tab" aria-selected={s === shot} className={s === shot ? "on" : undefined} title={s.caption ?? `Picture ${i + 1}`} onClick={() => setShotAt(i)}>
+                      <img src={s.url} alt="" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button className="rp-flip prev" aria-label="Previous slide" disabled={at <= 0} onClick={() => go(at - 1)}>
+                ←
+              </button>
+              <button className="rp-flip next" aria-label="Next slide" disabled={at >= count - 1} onClick={() => go(at + 1)}>
+                →
+              </button>
+            </div>
+            <div className="rp-about">
+              <div className="rp-title">
+                <h1 dir="auto">{slide.title}</h1>
+                {slide.outcome && (
+                  <span className={`rv-wrap-outcome ${slide.outcome}`} title={slide.outcomeBy ? `${slide.outcomeBy} said so` : undefined}>
+                    {outcomeLabel(slide.outcome)}
+                  </span>
+                )}
+                {slide.owner && <span className="rp-pill">{slide.owner}</span>}
+                {slide.pr && (
+                  <a className="rp-pill" href={slide.pr} target="_blank" rel="noreferrer">
+                    {prLabel(slide.pr)}
+                  </a>
+                )}
+                {slide.taskId && (
+                  <Link className="rp-pill" to={`/ref/action/${slide.taskId}`}>
+                    To-do
+                  </Link>
+                )}
+              </div>
+              {slide.body && (
+                <p className="rp-body" dir="auto">
+                  {slide.body}
+                </p>
+              )}
+              {ran && (
+                <div className="rp-caught">
+                  {(slide.caught ?? []).map((c) => {
+                    const k = KINDS.find((x) => x.kind === c.kind)!;
+                    return (
+                      <Link key={c.id} to={`/ref/${c.kind}/${c.id}`} className={`rp-line ${c.kind}${c.done ? " done" : ""}`} title={k.label}>
+                        <k.Icon />
+                        <span dir="auto">{c.text}</span>
+                        {c.owner && <span className="rv-who">{c.owner.split(" ")[0]}</span>}
+                      </Link>
+                    );
+                  })}
+                  {!slide.caught?.length && <p className="muted rp-none">Nothing was raised on this slide</p>}
+                </div>
+              )}
+            </div>
+          </main>
+          <div className="rp-strip" ref={strip} role="tablist" aria-label="Slides">
+            {review.slides.map((s, i) => (
+              <button key={s.id} type="button" role="tab" aria-selected={i === at} className={i === at ? "on" : undefined} title={s.title} onClick={() => go(i)}>
+                <span className="rp-thumb">{s.shots[0] ? <img src={s.shots[0].url} alt="" loading="lazy" /> : <span>{s.title}</span>}</span>
+                <span className="rp-thumb-foot">
+                  <span className="rp-n">{i + 1}</span>
+                  {s.outcome && <span className={`rp-dot ${s.outcome}`} title={outcomeLabel(s.outcome)} />}
+                  {!!s.caught?.length && <span className="count" title={`${s.caught.length} raised on this slide`}>{s.caught.length}</span>}
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {zoomed && shot && slide && <ShotZoom url={shot.url} alt={shot.caption ?? slide.title} onClose={() => setZoomed(false)} />}
+    </div>
+  );
+}
+
+const countOutcomes = (review: ReviewView) => {
+  const n = { ship: 0, fixes: 0, not_yet: 0 };
+  for (const s of review.slides) if (s.outcome) n[s.outcome]++;
+  return n;
+};
+
+/** Which review this is, as a pill that opens the others: the next one, then each that ran. */
+function ReviewPicker(props: { roomId: string; current: ReviewView | null; reviews: ReviewSummary[] }) {
+  const [open, setOpen] = useState(false);
+  const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const ran = props.current?.status === "done";
+  const label = ran ? day(props.current!.startedAt) : props.current?.status === "live" ? "On now" : "Next";
+  if (!props.reviews.length) return <span className="rp-pill">{label}</span>;
+  return (
+    <div className="rp-picker" ref={box}>
+      <button type="button" className="rp-pill" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {label} <ChevronIcon size={10} />
+      </button>
+      {open && (
+        <div className="rp-menu" role="menu">
+          <Link role="menuitem" to={reviewHref(props.roomId, "next")} className={ran ? undefined : "on"} onClick={() => setOpen(false)}>
+            Next review
+          </Link>
+          {props.reviews.map((r) => (
+            <Link key={r.id} role="menuitem" to={reviewHref(props.roomId, r.id)} className={props.current?.id === r.id ? "on" : undefined} onClick={() => setOpen(false)}>
+              <span>{day(r.startedAt)}</span>
+              <span className="muted">{r.slides} slides</span>
+              <OutcomeCounts outcomes={r.outcomes} />
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
