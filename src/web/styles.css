@@ -3278,3 +3278,24 @@ a.sh-review { text-decoration: none; color: inherit; }
   .sh-brain input { order: 2; flex-basis: 60%; padding: 0; font-size: 16px; }
   .sh-brain button.primary { order: 3; }
 }
+
+/* Start talking, with the kinds of call behind the arrow. */
+.sh-start { position: relative; display: inline-flex; }
+.sh-start .sh-join { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.sh-start-more { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 32px; padding: 0; margin-left: 1px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.sh-start-more svg { rotate: 90deg; }
+.rp-menu.sh-start-menu { top: 38px; left: auto; right: 0; min-width: 250px; }
+.sh-start-menu button, .sh-start-menu a { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 8px 10px; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--text); font-size: 13px; text-align: left; white-space: nowrap; cursor: pointer; }
+.sh-start-menu button:hover:not(:disabled) { background: var(--panel-2); }
+.sh-start-menu button:disabled { cursor: default; }
+.sh-start-menu button:disabled strong { color: var(--muted); font-weight: 500; }
+.sh-start-menu .muted { font-size: 12px; }
+.brain-pop { width: min(460px, 100%); gap: 14px; }
+.brain-pop h2 { margin: 0; font-size: 16px; }
+.brain-pop input { height: 38px; font-size: 16px; }
+.brain-pop-end { display: flex; justify-content: flex-end; gap: 8px; }
+.sh-kinds { display: flex; gap: 6px; margin-bottom: 14px; overflow-x: auto; scrollbar-width: none; }
+.sh-kinds .rp-pill { cursor: pointer; flex: none; }
+.sh-kinds .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
+.sh-kinds .rp-pill.on .muted { color: inherit; opacity: 0.7; }
+.sh-row > a.rp-pill { flex: none; }
