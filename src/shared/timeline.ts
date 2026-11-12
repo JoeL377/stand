@@ -12,7 +12,7 @@ export type TimelineKind = "speech" | "chat" | "capture" | "ask" | "focus" | "ag
 export interface StageView {
   itemId: string | null;
   /** The board's tab in place of the deck or the share. */
-  tab: "main" | "board";
+  tab: "main" | "board" | "view";
   /** While a to-do is presented: its brief or its full spec. */
   taskMode: "brief" | "spec" | null;
   /** Which picture of a review slide is up, from 0. */
@@ -151,7 +151,7 @@ function stageChange(prev: StageView | null, view: StageView): string | null {
   if (view.sharing !== prev.sharing) return view.sharing ? `${view.sharing} started sharing their screen` : `${prev.sharing} stopped sharing`;
   if (view.snapId !== prev.snapId) return view.snapId ? "A screenshot went up on the stage" : "The screenshot came down";
   if (view.itemId !== prev.itemId) return null;
-  if (view.tab !== prev.tab) return view.tab === "board" ? "The board went up" : "Back from the board";
+  if (view.tab !== prev.tab) return view.tab === "board" ? "The board went up" : view.tab === "view" ? "The map or diagram went up" : prev.tab === "view" ? "Back from the map or diagram" : "Back from the board";
   if (view.taskMode !== prev.taskMode && view.taskMode) return view.taskMode === "spec" ? "The full spec went up" : "Back to the brief";
   if (view.shot !== prev.shot && view.shot !== null) return `Picture ${view.shot + 1} went up`;
   return null;

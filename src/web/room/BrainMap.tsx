@@ -1,5 +1,6 @@
 // A brainstorm's map: the sentence it started from in the middle, the directions the talk opened
-// around it, and the ideas said under each. In the call it grows as Stand reads the talk
+// around it, and the ideas said under each. When the talk moved to a subject the first sentence
+// doesn't cover, that subject is a centre of its own beside it, with its own directions. In the call it grows as Stand reads the talk
 // (server/brainstorm.ts); on the brainstorm's page it is the record. A click on a circle opens
 // what's behind it, on your screen only.
 
@@ -17,7 +18,7 @@ interface Placed {
   id: string;
   x: number;
   y: number;
-  /** The circle it hangs off: "root" or a direction's id. */
+  /** The circle it hangs off: a centre's key ("root", or "root:<topic>" for a later one) or a direction's id. */
   from: string;
   node?: BrainNode;
   /** A "+3" pill standing in for ideas that don't fit. */
@@ -69,6 +70,52 @@ export function layout(nodes: BrainNode[], w: number, h: number): Placed[] {
   return spread(out, w, h, big);
 }
 
+/** A centre of the map: the brainstorm's own sentence, or a subject the talk moved to. */
+export interface Centre {
+  /** "root" for the first; "root:<topic>" for the others. */
+  key: string;
+  label: string;
+  x: number;
+  y: number;
+}
+
+/** The centres a map has, first one first, each with the directions that hang off it. */
+export function centresOf(nodes: BrainNode[], prompt: string): Array<{ key: string; label: string; dirs: BrainNode[] }> {
+  const dirs = nodes.filter((n) => !n.parent);
+  const topics = [...new Set(dirs.flatMap((d) => (d.topic ? [d.topic] : [])))];
+  return [{ key: "root", label: prompt, dirs: dirs.filter((d) => !d.topic) }, ...topics.map((t) => ({ key: `root:${t}`, label: t, dirs: dirs.filter((d) => d.topic === t) }))];
+}
+
+/** How much bigger than the screen the canvas is drawn, so every centre keeps room for its circles. */
+export const canvasScale = (centres: number) => (centres <= 1 ? 1 : centres === 2 ? 1.35 : 1.7);
+
+/** The whole map: one radial tree per centre, each in its own part of the canvas. Two sit side by
+ *  side (one over the other on a tall screen); three or four take a two by two grid. */
+export function layoutAll(nodes: BrainNode[], prompt: string, w: number, h: number): { placed: Placed[]; centres: Centre[] } {
+  const groups = centresOf(nodes, prompt);
+  if (!w || !h) return { placed: [], centres: [] };
+  if (groups.length === 1) return { placed: layout(nodes, w, h), centres: [{ key: "root", label: prompt, x: w / 2, y: h / 2 }] };
+  const n = groups.length;
+  const cols = n === 2 ? (w >= h ? 2 : 1) : 2;
+  const rows = Math.ceil(n / cols);
+  const placed: Placed[] = [];
+  const centres: Centre[] = [];
+  groups.forEach((g, k) => {
+    const row = Math.floor(k / cols);
+    // A row that isn't full (the third of three) is shared out among what it has.
+    const inRow = Math.min(cols, n - row * cols);
+    const rw = w / inRow;
+    const rh = h / rows;
+    const x0 = (k - row * cols) * rw;
+    const y0 = row * rh;
+    const ids = new Set(g.dirs.map((d) => d.id));
+    const own = nodes.filter((x) => ids.has(x.id) || (x.parent && ids.has(x.parent)));
+    for (const p of layout(own, rw, rh)) placed.push({ ...p, x: p.x + x0, y: p.y + y0, from: p.from === "root" ? g.key : p.from });
+    centres.push({ key: g.key, label: g.label, x: x0 + rw / 2, y: y0 + rh / 2 });
+  });
+  return { placed, centres };
+}
+
 /** Room kept clear between two circles. */
 const GAP = 22;
 
@@ -93,7 +140,7 @@ export function spread(placed: Placed[], w: number, h: number, big = 1): Placed[
   const root = { x: w / 2, y: h / 2, w: Math.min(290, Math.max(180, w * 0.24)) * big, h: 104 * big, fixed: true, heavy: 1 };
   const boxes = placed.map((p) => {
     const b = boxOf(p);
-    return { x: p.x, y: p.y, w: b.w * big, h: b.h * big, fixed: false, heavy: p.from === "root" ? 3 : 1 };
+    return { x: p.x, y: p.y, w: b.w * big, h: b.h * big, fixed: false, heavy: p.from.startsWith("root") ? 3 : 1 };
   });
   const all = [root, ...boxes];
   const edge = 8;
@@ -153,14 +200,17 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
   }, []);
   const narrow = size.w > 0 && size.w < 620;
   // A phone draws the whole map on a canvas bigger than its screen, fitted to it, and you drag and pinch.
-  const cw = narrow ? Math.max(1000, size.w * 2.6) : size.w;
-  const ch = narrow ? cw * (size.h / Math.max(1, size.w)) : size.h;
-  const fit = narrow ? size.w / cw : 1;
+  // So does any screen once the map has more than one centre: each keeps the room one centre has alone.
+  const scale = canvasScale(centresOf(nodes, brainstorm.prompt).length);
+  const scaled = narrow || scale > 1;
+  const cw = (narrow ? Math.max(1000, size.w * 2.6) : size.w) * scale;
+  const ch = scaled ? cw * (size.h / Math.max(1, size.w)) : size.h;
+  const fit = scaled && cw ? size.w / cw : 1;
   /** Where you've dragged and pinched to; null is the whole map fitted to the screen. */
   const [view, setView] = useState<{ k: number; x: number; y: number } | null>(null);
   const v = view ?? { k: fit, x: 0, y: 0 };
   // A phone never goes smaller than the whole map; a wider screen can shrink it a little and grow it more.
-  const minK = narrow ? fit : 0.6;
+  const minK = scaled ? Math.min(fit, 0.6) : 0.6;
   const maxK = narrow ? 1.5 : 2.5;
   const clampView = (k: number, x: number, y: number) => {
     const kk = Math.min(maxK, Math.max(minK, k));
@@ -242,8 +292,9 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
           setView(view ? null : zoomAt(v, narrow ? 1 / fit : 1.8, e.clientX - rect.left, e.clientY - rect.top));
         },
       };
-  const placed = useMemo(() => layout(nodes, cw, ch), [nodes, cw, ch]);
+  const { placed, centres } = useMemo(() => layoutAll(nodes, brainstorm.prompt, cw, ch), [nodes, brainstorm.prompt, cw, ch]);
   const at = new Map(placed.map((p) => [p.id, p]));
+  const centreAt = new Map(centres.map((c) => [c.key, c]));
 
   // A circle that arrives while you watch glows for a few seconds with who raised it.
   const seen = useRef<Map<string, number> | null>(null);
@@ -273,7 +324,6 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
   const dirs = nodes.filter((n) => !n.parent);
   const ideas = nodes.filter((n) => n.parent);
   const cx = cw / 2;
-  const cy = ch / 2;
   const [only, setOnly] = useState<BrainCaught["kind"] | null>(null);
   const pick = (id: string) => setOpenId((cur) => (cur === id ? null : id));
   // What came out of a circle: the to-dos, decisions and open questions caught while it was talked about.
@@ -313,17 +363,19 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
           ))}
         </div>
       )}
-      <div className="brain-canvas" style={narrow || view ? { width: cw, height: ch, inset: "auto", top: 0, left: 0, transformOrigin: "0 0", transform: `translate(${v.x}px, ${v.y}px) scale(${v.k})` } : undefined}>
+      <div className="brain-canvas" style={scaled || view ? { width: cw, height: ch, inset: "auto", top: 0, left: 0, transformOrigin: "0 0", transform: `translate(${v.x}px, ${v.y}px) scale(${v.k})` } : undefined}>
           <svg className="brain-lines" width={cw} height={ch} aria-hidden>
             {placed.map((p) => {
-              const from = p.from === "root" ? { x: cx, y: cy } : at.get(p.from);
-              return from ? <line key={p.id} x1={from.x} y1={from.y} x2={p.x} y2={p.y} className={p.from === "root" ? "trunk" : undefined} /> : null;
+              const from = centreAt.get(p.from) ?? at.get(p.from);
+              return from ? <line key={p.id} x1={from.x} y1={from.y} x2={p.x} y2={p.y} className={centreAt.has(p.from) ? "trunk" : undefined} /> : null;
             })}
           </svg>
-          <div className={`brain-node root${brainstorm.busy ? " busy" : ""}`} style={{ left: cx, top: cy }}>
-            <span dir="auto">{brainstorm.prompt}</span>
-            {!dirs.length && <small>{brainstorm.status === "live" ? "✦ Ideas branch out here as people talk" : "Nothing came up in this one"}</small>}
-          </div>
+          {centres.map((c, k) => (
+            <div key={c.key} className={`brain-node root${brainstorm.busy ? " busy" : ""}${c.label ? "" : " unnamed"}`} style={{ left: c.x, top: c.y }}>
+              <span dir="auto">{c.label || (brainstorm.status === "live" ? "✦ Stand names this from the talk" : "Untitled map")}</span>
+              {k === 0 && !dirs.length && <small>{brainstorm.status === "live" ? (c.label ? "✦ Ideas branch out here as people talk" : "Just start talking") : "Nothing came up in this one"}</small>}
+            </div>
+          ))}
           {placed.map((p) =>
             p.node ? (
               <button

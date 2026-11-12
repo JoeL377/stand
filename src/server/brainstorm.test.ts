@@ -94,20 +94,20 @@ test("a circle someone took off stays off, and a model that can't answer changes
   assert.equal(again.unreadSince(talk), talk[1].ts);
 });
 
-test("a brainstorm leads the agenda while it runs, and keeps its page after the call", () => {
+test("a map is a view: it leaves the agenda alone, and keeps its page after the call", () => {
   const db = openDb(":memory:");
   const room = db.createRoom("Conxt 1.0", null, "");
   const other = db.createRoom("Elsewhere", null, "");
   db.addItems(room.id, [{ source: "agenda", externalId: null, title: "Roadmap", url: null, description: null }]);
-  assert.throws(() => startBrainstorm(db, room.id, "   ", "Joe Liang"), /topic or a question/);
   const b = startBrainstorm(db, room.id, "  How should a  review start? ", "Joe Liang", T0);
   assert.equal(b.prompt, "How should a review start?");
-  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["How should a review start?", "Roadmap"]);
+  assert.equal(b.itemId, null);
+  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
   // The same sentence again is the same brainstorm; another one takes its place.
   assert.equal(startBrainstorm(db, room.id, "How should a review start?", "Huy Ngo").id, b.id);
   const next = startBrainstorm(db, room.id, "Pricing", "Huy Ngo", T0 + 10);
   assert.notEqual(next.id, b.id);
-  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Pricing", "Roadmap"]);
+  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
   assert.deepEqual(brainstormsOf(db, room.id).map((x) => [x.prompt, x.status]), [["Pricing", "live"], ["How should a review start?", "done"]]);
 
   db.saveBrainstormMap(next.id, [
@@ -132,4 +132,38 @@ test("a brainstorm leads the agenda while it runs, and keeps its page after the 
   assert.deepEqual(brainstormPage(db, room.id, next.id)!.starred, ["i1"]);
   assert.equal(starIdea(db, room.id, next.id, "i1", false)!.starred, undefined);
   assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, directions: 1, ideas: 1 });
+});
+
+test("a map can start without a topic and hold more than one centre", async () => {
+  const model = scripted([
+    { title: "How a Discord chat gets into Stand.", add: [{ under: "root", label: "A bot", detail: "A bot reads the channels it can see.", by: "Janesh", line: 1 }] },
+    {
+      add: [
+        { under: "root", label: "Detect from talk", topic: "Meeting formats", detail: "Work out the format from what is said.", by: "Joe", line: 1 },
+        { under: "new1", label: "Suggest a brainstorm", detail: "Offer the map when it sounds like one.", by: "Huy", line: 1 },
+        { under: "root", label: "One review", topic: "meeting formats", detail: "Review is the one structured thing.", by: "Janesh", line: 1 },
+        { under: "root", label: "Links to chats", topic: "How a Discord chat gets into Stand", detail: "Does a chat have a link.", by: "Huy", line: 1 },
+      ],
+    },
+  ]);
+  const map = new MapKeeper(model, "", T0);
+  await map.run([seg(1, "Janesh", "you would have a bot that indexes the chats")], ["Janesh", "Joe", "Huy"], [], T0, T0 + 5000);
+  assert.match(model.asked[0], /no name yet/);
+  assert.equal(map.prompt, "How a Discord chat gets into Stand", "Stand named it from the talk");
+  await map.run([seg(1, "Janesh", "x"), seg(9, "Joe", "the format should be detected from the discussion")], ["Janesh", "Joe", "Huy"], [], T0, T0 + 12_000);
+  assert.deepEqual(map.centres(), ["Meeting formats"]);
+  assert.deepEqual(map.all().filter((n) => !n.parent).map((n) => [n.label, n.topic ?? null]), [["A bot", null], ["Detect from talk", "Meeting formats"], ["One review", "Meeting formats"], ["Links to chats", null]]);
+  assert.equal(map.all().find((n) => n.label === "Suggest a brainstorm")!.parent, "d2");
+  // The next pass is shown every centre with what hangs off it.
+  model.asked.length = 0;
+  await map.run([seg(1, "Janesh", "x"), seg(9, "Joe", "y"), seg(20, "Huy", "more")], ["Huy"], [], T0, T0 + 30_000);
+  assert.match(model.asked[0], /Centre 1 \(the first; topic null\): How a Discord chat gets into Stand\n- \[d1\] A bot[\s\S]*\[d4\] Links to chats[\s\S]*Centre 2, topic "Meeting formats":\n- \[d2\] Detect from talk/);
+
+  // In the space: a blank map is allowed, a blank diagram is not, and one never named gets a plain name when it is done.
+  const db = openDb(":memory:");
+  const room = db.createRoom("Conxt 1.0", null, "");
+  const b = startBrainstorm(db, room.id, "  ", "Joe Liang", T0);
+  assert.equal(b.prompt, "");
+  assert.equal(startBrainstorm(db, room.id, "", "Huy Ngo").id, b.id, "a blank one that is still empty is the same one");
+  assert.equal(finishBrainstorm(db, room.id, null, T0 + 5)!.prompt, "Untitled map");
 });

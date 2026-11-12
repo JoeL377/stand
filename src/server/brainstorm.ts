@@ -20,15 +20,30 @@ export const MAX_DIRECTIONS = 8;
 export const MAX_IDEAS = 12;
 const MAX_POINTS = 8;
 export const PROMPT_MAX = 160;
+/** How many centres one map holds: the first, and the subjects the talk moved to. */
+export const MAX_CENTRES = 4;
+const TOPIC_MAX = 60;
+/** What a map nobody named is called once it is done and Stand never found a name for it. */
+export const UNNAMED = "Untitled map";
 
 export class BrainstormError extends Error {}
 
 export const MapAnswerSchema = z.object({
+  title: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Only when the first centre has no name yet: what the team is brainstorming, as a topic or a question in at most 8 words, once the talk shows it. Otherwise null"),
   add: z
     .array(
       z.object({
         under: z.string().describe('"root" for a new direction, or the id of the direction this idea belongs to (d1, d2…)'),
         label: z.string().describe("What goes in the circle: at most 5 words, plain, no full stop"),
+        topic: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("A new direction only: the centre it belongs to, when it isn't the first one. The exact name of another centre on the map, or a new name (at most 6 words) when the talk has moved to a subject no centre covers. Null for the first centre"),
         detail: z.string().describe("One sentence saying what the idea is, in the speaker's terms"),
         by: z.string().nullable().describe("First name of who raised it; null if unclear"),
         line: z.number().int().describe("The NEW line it comes from"),
@@ -51,11 +66,13 @@ export const MapAnswerSchema = z.object({
 });
 export type MapAnswer = z.infer<typeof MapAnswerSchema>;
 
-export const MAP_SYSTEM = `You draw the map on the middle screen of a live team brainstorm. The centre is one sentence: the topic or question the team is brainstorming. Around it are the directions the talk has opened, and under each direction the ideas people have said. Everyone glances at the map while they talk, so it has to be right, and it has to stay calm: a circle that appears is read by everyone.
+export const MAP_SYSTEM = `You draw the map of a live team brainstorm. A centre is one sentence: a topic or question the team is brainstorming. Around it are the directions the talk has opened, and under each direction the ideas people have said. A map starts with one centre and can grow more. Everyone glances at the map while they talk, so it has to be right, and it has to stay calm: a circle that appears is read by everyone.
 
 Each time you get the map so far, with ids, and the last couple of minutes of transcript. Lines marked NEW are the ones you haven't seen yet. Return only what the NEW lines add; everything you don't name stays as it is. Often the answer is empty.
 
-- A direction (under "root") is a distinct angle on the centre that the talk has opened: an area, an approach, a kind of answer. Add one when someone raises an idea that fits no direction on the map, and name it for the angle, not for that one idea ("Onboarding", not "Add a welcome video"). Then add the idea under it. At most ${MAX_DIRECTIONS} directions: once they are there, put new ideas under the closest one.
+- A brainstorm doesn't always stay on one subject. When the talk moves to a different subject that no centre on the map covers (a different problem or question, not another angle on the same one), give the new direction a topic: a short name for the new subject. That starts another centre, and the direction hangs off it. Later directions on that subject carry the same topic, word for word. Directions that answer the first centre have topic null. Be slow to start a centre: a tangent of a line or two isn't one, and a map holds at most ${MAX_CENTRES}. Never force an idea under a centre it isn't about.
+- When the first centre has no name yet, the team started without a topic. Set title as soon as the talk shows what they are brainstorming, in their words, and put the directions under it with topic null.
+- A direction (under "root") is a distinct angle on its centre that the talk has opened: an area, an approach, a kind of answer. Add one when someone raises an idea that fits no direction on the map, and name it for the angle, not for that one idea ("Onboarding", not "Add a welcome video"). Then add the idea under it. At most ${MAX_DIRECTIONS} directions: once they are there, put new ideas under the closest one.
 - An idea (under a direction) is something specific someone proposes, suggests or wonders about that answers the centre. Add it once it has actually been stated, not while the speaker is still finding the words. Not agreement, not small talk, not logistics, not a restatement of something on the map.
 - Before adding, check the map: when a circle already says it in other words, don't add it. When the NEW talk builds on an existing circle (a reason for it, a variation, a concern about it), use extend on that circle instead.
 - Labels are what people will read at a glance: at most 5 words, concrete, in the team's own words. The detail is one plain sentence.
@@ -84,7 +101,8 @@ export class MapKeeper {
 
   constructor(
     private model: MapModel,
-    readonly prompt: string,
+    /** The first centre. "" until someone or Stand names it. */
+    public prompt: string,
     /** Talk before this isn't the brainstorm's. */
     private readonly since: number,
     saved?: BrainNode[] | null,
@@ -128,18 +146,19 @@ export class MapKeeper {
     const live = this.nodes.filter((n) => !n.removed);
     const linked = new Set(this.nodes.flatMap((n) => n.caught.map((c) => c.id)));
     const line = (n: BrainNode) => `[${n.id}] ${n.label}${n.by ? ` (${n.by})` : ""}: ${n.detail ?? ""}${n.points.length ? ` (+ ${n.points.map((p) => p.text).join("; ")})` : ""}`;
-    const map =
-      live
-        .filter((n) => !n.parent)
-        .map((d) => [`- ${line(d)}`, ...live.filter((n) => n.parent === d.id).map((i) => `  - ${line(i)}`)].join("\n"))
-        .join("\n") || "(empty)";
+    const under = (dirs: BrainNode[]) => dirs.map((d) => [`- ${line(d)}`, ...live.filter((n) => n.parent === d.id).map((i) => `  - ${line(i)}`)].join("\n")).join("\n") || "(nothing yet)";
+    const centres = this.centres();
+    const centre1 = this.prompt || "(no name yet: the team started without a topic)";
+    const map = centres.length
+      ? [`Centre 1 (the first; topic null): ${centre1}\n${under(live.filter((n) => !n.parent && !n.topic))}`, ...centres.map((t, k) => `Centre ${k + 2}, topic "${t}":\n${under(live.filter((n) => !n.parent && n.topic === t))}`)].join("\n\n")
+      : under(live.filter((n) => !n.parent)).replace("(nothing yet)", "(empty)");
     const off = this.nodes.filter((n) => n.removed).map((n) => `- ${n.label}`);
     const open = caught.filter((c) => !linked.has(c.id));
     const lines = shown
       .map((s, k) => `${from + k >= firstNew ? "NEW " : ""}[${k + 1}] [${at(s.ts, meetingStartedAt)}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
       .join("\n");
     const a = await this.model.brainstormMap(
-      `The centre of the map: ${this.prompt}\nPeople: ${people.join(", ")}`,
+      `${centres.length ? "The first centre of the map" : "The centre of the map"}: ${centre1}\nPeople: ${people.join(", ")}`,
       [
         `Map so far:\n${map}`,
         off.length ? `Taken off by the team, never add these again:\n${off.join("\n")}` : "",
@@ -152,6 +171,10 @@ export class MapKeeper {
     this.lastLook = talk.at(-1)!.ts;
     if (!a) return false;
     let changed = false;
+    if (!this.prompt && a.title?.trim()) {
+      this.prompt = clip(a.title.replace(/\s+/g, " ").trim().replace(/\.$/, ""), PROMPT_MAX);
+      changed = true;
+    }
     const segOf = (n: number) => shown[Math.min(shown.length, Math.max(firstNew - from + 1, n)) - 1];
     const quote = (s: Segment) => ({ segmentId: s.id, ts: s.ts, speaker: s.speakerName, text: clip(s.text, 400) });
     const fresh: string[] = [];
@@ -168,7 +191,8 @@ export class MapKeeper {
           fresh.push(same && !same.removed ? same.id : "");
           continue;
         }
-        const d: BrainNode = { id: `d${++this.nd}`, parent: null, label, detail: clip(x.detail.trim(), 240) || null, by: first(x.by), ts: seg.ts, quote: quote(seg), points: [], caught: [] };
+        const topic = this.centreFor(x.topic);
+        const d: BrainNode = { id: `d${++this.nd}`, parent: null, label, detail: clip(x.detail.trim(), 240) || null, by: first(x.by), ts: seg.ts, quote: quote(seg), points: [], caught: [], ...(topic ? { topic } : {}) };
         this.nodes.push(d);
         fresh.push(d.id);
         changed = true;
@@ -198,6 +222,25 @@ export class MapKeeper {
       changed = true;
     }
     return changed;
+  }
+
+  /** The other centres on the map, by name, in the order the talk came to them. */
+  centres(): string[] {
+    return [...new Set(this.nodes.flatMap((n) => (!n.parent && !n.removed && n.topic ? [n.topic] : [])))];
+  }
+
+  /** The centre a new direction goes under, from what the model called it: undefined for the first. */
+  private centreFor(named: string | null | undefined): string | undefined {
+    const t = clip((named ?? "").replace(/\s+/g, " ").trim().replace(/\.$/, ""), TOPIC_MAX);
+    if (!t) return undefined;
+    // A map nobody named takes its first subject as its name.
+    if (!this.prompt) return void (this.prompt = t);
+    if (similar(t, this.prompt) || t.toLowerCase() === this.prompt.toLowerCase()) return undefined;
+    const have = this.centres();
+    const same = have.find((c) => c.toLowerCase() === t.toLowerCase() || similar(c, t));
+    if (same) return same;
+    // Full: it joins the centre the talk came to last instead of being forced under the first.
+    return have.length >= MAX_CENTRES - 1 ? have.at(-1) : t;
   }
 
   /** What was caught may have been reworded, ticked off or taken back since it was linked. */
@@ -278,8 +321,10 @@ const summaryOf = (b: BrainstormRow): BrainstormSummary => {
   };
 };
 
-/** Starts a brainstorm on one sentence: it becomes the agenda's first item, so what's said and
- *  caught is filed under it. One runs at a time; starting another closes the one running. */
+/** Opens a view on one sentence: a map (or, with `design`, a diagram) drawn from the talk of the call
+ *  it is open in. It is a view of the meeting, not a part of its agenda: nothing moves, the talk
+ *  stays filed where it was, and the board keeps running beside it. One is open at a time; opening
+ *  another closes the one that was. */
 export function startBrainstorm(
   db: DB,
   roomId: string,
@@ -289,25 +334,21 @@ export function startBrainstorm(
   /** Makes it a design session: the diagram it starts from, what was pasted, and the to-do its spec goes on. */
   design?: { diagram: DesignDiagram; seed: string | null; taskId: string | null },
 ): BrainstormRow {
-  // A design session can start without a topic: it is named from the talk (designSession.ts).
+  // Either can start without a topic: Stand names a map (MapKeeper) or a diagram (designSession.ts) from the talk.
   const text = clip(prompt.replace(/\s+/g, " ").trim(), PROMPT_MAX) || (design ? UNTITLED_DESIGN : "");
-  if (!text) throw new BrainstormError("Say what the brainstorm is about: a topic or a question, in a sentence.");
   const live = db.brainstormLive(roomId);
-  if (live && live.prompt === text && (live.kind === "design") === !!design) return live;
+  if (live && (live.kind === "design") === !!design && (live.prompt === text || (!text && live.kind === "map" && !live.nodes.length))) return live;
   if (live) finishBrainstorm(db, roomId, null, now);
-  const before = new Set(db.listItems(roomId).map((it) => it.id));
-  const item = db.addItems(roomId, [{ source: "agenda", externalId: null, title: text, url: null, description: null }]).find((it) => !before.has(it.id))!;
-  const rest = db.listItems(roomId).filter((it) => it.id !== item.id).map((it) => it.id);
-  db.reorderItems(roomId, [item.id, ...rest]);
-  return db.createBrainstorm({ roomId, prompt: text, itemId: item.id, startedBy: by, startedAt: now, design });
+  return db.createBrainstorm({ roomId, prompt: text, itemId: null, startedBy: by, startedAt: now, design });
 }
 
 /** The meeting it ran in has ended (or another one took its place): it is done, and its sentence
  *  leaves the agenda. What was said and caught under it stays filed there. */
-export function finishBrainstorm(db: DB, roomId: string, meetingId: string | null, now = Date.now()): BrainstormRow | null {
-  const live = db.brainstormLive(roomId);
-  if (!live) return null;
+export function finishBrainstorm(db: DB, roomId: string, meetingId: string | null, now = Date.now(), id?: string): BrainstormRow | null {
+  const live = id ? db.getBrainstorm(id) : db.brainstormLive(roomId);
+  if (!live || live.roomId !== roomId || live.status !== "live") return null;
   db.setBrainstorm(live.id, { status: "done", meetingId: meetingId ?? live.meetingId, endedAt: now });
+  if (!live.prompt) db.setBrainstormPrompt(live.id, UNNAMED);
   if (live.itemId) db.archiveItem(live.itemId);
   return db.getBrainstorm(live.id);
 }
@@ -342,3 +383,6 @@ export function brainstormOfMeeting(db: DB, meetingId: string): BrainstormSummar
   const b = db.brainstormByMeeting(meetingId);
   return b ? summaryOf(b) : null;
 }
+
+/** Every view that was opened in a meeting, in the order they were opened, for its recap. */
+export const viewsOfMeeting = (db: DB, meetingId: string): BrainstormSummary[] => db.brainstormsByMeeting(meetingId).map(summaryOf);

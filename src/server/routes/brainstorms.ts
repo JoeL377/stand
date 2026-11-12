@@ -7,7 +7,7 @@ import { memberRoom, notFound, route } from "./http.ts";
 
 export function brainstormRoutes(app: Express, ctx: Services) {
   const { db, agent, sessions } = ctx;
-  // Starts one on a topic or a question. It leads the agenda, and a call that's running goes to it.
+  // Opens a map or a diagram on a topic or a question, for the call that is running or the next one.
   app.post(
     "/api/rooms/:id/brainstorm/start",
     route(async (req, res) => {
@@ -34,14 +34,9 @@ export function brainstormRoutes(app: Express, ctx: Services) {
           if (pasted && !diagram.boxes.length) diagram = parseSeed(pasted);
           design = { diagram, seed: seed || null, taskId: task?.id ?? null };
         }
-        const b = startBrainstorm(db, room.id, prompt, req.user!.name, Date.now(), design);
+        // In a call it opens as a view beside the board: the agenda, the focus and the host stay as they are.
         const s = sessions.get(room.id);
-        if (s) {
-          s.itemsChanged();
-          s.brainstormChanged();
-          s.startedBy(req.user!.id);
-          if (b.itemId) s.setFocus(b.itemId, req.user!.name, "manual");
-        }
+        const b = s && !s.ended ? s.openView(prompt, req.user!.name, design) : startBrainstorm(db, room.id, prompt, req.user!.name, Date.now(), design);
         res.json({ brainstorm: toBrainstormView(b) });
       } catch (err) {
         if (err instanceof BrainstormError) return res.status(400).json({ error: err.message });
@@ -50,8 +45,7 @@ export function brainstormRoutes(app: Express, ctx: Services) {
     }),
   );
 
-  // "Finish this": the host ends the review, brainstorm or design session running in the call, and the
-  // call goes on as plain talk.
+  // "Finish this": the host ends the review running in the call, and the call goes on as plain talk.
   app.post(
     "/api/rooms/:id/experience/finish",
     route(async (req, res) => {

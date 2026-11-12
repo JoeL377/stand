@@ -1132,19 +1132,20 @@ export function BrainstormPop(props: { onStart: (prompt: string) => Promise<void
         aria-label="Brainstorm"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!prompt.trim() || starting) return;
+          // The topic is optional: left blank, Stand names the map from the talk.
+          if (starting) return;
           setStarting(true);
           await props.onStart(prompt);
           setStarting(false);
         }}
       >
         <h2>Brainstorm</h2>
-        <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A topic or a question to start from" aria-label="What the brainstorm is about" maxLength={160} dir="auto" />
+        <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A topic or a question, or leave it blank" aria-label="What the brainstorm is about (optional: Stand names it from the talk)" title="Left blank, Stand names it from the talk" maxLength={160} dir="auto" />
         <div className="brain-pop-end">
           <button type="button" onClick={props.onClose}>
             Cancel
           </button>
-          <button type="submit" className="primary" disabled={!prompt.trim() || starting}>
+          <button type="submit" className="primary" disabled={starting}>
             {starting ? "Starting…" : "Start"}
           </button>
         </div>

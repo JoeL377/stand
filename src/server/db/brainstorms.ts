@@ -22,6 +22,9 @@ export function brainstormsStore(db: DatabaseSync) {
       const r = db.prepare("SELECT * FROM brainstorms WHERE meeting_id = ? ORDER BY rowid DESC LIMIT 1").get(meetingId) as Row | undefined;
       return r ? toBrainstorm(r) : null;
     },
+    brainstormsByMeeting(meetingId: string): BrainstormRow[] {
+      return (db.prepare("SELECT * FROM brainstorms WHERE meeting_id = ? ORDER BY started_at, rowid").all(meetingId) as Row[]).map(toBrainstorm);
+    },
     createBrainstorm(b: {
       roomId: string;
       prompt: string;
@@ -63,6 +66,9 @@ export function brainstormsStore(db: DatabaseSync) {
     renameBrainstorm(id: string, prompt: string) {
       db.prepare("UPDATE brainstorms SET prompt = ? WHERE id = ?").run(prompt, id);
       db.prepare("UPDATE items SET title = ? WHERE id = (SELECT item_id FROM brainstorms WHERE id = ?)").run(prompt, id);
+    },
+    setBrainstormPrompt(id: string, prompt: string) {
+      db.prepare("UPDATE brainstorms SET prompt = ? WHERE id = ?").run(prompt, id);
     },
     saveBrainstormStars(id: string, starred: string[]) {
       db.prepare("UPDATE brainstorms SET stars_json = ? WHERE id = ?").run(starred.length ? JSON.stringify(starred) : null, id);

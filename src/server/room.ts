@@ -21,11 +21,15 @@ import type {
   RoomState,
   Segment,
   ServerMessage,
+  NextStep,
   Suggestion,
 } from "../shared/protocol.ts";
+import { NEXT_QUIET_MS, NEXT_SHOWN_MS, heardIntent, isReviewKind } from "./nextSteps.ts";
+import { reviewView } from "./reviews.ts";
+import { designReviewSummary } from "./designReviews.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, type ListItem, ListKeeper } from "./liveList.ts";
-import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, finishBrainstorm, toBrainstormView } from "./brainstorm.ts";
+import { UNNAMED, BrainstormError, MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, finishBrainstorm, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { DiagramKeeper, sessionBackground, saveDraftSpec } from "./designSession.ts";
 import { PilotSeat } from "./pilot.ts";
 import { projectDigest, repoTools } from "./projects.ts";
@@ -152,6 +156,12 @@ export class RoomSession implements SpeechSink {
   /** Where the meeting was when the host began presenting a to-do: "Stop presenting" goes back there. */
   private beforeTask: string | null = null;
   private suggestion: Suggestion | null = null;
+  /** The next steps people asked for out loud in this call (nextSteps.ts); the one offered is on a card. */
+  private nextSteps: NextStep[] = [];
+  private nextTimer: NodeJS.Timeout | null = null;
+  private nextHeard: { segmentId: string; upTo: number } | null = null;
+  /** When a card of each kind was last waved off: that kind stays quiet for a while. */
+  private nextWaved = new Map<string, number>();
   /** (ts, item) pairs, so late-arriving transcripts land on the item that was
    *  in focus when the words were spoken. */
   private focusLog: Array<{ ts: number; itemId: string | null }> = [];
@@ -306,6 +316,7 @@ export class RoomSession implements SpeechSink {
     if (agent.liveList) this.list = new ListKeeper({ liveList: agent.liveList.bind(agent) }, this.meetingStartedAt, resume ? db.meetingList(resume.id) : null);
     if (agent.findOptions && this.list) this.agentCards = new AgentKeeper(resume ? db.meetingAgentCards(resume.id) : null);
     this.loadBrainstorm();
+    if (resume) this.nextSteps = db.meetingNext(resume.id).map((n) => (n.state === "offered" ? { ...n, state: "missed" as const } : n));
     // Tidy the suggested agenda now, before anyone has started talking.
     polisher?.schedule(room.id, 0);
   }
@@ -361,34 +372,16 @@ export class RoomSession implements SpeechSink {
     this.broadcastState();
   }
 
-  /** "Finish this": the review, brainstorm or design session running in this call is over, and the
-   *  call goes on as plain talk. Each keeps what it would have kept at the end of the call; what the
-   *  meeting files afterwards (reviews.ts refileReview, designReviews.ts writeBackReview) still runs then. */
-  async finishExperience(): Promise<Array<"review" | "design-review" | "brainstorm" | "design-session">> {
+  /** "Finish this": the review running in this call is over, and the call goes on as plain talk. It
+   *  keeps what it would have kept at the end of the call; what the meeting files afterwards
+   *  (reviews.ts refileReview, designReviews.ts writeBackReview) still runs then. A map or a diagram
+   *  is a view, not a mode: it stays open beside the board until someone closes it (closeView). */
+  async finishExperience(): Promise<Array<"review" | "design-review">> {
     if (this.ended) return [];
-    const done: Array<"review" | "design-review" | "brainstorm" | "design-session"> = [];
+    const done: Array<"review" | "design-review"> = [];
     if (finishReview(this.db, this.roomId, this.meetingId)) done.push("review");
     if (finishIdeaReview(this.db, this.roomId, this.meetingId)) done.push("review");
     if (finishDesignReview(this.db, this.roomId, this.meetingId)) done.push("design-review");
-    if (this.brain) {
-      // One last look at the talk no pass has read, then its map is the record.
-      await this.mapPasses.idle();
-      let wait: NodeJS.Timeout | undefined;
-      await Promise.race([this.mapPasses.run(), new Promise((r) => (wait = setTimeout(r, 15_000)))]);
-      clearTimeout(wait);
-      if (this.ended) return done;
-      const row = finishBrainstorm(this.db, this.roomId, this.meetingId);
-      if (row?.kind === "design") {
-        try {
-          saveDraftSpec(this.db, row, this.brainCaught());
-        } catch (e) {
-          console.error(`[design session] ${this.meetingId}: ${(e as Error).message}`);
-        }
-      }
-      if (row) done.push(row.kind === "design" ? "design-session" : "brainstorm");
-      this.brain = null;
-      this.broadcastBrainstorm();
-    }
     if (done.length) {
       // Its slides or its sentence left the agenda: the call is back on General.
       this.itemsChanged();
@@ -402,6 +395,117 @@ export class RoomSession implements SpeechSink {
     this.loadBrainstorm();
     this.broadcastBrainstorm();
     this.scheduleMap();
+  }
+
+  // ---- views ------------------------------------------------------------------
+  // A map or a diagram is a view of the call's talk, open beside the board. Anyone opens one and
+  // anyone closes it; the agenda, the focus and the host seat stay as they were.
+
+  /** Opens a map (or, with `design`, a diagram) on a topic for everyone in the call. */
+  openView(prompt: string, by: string, design?: Parameters<typeof startBrainstorm>[5]) {
+    if (this.ended) throw new BrainstormError("The meeting has ended.");
+    const live = this.db.brainstormLive(this.roomId);
+    const text = prompt.replace(/\s+/g, " ").trim();
+    // Another view was open: it is kept as this meeting's before the new one takes its place.
+    if (live && this.brain?.id === live.id && !(live.prompt === text && (live.kind === "design") === !!design)) this.closeView(live.id);
+    const b = startBrainstorm(this.db, this.roomId, prompt, by, Date.now(), design);
+    this.brainstormChanged();
+    return b;
+  }
+
+  /** Closes the view that is open. It is done at once for everyone, and kept on its own page; the
+   *  last look at the talk no pass has read runs afterwards, in the background. */
+  closeView(id?: string): boolean {
+    const brain = this.brain;
+    if (!brain || (id && brain.id !== id)) return false;
+    const row = finishBrainstorm(this.db, this.roomId, this.meetingId, Date.now(), brain.id);
+    this.brain = null;
+    this.broadcastBrainstorm();
+    if (row) void this.lastLook(brain, row.kind === "design");
+    return true;
+  }
+
+  private async lastLook(brain: NonNullable<RoomSession["brain"]>, design: boolean) {
+    try {
+      await this.mapPasses.idle();
+      const segments = this.db.meetingSegments(this.meetingId);
+      if (brain.map.unreadSince(segments) !== null) {
+        let wait: NodeJS.Timeout | undefined;
+        await Promise.race([brain.map.run(segments, this.people(segments), this.brainCaught(), this.meetingStartedAt, Date.now()), new Promise((r) => (wait = setTimeout(r, 25_000)))]);
+        clearTimeout(wait);
+      }
+      brain.map.refresh(this.brainCaught());
+      if (brain.map instanceof DiagramKeeper) this.db.saveDesignDiagram(brain.id, brain.map.all());
+      else this.saveMap(brain.id, brain.map);
+      const row = this.db.getBrainstorm(brain.id);
+      if (design && row) saveDraftSpec(this.db, row, this.brainCaught());
+      this.followUpsChanged();
+    } catch (e) {
+      console.error(`[view] ${this.meetingId}: closing ${brain.id}: ${(e as Error).message}`);
+    }
+  }
+
+  // ---- next steps -------------------------------------------------------------
+
+  private offered() {
+    return this.nextSteps.find((n) => n.state === "offered") ?? null;
+  }
+
+  private settleNext(n: NextStep, state: NextStep["state"]) {
+    n.state = state;
+    if (this.nextTimer) clearTimeout(this.nextTimer);
+    this.nextTimer = null;
+    this.db.saveMeetingNext(this.meetingId, this.nextSteps);
+    this.broadcastState();
+  }
+
+  /** Someone said they want a brainstorm, a design session or a review: offer it to everyone, once. */
+  private checkNext(seg: Segment) {
+    // Said or typed in the call's chat: both are the call's talk.
+    if (this.ended || this.demoRunning) return;
+    // One thought arrives in fragments joined into one line: read its tail, past what was already heard in it.
+    const from = Math.max(this.nextHeard?.segmentId === seg.id ? this.nextHeard.upTo : 0, seg.text.length - 320);
+    const heard = heardIntent(seg.text.slice(from));
+    if (!heard) return;
+    this.nextHeard = { segmentId: seg.id, upTo: seg.text.length };
+    const items = this.items();
+    const reviewing = items.some((i) => i.slide?.layout === "review" || i.slide?.layout === "design");
+    // A review that is running has the room; a view of the same kind is already open.
+    if (reviewing) return;
+    const open = this.brain ? (this.brain.map instanceof DiagramKeeper ? "diagram" : "map") : null;
+    if (open === heard.kind) return;
+    const waved = this.nextWaved.get(heard.kind);
+    if (waved && seg.ts - waved < NEXT_QUIET_MS) return;
+    // What it is on: what the speaker named, else what the board says the talk is about.
+    const board = this.board?.board();
+    const thread = board?.threads.find((t) => t.id === board.currentId);
+    const topic = heard.topic ?? thread?.title ?? "";
+    const before = this.offered();
+    if (before) {
+      if (before.kind === heard.kind) return;
+      before.state = "missed";
+    }
+    const ready = heard.kind === "product-review" ? (reviewView(this.db, this.roomId)?.slides.length ?? 0) : heard.kind === "design-review" ? (designReviewSummary(this.db, this.roomId)?.specs ?? 0) : 0;
+    const step: NextStep = { id: newId(8), kind: heard.kind, topic, by: seg.speakerName, ts: seg.ts, segmentId: seg.id, state: "offered", ...(isReviewKind(heard.kind) ? { ready } : {}) };
+    this.nextSteps.push(step);
+    if (this.nextTimer) clearTimeout(this.nextTimer);
+    this.nextTimer = setTimeout(() => step.state === "offered" && this.settleNext(step, "missed"), NEXT_SHOWN_MS);
+    this.db.saveMeetingNext(this.meetingId, this.nextSteps);
+    this.broadcastState();
+  }
+
+  /** Anyone took the card. A view opens; a review is noted for the recap (`started`: it began here). */
+  private takeNext(id: string, by: string, started = false) {
+    const n = this.nextSteps.find((x) => x.id === id);
+    if (!n || n.state !== "offered" || this.ended) return;
+    if (isReviewKind(n.kind)) return this.settleNext(n, started ? "started" : "noted");
+    try {
+      // No topic said, and none on the board: it starts blank and Stand names it from the talk.
+      this.openView(n.topic ?? "", by, n.kind === "diagram" ? { diagram: { boxes: [], arrows: [] }, seed: null, taskId: null } : undefined);
+      this.settleNext(n, "opened");
+    } catch (e) {
+      console.error(`[next] ${this.meetingId}: ${(e as Error).message}`);
+    }
   }
 
   private brainstormView(busy = false) {
@@ -432,8 +536,15 @@ export class RoomSession implements SpeechSink {
         this.db.renameBrainstorm(this.brain.id, map.prompt);
         this.itemsChanged();
       }
-    } else this.db.saveBrainstormMap(this.brain.id, map.all());
+    } else this.saveMap(this.brain.id, map);
     this.broadcastBrainstorm();
+  }
+
+  /** The map as it stands, and the name Stand gave it when it started without one. */
+  private saveMap(id: string, map: MapKeeper) {
+    this.db.saveBrainstormMap(id, map.all());
+    const row = this.db.getBrainstorm(id);
+    if (map.prompt && row && (!row.prompt || row.prompt === UNNAMED)) this.db.setBrainstormPrompt(id, map.prompt);
   }
 
   /** The next map pass: MAP_DEBOUNCE_MS after the latest talk, never more than MAP_MAX_WAIT_MS after
@@ -610,6 +721,7 @@ export class RoomSession implements SpeechSink {
       notesFailing: [...this.notesFailing],
       notesTrouble: this.notesFailing.size ? this.notesWhy : null,
       suggestion: this.suggestion,
+      next: this.ended ? null : this.offered(),
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
       followUps: this.carried(true),
@@ -1141,6 +1253,19 @@ export class RoomSession implements SpeechSink {
         if (map instanceof DiagramKeeper && (msg.type === "design.keep" ? map.keep(msg.id) : map.drop(msg.id))) this.saveBrainstorm();
         break;
       }
+      case "next.take":
+        this.takeNext(msg.id, conn.name, msg.started === true);
+        break;
+      case "next.wave": {
+        const n = this.nextSteps.find((x) => x.id === msg.id && x.state === "offered");
+        if (!n) break;
+        this.nextWaved.set(n.kind, Date.now());
+        this.settleNext(n, "waved");
+        break;
+      }
+      case "view.close":
+        if (!this.ended) this.closeView(msg.id);
+        break;
       case "brainstorm.remove": {
         if (this.brain?.map instanceof MapKeeper && this.brain.map.remove(msg.id)) this.saveBrainstorm();
         break;
@@ -1566,6 +1691,7 @@ export class RoomSession implements SpeechSink {
         this.scheduleMap();
         // Only the words just added count, so a long turn isn't scored twice.
         this.checkDrift({ ...seg, text: t });
+        this.checkNext(seg);
         return;
       }
     }
@@ -1620,6 +1746,7 @@ export class RoomSession implements SpeechSink {
     this.scheduleList();
     this.scheduleMap();
     this.checkDrift(segment);
+    this.checkNext(segment);
     this.checkConxtTerms(text, ts);
     return segment;
   }
@@ -2522,7 +2649,7 @@ function isMessage(v: unknown): v is ClientMessage {
 /** A host view as sent, or null when it isn't one. */
 function asHostView(v: unknown): HostView | null {
   const o = v as HostView | null;
-  if (!o || (o.tab !== "main" && o.tab !== "board")) return null;
+  if (!o || (o.tab !== "main" && o.tab !== "board" && o.tab !== "view")) return null;
   if (o.taskMode !== undefined && o.taskMode !== "brief" && o.taskMode !== "spec") return null;
   const task = o.taskMode ? { taskMode: o.taskMode } : null;
   const shot = Number.isInteger(o.shot) && o.shot! > 0 && o.shot! < 50 ? { shot: o.shot } : null;

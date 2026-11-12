@@ -477,6 +477,8 @@ export function migrate(db: DatabaseSync) {
   // rewritten by every pass of a running brainstorm.
   if (!brainCols.includes("stars_json")) db.exec("ALTER TABLE brainstorms ADD COLUMN stars_json TEXT");
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
+  // The next steps people asked for out loud in the call (nextSteps.ts).
+  if (!meetingCols.includes("next_json")) db.exec("ALTER TABLE meetings ADD COLUMN next_json TEXT");
   // What ✦ Stand did on the board (meetingAgent.ts): its cards, which are also its log.
   if (!meetingCols.includes("agent_json")) db.exec("ALTER TABLE meetings ADD COLUMN agent_json TEXT");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);

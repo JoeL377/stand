@@ -278,6 +278,9 @@ export interface BrainNode {
   caught: BrainCaught[];
   /** Someone took it off the map. Kept on the server so it isn't added again; never sent. */
   removed?: boolean;
+  /** A direction only: the other centre it belongs to, by name, when the talk moved to a subject the
+   *  first centre doesn't cover. Left out for the first centre (the brainstorm's own sentence). */
+  topic?: string;
 }
 
 /** What a design session is called until it has a topic: one started blank is named from the talk. */
@@ -817,6 +820,25 @@ export interface Participant {
   muted?: boolean;
 }
 
+/** What the meeting agent can offer to do next (server/nextSteps.ts). */
+export type NextKind = "map" | "diagram" | "design-review" | "product-review";
+/** One next step heard in the call: someone said they want a brainstorm, a design session or a review. */
+export interface NextStep {
+  id: string;
+  kind: NextKind;
+  /** What it is on; "" when nobody said and the board had no topic. */
+  topic: string;
+  /** Who said it, and the line they said it in. */
+  by: string;
+  ts: number;
+  segmentId: string;
+  /** offered: its card is up. opened: its view was opened. started: the review started in this call.
+   *  noted: kept for the recap. waved: someone said no. missed: the card went away unanswered. */
+  state: "offered" | "opened" | "started" | "noted" | "waved" | "missed";
+  /** A review: how many slides or specs are waiting, so it could start now. */
+  ready?: number;
+}
+
 export interface Suggestion {
   itemId: string;
   /** Why the agent thinks so, e.g. "ENG-142 is visible in the window title". */
@@ -879,7 +901,8 @@ export interface DoneSlide {
 export interface HostView {
   /** While the item in focus presents a to-do (Item.taskId): the brief or the full spec, as the host chose. */
   taskMode?: "brief" | "spec";
-  tab: "main" | "board";
+  /** "view": the map or diagram open beside the board. */
+  tab: "main" | "board" | "view";
   /** Which picture of the review slide in focus is up, from 0. */
   shot?: number;
   /** A chapter (or the Kickoff, id "kickoff") as it stood at `at`; live: the thread on screen when it was opened. */
@@ -914,6 +937,8 @@ export interface RoomState {
   /** While down: Stand is about to start it again by itself. */
   transcriptionRestarting?: boolean;
   suggestion: Suggestion | null;
+  /** The next step the meeting agent is offering everyone right now, if one. */
+  next?: NextStep | null;
   items: Item[];
   decks: Deck[];
   /** Action items from earlier meetings that are still open, oldest first, plus any closed since
@@ -1027,6 +1052,11 @@ export type ClientMessage = (
   | { type: "note.remove"; noteId: string }
   /** Take a circle off the brainstorm's map (anyone in the call: Stand got it wrong). */
   | { type: "brainstorm.remove"; id: string }
+  /** Anyone: take the next step on the card (open the view, start or note the review), or wave it off. */
+  | { type: "next.take"; id: string; started?: boolean }
+  | { type: "next.wave"; id: string }
+  /** Anyone: close the map or diagram that is open beside the board. It is kept on its own page. */
+  | { type: "view.close"; id: string }
   /** Keep or drop something on a design session's diagram, by its id (anyone in the call). Drop also takes a kept one off. */
   | { type: "design.keep"; id: string }
   | { type: "design.drop"; id: string }
@@ -1184,6 +1214,10 @@ export interface MeetingRecap {
   designReview?: DesignReviewRan | null;
   /** The brainstorm that ran in it, if one did. */
   brainstorm?: BrainstormSummary | null;
+  /** Every map and diagram that was opened in it, in order. */
+  views?: BrainstormSummary[];
+  /** Reviews people asked for in the call that didn't happen there (server/nextSteps.ts). */
+  next?: NextStep[];
   /** Everything in the meeting in order: speech, chat, captures, Ask Stand, focus changes, agents' reports. */
   timeline?: TimelineEntry[];
 }

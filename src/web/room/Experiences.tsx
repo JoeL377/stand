@@ -1,7 +1,7 @@
-// Experiences inside a call. A call starts as plain talk; the host can put a product review, a design
-// review, a brainstorm or a design session on its board from here, one at a time, and "Finish" takes
-// it off again so the call goes on as plain talk. Each keeps what it would have kept at the end of
-// the call. The same four start from the space page's menu, beside Start talking.
+// What a call can start. A call is plain talk. A review is the one structured thing: it goes on the
+// board from here, and "Finish" takes it off again so the call goes on as plain talk. A map or a
+// diagram is a view of the talk, not a mode: it opens in a tab beside the board, anyone closes it
+// from its tab, and nothing else in the call moves. The same start from the space page's menu.
 
 import { useEffect, useState } from "react";
 import type { BrainstormView, Item, SpaceFeed } from "../../shared/protocol.ts";
@@ -10,9 +10,8 @@ import { errorToast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
 
-/** What is on the call's board now, in the words people use for it. */
-export function runningExperience(items: Item[], brainstorm: BrainstormView | null | undefined): string | null {
-  if (brainstorm?.status === "live") return brainstorm.design ? "design session" : "brainstorm";
+/** The review on the call's board now, in the words people use for it. A view is never "running". */
+export function runningExperience(items: Item[], _brainstorm?: BrainstormView | null): string | null {
   if (items.some((i) => i.slide?.layout === "review" && i.slide.review?.idea)) return "idea review";
   if (items.some((i) => i.slide?.layout === "review")) return "product review";
   if (items.some((i) => i.slide?.layout === "design")) return "design review";
@@ -37,7 +36,7 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
     try {
       await start();
     } catch (err) {
-      errorToast(`Couldn't start the ${what}`)(err);
+      errorToast(`Couldn't ${what === "map" || what === "diagram" ? "open" : "start"} the ${what}`)(err);
     }
     setBusy(false);
   };
@@ -68,7 +67,7 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
   const ideas = feed?.ideaReviews?.filter((r) => r.status === "draft") ?? [];
   return (
     <div className="xp" ref={box}>
-      <button className="control" disabled={props.disabled || busy} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="Put a review, a brainstorm or a design session on the board">
+      <button className="control" disabled={props.disabled || busy} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="Start a review, or open a map or a diagram beside the board">
         <StartIcon />
         <span>{busy ? "Starting…" : "Start"}</span>
       </button>
@@ -91,14 +90,14 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
               </span>
             </button>
           ))}
-          <span className="xp-group">Working sessions</span>
+          <span className="xp-group">Views of this call</span>
           <button type="button" role="menuitem" onClick={() => (setOpen(false), setPop("brainstorm"))}>
-            <strong>Brainstorm</strong>
-            <span className="muted xp-hint">from a topic or a question</span>
+            <strong>Map</strong>
+            <span className="muted xp-hint">ideas, as you brainstorm</span>
           </button>
           <button type="button" role="menuitem" onClick={() => (setOpen(false), setPop("session"))}>
-            <strong>Design session</strong>
-            <span className="muted xp-hint">draw it as you talk</span>
+            <strong>Diagram</strong>
+            <span className="muted xp-hint">boxes and arrows, as you design</span>
           </button>
         </div>
       )}
@@ -106,7 +105,7 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
         <BrainstormPop
           onClose={() => setPop(null)}
           onStart={async (prompt) => {
-            await run("brainstorm", () => api.startBrainstorm(roomId, prompt))();
+            await run("map", () => api.startBrainstorm(roomId, prompt))();
             setPop(null);
           }}
         />
@@ -116,7 +115,7 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
           todos={[]}
           onClose={() => setPop(null)}
           onStart={async (prompt, seed, taskId) => {
-            await run("design session", () => api.startBrainstorm(roomId, prompt, { seed, taskId }))();
+            await run("diagram", () => api.startBrainstorm(roomId, prompt, { seed, taskId }))();
             setPop(null);
           }}
         />
