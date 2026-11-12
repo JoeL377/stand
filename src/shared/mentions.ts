@@ -23,17 +23,22 @@ export function mentionNames(people: Person[]): Array<{ id: string; name: string
   });
 }
 
-/** The ids of the people a comment tags, in the order they come up. */
-export function mentionedIn(text: string, people: Person[]): string[] {
+/** Where each @Name in a text is, from the @ to the end of the name, in order. */
+export function mentionSpans(text: string, people: Person[]): Array<{ id: string; start: number; end: number }> {
   const names = mentionNames(people).sort((a, b) => b.name.length - a.name.length);
   let rest = text;
-  const found: Array<{ id: string; at: number }> = [];
+  const found: Array<{ id: string; start: number; end: number }> = [];
   for (const n of names) {
     const re = new RegExp(`(^|[^${WORD}@])@${esc(n.name).replace(/ /g, "\\s+")}(?![${WORD}])`, "giu");
     rest = rest.replace(re, (all, lead: string, at: number) => {
-      found.push({ id: n.id, at });
+      found.push({ id: n.id, start: at + lead.length, end: at + all.length });
       return lead + " ".repeat(all.length - lead.length);
     });
   }
-  return [...new Set(found.sort((a, b) => a.at - b.at).map((f) => f.id))];
+  return found.sort((a, b) => a.start - b.start);
+}
+
+/** The ids of the people a comment tags, in the order they come up. */
+export function mentionedIn(text: string, people: Person[]): string[] {
+  return [...new Set(mentionSpans(text, people).map((f) => f.id))];
 }

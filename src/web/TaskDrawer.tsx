@@ -16,6 +16,7 @@ import { CloseIcon } from "./icons.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
 import { LastReview, designReviewHref } from "./pages/DesignReviewPage.tsx";
 import { PlanReviewBody } from "./PlanReview.tsx";
+import { MentionText } from "./Mentions.tsx";
 import { errorToast } from "./Toasts.tsx";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
@@ -334,7 +335,7 @@ function MentionNotice({ mentions, onDismiss }: { mentions: TaskMention[]; onDis
         <span className="muted">{fmtAgo(latest.ts)}</span>
         <button type="button" onClick={onDismiss} title="Take this task out of Mentions you">Dismiss</button>
       </p>
-      <p className="td-mention-text">{latest.text}</p>
+      <p className="td-mention-text"><MentionText text={latest.text} /></p>
       <p className="muted small">Reply below, or dismiss it. Until then the task shows first in your task list.</p>
     </section>
   );

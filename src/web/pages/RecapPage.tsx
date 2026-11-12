@@ -12,6 +12,8 @@ import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, 
 import { meetingChapters, saidAt } from "../../shared/chapters.ts";
 import { ChapterBar, ChapterChip, ChapterList, Face, QuoteMark } from "../RecapChapters.tsx";
 import { api, request, type RoomInfo } from "../api.ts";
+import { useAuth } from "../auth.tsx";
+import { MentionScope, useSpacePeople } from "../Mentions.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { Markdown } from "../Synthesis.tsx";
@@ -31,6 +33,8 @@ export function RecapPage() {
   const here = useSectionInView(["todo", "decided", "open", "chapters"], Boolean(data));
 
   const [attempt, setAttempt] = useState(0);
+  const { user } = useAuth();
+  const mentionable = useSpacePeople(data?.roomId);
   const colorFor = useColorRegistry(meetingId, (data?.items ?? []).flatMap((g) => g.segments.map((s) => ({ id: s.speakerId, name: s.speakerName }))));
 
   useEffect(() => {
@@ -151,6 +155,7 @@ export function RecapPage() {
   const nextCount = upNext && upNext.since === data.startedAt ? upNext.suggestions.length + upNext.parked.length : 0;
 
   return (
+  <MentionScope people={mentionable} me={user.id}>
   <PersonColors.Provider value={colorFor}>
     <div className="doc recap">
       <nav className="crumbs">
@@ -355,6 +360,7 @@ export function RecapPage() {
       </footer>
     </div>
   </PersonColors.Provider>
+  </MentionScope>
   );
 }
 

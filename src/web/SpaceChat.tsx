@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatEvent, ChatMessage, ChatThread } from "../shared/chat.ts";
+import { mentionedIn } from "../shared/mentions.ts";
 import { api } from "./api.ts";
 import { EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
 import { Linkified } from "./Linkified.tsx";
@@ -23,6 +24,10 @@ export interface SpaceChatState {
   error: string | null;
   /** Messages from other people after the last one you read. */
   unread: number;
+  /** Of those, the ones that tag you with @Name. */
+  mentions: number;
+  /** This message tags you. */
+  mentionsMe: (m: ChatMessage) => boolean;
   /** There may be messages before the oldest one loaded. */
   hasOlder: boolean;
   loadOlder: () => Promise<void>;
@@ -31,11 +36,19 @@ export interface SpaceChatState {
   reload: () => void;
 }
 
-/** A space's chat, loaded once and then fed by the space's event stream for as long as the page is open. */
-export function useSpaceChat(roomId: string, me: string): SpaceChatState {
+/** A space's chat, loaded once and then fed by the space's event stream for as long as the page is open.
+ *  onMention hears each new message that tags you, as it arrives. */
+export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMessage) => void): SpaceChatState {
   const [thread, setThread] = useState<ChatThread | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasOlder, setHasOlder] = useState(false);
+
+  const people = thread?.people;
+  const mentionsMe = useCallback((m: ChatMessage) => !m.deletedAt && m.authorId !== me && !!people && m.text.includes("@") && mentionedIn(m.text, people).includes(me), [people, me]);
+  // The stream outlives a render: it reads these as they are now.
+  const heard = useRef({ mentionsMe, onMention, known: new Set<string>() });
+  heard.current.mentionsMe = mentionsMe;
+  heard.current.onMention = onMention;
 
   const apply = useCallback((m: ChatMessage) => {
     setThread((t) => {
@@ -78,7 +91,12 @@ export function useSpaceChat(roomId: string, me: string): SpaceChatState {
     let dropped = false;
     stream.onmessage = (ev) => {
       const e = JSON.parse(ev.data) as ChatEvent;
-      if (e.type === "message") apply(e.message);
+      if (e.type !== "message") return;
+      const h = heard.current;
+      // Only a message seen for the first time: an edit that adds you doesn't call out again.
+      if (!h.known.has(e.message.id) && h.mentionsMe(e.message)) h.onMention?.(e.message);
+      h.known.add(e.message.id);
+      apply(e.message);
     };
     // The browser connects again by itself. What was sent meanwhile is read then.
     stream.onerror = () => {
@@ -108,8 +126,10 @@ export function useSpaceChat(roomId: string, me: string): SpaceChatState {
     api.readChat(channelId, last).catch(() => {});
   }, [channelId, last, readUpTo]);
 
-  const unread = thread ? thread.messages.filter((m) => m.seq > thread.readUpTo && m.authorId !== me && !m.deletedAt).length : 0;
-  return { thread, error, unread, hasOlder, loadOlder, markRead, apply, reload };
+  for (const m of thread?.messages ?? []) heard.current.known.add(m.id);
+  const fresh = thread ? thread.messages.filter((m) => m.seq > thread.readUpTo && m.authorId !== me && !m.deletedAt) : [];
+  const mentions = fresh.filter(mentionsMe).length;
+  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, reload };
 }
 
 const dayLabel = (ts: number) => {
@@ -132,6 +152,8 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
   const [newFrom, setNewFrom] = useState<number | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // The newest message you had in view when you scrolled up from the foot; null while you're at it.
+  const [awayAt, setAwayAt] = useState<number | null>(null);
   const loaded = !!thread;
   useEffect(() => {
     // Only when the thread first arrives.
@@ -153,6 +175,22 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
     };
   }, [last, markRead]);
 
+  const lastRef = useRef(last);
+  lastRef.current = last;
+  const follow = (atFoot: boolean) => {
+    stick.current = atFoot;
+    setAwayAt((v) => (atFoot ? null : (v ?? lastRef.current)));
+  };
+  // What came in under the fold since you scrolled up, for the pill that takes you down to it.
+  const below = awayAt === null ? [] : (thread?.messages ?? []).filter((m) => m.seq > awayAt && m.authorId !== me.id && !m.deletedAt);
+  const belowMentions = below.filter(chat.mentionsMe).length;
+  const toFoot = () => {
+    const el = scroller.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    if (!el || el.scrollHeight <= el.clientHeight) window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+    follow(true);
+  };
+
   const rows = useMemo(() => {
     const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean }> = [];
     let marked = false;
@@ -170,7 +208,10 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
   // on a wide screen and the page on a phone, so both are kept.
   useEffect(() => {
     const onScroll = () => {
-      stick.current = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 60;
+      // Only on a phone, where the page scrolls and the thread doesn't.
+      const el = scroller.current;
+      if (el && el.scrollHeight > el.clientHeight) return;
+      follow(window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 60);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -219,7 +260,7 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
         ref={scroller}
         onScroll={(e) => {
           const el = e.currentTarget;
-          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+          follow(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
         }}
       >
         {chat.hasOlder && (
@@ -239,6 +280,7 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
             day={day}
             head={head}
             fresh={fresh}
+            mentionsMe={chat.mentionsMe(m)}
             mine={m.authorId === me.id}
             editing={editing === m.id}
             onEdit={(on) => setEditing(on ? m.id : null)}
@@ -246,11 +288,17 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
           />
         ))}
       </div>
+      {below.length > 0 && (
+        <button type="button" className={belowMentions ? "chat-jump mention" : "chat-jump"} onClick={toFoot}>
+          <span aria-hidden>↓</span>
+          {belowMentions ? `${belowMentions === 1 ? "A new message mentions" : `${belowMentions} new messages mention`} you` : `${below.length} new ${below.length === 1 ? "message" : "messages"}`}
+        </button>
+      )}
       <Composer
         roomId={roomId}
         people={thread.people.filter((p) => p.id !== me.id)}
         onSent={(m) => {
-          stick.current = true;
+          follow(true);
           chat.apply(m);
         }}
       />
@@ -263,6 +311,7 @@ function MessageRow(props: {
   day: string | null;
   head: boolean;
   fresh: boolean;
+  mentionsMe: boolean;
   mine: boolean;
   editing: boolean;
   onEdit: (on: boolean) => void;
@@ -307,7 +356,7 @@ function MessageRow(props: {
           <span>New</span>
         </div>
       )}
-      <div className={`chat-msg${props.head ? " head" : ""}${m.deletedAt ? " deleted" : ""}`} data-seq={m.seq}>
+      <div className={`chat-msg${props.head ? " head" : ""}${m.deletedAt ? " deleted" : ""}${props.mentionsMe ? " mentions-you" : ""}`} data-seq={m.seq}>
         <div className="chat-msg-side">
           {props.head ? <Avatar id={m.author} name={m.author} size={28} /> : <span className="chat-msg-time">{fmtTime(m.ts).replace(/\s?[AP]M$/i, "")}</span>}
         </div>

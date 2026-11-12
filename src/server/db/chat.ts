@@ -145,6 +145,20 @@ export function chatStore(db: DatabaseSync) {
         .all(userId) as Row[];
       return new Map(rows.map((r) => [r.room_id as string, r.n as number]));
     },
+    /** What other people wrote with an @ in it that this person hasn't read, per space: where a mention of them could be. */
+    unreadChatWithAt(userId: string): Array<{ roomId: string; text: string }> {
+      return (
+        db
+          .prepare(
+            `SELECT ch.room_id, s.text FROM channels ch
+             JOIN room_members x ON x.room_id = ch.room_id AND x.user_id = ?
+             LEFT JOIN channel_reads r ON r.channel_id = ch.id AND r.user_id = x.user_id
+             JOIN chat_messages c ON c.channel_id = ch.id AND c.seq > COALESCE(r.read_up_to, 0) AND c.deleted_at IS NULL
+             JOIN segments s ON s.id = c.segment_id AND s.speaker_id != x.user_id AND s.text LIKE '%@%'`,
+          )
+          .all(userId) as Row[]
+      ).map((r) => ({ roomId: r.room_id as string, text: r.text as string }));
+    },
     /** A page of a channel's messages, oldest first: the newest ones, those before a seq, or those after one. */
     channelMessages(channelId: string, page: { before?: number; after?: number; limit?: number } = {}): ChatMessage[] {
       const limit = Math.min(Math.max(page.limit ?? 100, 1), 500);

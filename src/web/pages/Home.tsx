@@ -213,9 +213,22 @@ function SpaceCard({ s }: { s: SpaceSummary }) {
 
 function StateChips({ s }: { s: SpaceSummary }) {
   const mentions = s.mentions ?? 0;
-  if (!s.toDecide && !s.todos && !mentions) return null;
+  const unread = s.unread ?? 0;
+  const chatMentions = s.chatMentions ?? 0;
+  if (!s.toDecide && !s.todos && !mentions && !unread) return null;
   return (
     <span className="sp-states">
+      {chatMentions > 0 ? (
+        <span className="sp-state chat-mention" title="Chat messages you haven't read that tag you">
+          @ Mentioned in chat{chatMentions > 1 ? ` · ${chatMentions}` : ""}
+        </span>
+      ) : (
+        unread > 0 && (
+          <span className="sp-state chat-new" title="Chat messages you haven't read">
+            {unread} new in chat
+          </span>
+        )
+      )}
       {mentions > 0 && (
         <span className="sp-state mention" title="Open tasks where a comment tags you">
           Tagged in {mentions} {mentions === 1 ? "task" : "tasks"}

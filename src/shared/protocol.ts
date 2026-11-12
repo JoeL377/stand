@@ -1317,6 +1317,8 @@ export interface SpaceSummary {
   mentions?: number;
   /** Chat messages from other people that you haven't read. */
   unread?: number;
+  /** Of those, the ones that tag you with @Name. */
+  chatMentions?: number;
   /** The latest decision or open question, for the card's last line. */
   last: { kind: "decision" | "question" | "action"; text: string; ts: number } | null;
   /** People who have been in it. */
