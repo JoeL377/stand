@@ -2352,6 +2352,12 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .task-closed.dropped { color: var(--muted); }
 .task-doing { margin-left: 8px; vertical-align: 1px; color: var(--accent-text); background: var(--accent-soft); }
 .task-mention { margin-left: 8px; vertical-align: 1px; color: var(--accent-text); background: var(--accent-soft); font-weight: 600; }
+/* A to-do's parts sit under it, one step in. A part anywhere else names its parent after its text. */
+.followups li.part { padding-left: 28px; }
+.task-parts { margin-left: 8px; vertical-align: 1px; }
+.task-parts:hover { color: var(--muted); background: var(--panel-2); }
+.task-part-of { display: inline-block; max-width: 240px; height: auto; min-height: 0; margin-left: 8px; padding: 0; border: 0; background: none; box-shadow: none; font-size: 12px; font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; cursor: pointer; }
+.task-part-of:hover, .task-part-of:focus-visible { color: var(--accent-text); background: none; text-decoration: underline; text-underline-offset: 2px; }
 .task-ready { background: var(--accent-soft); color: var(--accent-text); }
 @media (max-width: 640px) {
   .checkin { padding: 12px; }
@@ -3662,6 +3668,8 @@ button.chat-caught-text { padding: 0; }
   /* What follows the title (topic, working pill) starts flush under the title when it drops to its own line. */
   .sh-panel.tasks .followups.one-line .fu-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
   .sh-panel.tasks .followups.one-line .fu-text .rc-pill-wrap, .sh-panel.tasks .followups.one-line .fu-text .project-pill { margin-left: 0; }
+  .sh-panel.tasks .followups.one-line .fu-text .task-parts, .sh-panel.tasks .followups.one-line .fu-text .task-part-of { margin-left: 0; }
+  .sh-panel.tasks .followups li.part { padding-left: 20px; }
   .sh-panel.tasks .followups .project-pill { padding: 0; margin-left: 6px; border: 0; background: none; box-shadow: none; height: auto; min-height: 0; font-size: 12px; font-weight: 400; color: var(--muted); max-width: 140px; }
   .td-phone-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
   .td-phone-acts > button { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; }

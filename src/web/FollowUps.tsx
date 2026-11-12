@@ -43,6 +43,8 @@ export function FollowUpList(props: {
   onOpen?: (n: FollowUpNote) => void;
   /** The task open beside the list, marked in it. */
   openId?: string | null;
+  /** A class for one action's row, like "part" for a row that sits under the one above it. */
+  rowClass?: (n: FollowUpNote) => string | undefined;
 }) {
   const [saved, setSaved] = useState<Record<string, { note: Note; original: FollowUpNote }>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -61,7 +63,7 @@ export function FollowUpList(props: {
         const w = work[n.id];
         const open = opened === n.id && !!w?.log.length;
         return (
-          <li key={n.id} className={[done && "done", dropped && "dropped", props.openId === n.id && "opened"].filter(Boolean).join(" ") || undefined}>
+          <li key={n.id} className={[done && "done", dropped && "dropped", props.openId === n.id && "opened", props.rowClass?.(n)].filter(Boolean).join(" ") || undefined}>
             <button
               className="check"
               role="checkbox"

@@ -22,6 +22,37 @@ export const isClosed = (s: TaskState) => s === "done" || s === "dropped";
 /** Someone said it's finished, nothing shows it yet. */
 export const saidDone = (n: Pick<Note, "kind" | "doneAt" | "state" | "saidDone">) => !!n.saidDone && !isClosed(stateOf(n));
 
+/** The rows of one list with each to-do's parts under it: the rows that stand on their own, in the
+ *  list's order, each with its parts. A part whose parent isn't in the list stands on its own. */
+export function withParts<T extends Pick<Note, "id" | "parentId">>(notes: T[]): Array<{ note: T; parts: T[] }> {
+  const byId = new Map(notes.map((n) => [n.id, n]));
+  const parentIn = (n: T) => (n.parentId && n.parentId !== n.id ? byId.get(n.parentId) : undefined);
+  // Tasks have one level, so a row goes under its parent only when that parent stands on its own.
+  const under = (n: T) => {
+    const parent = parentIn(n);
+    return parent && !parentIn(parent) ? parent.id : null;
+  };
+  const parts = new Map<string, T[]>();
+  for (const n of notes) {
+    const p = under(n);
+    if (p) parts.set(p, [...(parts.get(p) ?? []), n]);
+  }
+  return notes.filter((n) => !under(n)).map((n) => ({ note: n, parts: parts.get(n.id) ?? [] }));
+}
+
+/** Per to-do with parts: how many are done, of the ones still wanted. A dropped part doesn't count. */
+export function partsTally(all: Array<Pick<Note, "id" | "kind" | "doneAt" | "state" | "parentId">>): Map<string, { done: number; total: number }> {
+  const tally = new Map<string, { done: number; total: number }>();
+  for (const n of all) {
+    if (!n.parentId || n.parentId === n.id) continue;
+    const state = stateOf(n);
+    if (state === "dropped") continue;
+    const t = tally.get(n.parentId) ?? { done: 0, total: 0 };
+    tally.set(n.parentId, { done: t.done + (state === "done" ? 1 : 0), total: t.total + 1 });
+  }
+  return tally;
+}
+
 /** What closed a task, in a few words. */
 export function closedLabel(closedBy: string | null | undefined): string | null {
   if (!closedBy) return null;
