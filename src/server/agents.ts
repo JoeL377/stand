@@ -1578,7 +1578,8 @@ export function agentApi(deps: AgentDeps) {
         const name = (id: string) => d.boxes.find((x) => x.id === id)?.label ?? id;
         const state = (x: { suggested?: boolean }) => (x.suggested ? "suggested, not kept" : undefined);
         return {
-          parts: d.boxes.map((x) => ({ ...circle({ ...x, parent: "-" }), state: state(x) })),
+          parts: d.boxes.map((x) => ({ ...circle({ ...x, parent: "-" }), kind: x.kind, group: d.groups?.find((g) => g.id === x.group)?.label, state: state(x) })),
+          groups: d.groups?.length ? d.groups.map((g) => ({ name: g.label, holds: g.detail ?? undefined })) : undefined,
           relations: d.arrows.map((x) => ({ from: name(x.from), relation: x.label || "relates to", to: name(x.to), state: state(x) })),
           context: row.context.length ? row.context.map((c) => ({ title: c.title, text: c.text, url: c.url ?? undefined, by: c.by ?? undefined })) : undefined,
           spec_on: row.taskId ? `stand:action/${row.taskId}` : undefined,

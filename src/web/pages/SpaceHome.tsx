@@ -1126,7 +1126,7 @@ export function BrainstormPop(props: { onStart: (prompt: string) => Promise<void
   );
 }
 
-/** A design session starts from one sentence on what is being designed. It can start from notes or a
+/** A design session can start blank, or from a sentence on what is being designed; without one the talk names it. It can start from notes or a
  *  diagram instead of a blank board, and its draft spec is saved on a to-do when the call ends. */
 export function DesignSessionPop(props: { todos: Array<{ id: string; text: string }>; onStart: (prompt: string, seed: string, taskId: string | null) => Promise<void>; onClose: () => void }) {
   const [prompt, setPrompt] = useState("");
@@ -1147,19 +1147,19 @@ export function DesignSessionPop(props: { todos: Array<{ id: string; text: strin
         aria-label="Design session"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!prompt.trim() || starting) return;
+          if (starting) return;
           setStarting(true);
           await props.onStart(prompt, seed, taskId || null);
           setStarting(false);
         }}
       >
         <h2>Design session</h2>
-        <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What you're designing" aria-label="What you're designing" maxLength={160} dir="auto" />
+        <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What you're designing (optional)" aria-label="What you're designing" maxLength={160} dir="auto" />
         <textarea
           value={seed}
           onChange={(e) => setSeed(e.target.value)}
           rows={5}
-          placeholder={"Start from (optional): notes, or a diagram, one line each\nTask: a to-do with an owner\nTask -> Project: belongs to"}
+          placeholder={"Start from (optional): notes, or a diagram, one line each\nTrial: 14 days free\nTrial -> Paid plan: becomes"}
           aria-label="What to start from"
           maxLength={20000}
           dir="auto"
@@ -1176,7 +1176,7 @@ export function DesignSessionPop(props: { todos: Array<{ id: string; text: strin
           <button type="button" onClick={props.onClose}>
             Cancel
           </button>
-          <button type="submit" className="primary" disabled={!prompt.trim() || starting}>
+          <button type="submit" className="primary" disabled={starting}>
             {starting ? "Starting…" : "Start"}
           </button>
         </div>
