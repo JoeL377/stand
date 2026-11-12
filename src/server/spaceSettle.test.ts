@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { HeuristicAgent, type SettleInput, type SettleRow } from "./llm.ts";
 import { settleSpace, settledView } from "./spaceSettle.ts";
+import { recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
 const tick = () => new Promise((r) => setTimeout(r, 3));
 /** One note after another, a moment apart, as they're said. */
@@ -93,4 +94,23 @@ test("without a model nothing is settled and every meeting's open questions show
     settledView(db, room.id).open.map((n) => n.text),
     ["Second question?", "First question?"],
   );
+});
+
+test("the settle pass's Claude call is kept with its space, between meetings", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Stand", null, "");
+  const m = db.startMeeting(room.id);
+  db.addNote(m.id, null, { kind: "question", text: "Who drives pricing?", owner: null }, null);
+  db.endMeeting(m.id, null);
+  const rows: UsageRow[] = [];
+  setUsageSink((r) => rows.push(r));
+  try {
+    const agent = Object.assign(new HeuristicAgent(), {
+      settleSpace: async (): Promise<SettleRow[]> => (recordUsage("claude-sonnet-5-5", { input_tokens: 1, output_tokens: 1 }), []),
+    });
+    await settleSpace(db, agent, room.id);
+  } finally {
+    setUsageSink(null);
+  }
+  assert.deepEqual(rows.map((r) => [r.meetingId, r.roomId, r.task]), [[null, room.id, "settleSpace"]]);
 });

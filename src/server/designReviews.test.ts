@@ -11,6 +11,7 @@ import type { Agent } from "./llm.ts";
 import { PlanBriefs, slideGroups } from "./planBrief.ts";
 import { changeReview, planDiagrams, planSections, reviewFor } from "./planReview.ts";
 import { addSlide, refilePrompt, refileReview, reviewView, startReview } from "./reviews.ts";
+import { recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
 const SPEC = [
   "# Rollout of server capture",
@@ -697,4 +698,17 @@ test("a design review that ends with nothing called goes back to waiting and can
   assert.equal(again.started, true);
   assert.notEqual(again.firstItemId, first.firstItemId);
   assert.equal(db.listItems(room.id)[0].id, again.firstItemId);
+});
+
+test("writing a plan's brief is a Claude call kept with the to-do's space", async () => {
+  const { db, room, task } = space();
+  const note = task("Move capture to the server");
+  const rows: UsageRow[] = [];
+  setUsageSink((r) => rows.push(r));
+  try {
+    await new PlanBriefs(db, { taskBrief: async () => (recordUsage("claude-sonnet-5-5", { input_tokens: 1, output_tokens: 1 }), DRAFT) }).ensure(note);
+  } finally {
+    setUsageSink(null);
+  }
+  assert.deepEqual(rows.map((r) => [r.meetingId, r.roomId, r.task]), [[null, room.id, "taskBrief"]]);
 });

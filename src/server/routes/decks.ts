@@ -4,6 +4,7 @@ import type { DeckDraft, DeckHistory, DeckTheme, SlideLayout } from "../../share
 import { deckFile, deckImageFile, deckTitle, imageType, looksLikePdf, MAX_DECK_BYTES, MAX_IMAGE_BYTES, parseDeck, saveDeckFile, saveDeckImage } from "../decks.ts";
 import { newId } from "../ids.ts";
 import type { Services } from "../services.ts";
+import { forSpace } from "../usage.ts";
 import { notFound, route } from "./http.ts";
 
 export function deckRoutes(app: Express, ctx: Services) {
@@ -85,7 +86,7 @@ export function deckRoutes(app: Express, ctx: Services) {
       if (!room) return notFound(res);
       const brief = text(req.body?.brief, 20000).trim();
       const title = text(req.body?.title, 100).trim() || "Untitled deck";
-      const drafted = brief ? await agent.draftDeck(brief).catch(() => []) : [];
+      const drafted = brief ? await forSpace(agent, room.id).draftDeck(brief).catch(() => []) : [];
       const deck = db.createDeck(room.id, title, 1, "native");
       const slides = drafted.length ? drafted : [{ title, layout: "title" as const, body: "", image: null, notes: "" }];
       const saved = db.saveDeck(deck, { title, theme: "paper", slides: slides.map((sl) => ({ ...sl, id: newId() })) });
@@ -123,10 +124,11 @@ export function deckRoutes(app: Express, ctx: Services) {
   app.post(
     "/api/decks/:deckId/draft",
     route(async (req, res) => {
-      if (!db.getDeck(req.params.deckId)) return notFound(res);
+      const deck = db.getDeck(req.params.deckId);
+      if (!deck) return notFound(res);
       const brief = text(req.body?.brief, 20000).trim();
       if (!brief) return res.status(400).json({ error: "Write or paste something to make slides from." });
-      res.json({ slides: await agent.draftDeck(brief) });
+      res.json({ slides: await forSpace(agent, deck.roomId).draftDeck(brief) });
     }),
   );
 

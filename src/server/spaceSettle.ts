@@ -10,6 +10,7 @@ import type { Note, ReplacedBy } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import type { Agent, SettleRow } from "./llm.ts";
+import { forSpace } from "./usage.ts";
 
 export interface Settled {
   at: number;
@@ -42,7 +43,7 @@ export async function settleSpace(db: DB, agent: Agent, roomId: string): Promise
   if (db.getSettled(roomId)?.basis === basis) return;
   const started = Date.now();
   const keyed = notes.map((n, i) => ({ n, key: `${n.kind === "decision" ? "D" : "Q"}${i + 1}`, order: i }));
-  const out = await agent.settleSpace(
+  const out = await forSpace(agent, roomId).settleSpace(
     room,
     keyed.map(({ n, key }) => ({ key, kind: n.kind as "decision" | "question", text: n.text, meeting: n.meetingStartedAt })),
   );

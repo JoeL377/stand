@@ -4,6 +4,7 @@ import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { HeuristicAgent, type ProjectSuggestInput, projectSuggestPrompt } from "./llm.ts";
 import { ProjectSuggester, projectSuggestInput, suggestProjects } from "./projectSuggest.ts";
+import { recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
 type DB = ReturnType<typeof openDb>;
 type Line = { kind: "action" | "question" | "decision"; text: string; owner?: string | null; discussionId?: string | null };
@@ -237,4 +238,20 @@ test("the scheduler runs a space once for two schedules, the sooner wins, and a 
   } finally {
     config.projectSuggest = true;
   }
+});
+
+test("the pass's Claude call is kept with its space, between meetings", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Shop");
+  db.createProject(room.id, { name: "Checkout" }, "Sam");
+  ended(db, room.id, [{ kind: "action", text: "Fix the checkout button" }]);
+  const rows: UsageRow[] = [];
+  setUsageSink((r) => rows.push(r));
+  try {
+    const { agent } = fake(() => (recordUsage("claude-sonnet-5-5", { input_tokens: 1, output_tokens: 1 }), []));
+    await suggestProjects(db, agent, room.id);
+  } finally {
+    setUsageSink(null);
+  }
+  assert.deepEqual(rows.map((r) => [r.meetingId, r.roomId, r.task]), [[null, room.id, "suggestProjects"]]);
 });

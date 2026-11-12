@@ -1250,6 +1250,18 @@ export interface MeetingCost {
   tasks: Array<{ task: string; usd: number; calls: number }>;
 }
 
+/** What a space's Claude calls cost over a range of days, in dollars (server/usage.ts). */
+export interface SpaceCost {
+  since: number;
+  until: number;
+  usd: number;
+  calls: number;
+  /** Where the money went, most expensive first: in calls, in chat, or between meetings. Each has the shape of MeetingCost. */
+  groups: Array<{ where: "calls" | "chat" | "between"; usd: number; calls: number; tasks: Array<{ task: string; usd: number; calls: number }> }>;
+  /** One entry for each day in the range (YYYY-MM-DD in the viewer's time), oldest first, days with nothing too. `between`: that day's dollars between meetings. */
+  days: Array<{ day: string; usd: number; calls: number; between: number }>;
+}
+
 /** The recap's words on one chapter: where it landed, and for a long one, the moments that moved it. */
 export interface ChapterRecap {
   key: string;

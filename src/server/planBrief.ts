@@ -10,6 +10,7 @@ import type { PlanVersion } from "../shared/planReview.ts";
 import type { DB } from "./db.ts";
 import { newId } from "./ids.ts";
 import type { Agent } from "./llm.ts";
+import { forSpace } from "./usage.ts";
 import { planSections } from "./planReview.ts";
 
 const SPEC_MAX = 120_000;
@@ -139,7 +140,7 @@ export class PlanBriefs {
     const run = (async () => {
       let draft: Draft | null = null;
       try {
-        draft = (await this.agent.taskBrief!(JSON.stringify({ task: note.text, sections: base.sections.map((s) => s.heading), spec: plan.text }))) ?? null;
+        draft = (await forSpace(this.agent, this.db.getNote(note.id)?.roomId ?? null).taskBrief!(JSON.stringify({ task: note.text, sections: base.sections.map((s) => s.heading), spec: plan.text }))) ?? null;
       } catch (err) {
         console.error("[agent] plan brief failed:", err);
       }
