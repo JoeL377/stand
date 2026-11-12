@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentCard, Board, BrainstormView, ClientMessage, Discussion, ListNote, MeetingCost, Note, PilotView, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
+import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, Discussion, ListNote, MeetingCost, Note, PilotView, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
 
 export interface Interim {
   speakerId: string;
@@ -113,6 +113,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [list, setList] = useState<ListNote[] | null>(null);
   /** The brainstorm running in this space, with its map; null when none is. */
   const [brainstorm, setBrainstorm] = useState<BrainstormView | null>(null);
+  /** The other maps and diagrams of this call, oldest first. */
+  const [brainstorms, setBrainstorms] = useState<BrainstormSummary[]>([]);
   /** What ✦ Stand has put on the board; null when the server runs no agent. */
   const [agentCards, setAgentCards] = useState<AgentCard[] | null>(null);
   /** Who pilots ✦ Stand, with its server times moved onto this computer's clock. */
@@ -226,6 +228,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
             break;
           case "brainstorm":
             setBrainstorm(msg.brainstorm);
+            setBrainstorms(msg.others);
             break;
           case "agent":
             setAgentCards(msg.cards);
@@ -388,6 +391,7 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     cost,
     list,
     brainstorm,
+    brainstorms,
     agentCards,
     pilot,
     notesBusy,

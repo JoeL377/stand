@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { BrainCaught, Segment } from "../shared/protocol.ts";
-import { type MapAnswer, MapKeeper, brainstormOfMeeting, brainstormPage, brainstormsOf, finishBrainstorm, starIdea, startBrainstorm } from "./brainstorm.ts";
+import { type MapAnswer, MapKeeper, brainstormOfMeeting, catchUp, brainstormPage, brainstormsOf, finishBrainstorm, starIdea, startBrainstorm } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
+import { migrate } from "./db/schema.ts";
+import { DatabaseSync } from "node:sqlite";
 
 const T0 = 1_000_000;
 const seg = (n: number, who: string, text: string): Segment => ({ id: `s${n}`, meetingId: "m", itemId: null, speakerId: who, speakerName: who, kind: "speech", text, ts: T0 + n * 1000 });
@@ -94,7 +96,20 @@ test("a circle someone took off stays off, and a model that can't answer changes
   assert.equal(again.unreadSince(talk), talk[1].ts);
 });
 
-test("a brainstorm leads the agenda while it runs, and keeps its page after the call", () => {
+test("a line out of the map's scope is never read, and never waits as unread", async () => {
+  const model = scripted([{ add: [{ under: "root", label: "Onboarding", detail: "Ways to get a new team going.", by: "Huy", line: 1 }] }]);
+  const slide = (n: number, who: string, text: string): Segment => ({ ...seg(n, who, text), itemId: "slide" });
+  const map = new MapKeeper(model, "Week one", T0, null, (s) => s.itemId !== "slide");
+  const talk = [slide(1, "Joe", "on this slide the button is blue"), seg(2, "Huy", "onboarding could start from a sample space")];
+  assert.equal(map.unreadSince(talk), talk[1].ts);
+  assert.equal(await map.run(talk, [], [], T0, T0 + 5000), true);
+  assert.doesNotMatch(model.asked[0], /button is blue/);
+  assert.match(model.asked[0], /NEW \[1\] \[0:02\] Huy: onboarding/);
+  talk.push(slide(3, "Joe", "next slide"));
+  assert.equal(map.unreadSince(talk), null);
+});
+
+test("a brainstorm adds nothing to the agenda, and keeps its page after the call", () => {
   const db = openDb(":memory:");
   const room = db.createRoom("Conxt 1.0", null, "");
   const other = db.createRoom("Elsewhere", null, "");
@@ -102,12 +117,13 @@ test("a brainstorm leads the agenda while it runs, and keeps its page after the 
   assert.throws(() => startBrainstorm(db, room.id, "   ", "Joe Liang"), /topic or a question/);
   const b = startBrainstorm(db, room.id, "  How should a  review start? ", "Joe Liang", T0);
   assert.equal(b.prompt, "How should a review start?");
-  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["How should a review start?", "Roadmap"]);
+  assert.equal(b.itemId, null);
+  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
   // The same sentence again is the same brainstorm; another one takes its place.
   assert.equal(startBrainstorm(db, room.id, "How should a review start?", "Huy Ngo").id, b.id);
   const next = startBrainstorm(db, room.id, "Pricing", "Huy Ngo", T0 + 10);
   assert.notEqual(next.id, b.id);
-  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Pricing", "Roadmap"]);
+  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
   assert.deepEqual(brainstormsOf(db, room.id).map((x) => [x.prompt, x.status]), [["Pricing", "live"], ["How should a review start?", "done"]]);
 
   db.saveBrainstormMap(next.id, [
@@ -131,5 +147,50 @@ test("a brainstorm leads the agenda while it runs, and keeps its page after the 
   assert.equal(starIdea(db, other.id, next.id, "i1", true), null);
   assert.deepEqual(brainstormPage(db, room.id, next.id)!.starred, ["i1"]);
   assert.equal(starIdea(db, room.id, next.id, "i1", false)!.starred, undefined);
-  assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, directions: 1, ideas: 1 });
+  assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, threadId: null, directions: 1, ideas: 1 });
+});
+
+test("a brainstorm running from before maps were views lets go of its agenda item", () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Conxt 1.0", null, "");
+  const [item, kept] = db.addItems(room.id, [
+    { source: "agenda", externalId: null, title: "Pricing", url: null, description: null },
+    { source: "agenda", externalId: null, title: "Roadmap", url: null, description: null },
+  ]);
+  const old = db.createBrainstorm({ roomId: room.id, prompt: "Pricing", itemId: item.id, startedBy: "Joe", startedAt: T0 });
+  migrate(db.raw);
+  migrate(db.raw);
+  assert.equal(db.getBrainstorm(old.id)!.itemId, null);
+  assert.equal(db.getBrainstorm(old.id)!.status, "live");
+  assert.deepEqual(db.listItems(room.id).map((i) => i.id), [kept.id]);
+});
+
+test("a long stretch nobody has read is caught up a window at a time; a short one is one pass", async () => {
+  const MIN = 60_000;
+  const line = (n: number): Segment => ({ ...seg(n, "Joe", `line ${n}`), ts: T0 + n * 30_000 });
+  const talk = Array.from({ length: 20 }, (_, i) => line(i + 1));
+  const model = scripted([]);
+  const map = new MapKeeper(model, "Week one", T0);
+  let steps = 0;
+  await catchUp(map, talk, [], [], T0, T0 + 10 * MIN + 1000, () => steps++);
+  assert.ok(model.asked.length > 1);
+  // Each step sees two minutes from the first line it hadn't read, and nothing after.
+  assert.match(model.asked[0], /line 5\b/);
+  assert.doesNotMatch(model.asked[0], /line 6\b/);
+  assert.match(model.asked.at(-1)!, /line 20/);
+  assert.equal(map.unreadSince(talk), null);
+  assert.equal(steps, 0, "nothing changed, so no step to show");
+
+  const short = scripted([]);
+  const again = new MapKeeper(short, "Week one", T0);
+  await catchUp(again, talk.slice(0, 3), [], [], T0, T0 + 2 * MIN);
+  assert.equal(short.asked.length, 1);
+});
+
+test("an old database gets the columns a topic's map keeps", () => {
+  const raw = new DatabaseSync(":memory:");
+  raw.exec("CREATE TABLE brainstorms (id TEXT PRIMARY KEY, room_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, item_id TEXT, meeting_id TEXT, started_by TEXT, started_at INTEGER NOT NULL, ended_at INTEGER, map_json TEXT)");
+  migrate(raw);
+  const cols = (raw.prepare("PRAGMA table_info(brainstorms)").all() as Array<{ name: string }>).map((c) => c.name);
+  assert.ok(cols.includes("thread_id") && cols.includes("spans_json"));
 });

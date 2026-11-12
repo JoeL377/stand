@@ -11,6 +11,7 @@ import type { Agent } from "./llm.ts";
 import { PlanBriefs, slideGroups } from "./planBrief.ts";
 import { changeReview, planDiagrams, planSections, reviewFor } from "./planReview.ts";
 import { addSlide, refilePrompt, refileReview, reviewView, startReview } from "./reviews.ts";
+import { recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
 const SPEC = [
   "# Rollout of server capture",
@@ -440,9 +441,15 @@ test("what the review decides goes back: onto each point's thread, the spec's to
     { kind: "decision", text: "Mobile clients get a banner", owner: null },
     { kind: "action", text: "Change the plan to two weeks", owner: "Sam" },
   ]);
-  db.syncNotes(m.id, steps.id, [{ kind: "action", text: "Write the flag removal checklist", owner: null }]);
+  const [checklist] = db.syncNotes(m.id, steps.id, [{ kind: "action", text: "Write the flag removal checklist", owner: null }]);
   const general = db.syncNotes(m.id, null, [{ kind: "action", text: "Book the offsite", owner: null }]);
+  // Someone made the checklist a part of another to-do already.
+  const release = task("Plan the release", null, null);
+  db.setNoteParent(room.id, checklist.id, release.id);
   assert.deepEqual(writeBackReview(db, m.id), { specs: 1, links: 2 });
+  // The to-dos from its slides are parts of the spec's to-do, unless they were a part of another one.
+  const parentOf = (text: string) => db.meetingNotes(m.id).find((n) => n.text === text)?.parentId ?? null;
+  assert.deepEqual([parentOf("Change the plan to two weeks"), parentOf("Write the flag removal checklist"), parentOf("Book the offsite")], [capture.id, release.id, null]);
 
   // Stand's line on the thread is rewritten in place with everything caught.
   t = thread("Is a week enough?");
@@ -691,4 +698,17 @@ test("a design review that ends with nothing called goes back to waiting and can
   assert.equal(again.started, true);
   assert.notEqual(again.firstItemId, first.firstItemId);
   assert.equal(db.listItems(room.id)[0].id, again.firstItemId);
+});
+
+test("writing a plan's brief is a Claude call kept with the to-do's space", async () => {
+  const { db, room, task } = space();
+  const note = task("Move capture to the server");
+  const rows: UsageRow[] = [];
+  setUsageSink((r) => rows.push(r));
+  try {
+    await new PlanBriefs(db, { taskBrief: async () => (recordUsage("claude-sonnet-5-5", { input_tokens: 1, output_tokens: 1 }), DRAFT) }).ensure(note);
+  } finally {
+    setUsageSink(null);
+  }
+  assert.deepEqual(rows.map((r) => [r.meetingId, r.roomId, r.task]), [[null, room.id, "taskBrief"]]);
 });

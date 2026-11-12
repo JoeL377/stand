@@ -6,6 +6,7 @@ import type { CaughtLine, ChatCaught, ChatEvent, ChatMessage, ChatThread } from 
 import { mentionedIn } from "../shared/mentions.ts";
 import { api } from "./api.ts";
 import { mergeCaught, placeCaught } from "./chatCaught.ts";
+import { asMessage, restore, serial, unsaved, type PendingMessage } from "./chatPending.ts";
 import { CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
 import { Linkified } from "./Linkified.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
@@ -37,6 +38,12 @@ export interface SpaceChatState {
   /** A line Stand caught that isn't one: it goes for everyone. */
   removeCaught: (line: CaughtLine) => Promise<void>;
   reload: () => void;
+  /** What you sent that isn't saved yet, oldest first: sending, or failed and waiting for Retry. */
+  pending: PendingMessage[];
+  /** Shows the message at once and sends it. Sends go out one at a time, in order. */
+  send: (text: string) => void;
+  retry: (key: string) => void;
+  discard: (key: string) => void;
 }
 
 /** A space's chat, loaded once and then fed by the space's event stream for as long as the page is open.
@@ -45,6 +52,36 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   const [thread, setThread] = useState<ChatThread | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasOlder, setHasOlder] = useState(false);
+  // Kept by space, so what one space didn't send never shows in another.
+  const unsentKey = `stand.chatUnsent.${roomId}`;
+  const [unsent, setUnsent] = useState<{ roomId: string; list: PendingMessage[] }>(() => ({ roomId, list: restore(readSession(unsentKey)) }));
+  const setPending = useCallback(
+    (f: (list: PendingMessage[]) => PendingMessage[]) =>
+      setUnsent((u) => {
+        if (u.roomId !== roomId) return u;
+        const list = f(u.list);
+        return list === u.list ? u : { roomId, list };
+      }),
+    [roomId],
+  );
+  useEffect(() => {
+    setUnsent((u) => (u.roomId === roomId ? u : { roomId, list: restore(readSession(unsentKey)) }));
+  }, [roomId, unsentKey]);
+  // A reload brings back what wasn't saved, to send again by hand.
+  useEffect(() => {
+    if (unsent.roomId !== roomId) return;
+    try {
+      if (unsent.list.length) sessionStorage.setItem(unsentKey, JSON.stringify(unsent.list));
+      else sessionStorage.removeItem(unsentKey);
+    } catch {}
+  }, [unsent, roomId, unsentKey]);
+  // The saved message takes the place of the pending one, from the send's answer or from the stream.
+  // It goes from the list once the effect runs; until then this render leaves it out already.
+  const messages = thread?.messages;
+  useEffect(() => {
+    if (messages) setPending((list) => unsaved(list, messages));
+  }, [messages, setPending]);
+  const pending = useMemo(() => unsaved(unsent.roomId === roomId ? unsent.list : [], messages ?? []), [unsent, roomId, messages]);
 
   const people = thread?.people;
   const mentionsMe = useCallback((m: ChatMessage) => !m.deletedAt && m.authorId !== me && !!people && m.text.includes("@") && mentionedIn(m.text, people).includes(me), [people, me]);
@@ -153,11 +190,48 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
     api.readChat(channelId, last).catch(() => {});
   }, [channelId, last, readUpTo]);
 
+  const queue = useRef(serial());
+  const post = useCallback(
+    (key: string, text: string) => {
+      void queue.current(() => api.sendChat(roomId, { text, key })).then(apply, () =>
+        setPending((list) => list.map((p) => (p.key === key ? { ...p, state: "failed" as const } : p))),
+      );
+    },
+    [roomId, apply, setPending],
+  );
+  const send = useCallback(
+    (text: string) => {
+      const key = newKey();
+      setPending((list) => [...list, { key, text, ts: Date.now(), state: "sending" }]);
+      post(key, text);
+    },
+    [post, setPending],
+  );
+  const retry = useCallback(
+    (key: string) => {
+      const p = pending.find((x) => x.key === key);
+      if (!p || p.state !== "failed") return;
+      setPending((list) => list.map((x) => (x.key === key ? { ...x, state: "sending" as const } : x)));
+      // The same key: if the first try was saved after all, the server gives that message back.
+      post(key, p.text);
+    },
+    [pending, post, setPending],
+  );
+  const discard = useCallback((key: string) => setPending((list) => list.filter((p) => p.key !== key)), [setPending]);
+
   for (const m of thread?.messages ?? []) heard.current.known.add(m.id);
   const fresh = thread ? thread.messages.filter((m) => m.seq > thread.readUpTo && m.authorId !== me && !m.deletedAt) : [];
   const mentions = fresh.filter(mentionsMe).length;
-  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload };
+  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload, pending, send, retry, discard };
 }
+
+const readSession = (key: string) => {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
 
 const dayLabel = (ts: number) => {
   const d = new Date(ts);
@@ -170,7 +244,14 @@ const dayLabel = (ts: number) => {
 
 const newKey = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
-export function SpaceChat(props: { roomId: string; me: { id: string; name: string }; chat: SpaceChatState; onOpenTask?: (id: string) => void }) {
+export function SpaceChat(props: {
+  roomId: string;
+  me: { id: string; name: string };
+  chat: SpaceChatState;
+  onOpenTask?: (id: string) => void;
+  /** Each rise puts the cursor in the box. */
+  focus?: number;
+}) {
   const { roomId, me, chat } = props;
   const { thread } = chat;
   const scroller = useRef<HTMLDivElement>(null);
@@ -219,10 +300,12 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
   };
 
   const rows = useMemo(() => {
-    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null }> = [];
+    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; pending: PendingMessage["state"] | null }> = [];
     const placed = placeCaught(thread?.messages ?? [], thread?.caught ?? [], thread?.channel.openSessionId ?? null);
+    const states = new Map(chat.pending.map((p) => [p.key, p.state]));
+    const shown = thread ? [...thread.messages, ...chat.pending.map((p) => asMessage(p, me, thread.channel.id))] : [];
     let marked = false;
-    for (const m of thread?.messages ?? []) {
+    for (const m of shown) {
       const prev = out.at(-1)?.m;
       const day = !prev || dayLabel(prev.ts) !== dayLabel(m.ts) ? dayLabel(m.ts) : null;
       const fresh = !marked && newFrom !== null && newFrom > 0 && m.seq > newFrom && m.authorId !== me.id;
@@ -236,10 +319,12 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
         head: !!day || fresh || broken || !prev || prev.authorId !== m.authorId || m.ts - prev.ts > BLOCK_MS,
         caught: placed.lines.get(m.id) ?? [],
         recap: placed.recaps.get(m.id) ?? null,
+        pending: (m.sessionId === "" && m.key && states.get(m.key)) || null,
       });
     }
     return out;
-  }, [thread?.messages, thread?.caught, thread?.channel.openSessionId, newFrom, me.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread?.messages, thread?.caught, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
 
   // The newest message stays in view, unless you scrolled up to read older ones. The thread scrolls
   // on a wide screen and the page on a phone, so both are kept.
@@ -310,9 +395,12 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
             Nothing here yet. Write to the people in this space between meetings: what you send stays here for them to read.
           </p>
         )}
-        {rows.map(({ m, day, head, fresh, caught, recap }) => (
+        {rows.map(({ m, day, head, fresh, caught, recap, pending }) => (
           <MessageRow
             key={m.id}
+            pending={pending}
+            onRetry={() => m.key && chat.retry(m.key)}
+            onDiscard={() => m.key && chat.discard(m.key)}
             m={m}
             day={day}
             head={head}
@@ -336,11 +424,12 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
         </button>
       )}
       <Composer
+        focus={props.focus}
         roomId={roomId}
         people={thread.people.filter((p) => p.id !== me.id)}
-        onSent={(m) => {
+        onSend={(text) => {
           follow(true);
-          chat.apply(m);
+          chat.send(text);
         }}
       />
     </div>
@@ -349,6 +438,10 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
 
 function MessageRow(props: {
   m: ChatMessage;
+  /** Not saved yet: on its way, or failed and waiting for Retry. */
+  pending: PendingMessage["state"] | null;
+  onRetry: () => void;
+  onDiscard: () => void;
   day: string | null;
   head: boolean;
   fresh: boolean;
@@ -401,7 +494,10 @@ function MessageRow(props: {
           <span>New</span>
         </div>
       )}
-      <div className={`chat-msg${props.head ? " head" : ""}${m.deletedAt ? " deleted" : ""}${props.mentionsMe ? " mentions-you" : ""}`} data-seq={m.seq}>
+      <div
+        className={`chat-msg${props.head ? " head" : ""}${m.deletedAt ? " deleted" : ""}${props.mentionsMe ? " mentions-you" : ""}${props.pending ? ` ${props.pending === "failed" ? "failed" : "pending"}` : ""}`}
+        data-seq={props.pending ? undefined : m.seq}
+      >
         <div className="chat-msg-side">
           {props.head ? <Avatar id={m.author} name={m.author} size={28} /> : <span className="chat-msg-time">{fmtTime(m.ts).replace(/\s?[AP]M$/i, "")}</span>}
         </div>
@@ -454,8 +550,21 @@ function MessageRow(props: {
               {m.editedAt && <span className="chat-msg-edited"> (edited)</span>}
             </p>
           )}
+          {props.pending === "sending" && <span className="sr-only">Sending</span>}
+          {props.pending === "failed" && (
+            <p className="chat-msg-unsent" role="status">
+              Not sent.{" "}
+              <button type="button" className="link" onClick={props.onRetry}>
+                Retry
+              </button>{" "}
+              ·{" "}
+              <button type="button" className="link" onClick={props.onDiscard}>
+                Delete
+              </button>
+            </p>
+          )}
         </div>
-        {mine && !m.deletedAt && !props.editing && (
+        {mine && !props.pending && !m.deletedAt && !props.editing && (
           <span className="chat-msg-tools">
             <button className="icon-btn" aria-label="Change your message" title="Change" onClick={() => props.onEdit(true)}>
               <EditIcon />
@@ -543,8 +652,12 @@ function SessionRecap({ caught }: { caught: ChatCaught }) {
 }
 
 /** The box at the foot of the thread. Enter sends, and Shift+Enter makes a new line. */
-function Composer(props: { roomId: string; people: Array<{ id: string; name: string }>; onSent: (m: ChatMessage) => void }) {
+function Composer(props: { roomId: string; people: Array<{ id: string; name: string }>; onSend: (text: string) => void; focus?: number }) {
   const draftKey = `stand.chatDraft.${props.roomId}`;
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (props.focus) form.current?.querySelector("textarea")?.focus();
+  }, [props.focus]);
   const [text, setText] = useState(() => {
     try {
       return sessionStorage.getItem(draftKey) ?? "";
@@ -552,37 +665,26 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
       return "";
     }
   });
-  const [sending, setSending] = useState(false);
-  // The key a send went out with: trying the same words again sends the same key, so it is saved once.
-  const tried = useRef<{ text: string; key: string } | null>(null);
   const keep = (value: string) => {
     setText(value);
     try {
       sessionStorage.setItem(draftKey, value);
     } catch {}
   };
-  const send = async () => {
+  // The box clears at once: the message shows in the thread while it is saved (useSpaceChat's send).
+  const send = () => {
     const t = text.trim();
-    if (!t || sending) return;
-    if (tried.current?.text !== t) tried.current = { text: t, key: newKey() };
-    setSending(true);
-    try {
-      props.onSent(await api.sendChat(props.roomId, { text: t, key: tried.current.key }));
-      tried.current = null;
-      keep("");
-    } catch (err) {
-      // Kept in the box, so nothing typed is lost.
-      errorToast("Couldn't send it")(err);
-    } finally {
-      setSending(false);
-    }
+    if (!t) return;
+    props.onSend(t);
+    keep("");
   };
   return (
     <form
+      ref={form}
       className="chat-compose"
       onSubmit={(e) => {
         e.preventDefault();
-        void send();
+        send();
       }}
     >
       <MentionTextarea
@@ -596,11 +698,11 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            void send();
+            send();
           }
         }}
       />
-      <button type="submit" className="chat-send" aria-label="Send" disabled={sending || !text.trim()}>
+      <button type="submit" className="chat-send" aria-label="Send" disabled={!text.trim()}>
         <SendIcon />
       </button>
     </form>

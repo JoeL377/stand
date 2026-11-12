@@ -135,6 +135,8 @@ const earlier = meeting(8, 34, "The team moved payment retries to the server and
       { kind: "action", text: "Add an idempotency key to every charge", owner: "Leo Park" },
       { kind: "action", text: "Remove the browser retry path", owner: "Priya Shah" },
       { kind: "action", text: "Write the retry runbook for support", owner: "Maya Chen" },
+      { kind: "question", text: "Who is on call for the retry worker this week?" },
+      { kind: "question", text: "Does a retry need the shopper's card again?" },
     ],
   },
   {
@@ -154,6 +156,8 @@ const earlier = meeting(8, 34, "The team moved payment retries to the server and
       { kind: "decision", text: "Keep guest checkout behind a flag until December", line: 1 },
       { kind: "action", text: "Pull fraud numbers for guest orders", owner: "Sam Rivera" },
       { kind: "action", text: "Try a promo code field on the payment step", owner: "Maya Chen" },
+      { kind: "question", text: "Should guest checkout wait for the fraud numbers?" },
+      { kind: "question", text: "Can a guest order be linked to an account later?" },
     ],
   },
 ]);
@@ -363,6 +367,9 @@ api.createAction(samsAgent, { space: room.id, text: "Draft the Dec 1 launch chec
 const flagDecision = earlier.note("Keep guest checkout behind a flag");
 const shipDecision = latest.note("Ship guest checkout to everyone");
 db.addLink(room.id, shipDecision.id, flagDecision.id, "conflicts", "Sam Rivera via Claude Code", null);
+
+// A question someone answered: the answer is a decision the question points to.
+api.closeQuestion({ user: leo, token: null }, { ref: `stand:question/${earlier.note("Does a retry need the shopper's card").id}`, answer: "A retry reuses the saved payment method; the shopper isn't asked again" });
 
 // What's true in the space.
 const old = api.addContext(samsAgent, { space: room.id, text: "Stripe is the only card processor" });

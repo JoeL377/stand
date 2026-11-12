@@ -135,6 +135,8 @@ export const toBrainstorm = (r: Row): BrainstormRow => ({
   taskId: (r.task_id as string) ?? null,
   context: r.context_json ? (JSON.parse(r.context_json as string) as DesignContext[]) : [],
   starred: r.stars_json ? (JSON.parse(r.stars_json as string) as string[]) : [],
+  threadId: (r.thread_id as string) ?? null,
+  spans: r.spans_json ? (JSON.parse(r.spans_json as string) as Array<[number, number]>) : null,
 });
 export const toReviewSlide = (r: Row): ReviewSlideRow => ({
   id: r.id as string,
@@ -209,6 +211,8 @@ export const toJot = (r: Row): Jot => ({
 
 export const toNote = (r: Row): Note => ({
   ...(r.project_set_by != null ? { projectId: (r.project_id as string) ?? null, projectSetBy: r.project_set_by as string } : {}),
+  ...(r.suggested_project_id != null ? { suggestedProjectId: r.suggested_project_id as string } : {}),
+  ...(r.project_judged_at != null ? { projectJudgedAt: r.project_judged_at as number } : {}),
   id: r.id as string,
   meetingId: r.meeting_id as string,
   itemId: (r.item_id as string) ?? null,

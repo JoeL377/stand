@@ -1,11 +1,14 @@
-// What each Claude call cost, kept per meeting so the recap (and the call itself) can show what a
-// meeting spent. A room wraps its agent in metered(): every call made through it runs inside that
-// meeting's scope, and llm.ts reports each response's token usage here, which lands in llm_usage.
-// Calls made outside a meeting (Done since, the space settle pass) are kept with no meeting.
+// What each Claude call cost, kept with its meeting and its space so the recap (and the call itself)
+// can show what a meeting spent, and Manage spaces what a space spent. A room wraps its agent in
+// metered(): every call made through it runs inside that meeting's scope, and llm.ts reports each
+// response's token usage here, which lands in llm_usage. A pass between meetings (Done since, the
+// space settle pass, project suggestions) calls through forSpace(): kept with its space and no meeting.
 import { AsyncLocalStorage } from "node:async_hooks";
 
 export interface UsageRow {
   meetingId: string | null;
+  /** The space the call was for. Null with a meeting: the store takes the meeting's. */
+  roomId: string | null;
   /** The agent method that made the call, like boardCard or recapMeeting. */
   task: string;
   model: string;
@@ -32,11 +35,11 @@ export function costOf(r: Pick<UsageRow, "model" | "input" | "cacheRead" | "cach
   return (r.input * p.input + r.cacheWrite * p.input * 1.25 + r.cacheRead * p.cacheRead + r.output * p.output) / 1_000_000;
 }
 
-const scope = new AsyncLocalStorage<{ meetingId: string | null; task: string; spent?: () => void }>();
+const scope = new AsyncLocalStorage<{ meetingId: string | null; roomId?: string | null; task: string; spent?: () => void }>();
 let sink: ((row: UsageRow) => void) | null = null;
 
-/** Where usage rows go (the database), set once at startup. */
-export function setUsageSink(fn: (row: UsageRow) => void) {
+/** Where usage rows go (the database), set once at startup. Null: nowhere (tests put it back). */
+export function setUsageSink(fn: ((row: UsageRow) => void) | null) {
   sink = fn;
 }
 
@@ -46,6 +49,7 @@ export function recordUsage(model: string, u: { input_tokens: number; output_tok
   try {
     sink?.({
       meetingId: s?.meetingId ?? null,
+      roomId: s?.roomId ?? null,
       task: s?.task ?? "other",
       model,
       input: u.input_tokens,
@@ -80,6 +84,20 @@ export function labeled<T extends object>(agent: T): T {
       const v = Reflect.get(target, key, receiver);
       if (typeof v !== "function") return v;
       return (...args: unknown[]) => (scope.getStore() ? v.apply(target, args) : scope.run({ meetingId: null, task: String(key) }, () => v.apply(target, args)));
+    },
+  });
+}
+
+/** The agent, with every call made for a space between meetings (project suggestions, the agenda tidy,
+ *  Done since, note filing...) kept with that space and under its method's name. A call already inside
+ *  a meeting's scope (metered above) keeps that meeting, which has the space. A null space (a to-do
+ *  deleted meanwhile) keeps only the name, as labeled() does. */
+export function forSpace<T extends object>(agent: T, roomId: string | null): T {
+  return new Proxy(agent, {
+    get(target, key, receiver) {
+      const v = Reflect.get(target, key, receiver);
+      if (typeof v !== "function") return v;
+      return (...args: unknown[]) => (scope.getStore()?.meetingId ? v.apply(target, args) : scope.run({ meetingId: null, roomId, task: String(key) }, () => v.apply(target, args)));
     },
   });
 }

@@ -514,6 +514,7 @@ export function Meeting(props: {
           segments={room.segments}
           board={room.board}
           brainstorm={room.brainstorm}
+          brainstorms={room.brainstorms}
           list={room.list}
           agentCards={room.agentCards}
           notes={room.notes}
@@ -611,9 +612,9 @@ export function Meeting(props: {
               <span>Pop out</span>
             </button>
           )}
-          {/* Anyone in the call can start a review or a working session; finishing one stays with the host, who steers it. */}
-          {state && (canSteer || !runningExperience(state.items, room.brainstorm)) && (
-            <ExperienceControl roomId={roomId} running={runningExperience(state.items, room.brainstorm)} disabled={writingUp || !room.connected} />
+          {/* Anyone in the call can start a review; finishing one stays with the host, who steers it. */}
+          {state && (canSteer || !runningExperience(state.items)) && (
+            <ExperienceControl roomId={roomId} running={runningExperience(state.items)} disabled={writingUp || !room.connected} />
           )}
           {canSteer && (!caps.livekit || !caps.llm) ? (
             <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this space">

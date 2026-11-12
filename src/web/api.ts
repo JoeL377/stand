@@ -21,11 +21,15 @@ import type {
   Jot,
   MeetingRecap,
   Note,
+  QuestionClose,
+  QuestionClosed,
   SourcesStatus,
   Snap,
+  SpaceCost,
   SpaceFeed,
   SpaceMembers,
   SpaceSummary,
+  SweepProposal,
   TaskDetail,
   UpNext,
   User,
@@ -134,6 +138,8 @@ export const api = {
     call<{ id: string; name: string; purpose: string; synthesisInstructions: string }>("PATCH", `/api/rooms/${id}`, patch),
   members: (roomId: string) => call<SpaceMembers>("GET", `/api/rooms/${roomId}/members`),
   setAdmin: (roomId: string, userId: string, admin: boolean) => call<SpaceMembers>("PUT", `/api/rooms/${roomId}/members/${userId}`, { admin }),
+  /** What Stand spent for the space over the last `days` days, by day in this browser's time. */
+  spaceCost: (roomId: string, days: number) => call<SpaceCost>("GET", `/api/rooms/${roomId}/cost?days=${days}&tz=${-new Date().getTimezoneOffset()}`),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
@@ -187,10 +193,19 @@ export const api = {
   /** A project's id, null for Unassigned, or "auto" to follow the rules again. */
   setNoteProject: (roomId: string, noteId: string, projectId: string | null | "auto") =>
     call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/project`, projectId === "auto" ? { auto: true } : { projectId }),
+  /** The to-do it is a part of, or null to take it off. */
+  setNoteParent: (roomId: string, noteId: string, parentId: string | null) => call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/parent`, { parentId }),
   /** Links an agenda item to a project, or takes the link off. Returns the agenda. */
   setItemProject: (roomId: string, itemId: string, projectId: string | null) => call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { projectId }),
-  setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>
+  /** undoAnswer: with state open on a question, also takes back the decision its answer made. */
+  setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false; undoAnswer?: string }) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
+  /** Closes open questions: each with an answer (kept as a decision), a decision the space has, or a drop with why. */
+  closeQuestions: (roomId: string, rows: QuestionClose[]) => call<{ closed: QuestionClosed[] }>("POST", `/api/rooms/${roomId}/questions/close`, { rows }),
+  /** Stand's proposals for the space's open questions. It reads them all, so it takes a while. */
+  sweepQuestions: (roomId: string) => call<{ proposals: SweepProposal[] }>("POST", `/api/rooms/${roomId}/questions/sweep`, undefined, SLOW_REQUEST_MS),
+  setTaskOwner: (roomId: string, noteId: string, owner: string | null) =>
+    call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}/owner`, { owner }),
   planReview: (id: string, version?: string) =>
     call<PlanReview>("GET", `/api/tasks/${id}/plan-review${version ? `?version=${encodeURIComponent(version)}` : ""}`),
   changePlanReview: (id: string, input: object) =>

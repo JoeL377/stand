@@ -1,17 +1,19 @@
 // To-dos and open questions: their drawer, comments, work logs, plan reviews and state.
 import type { Express } from "express";
-import { type ActionWork, TASK_COMMENT_MAX, type TaskDetail, type TaskLink } from "../../shared/protocol.ts";
+import { type ActionWork, type QuestionClosed, TASK_COMMENT_MAX, type TaskDetail, type TaskLink } from "../../shared/protocol.ts";
 import { stateOf } from "../../shared/tasks.ts";
 import { AgentError } from "../agents.ts";
 import type { DB } from "../db.ts";
 import { mentionView, recordMentions } from "../mentions.ts";
 import { changeReview, logThreadChange, reviewFor } from "../planReview.ts";
+import { sweepQuestions } from "../questionSweep.ts";
+import { answerOf } from "../spaceSettle.ts";
 import { readyToShip, workingOn, workLog } from "../workLog.ts";
 import type { Services } from "../services.ts";
 import { notFound, route } from "./http.ts";
 
 export function taskRoutes(app: Express, ctx: Services) {
-  const { db, planBriefs, sessions, doneDecks, agents, specTouched } = ctx;
+  const { db, agent, planBriefs, sessions, doneDecks, agents, specTouched } = ctx;
   // Whether an agent is on each of these to-dos, and what's been reported on them. ?ids=a,b,c
   app.get(
     "/api/work",
@@ -62,6 +64,12 @@ export function taskRoutes(app: Express, ctx: Services) {
           return x ? [{ id: x.id, text: x.text, owner: x.owner ?? null, state: stateOf(x) }] : [];
         });
       const { roomId, meetingStartedAt: _s, meetingEndedAt: _e, ...note } = db.withProjects(n.roomId, [n])[0];
+      const parts = n.kind === "action" ? db.noteParts(n.id) : [];
+      // One level: a to-do with parts has no parent, and a parent is a to-do that is no part itself.
+      const choices = parts.length
+        ? []
+        : db.openActions(n.roomId).filter((x) => x.id !== n.id && (!x.parentId || !db.getNote(x.parentId))).reverse();
+      const answered = n.kind === "question" && stateOf(n) === "done" ? answerOf(db, n) : null;
       const detail: TaskDetail = {
         note,
         roomId,
@@ -69,8 +77,12 @@ export function taskRoutes(app: Express, ctx: Services) {
         work: workOf(n, db.notesUpdates([n.id]), db.noteWorkShots([n.id]), true),
         waitsOn: linked(links.filter((l) => l.fromId === n.id).map((l) => l.toId)),
         blocking: linked(links.filter((l) => l.toId === n.id).map((l) => l.fromId)),
+        parent: (n.parentId && linked([n.parentId])[0]) || null,
+        parts: linked(parts.map((x) => x.id)),
+        parentChoices: choices.map((x) => ({ id: x.id, text: x.text, owner: x.owner ?? null, state: stateOf(x) })),
         people: db.roomPeople(n.roomId),
         mentionsYou: db.openMentions(req.user!.id, n.roomId).filter((u) => u.noteId === n.id).map(mentionView),
+        answer: answered && { id: answered.id, text: answered.text },
       };
       res.json(detail);
     }),
@@ -176,13 +188,90 @@ export function taskRoutes(app: Express, ctx: Services) {
     }),
   );
 
+  // Give a to-do to someone: { owner: "Name" }, or { owner: null } to leave it unassigned.
+  app.patch("/api/rooms/:id/tasks/:noteId/owner", route((req, res) => {
+    if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
+    const before = db.getNote(req.params.noteId);
+    if (!before || before.kind !== "action" || before.roomId !== req.params.id) return notFound(res);
+    const owner = req.body?.owner;
+    if (owner !== null && (typeof owner !== "string" || owner.trim().length > 80))
+      return void res.status(400).json({ error: "Use a name of 80 characters or fewer, or null to leave it unassigned." });
+    const next = owner === null ? null : owner.replace(/\s+/g, " ").trim() || null;
+    if (next !== before.owner) {
+      try {
+        agents.updateAction({ user: req.user!, token: null }, { ref: `stand:action/${before.id}`, owner: next ?? "unassigned" });
+      } catch (err) {
+        if (err instanceof AgentError) return void res.status(400).json({ error: err.message });
+        throw err;
+      }
+    }
+    res.json(db.getNote(before.id));
+  }));
+
+  // Close open questions, one or a swept list at once: { rows: [{ id, answer } | { id, decisionId } | { id, drop }] }.
+  // An answer is kept as a decision the question points to. A row that can't close (already closed,
+  // gone) is left out of the reply.
+  app.post(
+    "/api/rooms/:id/questions/close",
+    route((req, res) => {
+      const roomId = req.params.id;
+      if (!db.isMember(roomId, req.user!.id)) return notFound(res);
+      const rows: unknown[] = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 200) : [];
+      const caller = { user: req.user!, token: null };
+      const closed: QuestionClosed[] = [];
+      let refused: string | null = null;
+      for (const raw of rows) {
+        const row = (raw ?? {}) as { id?: unknown; answer?: unknown; decisionId?: unknown; drop?: unknown };
+        const q = typeof row.id === "string" ? db.getNote(row.id) : null;
+        if (!q || q.kind !== "question" || q.roomId !== roomId) continue;
+        try {
+          const out = agents.closeQuestion(caller, {
+            ref: `stand:question/${q.id}`,
+            answer: typeof row.answer === "string" ? row.answer : undefined,
+            decision: typeof row.decisionId === "string" ? `stand:decision/${row.decisionId}` : undefined,
+            drop: typeof row.drop === "string" ? row.drop : undefined,
+          });
+          const by = out.answered_by;
+          closed.push({ note: db.getNote(q.id)!, decision: by && { id: by.ref.split("/")[1], text: by.text, made: !!by.new } });
+        } catch (err) {
+          if (!(err instanceof AgentError)) throw err;
+          refused = err.message;
+        }
+      }
+      if (!closed.length && refused) return void res.status(400).json({ error: refused });
+      if (closed.length) doneDecks.schedule(roomId);
+      res.json({ closed });
+    }),
+  );
+
+  // Stand's proposals for the space's open questions (questionSweep.ts): which a decision answers
+  // and which nobody needs answered any more. It changes nothing; the close above does.
+  app.post(
+    "/api/rooms/:id/questions/sweep",
+    route(async (req, res) => {
+      if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
+      const proposals = await sweepQuestions(db, agent, req.params.id);
+      if (!proposals) return void res.status(422).json({ error: "Stand couldn't read the questions just now. Try again in a moment." });
+      res.json({ proposals });
+    }),
+  );
+
   // Move a to-do or open question (the space page's Tasks tab): { state: "done" | "dropped" | "open", reason? },
-  // or { saidDone: false } to take off a Said done mark Stand heard wrong.
+  // or { saidDone: false } to take off a Said done mark Stand heard wrong. A question opened again
+  // lets go of its answer; { undoAnswer: decisionId } also takes back the decision that answer made.
   app.patch(
     "/api/rooms/:id/tasks/:noteId",
     route((req, res) => {
       if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
       const state = String(req.body?.state ?? "");
+      const before = db.getNote(req.params.noteId);
+      if (state === "open" && before?.kind === "question" && before.roomId === req.params.id) {
+        const undo = typeof req.body?.undoAnswer === "string" ? req.body.undoAnswer : undefined;
+        const reopened = agents.reopenQuestion({ user: req.user!, token: null }, { ref: `stand:question/${before.id}`, undo });
+        if (!reopened) return notFound(res);
+        doneDecks.schedule(req.params.id);
+        return void res.json(reopened);
+      }
       const note =
         req.body?.saidDone === false
           ? db.setSaidDone(req.params.id, req.params.noteId, null)

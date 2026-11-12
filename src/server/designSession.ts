@@ -286,6 +286,8 @@ export class DiagramKeeper {
     saved?: DesignDiagram | null,
     /** What the session started from, as pasted: context for every pass. */
     private seed: string | null = null,
+    /** Talk the diagram may read; a line out of it is never read. */
+    private readonly inScope: (s: Segment) => boolean = () => true,
   ) {
     this.lastLook = since;
     if (saved) {
@@ -312,7 +314,7 @@ export class DiagramKeeper {
   }
 
   unreadSince(segments: Segment[]): number | null {
-    return segments.find((s) => s.ts > this.lastLook)?.ts ?? null;
+    return segments.find((s) => s.ts > this.lastLook && this.inScope(s))?.ts ?? null;
   }
 
   /** Someone kept a suggestion: it joins the diagram. Keeping an arrow keeps the boxes at its ends. */
@@ -348,7 +350,7 @@ export class DiagramKeeper {
   /** One pass over the talk up to `now`. `caught` is the meeting's to-dos, decisions and open
    *  questions so far. Returns whether the diagram changed. */
   async run(segments: Segment[], people: string[], caught: BrainCaught[], meetingStartedAt: number, now: number): Promise<boolean> {
-    const talk = segments.filter((s) => s.ts > this.since && s.ts <= now).sort((a, b) => a.ts - b.ts);
+    const talk = segments.filter((s) => s.ts > this.since && s.ts <= now && this.inScope(s)).sort((a, b) => a.ts - b.ts);
     const firstNew = talk.findIndex((s) => s.ts > this.lastLook);
     if (firstNew === -1) return false;
     const from = Math.min(firstNew, Math.max(0, talk.findIndex((s) => s.ts > now - WINDOW_MS)));

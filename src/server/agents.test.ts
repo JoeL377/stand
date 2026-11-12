@@ -12,6 +12,7 @@ import { CHAT_QUIET_MS, Chat } from "./chat.ts";
 import { openDb } from "./db.ts";
 import { parseActor } from "../shared/actors.ts";
 import { addUpNext } from "./upNext.ts";
+import { settledView } from "./spaceSettle.ts";
 import { upNextView } from "./upNextPolish.ts";
 
 // These tests cover the suggested agenda itself, which production has off for now (config.ts).
@@ -1212,4 +1213,162 @@ test("agents see projects: they create one, file to-dos in it by ref or name, fi
   const stranger = db.upsertUser({ googleSub: "g-x", email: "x@example.com", name: "Xavier", picture: null });
   assert.throws(() => api.get({ user: stranger, token: null }, ref, "x"), /not in that space/);
   assert.throws(() => api.createProject({ user: joe, token: { ...token, scope: "read" as const } }, { space: room.id, name: "Read only" }), /read only/);
+});
+
+test("agents set the order of a space's projects by ref or name, and list_spaces reads it", () => {
+  const { api, db, joe, room } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const [a, , c] = ["Alpha", "Beta", "Gamma"].map((name) => db.createProject(room.id, { name }, "Joe"));
+  const ordered = api.orderProjects(agent, { space: room.id, projects: [`stand:project/${c.id}`, "alpha"] });
+  assert.deepEqual(ordered.ordered.map((p) => p.name), ["Gamma", "Alpha", "Beta"]);
+  assert.deepEqual(api.listSpaces(agent)[0].projects?.map((p) => p.name), ["Gamma", "Alpha", "Beta"]);
+  assert.throws(() => api.orderProjects(agent, { space: room.id, projects: ["Nope"] }), /No project called "Nope"/);
+  assert.throws(() => api.orderProjects(agent, { space: room.id, projects: ["unassigned"] }), /not a project/);
+  assert.throws(() => api.orderProjects(agent, { space: room.id, projects: [] }), /at least one/);
+  assert.throws(() => api.orderProjects({ user: joe, token: { ...token, scope: "read" as const } }, { space: room.id, projects: [a.id] }), /read only/);
+  assert.deepEqual(db.listProjects(room.id).map((p) => p.name), ["Gamma", "Alpha", "Beta"], "a refused order changes nothing");
+});
+
+test("list_spaces keeps the team's order and says where the work is: in_progress and latest_activity", () => {
+  const { api, db, joe, room, action } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const [quiet, busy] = ["Quiet", "Busy"].map((name) => db.createProject(room.id, { name }, "Joe"));
+  db.setNoteProject(room.id, action.id, { projectId: busy.id, by: "Joe" });
+  const before = api.listSpaces(agent)[0].projects!;
+  assert.deepEqual(before.map((p) => [p.name, p.in_progress, p.latest_activity]), [["Quiet", undefined, undefined], ["Busy", undefined, new Date(action.ts).toISOString()]]);
+
+  api.startWork(agent, { ref: `stand:action/${action.id}`, note: "On it" });
+  const after = api.listSpaces(agent)[0].projects!;
+  assert.deepEqual(after.map((p) => [p.name, p.in_progress]), [["Quiet", undefined], ["Busy", 1]], "the order is still the team's");
+  assert.ok(Date.parse(after[1].latest_activity!) >= action.ts, "a report on a to-do moves latest_activity");
+  assert.equal(db.listProjects(room.id)[0].id, quiet.id);
+});
+
+test("agents see Stand's suggested project as suggested, find it under the project, and confirm it", () => {
+  const { api, db, joe, room } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const ref = (api.createProject(agent, { space: room.id, name: "Billing" }, "x").created as { ref: string }).ref;
+  const todo = api.createAction(agent, { space: room.id, text: "Send the invoices" }, "x").created as { ref: string };
+  db.suggestNoteProject(room.id, parseRef(todo.ref)!.id, parseRef(ref)!.id);
+
+  const listed = api.listActions(agent, { space: room.id, project: ref }, "x");
+  assert.deepEqual(listed.actions.map((a) => [a.ref, a.project]), [[todo.ref, { ref, name: "Billing", suggested: true }]], "the filter includes a suggested to-do");
+  assert.deepEqual((api.get(agent, todo.ref, "x") as { project: unknown }).project, { ref, name: "Billing", suggested: true });
+  const inIt = () => api.get(agent, ref, "x") as { open_todos: Array<{ ref: string; suggested?: boolean }>; how: string };
+  assert.deepEqual(inIt().open_todos.map((t) => [t.ref, t.suggested]), [[todo.ref, true]], "the project lists it as suggested");
+  assert.match(inIt().how, /Stand suggested it/);
+
+  const confirmed = api.updateAction(agent, { ref: todo.ref, project: ref }, "x");
+  assert.deepEqual(confirmed.updated.project, { ref, name: "Billing" }, "set by hand now: no suggested");
+  assert.ok(db.getNote(parseRef(todo.ref)!.id)?.projectSetBy, "confirmed by hand");
+  assert.deepEqual((api.get(agent, todo.ref, "x") as { project: unknown }).project, { ref, name: "Billing" });
+  assert.deepEqual(inIt().open_todos.map((t) => [t.ref, t.suggested]), [[todo.ref, undefined]]);
+});
+
+test("agents give a to-do a parent: it shows as a part, follows the parent's project, and a bad parent changes nothing", () => {
+  const { api, db, joe, room } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const ref = (api.createProject(agent, { space: room.id, name: "Search" }, "x").created as { ref: string }).ref;
+  const spec = api.createAction(agent, { space: room.id, text: "Spec the search", project: ref }, "x").created;
+  const part = api.createAction(agent, { space: room.id, text: "Index the notes", parent: spec.ref }, "x").created;
+  assert.equal(part.parent, spec.ref);
+  assert.deepEqual(part.project, { ref, name: "Search" }, "no project of its own: it follows its parent's");
+
+  const count = () => db.memberActions(joe.id).length;
+  const before = count();
+  assert.throws(() => api.createAction(agent, { space: room.id, text: "Too deep", parent: part.ref }), /is a part of another to-do, and tasks have one level/);
+  assert.throws(() => api.createAction(agent, { space: room.id, text: "Not a to-do", parent: ref }), /A parent is a to-do's ref/);
+  assert.equal(count(), before, "a bad parent adds nothing");
+
+  type Got = { parent?: { ref: string; text: string; status: string }; parts?: Array<{ ref: string; text: string; status: string; owner?: string }> };
+  assert.deepEqual((api.get(agent, spec.ref, "x") as Got).parts, [{ ref: part.ref, text: "Index the notes", status: "open", owner: joe.name }]);
+  assert.equal((api.get(agent, spec.ref, "x") as Got).parent, undefined);
+  assert.deepEqual((api.get(agent, part.ref, "x") as Got).parent, { ref: spec.ref, text: "Spec the search", status: "open" });
+  assert.deepEqual((api.startWork(agent, { ref: part.ref }, "x") as Got).parent?.ref, spec.ref, "start_work carries it");
+  const rows = api.listActions(agent, { space: room.id }, "x").actions;
+  assert.deepEqual([rows.find((a) => a.ref === part.ref)?.parent, rows.find((a) => a.ref === spec.ref)?.parent], [spec.ref, undefined]);
+  assert.equal(api.listMyWork(agent, { space: room.id }, "x").work.find((a) => a.ref === part.ref)?.parent, spec.ref);
+
+  const loose = api.createAction(agent, { space: room.id, text: "Tune the ranking" }, "x").created;
+  assert.equal(api.updateAction(agent, { ref: loose.ref, parent: spec.ref }, "x").updated.parent, spec.ref);
+  assert.equal(api.updateAction(agent, { ref: loose.ref, parent: "none" }, "x").updated.parent, undefined);
+  assert.throws(() => api.updateAction(agent, { ref: loose.ref, parent: "none" }, "x"), /Nothing to change/);
+  assert.throws(() => api.updateAction(agent, { ref: spec.ref, text: "Spec it again", parent: loose.ref }, "x"), /has parts of its own/);
+  const kept = db.getNote(parseRef(spec.ref)!.id)!;
+  assert.deepEqual([kept.text, kept.parentId], ["Spec the search", null], "a bad parent changes nothing");
+});
+
+test("an open question closes with an answer, kept as a decision it points to; reopening lets the answer go", () => {
+  const { api, db, joe, room, notes, notified } = setup();
+  const q = notes.find((n) => n.kind === "question")!;
+  const ref = `stand:question/${q.id}`;
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token };
+
+  assert.deepEqual(
+    api.listQuestions(agent, { space: room.id }).questions.map((x) => [x.ref, x.text]),
+    [[ref, q.text]],
+  );
+  assert.throws(() => api.closeQuestion(agent, { ref }), /Give one of answer/);
+  assert.throws(() => api.closeQuestion(agent, { ref, answer: "Yes", drop: "No" }), /Give one of answer/);
+  assert.throws(() => api.closeQuestion({ user: joe, token: { ...token, scope: "read" } }, { ref, answer: "Web first" }), /read only/);
+
+  const out = api.closeQuestion(agent, { ref, answer: "  Web first; mobile  waits for the new transcriber " });
+  assert.equal(out.status, "answered");
+  const decision = db.getNote(out.answered_by!.ref.split("/")[1])!;
+  assert.deepEqual([decision.kind, decision.text, decision.itemId, decision.addedActor?.kind], ["decision", "Web first; mobile waits for the new transcriber", q.itemId, "agent"]);
+  const closed = db.getNote(q.id)!;
+  assert.deepEqual([closed.state, closed.closedBy, closed.doneBy, closed.doneActor?.kind], ["done", "answered", "Joe Liang via Claude Code", "agent"]);
+  assert.deepEqual(db.roomLinks(room.id, "leaves"), [{ fromId: q.id, toId: decision.id }]);
+  assert.ok(notified.includes(`${room.id}:followups`));
+  // Agents and the page read the answer from both ends.
+  const got = api.get(agent, ref, "") as { status: string; answered_by: { text: string } };
+  assert.deepEqual([got.status, got.answered_by.text], ["answered", decision.text]);
+  assert.deepEqual((api.get(agent, `stand:decision/${decision.id}`, "") as { answers: unknown }).answers, [{ ref, text: q.text }]);
+  const view = settledView(db, room.id);
+  assert.equal(view.open.find((n) => n.id === q.id)?.answeredBy, decision.text);
+  assert.equal(view.decided.find((n) => n.id === decision.id)?.answers, q.text);
+  assert.equal(api.listQuestions(agent, { space: room.id }).count, 0);
+  assert.equal(api.whatsNew(agent, { space: room.id }).open_questions.length, 0);
+  assert.throws(() => api.closeQuestion(agent, { ref, drop: "Late" }), /already answered/);
+
+  // Opened again, it lets go of the answer; the decision someone wrote stays.
+  api.reopenQuestion(agent, { ref });
+  assert.deepEqual([db.getNote(q.id)!.state ?? null, db.roomLinks(room.id, "leaves").length, db.getNote(decision.id)?.text], [null, 0, decision.text]);
+  // Undo of an answer just written takes its decision back too, and only that one.
+  const again = api.closeQuestion(agent, { ref, answer: "Mobile first" });
+  const made = again.answered_by!.ref.split("/")[1];
+  api.reopenQuestion(agent, { ref, undo: made });
+  assert.deepEqual([db.getNote(made), db.getNote(decision.id)?.text, api.listQuestions(agent, { space: room.id }).count], [null, decision.text, 1]);
+});
+
+test("an open question closes on a decision the space already has, or drops with why", () => {
+  const { api, db, joe, andy, room, notes } = setup();
+  const q = notes.find((n) => n.kind === "question")!;
+  const kept = notes.find((n) => n.kind === "decision")!;
+  const ref = `stand:question/${q.id}`;
+  const me = { user: joe, token: null };
+
+  const other = db.createRoom("Other", andy.id, "");
+  db.touchMembership(other.id, joe.id);
+  const elsewhere = db.addOutsideMeeting(other.id, { kind: "decision", text: "Ship on Friday", owner: null, itemId: null }, "Andy Li");
+  assert.throws(() => api.closeQuestion(me, { ref, decision: `stand:decision/${elsewhere.id}` }), /same space/);
+  assert.throws(() => api.closeQuestion(me, { ref, decision: `stand:action/${notes[1].id}` }), /doesn't point|same space/);
+
+  const out = api.closeQuestion(me, { ref, decision: `stand:decision/${kept.id}` });
+  assert.deepEqual([out.status, out.answered_by?.text, out.answered_by?.new], ["answered", kept.text, undefined]);
+  assert.equal(db.spaceNotes(room.id, "decision", 50).length, 1, "nothing new is written");
+  // Its decision isn't one the answer made, so an undo leaves it.
+  api.reopenQuestion(me, { ref, undo: kept.id });
+  assert.equal(db.getNote(kept.id)?.text, kept.text);
+
+  const dropped = api.closeQuestion(me, { ref, drop: "Mobile is off the plan" });
+  assert.deepEqual([dropped.status, dropped.why_dropped], ["dropped", "Mobile is off the plan"]);
+  const now = db.getNote(q.id)!;
+  assert.deepEqual([now.state, now.dropReason, now.doneBy], ["dropped", "Mobile is off the plan", "Joe Liang"]);
+  assert.deepEqual((api.get(me, ref, "") as { status: string; why_dropped: string }).why_dropped, "Mobile is off the plan");
 });

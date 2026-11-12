@@ -19,7 +19,7 @@ import {
 } from "../shared/designReview.ts";
 import type { Passage, PlanThread } from "../shared/planReview.ts";
 import { TASK_COMMENT_MAX, type Item, type Note, type SlideContent } from "../shared/protocol.ts";
-import type { DB, ReviewRow, ReviewSlideRow } from "./db.ts";
+import { type DB, ParentError, type ReviewRow, type ReviewSlideRow } from "./db.ts";
 import { newId } from "./ids.ts";
 import { slideGroups, type PlanBriefs } from "./planBrief.ts";
 import { changeReview, logThreadChange, passageAround, planBlocks, planDiagrams, planSections, quotePassage, reviewFor } from "./planReview.ts";
@@ -669,11 +669,18 @@ export function writeBackReview(db: DB, meetingId: string): { specs: number; lin
     const points = slides.filter((r) => r.role === "point");
     const settled = points.filter((r) => r.outcome === "settled").length;
     const verdict = slides.find((r) => r.role === "verdict")?.outcome as Verdict | null | undefined;
-    // The to-dos the team left under this spec's slides: its to-do waits on each.
+    // The to-dos the team left under this spec's slides: its to-do waits on each, and each is a part
+    // of it, unless it is a part of another to-do already or the one level of parts doesn't allow it.
     const on = new Set(slides.map((r) => r.itemId));
     const todos = notes.filter((n) => n.kind === "action" && n.itemId && on.has(n.itemId) && n.id !== note.id && n.state !== "dropped");
     const have = db.roomLinks(note.roomId, "depends_on");
     for (const todo of todos) {
+      if (!todo.parentId || !db.getNote(todo.parentId))
+        try {
+          db.setNoteParent(note.roomId, todo.id, note.id);
+        } catch (err) {
+          if (!(err instanceof ParentError)) throw err;
+        }
       if (have.some((l) => (l.fromId === note.id && l.toId === todo.id) || (l.fromId === todo.id && l.toId === note.id))) continue;
       db.addLink(note.roomId, note.id, todo.id, "depends_on", "Stand", STAND.actor ?? null);
       links++;

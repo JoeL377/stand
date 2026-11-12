@@ -80,9 +80,12 @@ test("people in a space send, read, change and delete its chat; nobody else gets
     const sent = await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Can we ship Friday?", key });
     assert.deepEqual([sent.status, sent.body.author, sent.body.text], [200, "Joe Liang", "Can we ship Friday?"]);
     assert.equal((await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Can we ship Friday?", key })).body.id, sent.body.id);
+    // The message carries its key, so the page that sent it knows it when the stream brings it first.
+    assert.equal(sent.body.key, key);
     assert.equal((await j("POST", `/api/rooms/${room.id}/chat/messages`, { text: "  " })).status, 400);
     const reply = await h<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Yes", replyTo: sent.body.id });
     assert.equal(reply.body.replyTo, sent.body.id);
+    assert.equal(reply.body.key, null);
 
     // Joe wrote the first and hasn't seen the second. Huy sent the second, so he has read up to it.
     assert.deepEqual([db.unreadChat(joe.id).get(room.id), db.unreadChat(huy.id).get(room.id), db.unreadChat(eve.id).size], [1, undefined, 0]);

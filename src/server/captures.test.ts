@@ -9,6 +9,7 @@ import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { HeuristicAgent } from "./llm.ts";
 import { addUpNext, computeUpNext } from "./upNext.ts";
+import { recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "stand-captures-"));
 config.dataDir = tmp;
@@ -182,4 +183,27 @@ test("snaps pinned to a note show with it, not on their own, and go where it goe
   assert.deepEqual(keys.filter((k) => k.startsWith("jot:") || k.startsWith("snap:")).sort(), [`jot:${jot}`, `snap:${alone}`].sort());
   db.deleteJot(jot);
   assert.deepEqual([db.getSnap(a), db.getSnap(b), db.getSnap(alone)?.id], [null, null, alone]);
+});
+
+test("filing a note and reading a snap are Claude calls kept with their space", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Growth");
+  const rows: UsageRow[] = [];
+  setUsageSink((r) => rows.push(r));
+  try {
+    const spend = () => recordUsage("claude-sonnet-5-5", { input_tokens: 1, output_tokens: 1 });
+    const agent = Object.assign(new HeuristicAgent(), {
+      pickItem: async () => (spend(), null),
+      describeCapture: async () => (spend(), null),
+    });
+    saveJot(db, agent, { roomId: room.id, text: "Okta wants a call", at: Date.now(), byId: "u1", by: "Joe Liang", itemId: null });
+    saveCapture(db, agent, { roomId: room.id, buf: JPEG, ext: "jpg", width: 1, height: 1, at: Date.now(), takenById: "u1", takenBy: "Joe Liang", itemId: null, line: null });
+    await settle();
+  } finally {
+    setUsageSink(null);
+  }
+  assert.deepEqual(rows.map((r) => [r.meetingId, r.roomId, r.task]).sort(), [
+    [null, room.id, "describeCapture"],
+    [null, room.id, "pickItem"],
+  ]);
 });

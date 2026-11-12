@@ -5,7 +5,7 @@
 import { useMemo, useState } from "react";
 import type { BrainstormView } from "../../shared/protocol.ts";
 import { brainWords, centerOut } from "../brainWords.ts";
-import { BrainMap, Face } from "./BrainMap.tsx";
+import { Face } from "./BrainMap.tsx";
 
 const MIN_PX = 14;
 const MAX_PX = 54;
@@ -63,24 +63,6 @@ export function BrainWords(props: { brainstorm: BrainstormView; className?: stri
           </ul>
         </div>
       )}
-    </div>
-  );
-}
-
-/** The brainstorm on the call's main view: the map, or its words, as each person chooses for themselves. */
-export function BrainViews(props: { brainstorm: BrainstormView; onRemove?: (id: string) => void }) {
-  const [view, setView] = useState<"map" | "words">("map");
-  return (
-    <div className="brain-views">
-      <span className="bp-views brain-views-toggle" role="group" aria-label="View">
-        <button type="button" className={`rp-pill${view === "map" ? " on" : ""}`} aria-pressed={view === "map"} onClick={() => setView("map")}>
-          Map
-        </button>
-        <button type="button" className={`rp-pill${view === "words" ? " on" : ""}`} aria-pressed={view === "words"} onClick={() => setView("words")}>
-          Words
-        </button>
-      </span>
-      {view === "map" ? <BrainMap brainstorm={props.brainstorm} onRemove={props.onRemove} /> : <BrainWords brainstorm={props.brainstorm} />}
     </div>
   );
 }

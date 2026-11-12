@@ -226,9 +226,11 @@ CREATE TABLE IF NOT EXISTS brainstorms (
   map_json TEXT
 );
 CREATE INDEX IF NOT EXISTS brainstorms_room ON brainstorms(room_id, started_at);
--- Token use of every Claude call (usage.ts), with the meeting it was for (null outside a meeting).
+-- Token use of every Claude call (usage.ts), with the meeting it was for (null outside a meeting) and
+-- its space (null: not known, as for calls between meetings from before the space was kept).
 CREATE TABLE IF NOT EXISTS llm_usage (
   meeting_id TEXT,
+  room_id TEXT,
   task TEXT NOT NULL,
   model TEXT NOT NULL,
   input INTEGER NOT NULL,
@@ -491,6 +493,13 @@ export function migrate(db: DatabaseSync) {
   // The ideas people starred on a brainstorm's page. Kept beside the map, not in it: the map is
   // rewritten by every pass of a running brainstorm.
   if (!brainCols.includes("stars_json")) db.exec("ALTER TABLE brainstorms ADD COLUMN stars_json TEXT");
+  // The map of a topic: the board thread it follows, and the stretches of the meeting it read.
+  if (!brainCols.includes("thread_id")) db.exec("ALTER TABLE brainstorms ADD COLUMN thread_id TEXT; ALTER TABLE brainstorms ADD COLUMN spans_json TEXT;");
+  // A brainstorm used to lead the agenda with its sentence. A map is now a view beside the board: a
+  // running one lets go of its item.
+  db.exec(
+    "UPDATE items SET archived = 1 WHERE id IN (SELECT item_id FROM brainstorms WHERE status = 'live' AND item_id IS NOT NULL); UPDATE brainstorms SET item_id = NULL WHERE status = 'live' AND item_id IS NOT NULL;",
+  );
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
   // What ✦ Stand did on the board (meetingAgent.ts): its cards, which are also its log.
   if (!meetingCols.includes("agent_json")) db.exec("ALTER TABLE meetings ADD COLUMN agent_json TEXT");
@@ -518,6 +527,8 @@ export function migrate(db: DatabaseSync) {
   if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
   if (!noteCols.includes("project_id")) topicsToProjects(db);
   db.exec("CREATE INDEX IF NOT EXISTS notes_project ON notes(project_id);");
+  // Stand's suggested project (rule 4), and when it last read the note for one. NULL: not read.
+  if (!noteCols.includes("suggested_project_id")) db.exec("ALTER TABLE notes ADD COLUMN suggested_project_id TEXT; ALTER TABLE notes ADD COLUMN project_judged_at INTEGER;");
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
   // Who did it, as fields (shared/actors.ts). Older rows read theirs from done_by and edited_by.
@@ -569,6 +580,11 @@ export function migrate(db: DatabaseSync) {
     db.exec(
       "ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';",
     );
+  // Each call's space (Manage spaces shows what a space spent). Older rows with a meeting take its
+  // space; those with no meeting stay unknown.
+  if (!(db.prepare("PRAGMA table_info(llm_usage)").all() as Row[]).some((c) => c.name === "room_id"))
+    db.exec("ALTER TABLE llm_usage ADD COLUMN room_id TEXT; UPDATE llm_usage SET room_id = (SELECT room_id FROM meetings WHERE id = llm_usage.meeting_id) WHERE meeting_id IS NOT NULL;");
+  db.exec("CREATE INDEX IF NOT EXISTS llm_usage_room ON llm_usage (room_id, at);");
 }
 
 /** Once: the free-text topic labels become projects. Each different label in a space becomes one, in the

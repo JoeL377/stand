@@ -1,5 +1,6 @@
-// A brainstorm: a call that starts from one sentence (a topic or a question) and whose middle
-// screen is a map of what the talk has come up with. The sentence is the centre; the directions
+// A brainstorm: a map of what the talk in a call has come up with, drawn from one sentence (a topic
+// or a question). It is a view beside the board: anyone can look at it, and it changes nothing else
+// in the call. The sentence is the centre; the directions
 // the talk opens branch off it, and the ideas said under a direction hang off that.
 //
 // The map is drawn by a model pass in the style of the running list (liveList.ts): after each
@@ -16,6 +17,7 @@ import { similar } from "./notesMerge.ts";
 export const MAP_DEBOUNCE_MS = 4_000;
 export const MAP_MAX_WAIT_MS = 12_000;
 const MAP_WINDOW_MS = 2 * 60_000;
+const CATCH_UP_STEPS = 20;
 export const MAX_DIRECTIONS = 8;
 export const MAX_IDEAS = 12;
 const MAX_POINTS = 8;
@@ -88,6 +90,8 @@ export class MapKeeper {
     /** Talk before this isn't the brainstorm's. */
     private readonly since: number,
     saved?: BrainNode[] | null,
+    /** Talk the map may read; a line out of it is never read. */
+    private readonly inScope: (s: Segment) => boolean = () => true,
   ) {
     this.lastLook = since;
     if (saved?.length) {
@@ -104,7 +108,7 @@ export class MapKeeper {
   }
 
   unreadSince(segments: Segment[]): number | null {
-    return segments.find((s) => s.ts > this.lastLook)?.ts ?? null;
+    return segments.find((s) => s.ts > this.lastLook && this.inScope(s))?.ts ?? null;
   }
 
   /** Someone took a circle off: Stand got it wrong. Its words stay so a later pass doesn't add it
@@ -120,7 +124,7 @@ export class MapKeeper {
   /** One pass over the talk up to `now`. `caught` is the meeting's to-dos, decisions and open
    *  questions so far. Returns whether the map changed. */
   async run(segments: Segment[], people: string[], caught: BrainCaught[], meetingStartedAt: number, now: number): Promise<boolean> {
-    const talk = segments.filter((s) => s.ts > this.since && s.ts <= now).sort((a, b) => a.ts - b.ts);
+    const talk = segments.filter((s) => s.ts > this.since && s.ts <= now && this.inScope(s)).sort((a, b) => a.ts - b.ts);
     const firstNew = talk.findIndex((s) => s.ts > this.lastLook);
     if (firstNew === -1) return false;
     const from = Math.min(firstNew, Math.max(0, talk.findIndex((s) => s.ts > now - MAP_WINDOW_MS)));
@@ -212,6 +216,31 @@ export class MapKeeper {
   }
 }
 
+/** One map pass over a long stretch no pass has read, a window at a time, so the model never gets
+ *  more than MAP_WINDOW_MS of new talk at once. `onStep` follows each step that changed the map. */
+export async function catchUp(
+  keeper: MapKeeper,
+  segments: Segment[],
+  people: string[],
+  caught: BrainCaught[],
+  meetingStartedAt: number,
+  now: number,
+  onStep?: () => void,
+): Promise<boolean> {
+  const upTo = segments.filter((s) => s.ts <= now);
+  let changed = false;
+  for (let step = 0; step < CATCH_UP_STEPS; step++) {
+    const first = keeper.unreadSince(upTo);
+    if (first === null) return changed;
+    if (first + MAP_WINDOW_MS >= now) break;
+    if (await keeper.run(segments, people, caught, meetingStartedAt, first + MAP_WINDOW_MS)) {
+      changed = true;
+      onStep?.();
+    }
+  }
+  return (await keeper.run(segments, people, caught, meetingStartedAt, now)) || changed;
+}
+
 // ---- the record -----------------------------------------------------------------------------
 
 export interface BrainstormRow {
@@ -236,6 +265,10 @@ export interface BrainstormRow {
   taskId: string | null;
   /** Ids of the ideas people starred on its page. */
   starred: string[];
+  /** The board thread it is the map of; null: it follows no topic. */
+  threadId: string | null;
+  /** The stretches of the meeting a topic's map read, as of when it last parked, stopped or ended. */
+  spans: Array<[number, number]> | null;
 }
 
 /** A diagram as people see it: without what was dropped. */
@@ -254,6 +287,7 @@ export const toBrainstormView = (b: BrainstormRow, busy = false): BrainstormView
   status: b.status,
   itemId: b.itemId,
   meetingId: b.meetingId,
+  threadId: b.threadId,
   startedBy: b.startedBy,
   startedAt: b.startedAt,
   endedAt: b.endedAt,
@@ -272,14 +306,20 @@ const summaryOf = (b: BrainstormRow): BrainstormSummary => {
     status: b.status,
     startedAt: b.startedAt,
     meetingId: b.meetingId,
+    threadId: b.threadId,
     directions: live.filter((n) => !n.parent).length,
     ideas: live.filter((n) => n.parent).length,
     ...(d ? { design: { boxes: d.boxes.filter((x) => !x.suggested).length, arrows: d.arrows.filter((x) => !x.suggested).length } } : {}),
   };
 };
 
-/** Starts a brainstorm on one sentence: it becomes the agenda's first item, so what's said and
- *  caught is filed under it. One runs at a time; starting another closes the one running. */
+/** The sentence a brainstorm keeps, from what was typed. A design session can start without a
+ *  topic: it is named from the talk (designSession.ts). */
+export const promptOf = (prompt: string, design = false) => clip(prompt.replace(/\s+/g, " ").trim(), PROMPT_MAX) || (design ? UNTITLED_DESIGN : "");
+
+/** Starts a brainstorm on one sentence. It is a view beside the board: it adds nothing to the
+ *  agenda, and what's said is filed as it would be without it. One runs at a time; starting
+ *  another closes the one running. */
 export function startBrainstorm(
   db: DB,
   roomId: string,
@@ -289,21 +329,17 @@ export function startBrainstorm(
   /** Makes it a design session: the diagram it starts from, what was pasted, and the to-do its spec goes on. */
   design?: { diagram: DesignDiagram; seed: string | null; taskId: string | null },
 ): BrainstormRow {
-  // A design session can start without a topic: it is named from the talk (designSession.ts).
-  const text = clip(prompt.replace(/\s+/g, " ").trim(), PROMPT_MAX) || (design ? UNTITLED_DESIGN : "");
+  const text = promptOf(prompt, !!design);
   if (!text) throw new BrainstormError("Say what the brainstorm is about: a topic or a question, in a sentence.");
   const live = db.brainstormLive(roomId);
   if (live && live.prompt === text && (live.kind === "design") === !!design) return live;
   if (live) finishBrainstorm(db, roomId, null, now);
-  const before = new Set(db.listItems(roomId).map((it) => it.id));
-  const item = db.addItems(roomId, [{ source: "agenda", externalId: null, title: text, url: null, description: null }]).find((it) => !before.has(it.id))!;
-  const rest = db.listItems(roomId).filter((it) => it.id !== item.id).map((it) => it.id);
-  db.reorderItems(roomId, [item.id, ...rest]);
-  return db.createBrainstorm({ roomId, prompt: text, itemId: item.id, startedBy: by, startedAt: now, design });
+  return db.createBrainstorm({ roomId, prompt: text, itemId: null, startedBy: by, startedAt: now, design });
 }
 
-/** The meeting it ran in has ended (or another one took its place): it is done, and its sentence
- *  leaves the agenda. What was said and caught under it stays filed there. */
+/** It was stopped, the meeting it ran in has ended, or another one took its place: it is done, and
+ *  its map is the record. A brainstorm from before maps were views had an agenda item: it leaves
+ *  the agenda, and what was said and caught under it stays filed there. */
 export function finishBrainstorm(db: DB, roomId: string, meetingId: string | null, now = Date.now()): BrainstormRow | null {
   const live = db.brainstormLive(roomId);
   if (!live) return null;
@@ -311,6 +347,21 @@ export function finishBrainstorm(db: DB, roomId: string, meetingId: string | nul
   if (live.itemId) db.archiveItem(live.itemId);
   return db.getBrainstorm(live.id);
 }
+
+/** The board moved off a topic: its map stops reading, and goes on by itself when the talk comes back. */
+export function parkBrainstorm(db: DB, id: string, meetingId: string, spans: Array<[number, number]>) {
+  db.setBrainstorm(id, { status: "done", meetingId });
+  db.saveBrainstormSpans(id, spans);
+}
+
+/** A parked or stopped map draws again, as the same map. */
+export function resumeBrainstorm(db: DB, id: string) {
+  db.setBrainstorm(id, { status: "live", endedAt: null });
+}
+
+/** The other maps and diagrams of a meeting, oldest first. */
+export const othersOfMeeting = (db: DB, meetingId: string, except: string | null): BrainstormSummary[] =>
+  db.brainstormsOfMeeting(meetingId).filter((b) => b.id !== except).map(summaryOf);
 
 export const brainstormLive = (db: DB, roomId: string): BrainstormView | null => {
   const b = db.brainstormLive(roomId);
