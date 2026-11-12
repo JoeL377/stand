@@ -123,7 +123,9 @@ export function Stage(props: {
   };
   const flipRef = useRef(flip);
   flipRef.current = flip;
-  const presenting = canSteer && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
+  // A review's slides are anyone's to flip; other decks are the host's.
+  const reviewDeck = focusItem?.slide?.layout === "review" || focusItem?.slide?.layout === "design";
+  const presenting = (canSteer || reviewDeck) && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
   useEffect(() => {
     if (!presenting) return;
     const onKey = (e: KeyboardEvent) => {
@@ -596,7 +598,7 @@ export function Stage(props: {
               count={deckSlides.length}
               notes={props.notes}
               busy={props.notesBusy.includes(focusItem.id)}
-              canSteer={canSteer}
+              canFlip
               disabled={Boolean(props.offline || props.ending)}
               shot={myShot}
               onShot={setMyShot}
@@ -620,14 +622,8 @@ export function Stage(props: {
               disabled={Boolean(props.offline || props.ending)}
               specOpen={specOpen}
               onSpec={setMySpec}
-              onFlip={(delta) => {
-                if (canSteer) return flip(delta);
-                // The author moves within their own spec.
-                const mine = deckSlides.filter((s) => s.slide?.design?.taskId === design.taskId);
-                const next = mine[mine.findIndex((s) => s.id === focusItem.id) + delta];
-                if (next) send({ type: "design.go", itemId: next.id });
-              }}
-              onGo={(itemId) => send(canSteer ? { type: "focus", itemId } : { type: "design.go", itemId })}
+              onFlip={flip}
+              onGo={(itemId) => send({ type: "focus", itemId })}
               onOutcome={(outcome) => send({ type: "design.outcome", itemId: focusItem.id, outcome })}
               onRemove={canSteer ? removeNote : undefined}
               onAdd={canSteer ? (kind, text) => send({ type: "note.add", itemId: focusItem.id, kind, text }) : undefined}

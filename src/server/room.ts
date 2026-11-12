@@ -1024,9 +1024,10 @@ export class RoomSession implements SpeechSink {
     const isHost = this.isHost(conn.participantId);
 
     switch (msg.type) {
-      // Only the host moves the meeting between items.
+      // Only the host moves the meeting between items. Anyone in the call flips a review's slides,
+      // within the review: a product, idea or design review's deck.
       case "focus":
-        if (!isHost || this.ended) return;
+        if (this.ended || !(isHost || this.flipsReview(msg.itemId))) return;
         this.pinnedBy = null;
         this.setFocus(msg.itemId, conn.name, "manual");
         break;
@@ -1482,6 +1483,14 @@ export class RoomSession implements SpeechSink {
     const host = this.hostId ? this.names.get(this.hostId) : null;
     this.send(ws, { type: "error", message: `Couldn't ${what}: only the host can change notes${host ? `, and ${host} is hosting now` : ""}.` });
     if (itemId !== undefined) this.send(ws, this.itemNotes(itemId));
+  }
+
+  /** The board is on a review's slide and this goes to another slide of the same review. */
+  private flipsReview(itemId: string | null) {
+    const items = this.items();
+    const from = items.find((i) => i.id === this.focusItemId);
+    const to = items.find((i) => i.id === itemId);
+    return !!from?.deckId && from.deckId === to?.deckId && isReviewDeck(from) && isReviewDeck(to);
   }
 
   /** Whether this signed-in person is driving the meeting right now. */

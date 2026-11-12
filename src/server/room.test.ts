@@ -13,6 +13,7 @@ import type { BoardAnswer } from "./board.ts";
 import { changeReview } from "./planReview.ts";
 import { outlineToSlides } from "../shared/outline.ts";
 import { config } from "./config.ts";
+import { addSlide, startReview } from "./reviews.ts";
 
 function setup() {
   const db = openDb(":memory:");
@@ -775,6 +776,24 @@ test("ending lets everyone go to the recap at once; the recap is written after, 
   await ending;
   assert.ok(db.getMeeting(s.meetingId)?.endedAt);
   await next.end();
+});
+
+test("anyone in the call flips a review's slides, but only the host moves to an item outside it", async () => {
+  const { db, session, items } = setup();
+  addSlide(db, session.roomId, { title: "Mic picker", summary: "", addedBy: "x" });
+  addSlide(db, session.roomId, { title: "Dark mode", summary: "", addedBy: "x" });
+  const host = await join(session, { id: "u1", name: "Joe" });
+  const guest = await join(session, { id: "u2", name: "Huy" });
+  const started = startReview(db, session.roomId);
+  session.itemsChanged();
+  await say(host, { type: "focus", itemId: started.firstItemId });
+  const slides = db.listItems(session.roomId).filter((i) => i.deckId === started.deckId);
+  assert.equal(slides.length, 2);
+  await say(guest, { type: "focus", itemId: slides[1].id });
+  assert.equal(session.state().focusItemId, slides[1].id);
+  await say(guest, { type: "focus", itemId: items[0].id });
+  assert.equal(session.state().focusItemId, slides[1].id, "an item outside the review stays the host's");
+  await session.end();
 });
 
 test("a note change from someone who isn't the host says why, and puts their screen back", async () => {

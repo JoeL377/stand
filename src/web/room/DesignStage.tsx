@@ -49,7 +49,7 @@ export function DesignStage(props: {
   specOpen: boolean;
   onSpec: (open: boolean) => void;
   onFlip: (delta: number) => void;
-  /** The host or the author opens a question of the slide, for everyone. */
+  /** Anyone in the call opens a question of the slide, for everyone. */
   onGo: (itemId: string) => void;
   onOutcome: (outcome: DesignOutcome | null) => void;
   /** The host takes a line off that Stand got wrong, or adds one it missed. */
@@ -70,9 +70,10 @@ export function DesignStage(props: {
   const steps: Item[] = [];
   for (let i = pageAt + 1; pageAt >= 0 && i < mine.length && isQuestion(mine[i]); i++) steps.push(mine[i]);
   const pages = slides.filter((s) => !isQuestion(s));
-  const mayFlip = props.canSteer || props.author;
+  // Anyone in the call flips through the whole review, as in a product review.
+  const mayFlip = true;
   const deckAt = slides.findIndex((s) => s.id === item.id);
-  const [first, last] = props.canSteer ? [deckAt <= 0, deckAt >= slides.length - 1] : [at <= 0, at >= mine.length - 1];
+  const [first, last] = [deckAt <= 0, deckAt >= slides.length - 1];
   // What was caught on the slide and on its questions shows together; the Verdict shows the whole spec's.
   const ids = new Set((shown.role === "verdict" ? mine : [page, ...steps]).map((s) => s.id));
   const caught = props.notes.filter((n) => n.itemId && ids.has(n.itemId) && KINDS.some((k) => k.kind === n.kind));
