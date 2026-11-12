@@ -51,17 +51,20 @@ export function WorkPill({ work, open, onToggle }: { work: ActionWork; open: boo
       ? "Ready to ship"
       : done
         ? "Summary"
-        : `${work.log.length} update${work.log.length === 1 ? "" : "s"}`;
+        : String(work.log.length);
+  // A row says only how many reports there are; the word is in the tooltip.
+  const full = label === String(work.log.length) ? `${label} update${work.log.length === 1 ? "" : "s"}` : label;
   const title = work.working
     ? `${work.working.by} · started ${fmtAgo(work.working.since)}\n${work.working.text}`
     : work.ready
       ? `${work.ready.by} · ${fmtAgo(work.ready.since)}\n${work.ready.pr ? `${linkLabel(work.ready.pr)} · checked off when it merges` : "Waiting to ship"}`
-      : `${open ? "Hide" : "Show"} what was done`;
+      : `${full}: ${open ? "hide" : "show"} what was done`;
   return (
     <button
       type="button"
       className={`fu-work${work.working ? " working" : ""}${work.ready ? " ready" : ""}${open ? " open" : ""}`}
       aria-expanded={open}
+      aria-label={full}
       title={title}
       onClick={onToggle}
     >
