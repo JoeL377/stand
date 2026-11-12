@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "../Toasts.tsx";
 import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, Discussion, ListNote, MeetingCost, Note, PilotView, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
 
 export interface Interim {
@@ -258,6 +259,9 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
           }
           case "error":
             setError(msg.message);
+            break;
+          case "notice":
+            toast({ text: msg.message });
             break;
           case "restarting":
             // A deploy: the socket is about to drop, and comes back by itself once the new server is up.

@@ -1207,6 +1207,8 @@ export type ServerMessage =
   | { type: "meeting.ended"; meetingId: string }
   /** Stand is restarting for an update: the call carries on once it's back, and the audio never stops. */
   | { type: "restarting" }
+  /** Something to tell this person that isn't an error, such as someone taking over their screen share. */
+  | { type: "notice"; message: string }
   /** The server has a message the client sent with this cid. */
   | { type: "ack"; cid: string }
   | { type: "pong" }

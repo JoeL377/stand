@@ -1090,10 +1090,15 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "sharing": {
-        // One screen at a time: two people pressing Share together, the second is told.
+        // One screen at a time, and the newest share takes over (their page asked first). The person
+        // taken over is told; their browser stops its share when it sees someone else's counted
+        // instead. A review they were running carries on.
         const other = msg.on && [...this.participants.values()].find((p) => p.isSharing && p.id !== conn.participantId);
-        // Their browser stops the share it started when it sees someone else's counted instead.
-        if (other) return this.send(ws, { type: "error", message: `${other.name} is already sharing, so yours was stopped. Ask them to stop first.` });
+        if (other && me) {
+          other.isSharing = false;
+          for (const [w, c] of this.conns) if (c?.participantId === other.id) this.send(w, { type: "notice", message: `${conn.name} is sharing now, so your share stopped.` });
+          if (other.id === this.hostId) this.suggestion = null;
+        }
         // A share that ends takes the screen nudge with it; one Stand never counted doesn't.
         const wasSharing = Boolean(me?.isSharing);
         if (me) me.isSharing = msg.on;

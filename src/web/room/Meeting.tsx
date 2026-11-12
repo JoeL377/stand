@@ -116,9 +116,14 @@ export function Meeting(props: {
   const host = state?.participants.find((p) => p.isHost);
   const canSteer = host?.id === participantId;
   const otherSharer = state?.participants.find((p) => p.isSharing && p.id !== participantId);
-  // Two people pressed Share together and Stand took the other one: stop ours, so nobody
-  // shares a screen the room can't see. Stand says who is sharing.
-  const turnedAway = sharing && Boolean(otherSharer) && me?.isSharing === false;
+  // Someone else took over the screen: stop ours, so nobody shares a screen the room can't see.
+  // Stand tells us who.
+  // Only once Stand had counted ours: just after pressing Share to take over, the other share is
+  // still the counted one for a moment.
+  const counted = useRef(false);
+  if (!sharing) counted.current = false;
+  else if (me?.isSharing) counted.current = true;
+  const turnedAway = sharing && counted.current && Boolean(otherSharer) && me?.isSharing === false;
   useEffect(() => {
     if (turnedAway) void media.stopShare();
   }, [turnedAway]);
@@ -594,9 +599,13 @@ export function Meeting(props: {
           ) : (
             <button
               className="control share"
-              onClick={() => void media.startShare()}
-              disabled={Boolean(otherSharer) || media.sharePicking}
-              title={otherSharer ? `${otherSharer.name} is sharing` : media.sharePicking ? "Pick a screen or window in the dialog" : undefined}
+              onClick={() => {
+                // Taking over: asked first, and what they were presenting carries on.
+                if (otherSharer && !confirm(`${otherSharer.name} is sharing. Share your screen instead? Theirs stops, and the call carries on.`)) return;
+                void media.startShare();
+              }}
+              disabled={media.sharePicking}
+              title={otherSharer ? `${otherSharer.name} is sharing · Share yours instead` : media.sharePicking ? "Pick a screen or window in the dialog" : undefined}
             >
               <ShareIcon />
               <span>{media.sharePicking ? "Choosing…" : "Share screen"}</span>

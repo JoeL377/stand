@@ -906,17 +906,18 @@ test("the room keeps what the main view showed each time it changed", async () =
   await session.end();
 });
 
-test("only one person shares at a time; the second is told who is", async () => {
+test("one person shares at a time: a second share takes over, and the first sharer is told", async () => {
   const { session } = setup();
   const joe = await join(session, { id: "u1", name: "Joe" });
   const ann = await join(session, { id: "u2", name: "Ann" });
   await say(joe, { type: "sharing", on: true });
   await say(ann, { type: "sharing", on: true });
-  const err = ann.got.find((m) => m.type === "error");
-  assert.match(err?.type === "error" ? err.message : "", /Joe is already sharing/);
+  const told = joe.got.find((m) => m.type === "notice");
+  assert.match(told?.type === "notice" ? told.message : "", /Ann is sharing now/);
+  assert.ok(!ann.got.some((m) => m.type === "error"));
   assert.deepEqual(
     session.state().participants.filter((p) => p.isSharing).map((p) => p.id),
-    ["u1"],
+    ["u2"],
   );
   await session.end();
 });
