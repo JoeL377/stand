@@ -387,6 +387,16 @@ CREATE TABLE IF NOT EXISTS links (
   UNIQUE (from_id, to_id, relation)
 );
 CREATE INDEX IF NOT EXISTS links_to ON links(to_id, relation);
+-- What a call's main view showed, each time it changed (room.ts logStage): the item, the board's tab,
+-- a to-do's brief or spec, which picture of a review slide, a still on the stage, who was sharing.
+-- What a line or a to-do was said in front of is read from this by time (shared/timeline.ts).
+CREATE TABLE IF NOT EXISTS stage_events (
+  id TEXT PRIMARY KEY,
+  meeting_id TEXT NOT NULL REFERENCES meetings(id),
+  ts INTEGER NOT NULL,
+  view_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS stage_events_meeting ON stage_events(meeting_id, ts);
 -- Chat (chat.ts). A channel is a place text comes from, tied to one space; the space's own chat is
 -- one (source 'stand'). Its talk is kept as sessions: meetings rows of kind 'chat'.
 CREATE TABLE IF NOT EXISTS channels (

@@ -4,6 +4,7 @@
 
 import { meetingChapters } from "../shared/chapters.ts";
 import type { ChapterRecap, Deck, Discussion, DiscussionOutcome, FollowUp, Item, Note, Quote, Segment, Snap } from "../shared/protocol.ts";
+import { type TimelineEntry, type TimelineKind, timelineWho } from "../shared/timeline.ts";
 
 type Meeting = {
   id: string;
@@ -14,6 +15,24 @@ type Meeting = {
   synthesis?: string | null;
   chapters?: ChapterRecap[];
 };
+
+export interface BriefTimelineEntry {
+  at: string;
+  kind: TimelineKind;
+  /** "Joe", "Joe via Claude", or null for Stand moving the focus by itself. */
+  who: string | null;
+  text: string;
+  /** Ask Stand: its answer. */
+  answer?: string | null;
+  /** A capture or an agent's report: stand:action/<id>, stand:decision/<id> or stand:question/<id>. */
+  ref?: string;
+  /** A focus change: the item's short label, like "Slide 3". */
+  label?: string | null;
+  /** What the main view showed then, in a line: on a capture, a question to Stand, an agent's report,
+   *  and a line whose words point at the screen (pointing: true). Up at the time, not proof of "about". */
+  on_screen?: string;
+  pointing?: boolean;
+}
 
 export const BRIEF_SCHEMA = "stand.meeting-brief/v1";
 export const FOLLOW_UPS_SCHEMA = "stand.follow-ups/v1";
@@ -123,6 +142,9 @@ export interface MeetingBrief {
   openQuestions: Array<{ id: string; text: string; item: BriefItemRef; images: BriefImage[] }>;
   /** The meeting as chapters, in the order they were talked about. */
   chapters: BriefChapter[];
+  /** With the transcript: everything in order, what was said and typed, what Stand caught, what Ask Stand
+   *  was asked and answered, which item or slide was up, and what agents reported while it ran. */
+  timeline?: BriefTimelineEntry[];
   /** The same notes grouped by agenda item, in agenda order. */
   items: Array<{
     item: BriefItemRef;
@@ -213,6 +235,8 @@ export function buildBrief(input: {
   /** Finds discussions from other meetings, for carried-over action items. */
   discussionById?: DiscussionLookup;
   withTranscript?: boolean;
+  /** The meeting's timeline (server/timeline.ts); included with the transcript. */
+  timeline?: TimelineEntry[];
 }): MeetingBrief {
   const { meeting: m, baseUrl } = input;
   const ref = (it: Item | null) => itemRef(it, input.decks, baseUrl);
@@ -328,6 +352,18 @@ export function buildBrief(input: {
     const c = a.discussion ? chapterOfTopic.get(a.discussion.id) : undefined;
     a.chapter = c ? { key: c.key, title: c.title, at: offset(c.start, m.startedAt) } : null;
   }
+  if (input.withTranscript && input.timeline)
+    brief.timeline = input.timeline.map((e) => ({
+      at: iso(e.ts),
+      kind: e.kind,
+      who: e.who || e.actor ? timelineWho(e) : null,
+      text: e.text,
+      ...(e.answer !== undefined && { answer: e.answer }),
+      ...(e.ref && { ref: e.ref }),
+      ...(e.label && { label: e.label }),
+      ...(e.kind !== "focus" && e.shown && e.shown.kind !== "item" && { on_screen: e.shown.label }),
+      ...(e.points && { pointing: true }),
+    }));
   return brief;
 }
 
@@ -442,6 +478,11 @@ export function briefToMarkdown(b: MeetingBrief): string {
       out.push("", "</details>", "");
     }
   }
+  if (b.timeline?.length) {
+    out.push("## Timeline", "", "<details><summary>Everything in order</summary>", "");
+    for (const e of b.timeline) out.push(timelineLine(e));
+    out.push("", "</details>", "");
+  }
   return out.join("\n").trimEnd() + "\n";
 }
 
@@ -492,4 +533,22 @@ export function followUpsToMarkdown(f: FollowUpsFeed): string {
   if (!f.actions.length) out.push("None.");
   for (const a of f.actions) out.push(`${actionLine(a)} · raised [${a.raisedAt.slice(0, 10)}](${a.meetingUrl})`);
   return out.join("\n").trimEnd() + "\n";
+}
+
+/** One line of the timeline in Markdown: "- 14:02 Joe (chat): the link". */
+function timelineLine(e: BriefTimelineEntry): string {
+  const at = e.at.slice(11, 16);
+  const ref = `${e.ref ? ` (${e.ref})` : ""}${e.on_screen ? ` [on screen: ${e.on_screen}]` : ""}`;
+  switch (e.kind) {
+    case "focus":
+      return `- ${at} → ${e.label && !e.text.startsWith(e.label) ? `${e.label}: ` : ""}${e.text}${e.who ? ` (moved by ${e.who})` : ""}`;
+    case "capture":
+      return `- ${at} Caught: ${e.text}${ref}`;
+    case "ask":
+      return `- ${at} ${e.who} asked Stand: ${e.text}${ref}${e.answer ? `\n  - Stand: ${e.answer.replace(/\n/g, "\n    ")}` : ""}`;
+    case "agent":
+      return `- ${at} ${e.who}: ${e.text}${ref}`;
+    default:
+      return `- ${at} ${e.who}${e.kind === "chat" ? " (chat)" : ""}: ${e.text}${ref}`;
+  }
 }

@@ -1,3 +1,4 @@
+import type { TimelineEntry } from "./timeline.ts";
 import type { Actor } from "./actors.ts";
 import type { DesignOutcome, DesignReviewRan, DesignReviewSummary, DesignSlideInfo } from "./designReview.ts";
 // Types shared by the server and the browser. The WebSocket at /ws/rooms/:id
@@ -1153,6 +1154,8 @@ export interface MeetingRecap {
   designReview?: DesignReviewRan | null;
   /** The brainstorm that ran in it, if one did. */
   brainstorm?: BrainstormSummary | null;
+  /** Everything in the meeting in order: speech, chat, captures, Ask Stand, focus changes, agents' reports. */
+  timeline?: TimelineEntry[];
 }
 
 /** What a meeting's Claude calls cost, in dollars, most expensive task first (server/usage.ts). */

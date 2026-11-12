@@ -819,6 +819,23 @@ test("the host's view goes to everyone; nobody else can set it, and a new host s
   await session.end();
 });
 
+test("the room keeps what the main view showed each time it changed", async () => {
+  const { db, session, items, meetingId } = setup();
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  session.setFocus(items[1].id, "Joe", "manual");
+  await say(joe, { type: "sharing", on: true });
+  await say(joe, { type: "sharing", on: true });
+  await say(joe, { type: "sharing", on: false });
+  const views = db.stageEvents(meetingId).map((e) => [e.view.itemId, e.view.sharing]);
+  // Each change once, in order; saying the same again adds nothing.
+  assert.deepEqual(views.slice(-3), [
+    [items[1].id, null],
+    [items[1].id, "Joe"],
+    [items[1].id, null],
+  ]);
+  await session.end();
+});
+
 test("only one person shares at a time; the second is told who is", async () => {
   const { session } = setup();
   const joe = await join(session, { id: "u1", name: "Joe" });
