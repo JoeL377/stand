@@ -594,6 +594,13 @@ export function migrate(db: DatabaseSync) {
   if (!(db.prepare("PRAGMA table_info(llm_usage)").all() as Row[]).some((c) => c.name === "room_id"))
     db.exec("ALTER TABLE llm_usage ADD COLUMN room_id TEXT; UPDATE llm_usage SET room_id = (SELECT room_id FROM meetings WHERE id = llm_usage.meeting_id) WHERE meeting_id IS NOT NULL;");
   db.exec("CREATE INDEX IF NOT EXISTS llm_usage_room ON llm_usage (room_id, at);");
+  // Stand sends nothing to Conxt now. A database from before still has the triggers that copied each new
+  // meeting and transcript line into the conxt_* tables; they go, and the tables stay as they were.
+  db.exec(`DROP TRIGGER IF EXISTS conxt_meeting_started;
+    DROP TRIGGER IF EXISTS conxt_live_meeting;
+    DROP TRIGGER IF EXISTS conxt_live_segment;
+    DROP TRIGGER IF EXISTS conxt_live_segment_updated;
+    DROP TRIGGER IF EXISTS conxt_default_new_room;`);
 }
 
 /** Once: the free-text topic labels become projects. Each different label in a space becomes one, in the

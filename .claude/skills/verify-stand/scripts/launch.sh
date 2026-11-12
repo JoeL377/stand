@@ -23,7 +23,7 @@ npm run build >"$RUN/build.log" 2>&1 || { echo "Build failed, see $RUN/build.log
 KEY="${ANTHROPIC_API_KEY:-${STAND_ANTHROPIC_API_KEY:-}}"
 env -u LIVEKIT_URL -u LIVEKIT_API_KEY -u LIVEKIT_API_SECRET -u DEEPGRAM_API_KEY \
     -u GOOGLE_CLIENT_ID -u GOOGLE_CLIENT_SECRET -u ALLOWED_EMAILS -u ALLOWED_EMAIL_DOMAINS \
-    -u PUBLIC_URL -u LINEAR_API_KEY -u CONXT_DESTINATIONS \
+    -u PUBLIC_URL -u LINEAR_API_KEY \
     NODE_ENV=production PORT="$PORT" DATA_DIR="$RUN/data" ANTHROPIC_API_KEY="$KEY" \
     nohup node --import tsx src/server/index.ts >"$RUN/server.log" 2>&1 &
 echo $! >"$RUN/pid"

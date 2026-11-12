@@ -5,7 +5,6 @@ import { Link, useParams } from "react-router-dom";
 import { VerdictCounts, designRecordHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { brainCount, brainstormHref, designCount } from "./BrainstormPage.tsx";
-import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { SnapFigures, SnapStrip } from "../Snaps.tsx";
 import type { Discussion, DiscussionOutcome, MeetingRecap, Note, Segment, Snap, UpNext } from "../../shared/protocol.ts";
@@ -356,8 +355,6 @@ export function RecapPage() {
           <p className="muted small">The agent suggests these for the next agenda. The host adds the ones worth talking about.</p>
         </details>
       )}
-
-      <ConxtPanel roomId={data.roomId} meetingId={data.meetingId} />
 
       <footer className="brief-bar rc-brief">
         <span className="muted small">Follow-up brief for people and agents</span>

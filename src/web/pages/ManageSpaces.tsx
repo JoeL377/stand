@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { SYNTHESIS_HINT, SynthesisField } from "../Synthesis.tsx";
-import { ConxtPanel } from "../ConxtPanel.tsx";
 import { CostPanel } from "../CostPanel.tsx";
 import { MembersPanel } from "../MembersPanel.tsx";
 import { SourcePanel } from "../SourcePanel.tsx";
@@ -75,7 +74,6 @@ function SpaceEditor({ s }: { s: SpaceSummary }) {
       </label>
       <SynthesisField value={synthesis} onChange={setSynthesis} />
       <p className="muted small synth-hint">{SYNTHESIS_HINT}</p>
-      <ConxtPanel roomId={s.id} />
       <SourcePanel roomId={s.id} />
       <CostPanel roomId={s.id} />
       <MembersPanel roomId={s.id} />

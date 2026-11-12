@@ -36,7 +36,7 @@ export function MembersPanel({ roomId }: { roomId: string }) {
   return (
     <section className="members-panel">
       <h3>People</h3>
-      <p className="muted small">Admins can rename the space, link its repos, change where its meetings are shared, and make other people admins.</p>
+      <p className="muted small">Admins can rename the space, link its repos, and make other people admins.</p>
       {error && (
         <p className="error" role="alert">
           {error}
