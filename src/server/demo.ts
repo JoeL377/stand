@@ -1,5 +1,6 @@
 // A scripted 4-person standup that plays into a live room, so the whole flow
-// (pinning, the agent's screen suggestion, notes, history) can be seen
+// (pinning, the agent's screen suggestion, notes, history, and the transcript
+// taking in chat, a question to Stand and agents' reports) can be seen
 // without microphones or API keys.
 
 import type { Item } from "../shared/protocol.ts";
@@ -18,6 +19,10 @@ type Who = keyof typeof PEOPLE;
 type Step =
   | { say: Who; text: string }
   | { chat: Who; text: string }
+  /** Someone asks Stand, and Stand answers a moment later. */
+  | { ask: Who; text: string; answer: string }
+  /** Someone's own agent reports to the space over the MCP while the call runs. */
+  | { report: Who; agent: string; text: string }
   | { focus: number }
   | { suggest: number; reason: string }
   | { accept: true }
@@ -33,6 +38,7 @@ function script(items: Item[]): Step[] {
     { say: "sam", text: "Could we just generate one and let them rename it later?" },
     { say: "priya", text: "Yes, let's go with an auto-generated URL and an edit link. I'll ship that by Thursday." },
     { say: "alex", text: "Do we know if that breaks the invite links that are already out?" },
+    { chat: "sam", text: "Invite links carry the workspace id, not the URL: https://example.com/docs/invites" },
     { pause: 1500 },
     // The host scrolls to the next ticket; the agent notices from the screen.
     { suggest: 1, reason: `${label(b)} is open in the shared screen` },
@@ -40,17 +46,22 @@ function script(items: Item[]): Step[] {
     { pause: 1200 },
     { accept: true },
     { say: "jordan", text: "One concern, the discount copy says 20 percent but billing gives 17." },
+    { ask: "priya", text: "What discount did we agree on for annual plans?", answer: "20 percent, agreed in sprint planning. Billing's 17 percent doesn't match it." },
     { say: "sam", text: "Good catch. We agreed on 20 percent in planning, so billing is wrong. Jordan, can you file that against billing?" },
     { say: "jordan", text: "On it, I'll file it today." },
     { chat: "alex", text: "Billing config link: config/plans.yaml line 42" },
+    { report: "jordan", agent: "Claude Code", text: "Filed the discount mismatch against billing, with the config line Alex linked." },
     { focus: 2 },
     { say: "alex", text: `${label(c)} hasn't started. I'll pick it up after the retry library upgrade.` },
     { say: "priya", text: "What's the max backoff going to be, an hour?" },
+    { chat: "sam", text: "The retry library defaults to 30 minutes, for reference." },
     { say: "alex", text: "Decided: cap it at one hour with jitter, and give up after 24 hours." },
     { focus: 3 },
     { say: "jordan", text: `${label(d)} failed four times this week, always the payment iframe timing out.` },
     { say: "sam", text: "Is it the test or the sandbox being slow?" },
     { say: "jordan", text: "I think it's the sandbox. I'll add a retry around the iframe load and look at the timing data by Friday." },
+    { chat: "priya", text: "Sandbox status page shows slow responses all week." },
+    { report: "jordan", agent: "Claude Code", text: "Opened a draft PR that retries the payment iframe load twice before failing." },
   ];
 }
 
@@ -72,6 +83,16 @@ export async function runDemo(room: RoomSession, items: Item[]) {
     } else if ("chat" in step) {
       const p = PEOPLE[step.chat];
       room.demoChat(p.id, p.name, step.text);
+      await sleep(900);
+    } else if ("ask" in step) {
+      const p = PEOPLE[step.ask];
+      const cardId = room.demoAsk(p.id, p.name, step.text);
+      await sleep(1800);
+      room.demoAnswer(cardId, step.answer);
+      await sleep(900);
+    } else if ("report" in step) {
+      const p = PEOPLE[step.report];
+      room.demoReport(p.id, p.name, step.agent, step.text);
       await sleep(900);
     } else if ("focus" in step) {
       const it = items[step.focus];

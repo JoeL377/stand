@@ -2855,6 +2855,23 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .capture-head .seg-time { flex: none; }
 .capture-text { margin-top: 5px; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
 .capture-owner { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
+/* The timeline (Timeline.tsx, and the call's transcript): Ask Stand and agents' reports beside what was caught. */
+.tl-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.seg.capture-ask { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.seg.capture-ask .capture-head { color: var(--accent); }
+.seg.capture-agent { background: var(--panel-2); }
+.seg.capture-agent .capture-head { color: var(--muted); }
+.tl-answer { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.tl-answer > :first-child { margin-top: 0; }
+.tl-answer > :last-child { margin-bottom: 0; }
+.seg.tl-focus { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 6px; }
+.seg.tl-focus:first-child { margin-top: 0; border-top: 0; padding-top: 3px; }
+.tl-show { display: block; margin-top: 6px; }
+/* What was on screen when it was said: a quiet line under the row, a link to the slide or the still. */
+.tl-shown { display: block; width: fit-content; max-width: 100%; margin-top: 6px; font-size: 11px; color: var(--muted); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.tl-shown:hover { color: var(--text); text-decoration: underline; }
+.tl-shown-k { text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; margin-right: 2px; }
+.seg > .tl-shown { margin: 2px 0 0 6px; }
 
 /* ---- A product review's own page (pages/ReviewPage.tsx) ---- */
 .rp { height: 100dvh; display: flex; flex-direction: column; background: var(--bg); min-width: 0; }
@@ -3428,4 +3445,41 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
   .sh-panel.tasks .followups .topic-pill { padding: 0; margin-left: 6px; border: 0; background: none; box-shadow: none; height: auto; min-height: 0; font-size: 12px; font-weight: 400; color: var(--muted); max-width: 140px; }
   .td-phone-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
   .td-phone-acts > button { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; }
+}
+
+/* Design review on a phone. In the call: a one-line slide header, no helper lines, the verdict's
+   questions stacked, and the outcome buttons on a row of their own so none is cut off. Before the
+   call: the page is for reading the slides and adding a question; reshaping slides stays on a wider screen. */
+@media (max-width: 760px) {
+  .ds-head { padding: 8px 12px; gap: 8px; }
+  .ds-head .ds-owner, .ds-help { display: none; }
+  .ds-head button, .ds-spec-pane > header button { flex: none; white-space: nowrap; }
+  .ds-spec-pane > header { padding: 8px 12px; }
+  .ds-spec-pane > header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ds-caught { padding: 10px 12px 12px; }
+  .ds-results li { flex-wrap: wrap; gap: 2px 10px; }
+  .ds-results li > :nth-child(2) { order: 3; flex: 0 0 100%; }
+  .ds-results li > .ds-result { margin-left: auto; }
+  .ds-q { flex-wrap: wrap; gap: 2px 10px; }
+  .ds-q > span:nth-child(2) { order: 3; flex: 0 0 100%; }
+  .ds-q > .ds-result { margin-left: auto; }
+  .design-stage .rv-bar { flex-wrap: wrap; row-gap: 6px; }
+  .design-stage .rv-bar .rv-outcomes { order: -1; flex: 0 0 100%; justify-content: center; flex-wrap: wrap; }
+  .dr-help, .dr-shape { display: none; }
+  .dr-ask button:disabled { display: none; }
+}
+
+/* One way out of a call: Leave. The host, with others still in the call, gets a two-line menu. */
+.leave { position: relative; display: flex; }
+.rp-menu.leave-menu { top: auto; bottom: calc(100% + 8px); left: auto; right: 0; min-width: 170px; }
+.leave-menu button { display: block; width: 100%; padding: 9px 12px; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--text); font-size: 13px; text-align: left; height: auto; }
+.leave-menu button:hover { background: var(--panel-2); }
+.leave-menu button.danger { color: #ef4444; }
+/* The Start menu on a phone: as wide as the screen, just above the controls, names and counts only. */
+@media (max-width: 760px) {
+  .xp { position: static; }
+  .rp-menu.sh-start-menu.xp-menu { left: 8px; right: 8px; transform: none; min-width: 0; max-width: none; bottom: calc(100% + 4px); }
+  .xp-menu button { padding: 9px 12px; font-size: 14px; }
+  .xp-menu .xp-hint { display: none; }
+  .xp-menu .xp-idea { max-width: 55vw; }
 }

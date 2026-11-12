@@ -212,7 +212,7 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
           </button>
         )}
       </div>
-      <p className="muted small">
+      <p className="muted small dr-help">
         {spec.requestedBy ? `Review requested by ${spec.requestedBy}. ` : ""}
         {mine ? "You prepare this spec: what each slide says, and which sections and questions go to the call." : "Comment on a passage of the spec to add a question. Its author prepares the slides."}
       </p>
@@ -375,12 +375,12 @@ function SectionPart(props: {
         <span className="rp-grow" />
         {s.off && <span className="muted small">Off the call</span>}
         {mine && !s.off && props.join && (
-          <button type="button" className="ghost small" onClick={() => void change({ section: s.heading, join: props.join === "join" })}>
+          <button type="button" className="ghost small dr-shape" onClick={() => void change({ section: s.heading, join: props.join === "join" })}>
             {props.join === "join" ? "Combine with the slide above" : "Give it its own slide"}
           </button>
         )}
         {mine && (
-          <button type="button" className="ghost small" onClick={() => void change({ section: s.heading, off: !s.off })}>
+          <button type="button" className="ghost small dr-shape" onClick={() => void change({ section: s.heading, off: !s.off })}>
             {s.off ? "Put back" : "Take off the call"}
           </button>
         )}

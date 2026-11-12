@@ -526,6 +526,7 @@ export function Meeting(props: {
         <SidePanel
           notes={room.notes}
           list={room.list}
+          cards={room.agentCards}
           state={state}
           segments={room.segments}
           notesBusy={room.notesBusy}
@@ -610,7 +611,10 @@ export function Meeting(props: {
               <span>Pop out</span>
             </button>
           )}
-          {canSteer && state && <ExperienceControl roomId={roomId} running={runningExperience(state.items, room.brainstorm)} disabled={writingUp || !room.connected} />}
+          {/* Anyone in the call can start a review or a working session; finishing one stays with the host, who steers it. */}
+          {state && (canSteer || !runningExperience(state.items, room.brainstorm)) && (
+            <ExperienceControl roomId={roomId} running={runningExperience(state.items, room.brainstorm)} disabled={writingUp || !room.connected} />
+          )}
           {canSteer && (!caps.livekit || !caps.llm) ? (
             <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this space">
               <PlayIcon />
@@ -619,31 +623,21 @@ export function Meeting(props: {
           ) : null}
         </div>
         <span className="spacer" />
-        <button
-          className="control pill"
-          onClick={() => {
+        <LeaveControl
+          canEnd={canSteer && !writingUp && room.connected}
+          alone={(state?.participants.length ?? 1) <= 1}
+          writingUp={writingUp}
+          onLeave={() => {
             // Waiting changes live only in this tab, so leaving now would drop them.
             const n = room.waiting;
             if (n && !confirm(`${n === 1 ? "1 change hasn't" : `${n} changes haven't`} reached Stand yet and will be lost. Leave anyway?`)) return;
             media.leave();
             props.onLeave();
           }}
-        >
-          Leave
-        </button>
-        {canSteer && (
-        <button
-          className="control pill danger"
-          disabled={writingUp || !room.connected}
-          title={writingUp ? writingTitle : room.connected ? undefined : "You can end the meeting once Stand reconnects"}
-          onClick={() => {
-            if (!confirm("End the meeting for everyone and write up the notes?")) return;
+          onEnd={() => {
             if (send({ type: "meeting.end" })) setEnding(true);
           }}
-        >
-          {writingUp ? "Writing notes…" : "End meeting"}
-        </button>
-        )}
+        />
         <PilotRequest acts={pilot} />
       </footer>
       {popOut.win && state && (
@@ -661,6 +655,42 @@ export function Meeting(props: {
       )}
     </div>
   </PersonColors.Provider>
+  );
+}
+
+/** The one way out of a call. Leaving as the last person ends the meeting and writes it up; with
+ *  others still in it, the host picks between leaving and ending it for everyone. A meeting everyone
+ *  walked out of ends by itself (room.ts, EMPTY_ROOM_GRACE_MS). */
+function LeaveControl(props: { canEnd: boolean; alone: boolean; writingUp: boolean; onLeave: () => void; onEnd: () => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const click = () => {
+    if (props.writingUp || !props.canEnd) return props.onLeave();
+    if (props.alone) return props.onEnd();
+    setOpen(!open);
+  };
+  return (
+    <div className="leave" ref={box}>
+      <button
+        className="control pill danger"
+        aria-haspopup={props.canEnd && !props.alone ? "menu" : undefined}
+        aria-expanded={props.canEnd && !props.alone ? open : undefined}
+        title={props.writingUp ? "Stand is writing up the notes. You can leave; the recap will be in the space." : props.canEnd && props.alone ? "You're the last one here, so this ends the meeting and writes up the notes" : undefined}
+        onClick={click}
+      >
+        {props.writingUp ? "Writing notes…" : "Leave"}
+      </button>
+      {open && (
+        <div className="rp-menu leave-menu" role="menu">
+          <button type="button" role="menuitem" onClick={() => (setOpen(false), props.onLeave())}>
+            Leave
+          </button>
+          <button type="button" role="menuitem" className="danger" onClick={() => (setOpen(false), props.onEnd())}>
+            End for everyone
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

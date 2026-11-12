@@ -36,6 +36,7 @@ import { type Agent, type ItemNotesDraft, NotesTrouble, type OnDraft, type Recap
 import { meetingChapters } from "../shared/chapters.ts";
 import { currentDoneDeck } from "./doneDeck.ts";
 import { sampleSprint } from "./linear.ts";
+import type { StageView } from "../shared/timeline.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
@@ -525,7 +526,31 @@ export class RoomSession implements SpeechSink {
   }
 
   private broadcastState() {
+    this.logStage();
     this.broadcast({ type: "state", state: this.state() });
+  }
+
+  /** What the main view shows now. */
+  private stageView(): StageView {
+    const sharer = [...this.participants.values()].find((p) => p.isSharing);
+    return {
+      itemId: this.focusItemId,
+      tab: this.hostView?.tab ?? "main",
+      taskMode: this.hostView?.taskMode ?? null,
+      shot: this.hostView?.shot ?? null,
+      snapId: this.stageSnapId,
+      sharing: sharer?.name ?? null,
+    };
+  }
+  private lastStage = "";
+  /** Keeps what the main view shows each time it changes, so a line can say what it was said in front of. */
+  private logStage() {
+    if (this.ended) return;
+    const view = this.stageView();
+    const key = JSON.stringify(view);
+    if (key === this.lastStage) return;
+    this.lastStage = key;
+    this.db.logStage(this.meetingId, view);
   }
 
   /** The space was renamed while people are in it. */
@@ -2130,6 +2155,23 @@ export class RoomSession implements SpeechSink {
   }
   demoAccept() {
     this.acceptSuggestion("Demo host");
+  }
+  /** The demo's stand-in for Ask Stand: the question shows as being worked on, then demoAnswer
+   *  writes its answer, so the card and its line in the transcript can be seen without a model. */
+  demoAsk(speakerId: string, speakerName: string, question: string): string {
+    this.agentCards ??= new AgentKeeper();
+    const card = this.agentCards.ask(speakerName, speakerId, question);
+    this.agentChanged();
+    return card.id;
+  }
+  demoAnswer(cardId: string, answer: string) {
+    this.agentCards?.finishAnswer(cardId, { fields: { note: answer, sources: [], todo: null, fromSpace: [] }, follows: null, model: null, costUsd: null });
+    this.agentChanged();
+  }
+  /** The demo's stand-in for someone's agent reporting over the MCP while the call runs. */
+  demoReport(userId: string, userName: string, client: string, text: string) {
+    this.db.addUpdate({ roomId: this.roomId, itemId: this.focusItemId, noteId: null, noteText: null, userId, userName, client, status: "progress", text, links: [] });
+    this.updatesChanged();
   }
   get isEnded() {
     return this.ended;

@@ -1,6 +1,6 @@
 # Live meeting and notes
 
-The meeting screen (`/s/<id>` after Start talking): agenda on the left (rows show the title; the row in focus also shows `N remarks · N to-dos`), "Now discussing" with the topic card in the middle (server/board.ts: a fixed title, a ✦ paragraph Sonnet rewrites every 30 s, details, and the point being made now; a share or deck shrinks it to one line over the screen) and a chapter bar of topics under it, the right panel with Chat / Transcript (Transcript opens first; chat is one conversation for the meeting with a message box), and the bottom controls (Mute, Share screen, Pop out, Play demo, Leave, End meeting). Live notes run on Claude Haiku a few seconds after each pause.
+The meeting screen (`/s/<id>` after Start talking): agenda on the left (rows show the title; the row in focus also shows `N remarks · N to-dos`), "Now discussing" with the topic card in the middle (server/board.ts: a fixed title, a ✦ paragraph Sonnet rewrites every 30 s, details, and the point being made now; a share or deck shrinks it to one line over the screen) and a chapter bar of topics under it, the right panel with Chat / Transcript (Transcript opens first; chat is one conversation for the meeting with a message box), and the bottom controls (Mute, Share screen, Pop out, Play demo, Leave, Leave). Live notes run on Claude Haiku a few seconds after each pause.
 
 ## Sub-features
 - Host-driven focus: clicking an agenda item pins talk to it.
@@ -14,7 +14,7 @@ The meeting screen (`/s/<id>` after Start talking): agenda on the left (rows sho
 On a space page click **Start talking**. With no LiveKit (mock mode) the host sees **Play demo** in the bottom bar.
 
 ## Driving it with Playwright
-`drive.cjs <run> meeting` clicks `Start talking`, waits for `End meeting`, clicks `Play demo`, then waits for the agenda text `DEMO-104 · N remarks` (the demo reached the last item) and `DEMO-104 · N remarks · N to-dos` (live notes landed). Screenshots `meeting-demo-midway` and `meeting-live-notes`; page text in `meeting-page.txt`. The server log should show `[agent] claude-haiku-5-5 … notes for <item>` lines.
+`drive.cjs <run> meeting` clicks `Start talking`, waits for `Leave`, clicks `Play demo`, then waits for the agenda text `DEMO-104 · N remarks` (the demo reached the last item) and `DEMO-104 · N remarks · N to-dos` (live notes landed). Screenshots `meeting-demo-midway` and `meeting-live-notes`; page text in `meeting-page.txt`. The server log should show `[agent] claude-haiku-5-5 … notes for <item>` lines.
 
 ## Gotchas
 - The opening board needs history the fresh DB doesn't have: an ended meeting with two speakers and tasks closed after it. Seed the DB before the server starts (the startup sweep writes the pages within seconds), or end the demo meeting, close a task on the Tasks tab and wait ~20 s for the pass.

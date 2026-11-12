@@ -94,11 +94,11 @@ async function newSpace() {
 }
 
 async function meeting() {
-  // End meeting asks with the browser's confirm(); Playwright dismisses dialogs unless told.
+  // Leaving with unsent changes asks with the browser's confirm(); Playwright dismisses dialogs unless told.
   page.on("dialog", (d) => d.accept());
   await step("start talking", async () => {
     await page.getByRole("button", { name: "Start talking" }).click();
-    await page.getByRole("button", { name: "End meeting" }).waitFor();
+    await page.getByRole("button", { name: "Leave", exact: true }).waitFor();
     // The agenda starts folded to its numbered strip; open it to read the rows.
     const show = page.getByRole("button", { name: "Show the agenda" });
     if (await show.count()) await show.click();
@@ -121,14 +121,16 @@ async function meeting() {
   check("talk is pinned to the item in focus and live notes made to-dos", /remarks?/.test(row) && /to-dos?/.test(row), row);
 
   await step("end the meeting and wait for the write-up", async () => {
-    await page.getByRole("button", { name: "End meeting" }).click();
-    await page.getByRole("button", { name: "End meeting" }).waitFor({ state: "detached", timeout: 180_000 });
+    // Leave ends the meeting for the last person in it; with others there, the host picks End for everyone.
+    await page.getByRole("button", { name: "Leave", exact: true }).click();
+    await page.getByRole("menuitem", { name: "End for everyone" }).click({ timeout: 1500 }).catch(() => {});
+    await page.locator("footer.controls").waitFor({ state: "detached", timeout: 180_000 });
     await page.waitForLoadState("networkidle");
     await snap("after-end");
   });
   summary.afterEndUrl = page.url();
 
-  // The write-up (Sonnet tidy per item, then the recap) runs after End meeting returns,
+  // The write-up (Sonnet tidy per item, then the recap) runs after the meeting ends,
   // so the meeting shows up on the space page a little later. Reload until it does.
   await step("meeting shows on the space page under Meetings", async () => {
     const deadline = Date.now() + 180_000;

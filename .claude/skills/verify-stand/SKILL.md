@@ -42,10 +42,10 @@ Playwright with Chromium (preinstalled in cloud sessions; elsewhere `npm i -g pl
 |---|---|---|
 | `signin` | stand-in sign-in, lands on home | 5 s |
 | `space` | + New space pop-up, Create and enter, space page | 10 s |
-| `meeting` | + Start talking, Play demo, wait for live notes, End meeting, wait for the write-up, space page, recap | 2-3 min |
+| `meeting` | + Start talking, Play demo, wait for live notes, Leave (ends the meeting), wait for the write-up, space page, recap | 2-3 min |
 | `mcp` | + agent token, MCP `tools/list`, `list_spaces`, `list_actions` | +5 s |
 
-Handles it uses (stable, from the UI's own text and roles): placeholders `Your name`, `Work email`, `e.g. Checkout v2`; buttons `Continue`, `New space`, `Create and enter`, `Start talking`, `Play demo`, `End meeting`; tabs `Meetings`, `Tasks`; links `a[href^="/meetings/"]`; agenda row text `DEMO-104 · N remarks · N to-dos`.
+Handles it uses (stable, from the UI's own text and roles): placeholders `Your name`, `Work email`, `e.g. Checkout v2`; buttons `Continue`, `New space`, `Create and enter`, `Start talking`, `Play demo`, `Leave`; tabs `Meetings`, `Tasks`; links `a[href^="/meetings/"]`; agenda row text `DEMO-104 · N remarks · N to-dos`.
 
 For a change the journeys don't cover, copy the pattern in `drive.cjs` (`step()` + `snap()` + `check()`) into a scratch script, and read the feature file for that area first. Add the new journey to `drive.cjs` and the feature map if it will be needed again.
 

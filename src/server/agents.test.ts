@@ -145,6 +145,17 @@ test("anyone in a space can confirm a replacement, and agents see whether a deci
   assert.equal(JSON.parse(link.made_actor_json).connection, "tok1");
 });
 
+test("a note says what was on screen when it was said, for an agent picking it up", () => {
+  const { api, db, joe, notes } = setup();
+  const decision = notes[0];
+  const caller = { user: joe, token: null };
+  const seen = () => (api.get(caller, `stand:decision/${decision.id}`, "https://stand.test") as { on_screen?: { what: string; kind: string; url?: string } }).on_screen;
+  // A plain agenda line was up: nothing more to say than the item it already names.
+  assert.equal(seen(), undefined);
+  db.logStage(decision.meetingId, { itemId: decision.itemId, tab: "main", taskMode: null, shot: null, snapId: null, sharing: "Andy Li" }, decision.ts - 1000);
+  assert.deepEqual([seen()?.kind, seen()?.what, seen()?.url], ["screen", "Andy's screen", `https://stand.test/items/${decision.itemId}`]);
+});
+
 test("a decision says why, from its discussion and quote, for agents catching up", () => {
   const { api, joe, room, notes } = setup();
   const decision = notes[0];

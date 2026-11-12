@@ -6,6 +6,7 @@ import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from
 import { designReviewOfMeeting } from "../designReviews.ts";
 import { ideaReviewOfMeeting } from "../ideaReview.ts";
 import { reviewOfMeeting } from "../reviews.ts";
+import { meetingTimeline } from "../timeline.ts";
 import type { Services } from "../services.ts";
 import { notFound, route } from "./http.ts";
 
@@ -32,6 +33,7 @@ export function meetingRoutes(app: Express, ctx: Services) {
         ideaReview: ideaReviewOfMeeting(db, m.id),
         designReview: designReviewOfMeeting(db, m.id),
         brainstorm: brainstormOfMeeting(db, m.id),
+        timeline: meetingTimeline(db, m.id),
       };
       res.json(body);
     }),
@@ -55,6 +57,7 @@ export function meetingRoutes(app: Express, ctx: Services) {
         itemById: (id) => db.getItem(id),
         discussionById: (id) => db.getDiscussion(id),
         withTranscript: req.query.transcript === "1",
+        timeline: req.query.transcript === "1" ? meetingTimeline(db, m.id) : undefined,
       });
       if (req.params.format === "json") return void res.json(brief);
       res.type("text/markdown; charset=utf-8").send(briefToMarkdown(brief));

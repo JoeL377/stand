@@ -1,4 +1,5 @@
 // Meetings: what was said (segments), where the focus was, the live board's saved state, and cost.
+import type { StageEvent, StageView } from "../../shared/timeline.ts";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentCard, Board, ChapterRecap, MeetingCost, Segment } from "../../shared/protocol.ts";
 import { enqueueConxtMeeting } from "../conxt.ts";
@@ -159,6 +160,27 @@ export function meetingsStore(db: DatabaseSync) {
       return (db.prepare("SELECT * FROM segments WHERE meeting_id = ? AND item_id IS ? ORDER BY ts").all(meetingId, itemId) as Row[]).map(
         toSegment,
       );
+    },
+    /** The same, with who moved it and why ("manual", "pin", "suggestion", "system"), for the timeline. */
+    focusEvents(meetingId: string): Array<{ id: string; ts: number; itemId: string | null; actor: string; reason: string }> {
+      return (db.prepare("SELECT id, item_id, actor, reason, ts FROM focus_events WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map((r) => ({
+        id: r.id as string,
+        ts: r.ts as number,
+        itemId: (r.item_id as string) ?? null,
+        actor: r.actor as string,
+        reason: r.reason as string,
+      }));
+    },
+    /** What the main view showed from now on (see stage_events). */
+    logStage(meetingId: string, view: StageView, ts = Date.now()) {
+      db.prepare("INSERT INTO stage_events (id, meeting_id, ts, view_json) VALUES (?, ?, ?, ?)").run(newId(12), meetingId, ts, JSON.stringify(view));
+    },
+    stageEvents(meetingId: string): StageEvent[] {
+      return (db.prepare("SELECT id, ts, view_json FROM stage_events WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map((r) => ({
+        id: r.id as string,
+        ts: r.ts as number,
+        view: JSON.parse(r.view_json as string) as StageView,
+      }));
     },
     logFocus(meetingId: string, itemId: string | null, actor: string, reason: string) {
       db.prepare("INSERT INTO focus_events (id, meeting_id, item_id, actor, reason, ts) VALUES (?, ?, ?, ?, ?, ?)").run(
