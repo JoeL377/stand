@@ -8,7 +8,7 @@
 // the map is never regrouped or dropped by a later pass, so what people are looking at stays put;
 // only a person takes one off. Two levels, never deeper: a deeper tree is unreadable on a call.
 import { z } from "zod";
-import type { BrainCaught, BrainNode, BrainstormSummary, BrainstormView, DesignContext, DesignDiagram, Segment } from "../shared/protocol.ts";
+import { UNTITLED_DESIGN, type BrainCaught, type BrainNode, type BrainstormSummary, type BrainstormView, type DesignContext, type DesignDiagram, type Segment } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { reviewedIdeas } from "./ideaReview.ts";
 import { similar } from "./notesMerge.ts";
@@ -289,8 +289,9 @@ export function startBrainstorm(
   /** Makes it a design session: the diagram it starts from, what was pasted, and the to-do its spec goes on. */
   design?: { diagram: DesignDiagram; seed: string | null; taskId: string | null },
 ): BrainstormRow {
-  const text = clip(prompt.replace(/\s+/g, " ").trim(), PROMPT_MAX);
-  if (!text) throw new BrainstormError(design ? "Say what you're designing, in a sentence." : "Say what the brainstorm is about: a topic or a question, in a sentence.");
+  // A design session can start without a topic: it is named from the talk (designSession.ts).
+  const text = clip(prompt.replace(/\s+/g, " ").trim(), PROMPT_MAX) || (design ? UNTITLED_DESIGN : "");
+  if (!text) throw new BrainstormError("Say what the brainstorm is about: a topic or a question, in a sentence.");
   const live = db.brainstormLive(roomId);
   if (live && live.prompt === text && (live.kind === "design") === !!design) return live;
   if (live) finishBrainstorm(db, roomId, null, now);

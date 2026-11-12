@@ -280,6 +280,9 @@ export interface BrainNode {
   removed?: boolean;
 }
 
+/** What a design session is called until it has a topic: one started blank is named from the talk. */
+export const UNTITLED_DESIGN = "Untitled design";
+
 /** What sort of thing a box is: it decides the box's shape and mark on the board. */
 export const DESIGN_KINDS = ["thing", "person", "screen", "store", "service", "step", "decision"] as const;
 export type DesignKind = (typeof DESIGN_KINDS)[number];

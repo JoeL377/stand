@@ -3,11 +3,11 @@ import { test } from "node:test";
 import type { BrainCaught, Segment } from "../shared/protocol.ts";
 import { brainstormsOf, finishBrainstorm, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
-import { type DiagramAnswer, DiagramKeeper, MAX_WAITING, diagramMermaid, draftSpec, isDiagramText, mermaidIn, parseSeed, saveDraftSpec, seedFromAnswer } from "./designSession.ts";
+import { type DiagramAnswer, DiagramKeeper, MAX_WAITING, UNTITLED, diagramMermaid, draftSpec, isDiagramText, mermaidIn, parseSeed, saveDraftSpec, seedFromAnswer } from "./designSession.ts";
 
 const T0 = 1_700_000_000_000;
 const seg = (n: number, speakerName: string, text: string): Segment => ({ id: `s${n}`, meetingId: "m", itemId: null, speakerId: speakerName, speakerName, kind: "speech", text, ts: T0 + n * 1000 }) as Segment;
-const none: DiagramAnswer = { boxes: [], arrows: [], extend: [], caught: [], place: [], groups: [] };
+const none: DiagramAnswer = { boxes: [], arrows: [], extend: [], caught: [], place: [], groups: [], topic: null };
 
 test("a starting diagram is read as typed: boxes, arrows, and a mermaid flowchart", () => {
   const d = parseSeed(["Task: a to-do with an owner", "- Project: a group of tasks", "Task -> Project: belongs to", "Decision", "Question → Decision: becomes", "We talked about a lot of things today."].join("\n"), T0);
@@ -43,6 +43,7 @@ test("what Stand hears is a suggestion until someone keeps it, and a dropped one
     caught: [{ id: "new1", item: "li_1" }, { id: "b1", item: "li_1" }],
     place: [],
     groups: [],
+    topic: null,
   });
   assert.equal(await k.run(talk, ["Joe Liang", "Janesh"], caught, T0, T0 + 5000), true);
   let d = k.all();
@@ -174,4 +175,20 @@ test("kinds and groups: read from a starting diagram, suggested by a pass, and w
   // The host had no group and joins Review; the transcript stays where the room saw it.
   assert.deepEqual([by("Host").group, by("Transcript").group], ["g2", "g1"]);
   assert.deepEqual(all.groups?.find((g) => g.label === "Plumbing"), { id: "g3", label: "Plumbing", detail: "Under the hood" });
+});
+
+test("a session started without a topic is named by the first pass that hears one, and only once", async () => {
+  const answers: DiagramAnswer[] = [{ ...none }, { ...none, topic: "Review flow." }, { ...none, topic: "Something else" }];
+  const contexts: string[] = [];
+  const k = new DiagramKeeper({ designDiagram: async (c) => (contexts.push(c), answers.shift() ?? null) }, UNTITLED, T0);
+  const talk = [seg(1, "Joe Liang", "Hello.")];
+  assert.equal(await k.run(talk, ["Joe Liang"], [], T0, T0 + 2000), false);
+  assert.match(contexts[0], /What the team is designing: \(not named yet/);
+  talk.push(seg(5, "Joe Liang", "We're designing the review flow."));
+  assert.equal(await k.run(talk, ["Joe Liang"], [], T0, T0 + 6000), true);
+  assert.equal(k.prompt, "Review flow");
+  talk.push(seg(9, "Joe Liang", "And more."));
+  assert.equal(await k.run(talk, ["Joe Liang"], [], T0, T0 + 10000), false);
+  assert.equal(k.prompt, "Review flow");
+  assert.match(contexts[2], /What the team is designing: Review flow/);
 });

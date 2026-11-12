@@ -59,6 +59,11 @@ export function brainstormsStore(db: DatabaseSync) {
       const cols: Record<string, string> = { status: "status", meetingId: "meeting_id", endedAt: "ended_at" };
       for (const [k, v] of Object.entries(patch)) db.prepare(`UPDATE brainstorms SET ${cols[k]} = ? WHERE id = ?`).run(v ?? null, id);
     },
+    /** A session that started without a topic got one: its sentence, and the agenda item that carries it. */
+    renameBrainstorm(id: string, prompt: string) {
+      db.prepare("UPDATE brainstorms SET prompt = ? WHERE id = ?").run(prompt, id);
+      db.prepare("UPDATE items SET title = ? WHERE id = (SELECT item_id FROM brainstorms WHERE id = ?)").run(prompt, id);
+    },
     saveBrainstormStars(id: string, starred: string[]) {
       db.prepare("UPDATE brainstorms SET stars_json = ? WHERE id = ?").run(starred.length ? JSON.stringify(starred) : null, id);
     },

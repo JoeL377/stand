@@ -8,7 +8,7 @@
 // person kept is renamed, moved or dropped by a later pass. When the call ends the diagram is saved
 // as a draft spec on a to-do, which goes through the normal design review from there.
 import { z } from "zod";
-import { DESIGN_KINDS, type BrainCaught, type DesignArrow, type DesignBox, type DesignContext, type DesignDiagram, type DesignGroup, type DesignKind, type Segment } from "../shared/protocol.ts";
+import { DESIGN_KINDS, UNTITLED_DESIGN, type BrainCaught, type DesignArrow, type DesignBox, type DesignContext, type DesignDiagram, type DesignGroup, type DesignKind, type Segment } from "../shared/protocol.ts";
 import type { Actor } from "../shared/actors.ts";
 import { type BrainstormRow, shownDiagram } from "./brainstorm.ts";
 import type { DB } from "./db.ts";
@@ -19,6 +19,7 @@ const WINDOW_MS = 2 * 60_000;
 export const MAX_BOXES = 24;
 export const MAX_ARROWS = 40;
 export const MAX_GROUPS = 8;
+export { UNTITLED_DESIGN as UNTITLED };
 /** Suggestions waiting on the room at once: past this the board stops being calm, so new ones wait. */
 export const MAX_WAITING = 8;
 const MAX_POINTS = 8;
@@ -69,6 +70,7 @@ export const DiagramAnswerSchema = z.object({
   groups: z
     .array(z.object({ label: z.string().describe("A new group's name, as used in boxes or place"), detail: z.string().describe("One line on what the group holds, at most 12 words") }))
     .describe("One entry for each group named in this answer that Groups so far doesn't have"),
+  topic: z.string().nullable().describe("Only when the session has no topic yet and the talk has made clear what is being designed: its name, at most 6 words, no full stop. Otherwise null"),
 });
 export type DiagramAnswer = z.infer<typeof DiagramAnswerSchema>;
 
@@ -85,13 +87,14 @@ Each time you get the diagram so far, with ids, and the last couple of minutes o
 - extend is for what the talk adds to a box that is there: a field it has, a rule, a limit, a concern, a decision about it.
 - Lines marked (suggested) are waiting on the room. Don't suggest them again, and don't build on them unless the talk does.
 - Things under "Dropped by the team" were refused. Never suggest them again.
+- A session can start with no topic. When "What the team is designing" says it isn't named yet, return topic as soon as the talk makes clear what the design is of, in the team's words; until then, and whenever the session has a topic, topic is null.
 - by is the first name of the person who said it, matched to the people in the meeting.
 - The caught list is the meeting's to-dos, decisions and open questions. When one is clearly about a box and isn't linked to it yet, link it in caught.
 Transcription is rough: read through misheard words. Never invent a part of the design nobody said, and never return commentary about the transcript.`;
 
 export const SEED_SYSTEM = `You turn a team's notes into the starting diagram for a design session. Each box is one thing in the design described by the notes (an object, a record, a screen, a service, a step), named as the notes name it. Each arrow says in a few words how one box relates to another, read along the arrow: "task belongs to project".
 
-Return the boxes and arrows the notes actually describe, and nothing they don't. At most ${MAX_BOXES} boxes: when the notes hold more, keep the ones the rest hang off. Every arrow joins two boxes you return, named new1, new2… by their position in boxes. Give every box its kind. When the notes fall into areas, put each box in a group named for its area, with one line in groups on what each holds: at most ${MAX_GROUPS} groups, none for a single box. Leave extend, caught and place empty, set by to null and line to 0.`;
+Return the boxes and arrows the notes actually describe, and nothing they don't. At most ${MAX_BOXES} boxes: when the notes hold more, keep the ones the rest hang off. Every arrow joins two boxes you return, named new1, new2… by their position in boxes. Give every box its kind. When the notes fall into areas, put each box in a group named for its area, with one line in groups on what each holds: at most ${MAX_GROUPS} groups, none for a single box. Leave extend, caught and place empty, set topic, by to null and line to 0.`;
 
 /** What the diagram needs from the model; null when it couldn't answer. */
 export interface DiagramModel {
@@ -269,7 +272,8 @@ export class DiagramKeeper {
 
   constructor(
     private model: DiagramModel,
-    readonly prompt: string,
+    /** What is being designed. UNTITLED until a pass names a session that started without a topic. */
+    public prompt: string,
     /** Talk before this isn't the session's. */
     private readonly since: number,
     saved?: DesignDiagram | null,
@@ -357,7 +361,7 @@ export class DiagramKeeper {
       .map((s, k) => `${from + k >= firstNew ? "NEW " : ""}[${k + 1}] [${at(s.ts, meetingStartedAt)}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
       .join("\n");
     const a = await this.model.designDiagram(
-      [`What the team is designing: ${this.prompt}`, `People: ${people.join(", ")}`, this.seed ? `What they started from:\n${clip(this.seed, 6000)}` : ""].filter(Boolean).join("\n"),
+      [`What the team is designing: ${this.prompt === UNTITLED_DESIGN ? "(not named yet: the session started without a topic)" : this.prompt}`, `People: ${people.join(", ")}`, this.seed ? `What they started from:\n${clip(this.seed, 6000)}` : ""].filter(Boolean).join("\n"),
       [
         `Boxes so far:\n${boxLines.join("\n") || "(none)"}`,
         groupLines.length ? `Groups so far:\n${groupLines.join("\n")}` : "",
@@ -372,6 +376,8 @@ export class DiagramKeeper {
     this.lastLook = talk.at(-1)!.ts;
     if (!a) return false;
     let changed = false;
+    const topic = tidy(a.topic ?? "", 80);
+    if (this.prompt === UNTITLED_DESIGN && topic) ((this.prompt = topic), (changed = true));
     const segOf = (n: number) => shown[Math.min(shown.length, Math.max(firstNew - from + 1, n)) - 1];
     const quote = (s: Segment) => ({ segmentId: s.id, ts: s.ts, speaker: s.speakerName, text: clip(s.text, 400) });
     const waiting = () => this.boxes.filter((b) => b.suggested && !b.removed).length + this.arrows.filter((x) => x.suggested && !x.removed).length;
