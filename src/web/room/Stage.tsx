@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ReviewStage } from "./ReviewStage.tsx";
 import { DesignStage } from "./DesignStage.tsx";
 import { specAuthor } from "../../shared/designReview.ts";
+import { NextCard } from "./NextCard.tsx";
 import { ViewPane, type ViewTab } from "./Views.tsx";
 import { runningExperience } from "./Experiences.tsx";
 import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
@@ -375,6 +376,26 @@ export function Stage(props: {
       errorToast(`Couldn't start the ${what}`)(err);
     }
   };
+  // Taking Stand's card draws the same way the pills do: a topic that was said starts its own map or
+  // diagram, a map with none is the map of the board's topic, and with no topic at all the pop asks.
+  const drawNext = async (what: "map" | "diagram", topic: string): Promise<boolean> => {
+    const other = what === "map" ? live?.design : live && !live.design;
+    if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return false;
+    if (what === "map" && !topic) {
+      if (!thread) return setDrawPop("map"), true;
+      send({ type: "view.open" });
+      setView("map");
+      return true;
+    }
+    try {
+      await api.startBrainstorm(state.roomId, topic, what === "diagram" ? { seed: "", taskId: null } : undefined);
+      setView(what);
+      return true;
+    } catch (err) {
+      errorToast(`Couldn't start the ${what}`)(err);
+      return false;
+    }
+  };
   // The board: the middle screen, or a tab of its own while a share or a deck has it.
   const board = (
     <ViewPane
@@ -490,6 +511,8 @@ export function Stage(props: {
 
       <div className="screen" ref={screenRef}>
         <div className="nudges">
+        {/* Someone asked for a map, a diagram or a review out loud: Stand offers it to everyone, and anyone answers. */}
+        {state.next && !props.ending && <NextCard key={state.next.id} next={state.next} roomId={state.roomId} offline={props.offline} send={send} onDraw={drawNext} />}
         {/* A quiet nudge for the host only: their click is what moves the meeting. */}
         {canSteer && !props.ending && suggested && state.suggestion && (
           <div className="nudge" role="status" title={state.suggestion.reason}>

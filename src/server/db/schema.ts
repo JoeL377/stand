@@ -508,6 +508,8 @@ export function migrate(db: DatabaseSync) {
     "UPDATE items SET archived = 1 WHERE id IN (SELECT item_id FROM brainstorms WHERE status = 'live' AND item_id IS NOT NULL); UPDATE brainstorms SET item_id = NULL WHERE status = 'live' AND item_id IS NOT NULL;",
   );
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
+  // The next steps people asked for out loud in the call (nextSteps.ts).
+  if (!meetingCols.includes("next_json")) db.exec("ALTER TABLE meetings ADD COLUMN next_json TEXT");
   // What ✦ Stand did on the board (meetingAgent.ts): its cards, which are also its log.
   if (!meetingCols.includes("agent_json")) db.exec("ALTER TABLE meetings ADD COLUMN agent_json TEXT");
   const itemCols = (db.prepare("PRAGMA table_info(items)").all() as Row[]).map((c) => c.name);

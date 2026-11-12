@@ -1,7 +1,7 @@
 // Meetings: what was said (segments), where the focus was, the live board's saved state, and cost.
 import type { StageEvent, StageView } from "../../shared/timeline.ts";
 import type { DatabaseSync } from "node:sqlite";
-import type { AgentCard, Board, ChapterRecap, MeetingCost, Segment, SpaceCost } from "../../shared/protocol.ts";
+import type { AgentCard, Board, ChapterRecap, MeetingCost, NextStep, Segment, SpaceCost } from "../../shared/protocol.ts";
 import { enqueueConxtMeeting } from "../conxt.ts";
 import { newId } from "../ids.ts";
 import type { ListItem } from "../liveList.ts";
@@ -150,6 +150,13 @@ export function meetingsStore(db: DatabaseSync) {
     },
     saveList(meetingId: string, items: ListItem[]) {
       db.prepare("UPDATE meetings SET list_json = ? WHERE id = ?").run(JSON.stringify(items), meetingId);
+    },
+    saveMeetingNext(meetingId: string, steps: NextStep[]) {
+      db.prepare("UPDATE meetings SET next_json = ? WHERE id = ?").run(steps.length ? JSON.stringify(steps) : null, meetingId);
+    },
+    meetingNext(meetingId: string): NextStep[] {
+      const r = db.prepare("SELECT next_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;
+      return r?.next_json ? (JSON.parse(r.next_json as string) as NextStep[]) : [];
     },
     meetingList(meetingId: string): ListItem[] | null {
       const r = db.prepare("SELECT list_json FROM meetings WHERE id = ?").get(meetingId) as Row | undefined;

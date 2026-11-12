@@ -188,6 +188,16 @@ export function RecapPage() {
             </>
           )}
         </p>
+        {/* Reviews people asked for out loud that didn't happen in the call (server/nextSteps.ts). */}
+        {data.next?.map((n) => (
+          <span key={n.id} className="rp-pill rc-asked" title={`${n.by.split(/\s+/)[0]} asked for it in the call`}>
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>
+            Suggested next · {n.kind === "design-review" ? "Design review" : "Product review"}
+            {n.topic ? `: ${n.topic}` : ""}
+          </span>
+        ))}
         {data.brainstorm && (
           <Link className="rp-pill rc-review" to={brainstormHref(data.roomId, data.brainstorm.id)}>
             {data.brainstorm.design ? `Design session · ${designCount(data.brainstorm.design)}` : `Brainstorm · ${brainCount(data.brainstorm)}`}
