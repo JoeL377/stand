@@ -23,7 +23,7 @@ Before starting on a to-do, call start_work with its ref: one call marks it as y
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Both list mentions_you: tasks where someone tagged your person with @Name in a comment and waits on them. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. When your person asks for a review of that plan, or it has a question the team must decide, request_design_review puts it on the space's next design review with your questions; don't ask for one otherwise. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
-A project is a named group of a space's to-dos, open questions and decisions: a feature or a workstream. list_spaces lists each space's projects. When one fits a new to-do, give it with create_action (project); move a to-do with update_action. When your person asks for a new project -> create_project. What's in one -> get with its ref, or list_actions with project.
+A project is a named group of a space's to-dos, open questions and decisions: a feature or a workstream. list_spaces lists each space's projects. When one fits a new to-do, give it with create_action (project); move a to-do with update_action. When your person asks for a new project -> create_project. What's in one -> get with its ref, or list_actions with project. list_spaces lists projects in the team's order, most important first; when your person asks to change it -> order_projects.
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
 When your person wants to design something with the team in a call -> start_design_session, with the context they should have to hand.
@@ -136,7 +136,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "List my Stand spaces",
       description:
-        "The spaces this person is in, with their purpose, open to-do counts, their projects (ref, name, goal, open to-dos), their items (ids for get_item_context), latest meeting id, and live: the meeting running now with who's in it, or null. Check live before merging to Stand's own repo: a merge redeploys Stand and cuts a call. It only covers this person's spaces.",
+        "The spaces this person is in, with their purpose, open to-do counts, their projects in the team's order, most important first (ref, name, goal, open to-dos), their items (ids for get_item_context), latest meeting id, and live: the meeting running now with who's in it, or null. Check live before merging to Stand's own repo: a merge redeploys Stand and cuts a call. It only covers this person's spaces.",
       inputSchema: {},
       annotations: READ,
     },
@@ -509,6 +509,22 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: WRITE,
     },
     ({ space, name, goal, item_id, model }) => run(() => api.createProject(as(model), { space, name, goal, itemId: item_id }, baseUrl)),
+  );
+
+  server.registerTool(
+    "order_projects",
+    {
+      title: "Set the order of a Stand space's projects",
+      description:
+        "Sets the order of a space's projects, most important first. It is one order for the whole space, as the Tasks tab shows it, where people drag projects to change it. Give the projects you want at the top, in order; the ones you leave out keep their order after them. Call it only when your person asks to change the order. When you choose what to work on next, read the order in list_spaces.",
+      inputSchema: {
+        space: z.string().describe("The space's id or name (from list_spaces)"),
+        projects: z.array(z.string()).min(1).describe("Projects by ref (stand:project/<id>) or name, most important first"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ space, projects, model }) => run(() => api.orderProjects(as(model), { space, projects }, baseUrl)),
   );
 
   server.registerTool(

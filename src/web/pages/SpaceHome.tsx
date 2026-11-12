@@ -17,7 +17,7 @@ import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
-import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, GripIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
@@ -883,16 +883,46 @@ function TasksTab(props: {
   const mentioned = open.filter((n) => tagged.has(n.id)).sort((a, b) => tagged.get(b.id)![0].ts - tagged.get(a.id)![0].ts);
   const waiting = open.filter((n) => work[n.id]?.ready && !tagged.has(n.id));
   const rest = open.filter((x) => !work[x.id]?.ready && !tagged.has(x.id));
+  // The space's one order of projects, most important first. A move shows at once and saves behind it.
+  const [order, setOrder] = useState<string[] | null>(null);
+  useEffect(() => setOrder(null), [props.projects]);
+  const projects = order ? order.map((id) => props.projects.find((p) => p.id === id)).filter((p): p is Project => !!p) : props.projects;
+  const moveProject = (id: string, to: number) => {
+    const ids = projects.map((p) => p.id).filter((x) => x !== id);
+    const at = Math.max(0, Math.min(to, ids.length));
+    if (projects[at]?.id === id) return;
+    ids.splice(at, 0, id);
+    setOrder(ids);
+    api.updateProject(props.roomId, id, { position: at }).then(props.reload, (err) => {
+      setOrder(null);
+      errorToast("Couldn't move the project")(err);
+    });
+  };
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
+  const dropOn = (target: string, after: boolean) => {
+    if (!dragging || dragging === target) return;
+    const ids = projects.map((p) => p.id).filter((x) => x !== dragging);
+    moveProject(dragging, ids.indexOf(target) + (after ? 1 : 0));
+  };
   // One section per project, in the list's order; then Unassigned. A project with nothing open
   // stays until someone archives it, and an archived one shows only while something open is in it.
   const inProject = new Map<string, TaskNote[]>();
   for (const n of rest) {
-    const k = n.project && props.projects.some((p) => p.id === n.project) ? n.project : "";
+    const k = n.project && projects.some((p) => p.id === n.project) ? n.project : "";
     inProject.set(k, [...(inProject.get(k) ?? []), n]);
   }
-  const sections = props.projects.filter(
+  const sections = projects.filter(
     (p) => (props.projectFilter ? p.id === props.projectFilter : !p.archived || inProject.has(p.id)) && (!props.mine || inProject.has(p.id)),
   );
+  const canOrder = !props.projectFilter && sections.length > 1;
+  /** Up or down past the next project in view. */
+  const nudge = (id: string, dir: -1 | 1) => {
+    const next = sections[sections.findIndex((p) => p.id === id) + dir];
+    if (!next) return;
+    const ids = projects.map((p) => p.id).filter((x) => x !== id);
+    moveProject(id, ids.indexOf(next.id) + (dir > 0 ? 1 : 0));
+  };
   const unassigned = inProject.get("") ?? [];
   const showUnassigned = (!props.projectFilter || props.projectFilter === "none") && (unassigned.length > 0 || props.projects.length === 0);
   const done = closed.filter((n) => stateOf(n) !== "dropped");
@@ -1052,12 +1082,55 @@ function TasksTab(props: {
           {list(waiting)}
         </div>
       )}
-      {sections.map((p) => {
+      {sections.map((p, i) => {
         const notes = inProject.get(p.id) ?? [];
         const isFolded = folded.has(p.id);
+        const drop = dropAt?.id === p.id && dragging !== p.id ? (dropAt.after ? " drop-after" : " drop-before") : "";
         return (
-          <section key={p.id} className={`sh-project${isFolded ? " folded" : ""}`} aria-label={p.name}>
-            <ProjectHead project={p} count={notes.length} folded={isFolded} onFold={() => toggleFold(p.id)} roomId={props.roomId} reload={props.reload} />
+          <section
+            key={p.id}
+            className={`sh-project${isFolded ? " folded" : ""}${dragging === p.id ? " dragging" : ""}${drop}`}
+            aria-label={p.name}
+            onDragOver={
+              dragging
+                ? (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const box = e.currentTarget.getBoundingClientRect();
+                    const after = e.clientY > box.top + box.height / 2;
+                    if (dropAt?.id !== p.id || dropAt.after !== after) setDropAt({ id: p.id, after });
+                  }
+                : undefined
+            }
+            onDrop={
+              dragging
+                ? (e) => {
+                    e.preventDefault();
+                    if (dropAt) dropOn(dropAt.id, dropAt.after);
+                    setDragging(null);
+                    setDropAt(null);
+                  }
+                : undefined
+            }
+          >
+            <ProjectHead
+              project={p}
+              count={notes.length}
+              folded={isFolded}
+              onFold={() => toggleFold(p.id)}
+              roomId={props.roomId}
+              reload={props.reload}
+              order={
+                canOrder
+                  ? {
+                      onUp: i > 0 ? () => nudge(p.id, -1) : undefined,
+                      onDown: i < sections.length - 1 ? () => nudge(p.id, 1) : undefined,
+                      onDragStart: () => setDragging(p.id),
+                      onDragEnd: () => (setDragging(null), setDropAt(null)),
+                    }
+                  : undefined
+              }
+            />
             {!isFolded && (notes.length ? byOwner(notes) : <p className="sh-card-empty small">Nothing open in this project.</p>)}
           </section>
         );
@@ -1090,9 +1163,19 @@ function TasksTab(props: {
   );
 }
 
-/** A project section's header: fold it, and Rename, Edit goal, Archive or Delete from its menu. */
-function ProjectHead(props: { project: Project; count: number; folded: boolean; onFold: () => void; roomId: string; reload: () => void }) {
-  const { project: p } = props;
+/** A project section's header: fold it, drag it by its handle to change the order, and Move up, Move
+ *  down, Rename, Edit goal, Archive or Delete from its menu. */
+function ProjectHead(props: {
+  project: Project;
+  count: number;
+  folded: boolean;
+  onFold: () => void;
+  roomId: string;
+  reload: () => void;
+  /** Left out when the order can't change here: one project in view, or a filter on. */
+  order?: { onUp?: () => void; onDown?: () => void; onDragStart: () => void; onDragEnd: () => void };
+}) {
+  const { project: p, order } = props;
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<"name" | "goal" | null>(null);
   const ref = useDismiss<HTMLSpanElement>(menu, () => setMenu(false));
@@ -1120,6 +1203,24 @@ function ProjectHead(props: { project: Project; count: number; folded: boolean; 
     );
   return (
     <div className="sh-project-head">
+      {order && (
+        <span
+          className="sh-project-grip"
+          draggable
+          title="Drag to change the order"
+          aria-hidden
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", p.name);
+            const section = e.currentTarget.closest("section");
+            if (section) e.dataTransfer.setDragImage(section, 12, 12);
+            order.onDragStart();
+          }}
+          onDragEnd={order.onDragEnd}
+        >
+          <GripIcon />
+        </span>
+      )}
       <button type="button" className="sh-project-fold" aria-expanded={!props.folded} onClick={props.onFold}>
         <ChevronIcon />
         <span className="sh-project-name">{p.name}</span>
@@ -1133,6 +1234,16 @@ function ProjectHead(props: { project: Project; count: number; folded: boolean; 
         </button>
         {menu && (
           <span className="sh-menu" role="menu">
+            {order && (
+              <>
+                <button role="menuitem" disabled={!order.onUp} onClick={() => (setMenu(false), order.onUp?.())}>
+                  Move up
+                </button>
+                <button role="menuitem" disabled={!order.onDown} onClick={() => (setMenu(false), order.onDown?.())}>
+                  Move down
+                </button>
+              </>
+            )}
             <button role="menuitem" onClick={() => (setMenu(false), setEditing("name"))}>
               Rename
             </button>
