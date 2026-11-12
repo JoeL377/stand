@@ -16,6 +16,7 @@ import { CloseIcon } from "./icons.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
 import { LastReview, designReviewHref } from "./pages/DesignReviewPage.tsx";
 import { PlanReviewBody } from "./PlanReview.tsx";
+import { AnswerForm, answeredToast } from "./Questions.tsx";
 import { MentionText } from "./Mentions.tsx";
 import { errorToast } from "./Toasts.tsx";
 import { OwnerPicker } from "./OwnerPicker.tsx";
@@ -181,6 +182,28 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange
               <p className="td-done-when">
                 <strong>Dropped because</strong> {n.dropReason}
               </p>
+            )}
+
+            {n.kind === "question" && (task.answer || state === "open" || state === "doing") && (
+              <section className="td-section">
+                <h3>Answer</h3>
+                {task.answer ? (
+                  <p className="td-answer">{task.answer.text}</p>
+                ) : (
+                  <AnswerForm
+                    roomId={task.roomId}
+                    note={n}
+                    onDone={(done) => {
+                      void load();
+                      onListChange?.();
+                      answeredToast(task.roomId, done, () => {
+                        void load();
+                        onListChange?.();
+                      });
+                    }}
+                  />
+                )}
+              </section>
             )}
 
             <section className="td-section">

@@ -12,4 +12,5 @@ One file per user-facing feature: how a person reaches it, how `drive.cjs` drive
 | Design review | [design-review.md](design-review.md) | `design-review.cjs` (its own script) | yes, without the AI brief (needs a key) |
 | Projects | [projects.md](projects.md) | `projects.cjs` (its own script) | yes, with the scripted demo |
 | Task owners | [task-owners.md](task-owners.md) | `task-owner.cjs` (its own script) | yes |
+| Open questions: answer, drop, sweep | [questions.md](questions.md) | `questions.cjs` (its own script, on the preview's sample data) | yes, without the sweep's model pass (needs a key) |
 | Bar notes and snaps | [bar-notes-and-snaps.md](bar-notes-and-snaps.md) | none | no, needs the Mac app |

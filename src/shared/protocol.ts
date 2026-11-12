@@ -240,7 +240,8 @@ export interface Note {
   /** A spec's id, for a task that is part of one. */
   parentId?: string | null;
   /** What closed it: "pr:<url>" for a merged PR, "agent" for an agent's report, "confirmed" for a
-   *  person's click with nothing to show, "moved" for a to-do carried to another space. */
+   *  person's click with nothing to show, "moved" for a to-do carried to another space, "answered"
+   *  for a question someone answered with a decision. */
   closedBy?: string | null;
   /** Dropped: why, in a line. */
   dropReason?: string | null;
@@ -677,6 +678,32 @@ export interface TaskDetail {
   people: Array<{ id: string; name: string }>;
   /** Comments on it that tag you and wait on you, newest first. */
   mentionsYou: TaskMention[];
+  /** A question someone answered: the decision that answers it. */
+  answer?: { id: string; text: string } | null;
+}
+
+/** One way to close an open question: an answer to keep as a decision, a decision the space
+ *  already has, or a drop with why. */
+export type QuestionClose = { id: string } & ({ answer: string } | { decisionId: string } | { drop: string });
+
+/** What closing a question left: the question as it is now, and the decision that answers it
+ *  (made: this close wrote it). */
+export interface QuestionClosed {
+  note: Note;
+  decision?: { id: string; text: string; made: boolean };
+}
+
+/** Stand's proposal for one open question in a sweep of a space's questions. A person confirms it. */
+export interface SweepProposal {
+  id: string;
+  text: string;
+  /** When the meeting it was asked in started. */
+  askedAt: number;
+  /** answered: a decision the space has settles it. drop: nobody needs the answer any more. */
+  how: "answered" | "drop";
+  decision?: { id: string; text: string };
+  /** One line someone can check. */
+  why: string;
 }
 
 /** A comment that tags someone with @Name: it puts the task first in their task list until they
@@ -1315,6 +1342,8 @@ export interface SpaceFeed {
       replacedBy?: ReplacedBy;
       /** What Stand thinks replaced it. It stays kept until someone confirms. */
       mayBeReplacedBy?: ReplacedBy;
+      /** The open question someone answered with it. */
+      answers?: string;
     }
   >;
   /** Open questions from all its meetings that no later decision answered, newest first. */

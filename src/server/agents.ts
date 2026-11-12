@@ -23,7 +23,7 @@ import { IDEA_SLIDES_MAX, ideaReviewView, reviewedIdeas, setUpIdeaReview } from 
 import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
 import { recordMentions } from "./mentions.ts";
-import { settledView } from "./spaceSettle.ts";
+import { answerOf, openQuestions, settledView } from "./spaceSettle.ts";
 import { CHECK_INSTRUCTIONS, CHECK_LEASE_MS, CHECK_VERSION, SHOW_FROM } from "./decisionCheck.ts";
 
 /** A position as one line, with the person's own words when the meeting-end run kept them. */
@@ -170,6 +170,23 @@ export function agentApi(deps: AgentDeps) {
           may_be_replaced_by: n.mayBeReplacedBy ? { ref: refOf("decision", n.mayBeReplacedBy.noteId), text: n.mayBeReplacedBy.text } : undefined,
         }
       : {};
+
+  /** Where a question stands, for agents: open, answered (with the decision) or dropped (with why). */
+  const questionInfo = (roomId: string, n: Note) => {
+    const state = stateOf(n);
+    const by = state === "done" ? answerOf(db, n) : null;
+    const settled = by || isClosed(state) ? undefined : settledView(db, roomId).answered.find((x) => x.id === n.id);
+    return {
+      status: state === "dropped" ? "dropped" : state === "done" || settled ? "answered" : "open",
+      answered_by: by ? { ref: refOf("decision", by.id), text: by.text } : settled ? { text: settled.answeredBy } : undefined,
+      why_dropped: state === "dropped" ? (n.dropReason ?? undefined) : undefined,
+    };
+  };
+  /** The questions someone answered with this decision. */
+  const answersOf = (roomId: string, decision: Note) => {
+    const asked = db.notesByIds(db.roomLinks(roomId, "leaves").filter((l) => l.toId === decision.id).map((l) => l.fromId));
+    return asked.length ? asked.map((q) => ({ ref: refOf("question", q.id), text: q.text })) : undefined;
+  };
 
   /** Who's on each to-do right now and what waits to ship: the same reading as the pills on the Tasks page. */
   const workOn = (notes: Note[]) => {
@@ -637,6 +654,8 @@ export function agentApi(deps: AgentDeps) {
         done_by: n.doneBy ?? undefined,
         ...(n.kind === "decision" ? decisionInfo(settledView(db, r.room.id).decided.find((x) => x.id === n.id)) : {}),
         why_dropped: n.kind === "action" && n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
+        ...(n.kind === "question" ? questionInfo(r.room.id, n) : {}),
+        answers: n.kind === "decision" ? answersOf(r.room.id, n) : undefined,
         ...where,
         topic,
         decided_with_it: sameTopic.filter((x) => x.kind === "decision").map((x) => x.text),
@@ -1414,7 +1433,7 @@ export function agentApi(deps: AgentDeps) {
       const room = findSpace(caller, opts.space);
       const since = opts.since ? Date.parse(opts.since) : Date.now() - WHATS_NEW_DAYS * 86_400_000;
       if (Number.isNaN(since)) throw new AgentError(`"${clip(opts.since ?? "", 40)}" isn't a date. Use one like 2026-10-11 or 2026-10-11T08:00.`);
-      const recent = (kind: "decision" | "question" | "context") => db.spaceNotes(room.id, kind, 200).filter((n) => n.ts >= since);
+      const recent = (kind: "decision" | "context") => db.spaceNotes(room.id, kind, 200).filter((n) => n.ts >= since);
       const standing = new Map(settledView(db, room.id).decided.map((n) => [n.id, n]));
       const line = (kind: RefKind) => (n: Note) => ({
         ...decisionInfo(standing.get(n.id)), ref: refOf(kind, n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, kind, n.id) });
@@ -1457,8 +1476,10 @@ export function agentApi(deps: AgentDeps) {
           })),
         chats: ((channels) => db.roomChatSessions(room.id, since).map((s) => chatInfo(s, channels)))(db.roomChannels(room.id)),
         decided: recent("decision").map(line("decision")),
-        open_questions: recent("question")
-          .filter((n) => !isClosed(stateOf(n)))
+        // As the Tasks tab lists them: without the ones a later decision settled.
+        open_questions: openQuestions(db, room.id)
+          .filter((n) => n.ts >= since)
+          .reverse()
           .map(line("question")),
         context: recent("context").map(line("context")),
         being_worked_on: open
@@ -1502,6 +1523,86 @@ export function agentApi(deps: AgentDeps) {
           url: refUrl(baseUrl, "context", n.id),
         })),
       };
+    },
+
+    /** A space's open questions, oldest first, as its Tasks tab lists them. */
+    listQuestions(caller: Caller, opts: { space: string }, baseUrl = "") {
+      const room = findSpace(caller, opts.space);
+      const open = grouped(room.id, openQuestions(db, room.id));
+      return {
+        space: { id: room.id, name: room.name },
+        count: open.length,
+        questions: open.slice(0, 200).map((n) => ({
+          ref: refOf("question", n.id),
+          text: n.text,
+          asked: day(n.meetingStartedAt),
+          project: projectInfo(n),
+          url: refUrl(baseUrl, "question", n.id),
+        })),
+        note: open.length > 200 ? "Showing the oldest 200." : undefined,
+        how: "close_question closes one: with answer (kept as a decision), with decision (one the space already has that answers it), or with drop (why nobody needs the answer).",
+      };
+    },
+
+    /** Closes an open question. An answer is kept as a decision the question points to, since a
+     *  resolved question becomes a decision; a decision the space already has can answer it
+     *  instead; or it is dropped, with why. */
+    closeQuestion(caller: Caller, args: { ref: string; answer?: string; decision?: string; drop?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:question/${args.ref}`);
+      if (r.note?.kind !== "question") throw new AgentError("Give an open question: stand:question/<id>.");
+      const q = r.note;
+      const answer = oneLine(args.answer, 500);
+      const given = args.decision?.trim() ?? "";
+      const drop = args.drop === undefined ? null : oneLine(args.drop, 200);
+      if ([!!answer, !!given, drop !== null].filter(Boolean).length !== 1)
+        throw new AgentError("Give one of answer (the answer, in a line that stands on its own), decision (the decision that already answers it) or drop (why nobody needs the answer).");
+      if (isClosed(stateOf(q))) throw new AgentError(`That question is already ${q.state === "dropped" ? "dropped" : "answered"}.`);
+      const by = byOf(caller);
+      const actor = actorOf(caller);
+      const ref = refOf("question", q.id);
+      if (drop !== null) {
+        db.setTaskState(r.room.id, q.id, { state: "dropped", by, actor, reason: drop || null });
+        deps.notify(r.room.id, "followups");
+        return { ref, status: "dropped", why_dropped: drop || undefined };
+      }
+      let decision: Note;
+      if (answer) {
+        decision = db.addOutsideMeeting(r.room.id, { kind: "decision", text: answer, owner: null, itemId: q.itemId }, by);
+        db.setAddedActor(decision.id, actor);
+        // The answer goes in the project its question is in.
+        const [asked, made] = grouped(r.room.id, [q, decision]);
+        if (asked.project && !asked.projectSuggested && made.project !== asked.project) db.setNoteProject(r.room.id, decision.id, { projectId: asked.project, by });
+      } else {
+        const d = resolve(caller, given.includes("/") ? given : `stand:decision/${given}`);
+        if (d.note?.kind !== "decision" || d.room.id !== r.room.id) throw new AgentError("decision takes a decision from the same space: stand:decision/<id>.");
+        decision = d.note;
+      }
+      for (const l of db.linksFrom([q.id], "leaves")) db.removeLink(l.fromId, l.toId, "leaves");
+      db.addLink(r.room.id, q.id, decision.id, "leaves", by, actor);
+      db.setTaskState(r.room.id, q.id, { state: "done", by, actor, closedBy: "answered" });
+      deps.notify(r.room.id, "followups");
+      return {
+        ref,
+        status: "answered",
+        answered_by: { ref: refOf("decision", decision.id), text: decision.text, new: answer ? true : undefined, url: refUrl(baseUrl, "decision", decision.id) },
+        shows_on: "The question moves to Done on the space's Tasks tab, with its answer. The decision is on the Decisions tab.",
+      };
+    },
+
+    /** Opens a closed question again. Its answer stays a decision, unless this takes back the answer
+     *  just written (undo: that decision's id). */
+    reopenQuestion(caller: Caller, args: { ref: string; undo?: string }) {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:question/${args.ref}`);
+      if (r.note?.kind !== "question") throw new AgentError("Give a question: stand:question/<id>.");
+      const links = db.linksFrom([r.note.id], "leaves");
+      for (const l of links) db.removeLink(l.fromId, l.toId, "leaves");
+      const note = db.setTaskState(r.room.id, r.note.id, { state: "open", by: byOf(caller) });
+      const made = args.undo && links.some((l) => l.toId === args.undo) ? db.getNote(args.undo) : null;
+      if (made?.kind === "decision" && db.getMeeting(made.meetingId)?.added) db.removeNote(made.id);
+      deps.notify(r.room.id, "followups");
+      return note;
     },
 
     /** Changes a to-do: its wording, owner or state, and adds a summary to its log. */
