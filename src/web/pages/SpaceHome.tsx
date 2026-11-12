@@ -248,12 +248,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const filtered = projectProblem(projects, projectFilter);
 
   const reviews = feed?.reviews ?? [];
+  /** The review that is waiting to run, when it has slides: it leads the list, marked Next. */
+  const nextReview = feed?.review && feed.review.status !== "done" && feed.review.kind !== "ideas" && feed.review.slides.length ? feed.review : null;
   const designReviews = feed?.designReviews ?? [];
   const ran = (feed?.brainstorms ?? []).filter((b) => b.status === "done");
   const brainstorms = ran.filter((b) => !b.design);
   const sessions = ran.filter((b) => b.design);
   const kinds = [
-    { key: "review" as const, label: "Product reviews", n: reviews.length },
+    { key: "review" as const, label: "Product reviews", n: reviews.length + (nextReview ? 1 : 0) },
     { key: "design" as const, label: "Design reviews", n: designReviews.length },
     { key: "brainstorm" as const, label: "Brainstorms", n: brainstorms.length },
     { key: "session" as const, label: "Design sessions", n: sessions.length },
@@ -434,11 +436,20 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                 </div>
               )}
               {kind && (
-                <ul className="sh-rows">
+                <ul className="sh-rows by-kind">
+                  {kind === "review" &&
+                    nextReview && (
+                      <KindRow to={reviewHref(room.id, "next")} name="Product review" at={null}>
+                        <span className="sh-what" dir="auto">{reviewName(nextReview.slides.map((x) => x.name || x.title), nextReview.slides.length)}</span>
+                        <span className="sh-what sh-count muted">{nextReview.slides.length} {nextReview.slides.length === 1 ? "slide" : "slides"}</span>
+                        <span className="rp-pill sh-next">Next</span>
+                      </KindRow>
+                    )}
                   {kind === "review" &&
                     reviews.map((r) => (
                       <KindRow key={r.id} to={reviewHref(room.id, r.id)} name="Product review" at={r.startedAt}>
-                        <span className="sh-what muted">{r.slides} {r.slides === 1 ? "slide" : "slides"}</span>
+                        <span className="sh-what" dir="auto">{reviewName(r.titles ?? [], r.slides)}</span>
+                        <span className="sh-what sh-count muted">{r.slides} {r.slides === 1 ? "slide" : "slides"}</span>
                         <OutcomeCounts outcomes={r.outcomes} />
                       </KindRow>
                     ))}
@@ -1451,6 +1462,12 @@ export function DesignSessionPop(props: { todos: Array<{ id: string; text: strin
 }
 
 /** A review or brainstorm that ran, as a row that opens its page. */
+/** A product review has no name of its own: its first slides say which one it is. */
+const reviewName = (titles: Array<string | null | undefined>, slides: number) => {
+  const shown = titles.map((t) => (t ?? "").trim()).filter(Boolean).slice(0, 3);
+  return shown.join(" · ") + (slides > shown.length && shown.length ? ` +${slides - shown.length}` : "");
+};
+
 function KindRow(props: { to: string; name: string; at: number | null; children: React.ReactNode }) {
   return (
     <li className="sh-row">
