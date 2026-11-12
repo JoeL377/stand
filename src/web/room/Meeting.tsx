@@ -621,8 +621,8 @@ export function Meeting(props: {
               <span>Pop out</span>
             </button>
           )}
-          {/* Anyone in the call can start a review; finishing one stays with the host, who steers it. */}
-          {state && (canSteer || !runningExperience(state.items)) && (
+          {/* Anyone in the call can start a review and finish it. */}
+          {state && (
             <ExperienceControl roomId={roomId} running={runningExperience(state.items)} disabled={writingUp || !room.connected} />
           )}
           {canSteer && (!caps.livekit || !caps.llm) ? (
