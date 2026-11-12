@@ -1,5 +1,6 @@
 // Chat in a space: talk in writing between meetings. A channel is one place the text comes from,
 // a session is one stretch of talk in it (a meetings row of kind "chat"), a message is a segment.
+import type { DiscussionOutcome } from "./protocol.ts";
 
 export interface Channel {
   id: string;
@@ -43,7 +44,31 @@ export interface ChatMessage {
 /** What the chat tells whoever listens (the space's event stream). */
 export type ChatEvent =
   | { type: "message"; message: ChatMessage }
-  | { type: "session"; channelId: string; sessionId: string; open: boolean };
+  | { type: "session"; channelId: string; sessionId: string; open: boolean }
+  /** What Stand caught from a session changed: read it again. */
+  | { type: "notes"; channelId: string; sessionId: string };
+
+/** A to-do, open question or decision Stand caught from chat, as the thread shows it. */
+export interface CaughtLine {
+  id: string;
+  kind: "action" | "question" | "decision";
+  text: string;
+  owner: string | null;
+  /** Done or dropped. */
+  closed: boolean;
+  /** The message it came from, once the session has closed and its words were found. */
+  messageId: string | null;
+  /** When Stand caught it: until it has a message, it sits after the last one written by then. */
+  ts: number;
+}
+
+/** What Stand made of one session: the lines it caught, its topics, and its summary once it has closed. */
+export interface ChatCaught {
+  sessionId: string;
+  summary: string | null;
+  topics: Array<{ id: string; topic: string; outcome: DiscussionOutcome }>;
+  lines: CaughtLine[];
+}
 
 /** What the Chat tab opens on. */
 export interface ChatThread {
@@ -52,6 +77,8 @@ export interface ChatThread {
   messages: ChatMessage[];
   /** The sessions those messages are in. */
   sessions: ChatSession[];
+  /** What Stand caught from those sessions, for the ones it caught something from. */
+  caught: ChatCaught[];
   /** The seq of the last message you have read. */
   readUpTo: number;
   /** The space's people, to tag with @. */

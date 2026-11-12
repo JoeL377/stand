@@ -35,17 +35,22 @@ const cleanText = (v: unknown) => (typeof v === "string" ? v.replace(/\r\n?/g, "
 
 export class Chat {
   private sweeper: ReturnType<typeof setInterval> | null = null;
+  private readonly quietMs: number;
 
   constructor(
     private readonly db: DB,
     /** Told after each change is saved. */
     private readonly onEvent: (roomId: string, e: ChatEvent) => void = () => {},
-  ) {}
+    /** quietMs: the quiet that closes a session, when it isn't the hour (a run that proves the close). */
+    opts: { quietMs?: number } = {},
+  ) {
+    this.quietMs = opts.quietMs ?? CHAT_QUIET_MS;
+  }
 
   /** Sessions the last run left open close if they went quiet meanwhile, and from now on as they do. */
   start() {
     this.sweep();
-    this.sweeper ??= setInterval(() => this.sweep(), SWEEP_MS);
+    this.sweeper ??= setInterval(() => this.sweep(), Math.min(SWEEP_MS, this.quietMs));
     this.sweeper.unref();
   }
 
@@ -130,7 +135,7 @@ export class Chat {
   }
 
   private due(s: ChatSession, now: number) {
-    return now - s.endedAt >= CHAT_QUIET_MS || now - s.startedAt >= CHAT_MAX_AGE_MS || s.messages >= CHAT_MAX_MESSAGES;
+    return now - s.endedAt >= this.quietMs || now - s.startedAt >= CHAT_MAX_AGE_MS || s.messages >= CHAT_MAX_MESSAGES;
   }
 
   private close(s: ChatSession, tell: ChatEvent[]) {

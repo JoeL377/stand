@@ -84,6 +84,8 @@ export function meetingsStore(db: DatabaseSync) {
         chapters: (r.chapters_json ? JSON.parse(r.chapters_json as string) : []) as ChapterRecap[],
         /** Not a meeting: the holder of a to-do someone added by hand (see addTask). */
         added: r.kind === "added",
+        /** Not a meeting: a stretch of a space's chat (chat.ts). */
+        chat: r.kind === "chat",
       };
     },
     listMeetings(roomId: string) {

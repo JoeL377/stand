@@ -619,8 +619,8 @@ export interface TaskLink {
 export interface TaskDetail {
   note: Note;
   roomId: string;
-  /** The meeting it came out of; null for one someone added by hand. */
-  meeting: { id: string; startedAt: number } | null;
+  /** The meeting it came out of, or the stretch of chat (chat: true); null for one someone added by hand. */
+  meeting: { id: string; startedAt: number; chat?: boolean } | null;
   /** Agents' work on it, with the latest plan or spec even when nothing's been reported. */
   work: ActionWork;
   waitsOn: TaskLink[];
@@ -736,6 +736,8 @@ export interface NoteFrom {
   } | null;
   /** Not from a meeting: someone added it by hand (an agent, through the MCP), and who. startedAt is when. */
   addedBy?: string;
+  /** Not from a meeting: Stand caught it in the space's chat. meetingId is that stretch of chat. */
+  chat?: boolean;
 }
 
 /** One thing the agent proposes for the agenda, with why. Nothing joins the
