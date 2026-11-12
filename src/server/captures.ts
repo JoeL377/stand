@@ -5,7 +5,7 @@
 // becomes a to-do or decision by itself.
 
 import { brainstormsOf } from "./brainstorm.ts";
-import type { SpaceFeed } from "../shared/protocol.ts";
+import type { Note, SpaceFeed } from "../shared/protocol.ts";
 import { designReviewSummary, designReviewsRan } from "./designReviews.ts";
 import { ideaReviewsOf } from "./ideaReview.ts";
 import { reviewView, reviewsDone } from "./reviews.ts";
@@ -158,6 +158,9 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
   const gone = new Set(archived.map((a) => a.ref));
   const keep = (kind: string) => (x: { id: string }) => !gone.has(`${kind}:${x.id}`);
   const { decided, open, answered } = settledView(db, roomId);
+  // Each to-do, question and decision with the project it is in (shared/projects.ts).
+  const graph = db.projectGraph(roomId);
+  const grouped = <T extends Note>(notes: T[]) => db.withProjects(roomId, notes, graph);
   return {
     archived,
     // Between meetings: what the next one will open on. During one: what it opened on.
@@ -176,16 +179,18 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
       .map((j) => ({ ...j, snaps: linkSnaps(db.jotSnaps(j.id), [], [], baseUrl) })),
     meetings: db.feedMeetings(roomId).filter(keep("meeting")),
     updates: db.roomUpdates(roomId, 0, FEED_UPDATES),
-    decided: withFrom(db, decided.filter(keep("decision")).slice(0, FEED_NOTES)),
+    decided: grouped(withFrom(db, decided.filter(keep("decision")).slice(0, FEED_NOTES))),
     // A question someone answered or dropped by hand leaves Open for the Tasks tab's Done and Dropped.
-    open: withFrom(db, open.filter(keep("question")).filter((n) => !isClosed(stateOf(n))).slice(0, FEED_NOTES)),
+    open: grouped(withFrom(db, open.filter(keep("question")).filter((n) => !isClosed(stateOf(n))).slice(0, FEED_NOTES))),
     context: db.spaceContext(roomId, FEED_NOTES),
-    closedQuestions: withFrom(
-      db,
-      [...open.filter((n) => isClosed(stateOf(n))), ...answered]
-        .filter(keep("question"))
-        .sort((a, b) => (b.doneAt ?? b.ts) - (a.doneAt ?? a.ts))
-        .slice(0, FEED_NOTES),
+    closedQuestions: grouped(
+      withFrom(
+        db,
+        [...open.filter((n) => isClosed(stateOf(n))), ...answered]
+          .filter(keep("question"))
+          .sort((a, b) => (b.doneAt ?? b.ts) - (a.doneAt ?? a.ts))
+          .slice(0, FEED_NOTES),
+      ),
     ),
   };
 }

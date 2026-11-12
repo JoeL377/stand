@@ -1,6 +1,6 @@
 // Spaces: the list, a space and its agenda, its feed and suggested agenda, archiving, and the call's token.
 import type { Express } from "express";
-import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS, type SpaceMembers } from "../../shared/protocol.ts";
+import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS, type Note, type SpaceMembers } from "../../shared/protocol.ts";
 import { archiveRow, restoreRow } from "../archive.ts";
 import { spaceFeed } from "../captures.ts";
 import { capabilities, config } from "../config.ts";
@@ -130,18 +130,23 @@ export function spaceRoutes(app: Express, ctx: Services) {
       if (!room) return notFound(res, "Space not found");
       db.touchMembership(room.id, req.user!.id);
       const live = sessions.get(room.id);
+      const graph = db.projectGraph(room.id);
+      const grouped = <T extends Note>(notes: T[]) => db.withProjects(room.id, notes, graph);
       res.json({
         ...room,
         items: db.listItems(room.id),
         decks: db.listDecks(room.id),
+        projects: db.listProjects(room.id, graph),
         meetings: db.listMeetings(room.id),
-        followUps: withFrom(db, db.roomFollowUps(room.id).filter((f) => !f.doneAt)),
-        doneFollowUps: withFrom(
-          db,
-          db
-            .roomFollowUps(room.id)
-            .filter((f) => f.doneAt)
-            .sort((a, b) => b.doneAt! - a.doneAt!),
+        followUps: grouped(withFrom(db, db.roomFollowUps(room.id).filter((f) => !f.doneAt))),
+        doneFollowUps: grouped(
+          withFrom(
+            db,
+            db
+              .roomFollowUps(room.id)
+              .filter((f) => f.doneAt)
+              .sort((a, b) => b.doneAt! - a.doneAt!),
+          ),
         ),
         liveMeetingId: live && !live.ended ? live.meetingId : null,
         // Who is in the call now, for the lobby's avatars.

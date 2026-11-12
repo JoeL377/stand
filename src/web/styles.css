@@ -1792,14 +1792,14 @@ a.sh-pill:hover { text-decoration: none; }
 .conxt-panel .conxt-consent input { width: auto; margin-top: 4px; }
 .conxt-delivery { border-top: 1px solid var(--line); padding: 10px 0; }
 .conxt-delivery > span { margin-left: 12px; font-size: 13px; }
-.project-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
-.project-panel h3 { margin: 0 0 8px; }
-.project-panel select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; background: var(--panel-2); }
-.project-panel .project-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
-.project-panel .project-consent input { width: auto; margin-top: 4px; }
-.project-row { border-top: 1px solid var(--line); padding: 10px 0; }
-.project-row > span { margin-left: 12px; }
-.project-row .error { margin: 6px 0 0; }
+.source-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.source-panel h3 { margin: 0 0 8px; }
+.source-panel select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; background: var(--panel-2); }
+.source-panel .source-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
+.source-panel .source-consent input { width: auto; margin-top: 4px; }
+.source-row { border-top: 1px solid var(--line); padding: 10px 0; }
+.source-row > span { margin-left: 12px; }
+.source-row .error { margin: 6px 0 0; }
 .members-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
 .members-panel h3 { margin: 0 0 8px; }
 .members-row { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding: 10px 0; }
@@ -2841,20 +2841,52 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .task-presentation-spec { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
 
 /* Cross-meeting topics stay separate from each outcome's source pill. */
-.sh-topic-filter { flex: 0 1 auto; min-width: 64px; display: flex; align-self: center; margin-left: auto; padding-left: 10px; }
-@media (max-width: 760px) { .sh-topic-filter { padding-left: 2px; } .sh-topic-filter select { width: 100%; padding: 0 18px 0 8px; font-size: 12px; } }
-.sh-topic-filter select { max-width: min(200px, 40vw); height: 26px; padding: 0 22px 0 10px; border: 1px solid var(--line); border-radius: 999px; background-color: var(--panel); color: var(--muted); font: inherit; font-size: 12.5px; text-overflow: ellipsis; }
-.sh-topic-filter.on select { color: var(--text); border-color: var(--text); font-weight: 500; }
-.topic-picker { display: inline-block; position: relative; margin-left: 6px; vertical-align: baseline; }
-.topic-pill { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; cursor: pointer; }
-.topic-pill.unset { opacity: .65; }
-.topic-pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 9px; width: min(280px, 72vw); padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 8px 32px #0002; font-size: 13px; font-weight: 400; white-space: normal; }
-.topic-pop label { font-weight: 600; }
-.topic-pop input { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: inherit; font: inherit; }
-.topic-actions { display: flex; gap: 8px; }
-.topic-actions button { padding: 4px 9px; }
-.topic-default { text-align: left; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-@media (max-width: 600px) { .topic-pop { position: fixed; left: 50%; right: auto; top: 30%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); } }
+.sh-project-filter { flex: 0 1 auto; min-width: 64px; display: flex; align-self: center; margin-left: auto; padding-left: 10px; }
+@media (max-width: 760px) { .sh-project-filter { padding-left: 2px; } .sh-project-filter select { width: 100%; padding: 0 18px 0 8px; font-size: 12px; } }
+.sh-project-filter select { max-width: min(200px, 40vw); height: 26px; padding: 0 22px 0 10px; border: 1px solid var(--line); border-radius: 999px; background-color: var(--panel); color: var(--muted); font: inherit; font-size: 12.5px; text-overflow: ellipsis; }
+.sh-project-filter.on select { color: var(--text); border-color: var(--text); font-weight: 500; }
+.project-picker { display: inline-block; position: relative; margin-left: 6px; vertical-align: baseline; }
+.project-pill { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; cursor: pointer; }
+.project-pill.unset { opacity: .65; }
+.project-pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 9px; width: min(280px, 72vw); padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 8px 32px #0002; font-size: 13px; font-weight: 400; white-space: normal; }
+.project-pop label { font-weight: 600; }
+.project-pop input { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: inherit; font: inherit; }
+.project-actions { display: flex; gap: 8px; }
+.project-actions button { padding: 4px 9px; }
+.project-default { text-align: left; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.project-options { display: flex; flex-direction: column; max-height: 200px; overflow-y: auto; margin: 0 -6px; }
+.project-options > button { text-align: left; height: auto; min-height: 0; padding: 5px 6px; border: 0; border-radius: 6px; background: none; box-shadow: none; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-options > button:hover { background: var(--hover); }
+.project-options > button.on { font-weight: 600; }
+.project-options > button.on::after { content: " ✓"; color: var(--accent-text); }
+.project-options > .project-new { color: var(--accent-text); }
+.project-default.on { color: var(--text); font-weight: 600; }
+/* The Tasks tab: one section per project, then Unassigned. */
+.sh-task-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
+.sh-task-tools .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
+.sh-project { margin-top: 14px; }
+.sh-project-head { display: flex; align-items: center; gap: 8px; min-width: 0; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.sh-panel .sh-project-fold { display: flex; align-items: center; gap: 7px; min-width: 0; height: auto; min-height: 0; padding: 4px 0; border: 0; background: none; box-shadow: none; color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
+.sh-panel .sh-project-fold:hover, .sh-panel .sh-project-fold:focus { background: none; }
+.sh-project-fold > svg:first-child { flex: none; transform: rotate(90deg); transition: transform 0.15s ease; }
+.sh-project.folded .sh-project-fold > svg:first-child { transform: none; }
+.sh-project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-project-fold .count { color: var(--muted); font-weight: 500; font-size: 12px; }
+.sh-project.unassigned .sh-project-fold { color: var(--muted); }
+.sh-project-goal { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+.sh-project-menu { position: relative; margin-left: auto; flex: none; }
+.sh-panel .sh-project-more { height: 24px; min-height: 0; padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 16px; line-height: 1; }
+.sh-project-more:hover { color: var(--text); }
+.sh-menu > button:disabled { opacity: 0.5; cursor: default; }
+.sh-project-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1 1 auto; }
+.sh-project-form input { flex: 1 1 160px; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: inherit; font: inherit; font-size: 13px; }
+.sh-project-form button { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.sh-project-form .error { flex-basis: 100%; }
+.sh-project .sh-card-empty.small { margin: 8px 0 0; font-size: 12.5px; }
+/* The live agenda: the project a line links to, and its menu's heading. */
+.item-project { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--accent-text); }
+.row-menu-label { display: block; padding: 6px 10px 2px; font-size: 11px; font-weight: 600; color: var(--muted); }
+@media (max-width: 600px) { .project-pop { position: fixed; left: 50%; right: auto; top: 30%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); } }
 
 /* Captured meeting items, inline with the spoken transcript. */
 .seg.capture-event { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--ok) 9%, var(--panel)); }
@@ -3499,7 +3531,7 @@ button.chat-caught-text { padding: 0; }
   .chat-compose .chat-send { right: 24px; bottom: 20px; }
 }
 
-.sh-topic-mark { display: none; }
+.sh-project-mark { display: none; }
 /* A to-do's log sits on its own line under the row: indented under the text on a wide screen,
    the full row on a phone. A long report is cut to its first lines until "More". */
 .followups li:has(> .fu-log) { flex-wrap: wrap; }
@@ -3511,10 +3543,10 @@ button.chat-caught-text { padding: 0; }
   /* Four tabs and the topic pill fit a phone when only the open tab shows its count. */
   .sh-tab:not(.on) .count { display: none; }
   .sh-tab { padding: 8px 7px 7px; }
-  .sh-topic-filter { position: relative; flex: none; min-width: 0; width: 30px; height: 26px; margin-left: auto; padding: 0; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
-  .sh-topic-filter.on { color: var(--bg); background: var(--text); border-color: var(--text); }
-  .sh-topic-filter .sh-topic-mark { display: block; }
-  .sh-topic-filter select, .sh-topic-filter.on select { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; padding: 0; opacity: 0; font-size: 16px; }
+  .sh-project-filter { position: relative; flex: none; min-width: 0; width: 30px; height: 26px; margin-left: auto; padding: 0; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+  .sh-project-filter.on { color: var(--bg); background: var(--text); border-color: var(--text); }
+  .sh-project-filter .sh-project-mark { display: block; }
+  .sh-project-filter select, .sh-project-filter.on select { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; padding: 0; opacity: 0; font-size: 16px; }
 }
 
 /* Tasks on a phone: a row is its checkbox, its title and what's happening on it. The topic, the date,
@@ -3523,15 +3555,15 @@ button.chat-caught-text { padding: 0; }
 @media (max-width: 760px) {
   .sh-panel.tasks .followups li > .sh-archive, .sh-panel.tasks .followups li > .cfa { display: none; }
   .sh-panel.tasks .by-owner .followups li > .rc-face { display: none; }
-  .sh-panel.tasks .followups .topic-picker:has(.unset), .sh-panel.tasks .followups .task-from { display: none; }
-  .sh-panel.tasks .followups .topic-picker { margin-left: 0; }
+  .sh-panel.tasks .followups .project-picker:has(.unset), .sh-panel.tasks .followups .task-from { display: none; }
+  .sh-panel.tasks .followups .project-picker { margin-left: 0; }
   /* A title that wraps keeps its checkbox on the first line, not floating in the middle of the row. */
   .sh-panel.tasks .followups.one-line li { align-items: flex-start; }
   .sh-panel.tasks .followups.one-line li > .check { margin-top: 2px; }
   /* What follows the title (topic, working pill) starts flush under the title when it drops to its own line. */
   .sh-panel.tasks .followups.one-line .fu-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
-  .sh-panel.tasks .followups.one-line .fu-text .rc-pill-wrap, .sh-panel.tasks .followups.one-line .fu-text .topic-pill { margin-left: 0; }
-  .sh-panel.tasks .followups .topic-pill { padding: 0; margin-left: 6px; border: 0; background: none; box-shadow: none; height: auto; min-height: 0; font-size: 12px; font-weight: 400; color: var(--muted); max-width: 140px; }
+  .sh-panel.tasks .followups.one-line .fu-text .rc-pill-wrap, .sh-panel.tasks .followups.one-line .fu-text .project-pill { margin-left: 0; }
+  .sh-panel.tasks .followups .project-pill { padding: 0; margin-left: 6px; border: 0; background: none; box-shadow: none; height: auto; min-height: 0; font-size: 12px; font-weight: 400; color: var(--muted); max-width: 140px; }
   .td-phone-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
   .td-phone-acts > button { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; }
 }
@@ -3572,6 +3604,7 @@ button.chat-caught-text { padding: 0; }
   .xp-menu .xp-hint { display: none; }
   .xp-menu .xp-idea { max-width: 55vw; }
 }
+.agenda .item-tools .add-menu.row-menu { left: auto; right: 0; width: max-content; min-width: 170px; max-width: 260px; }
 
 /* @Name in what people write: someone in the space in blue, and you in amber, everywhere text shows. */
 .mention { padding: 0 2px; border-radius: 4px; background: var(--accent-soft); color: var(--accent-text); font-weight: 500; -webkit-box-decoration-break: clone; box-decoration-break: clone; }

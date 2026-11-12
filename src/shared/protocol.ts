@@ -23,6 +23,8 @@ export interface Item {
   slide: SlideContent | null;
   /** The to-do this item walks through ("Present task"): what's said on it is filed under that to-do's item. */
   taskId?: string | null;
+  /** The project this item links to: its tasks are in that project unless someone set theirs. */
+  projectId?: string | null;
 }
 
 export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote" | "review" | "design";
@@ -196,8 +198,14 @@ export interface Segment {
 export type NoteKind = "summary" | "decision" | "action" | "question" | "context";
 
 export interface Note {
-  /** Optional cross-meeting topic. null inherits the agenda item; "" means no topic. */
-  topic?: string | null;
+  /** The project someone set by hand (shared/projects.ts). Null with projectSetBy: Unassigned by hand. */
+  projectId?: string | null;
+  /** Who set the project by hand; null: it follows the rules. */
+  projectSetBy?: string | null;
+  /** The project it is in by the rules, where the server worked it out for the page. */
+  project?: string | null;
+  /** What the rules give without the hand-set project: what "Follow the agenda" goes back to. */
+  ruledProject?: string | null;
   id: string;
   meetingId: string;
   itemId: string | null;
@@ -687,8 +695,8 @@ export interface GithubStatus {
   installations: GithubInstallation[];
 }
 
-/** A GitHub repo linked to a space as its project: Stand keeps a read-only copy and Ask Stand reads it. */
-export interface SpaceProject {
+/** A GitHub repo linked to a space as a source: Stand keeps a read-only copy and Ask Stand reads it. */
+export interface SpaceSource {
   owner: string;
   repo: string;
   branch: string;
@@ -709,13 +717,13 @@ export interface LinkableRepo {
   private: boolean;
 }
 
-/** A space's projects, as its settings show them. */
-export interface ProjectsStatus {
+/** A space's sources, as its settings show them. */
+export interface SourcesStatus {
   /** Whether this server has the Stand GitHub App set up. */
   available: boolean;
   /** Only the space's creator and its admins link and unlink repos. */
   canManage: boolean;
-  projects: SpaceProject[];
+  sources: SpaceSource[];
   /** For someone who manages the space: repos they can link. Null when they can't, or GitHub couldn't be asked. */
   linkable: LinkableRepo[] | null;
   /** Why linkable is null, when it's GitHub's fault. */

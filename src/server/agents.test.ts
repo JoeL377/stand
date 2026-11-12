@@ -1176,3 +1176,40 @@ test("agents read a space's chat: where it stands, the stretches since a date, a
   assert.throws(() => api.chatStatus(outsider, room.id), AgentError);
   assert.throws(() => api.getChat(caller, { chatId: "nope" }), /No chat with that id/);
 });
+
+test("agents see projects: they create one, file to-dos in it by ref or name, filter by it and read it", () => {
+  const { api, db, joe, room, item, action } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const made = api.createProject(agent, { space: room.id, name: "Transcripts", goal: "Text in under a second", itemId: item.id }, "http://stand.test");
+  const ref = (made.created as { ref: string }).ref;
+  assert.match(ref, /^stand:project\/[a-z0-9]+$/);
+  assert.throws(() => api.createProject(agent, { space: room.id, name: "transcripts" }), /already a project/);
+  assert.deepEqual(api.listSpaces(agent)[0].projects?.map((p) => [p.ref, p.name, p.goal, p.open_todos]), [[ref, "Transcripts", "Text in under a second", 2]]);
+
+  // The item is linked, so its to-dos are in the project already.
+  const listed = api.listActions(agent, { space: room.id, project: "Transcripts" }, "x");
+  assert.equal(listed.count, 2);
+  assert.deepEqual(listed.actions[0].project, { ref, name: "Transcripts" });
+
+  const loose = api.createAction(agent, { space: room.id, text: "Write the FAQ", project: ref }, "x");
+  assert.deepEqual(loose.created.project, { ref, name: "Transcripts" });
+  assert.throws(() => api.createAction(agent, { space: room.id, text: "Lost", project: "Nope" }), /No project called "Nope".*Transcripts \(stand:project\//);
+  assert.equal(db.memberActions(joe.id).some((n) => n.text === "Lost"), false, "a bad project adds nothing");
+
+  const moved = api.updateAction(agent, { ref: `stand:action/${action.id}`, project: "unassigned" }, "x");
+  assert.equal(moved.updated.project, "unassigned");
+  assert.equal(api.listActions(agent, { space: room.id, project: "unassigned" }, "x").actions.some((a) => a.ref === `stand:action/${action.id}`), true);
+  assert.equal((api.get(agent, `stand:action/${action.id}`, "x") as { project: unknown }).project, "unassigned");
+
+  const read = api.get(agent, ref, "http://stand.test") as { kind: string; name: string; counts: { open_todos: number }; open_todos: Array<{ text: string }>; agenda_items: Array<{ id: string }> };
+  assert.equal(read.kind, "project");
+  assert.equal(read.counts.open_todos, 2);
+  assert.deepEqual(read.open_todos.map((t) => t.text).sort(), ["Write the FAQ", "Write the migration note"]);
+  assert.deepEqual(read.agenda_items.map((i) => i.id), [item.id]);
+  assert.deepEqual(api.locate(agent, "project", parseRef(ref)!.id).roomId, room.id);
+
+  const stranger = db.upsertUser({ googleSub: "g-x", email: "x@example.com", name: "Xavier", picture: null });
+  assert.throws(() => api.get({ user: stranger, token: null }, ref, "x"), /not in that space/);
+  assert.throws(() => api.createProject({ user: joe, token: { ...token, scope: "read" as const } }, { space: room.id, name: "Read only" }), /read only/);
+});

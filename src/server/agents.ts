@@ -16,8 +16,9 @@ import { parseActor, type Actor } from "../shared/actors.ts";
 import type { Channel, ChatSession } from "../shared/chat.ts";
 import { IDEA_OUTCOMES, REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import type { ActionWork, BrainCaught, BrainNode, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
+import type { Project } from "../shared/projects.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
-import type { DB } from "./db.ts";
+import { type DB, ProjectError } from "./db.ts";
 import { IDEA_SLIDES_MAX, ideaReviewView, reviewedIdeas, setUpIdeaReview } from "./ideaReview.ts";
 import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
@@ -30,7 +31,7 @@ const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.
 import { linkSnaps, type SnapRow } from "./snaps.ts";
 import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, prOf, readyToShip, shotUrl, workingOn, type UploadLinks } from "./workLog.ts";
 
-export type RefKind = "action" | "decision" | "question" | "context" | "topic";
+export type RefKind = "action" | "decision" | "question" | "context" | "topic" | "project";
 const NOTE_KINDS: Record<string, RefKind> = { action: "action", decision: "decision", question: "question", context: "context" };
 
 export const refOf = (kind: RefKind, id: string) => `stand:${kind}/${id}`;
@@ -38,7 +39,7 @@ export const refUrl = (baseUrl: string, kind: RefKind, id: string) => `${baseUrl
 
 /** Reads "stand:action/n8f2k", "action/n8f2k" or a Stand link to one (…/ref/action/n8f2k). */
 export function parseRef(input: string): { kind: RefKind; id: string } | null {
-  const m = /(?:^|stand:|\/ref\/)(action|decision|question|context|topic)\/([a-z0-9]{4,24})\b/i.exec(input.trim());
+  const m = /(?:^|stand:|\/ref\/)(action|decision|question|context|topic|project)\/([a-z0-9]{4,24})\b/i.exec(input.trim());
   return m ? { kind: m[1].toLowerCase() as RefKind, id: m[2] } : null;
 }
 
@@ -183,10 +184,49 @@ export function agentApi(deps: AgentDeps) {
     ready: work?.ready ? { by: work.ready.by, since: new Date(work.ready.since).toISOString(), pr: work.ready.pr ?? undefined } : undefined,
   });
 
+  /** The project a note is in, when the note came through grouped (it has project worked out). */
+  const projectInfo = (n: Note) => {
+    if (n.project === undefined) return undefined;
+    const name = n.project ? db.projectName(n.project) : null;
+    return n.project && name ? { ref: refOf("project", n.project), name } : "unassigned";
+  };
+  /** Notes of one space with the project each is in (shared/projects.ts). */
+  const grouped = <T extends Note>(roomId: string, notes: T[]): T[] => db.withProjects(roomId, notes);
+  /** The same for notes from several spaces. */
+  const groupedByRoom = <T extends Note & { roomId: string }>(notes: T[]): T[] => {
+    const rooms = new Map<string, T[]>();
+    for (const n of notes) rooms.set(n.roomId, [...(rooms.get(n.roomId) ?? []), n]);
+    const out = new Map<string, T>();
+    for (const [roomId, list] of rooms) for (const n of db.withProjects(roomId, list)) out.set(n.id, n);
+    return notes.map((n) => out.get(n.id) ?? n);
+  };
+  /** A project as agents see it in lists. */
+  const projectRow = (p: Project, baseUrl: string) => ({
+    ref: refOf("project", p.id),
+    name: p.name,
+    goal: p.goal ?? undefined,
+    open_todos: p.openTodos,
+    url: `${baseUrl}/s/${p.roomId}?project=${p.id}`,
+  });
+  /** A project an agent named: its ref, its name, or "unassigned" (null). Unknown names list what there is. */
+  const projectFor = (roomId: string, input: string): string | null => {
+    const v = input.trim();
+    if (/^(unassigned|none|no project)$/i.test(v)) return null;
+    const ref = parseRef(v);
+    const all = db.listProjects(roomId);
+    const p = ref?.kind === "project" ? all.find((x) => x.id === ref.id) : db.findProject(roomId, v);
+    if (p) return p.id;
+    const names = all.filter((x) => !x.archived).map((x) => `${x.name} (${refOf("project", x.id)})`);
+    throw new AgentError(
+      `No project ${ref ? "with that ref" : `called "${clip(v, 80)}"`} in this space. ${names.length ? `Its projects: ${names.join(", ")}.` : "It has no projects yet."} Use "unassigned" for none, or create_project when your person asks for a new one.`,
+    );
+  };
+
   const actionInfo = (n: Note, work?: Work) => ({
     ref: refOf("action", n.id),
     text: n.text,
     owner: n.owner ?? undefined,
+    project: projectInfo(n),
     status: stateOf(n, work),
     ...workInfo(work),
     done_by: n.doneBy ?? undefined,
@@ -307,7 +347,8 @@ export function agentApi(deps: AgentDeps) {
   /** Decisions, open questions and open to-dos on an item, newest first, capped. */
   const onItem = (itemId: string | null, skip?: string) => {
     if (!itemId) return { decisions: [], open_questions: [], open_todos: [] };
-    const notes = db.itemNotes(itemId).filter((n) => n.id !== skip);
+    const item = db.getItem(itemId);
+    const notes = item ? grouped(item.roomId, db.itemNotes(itemId).filter((n) => n.id !== skip)) : [];
     // Questions only count from the latest meeting that talked about the item; older ones were answered or carried.
     const latest = notes[0]?.meetingId;
     const openTodos = notes.filter((n) => n.kind === "action" && !n.doneAt).slice(0, 6);
@@ -399,7 +440,7 @@ export function agentApi(deps: AgentDeps) {
   const dependenciesOf = (n: Pick<Note, "id"> & { roomId: string }) => {
     const links = db.roomLinks(n.roomId, "depends_on");
     const todos = (ids: string[]) => {
-      const notes = ids.map((id) => db.getNote(id)).filter((x) => x !== null);
+      const notes = grouped(n.roomId, ids.map((id) => db.getNote(id)).filter((x) => x !== null));
       const work = workOn(notes);
       return notes.map((x) => ({ ...actionInfo(x, work.get(x.id)), done_by: undefined, done_actor: undefined }));
     };
@@ -430,7 +471,8 @@ export function agentApi(deps: AgentDeps) {
   }
 
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
-  function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number; addedByHand?: boolean; fromChat?: boolean }>, baseUrl: string) {
+  function workRows(all: Array<Note & { roomId: string; roomName: string; meetingStartedAt: number; addedByHand?: boolean; fromChat?: boolean }>, baseUrl: string) {
+    const rows = groupedByRoom(all);
     const items = new Map<string, Item | null>();
     const work = workOn(rows);
     const planned = db.plannedNotes(rows.map((n) => n.id));
@@ -464,6 +506,7 @@ export function agentApi(deps: AgentDeps) {
   function resolve(caller: Caller, refText: string) {
     const ref = parseRef(refText);
     if (!ref) throw new AgentError(`"${clip(refText, 60)}" isn't a Stand reference. They look like stand:action/k3m9xq2p.`);
+    if (ref.kind === "project") throw new AgentError("A project (stand:project/...) isn't a to-do or a note: get reads it, and list_actions with project lists what's in it.");
     if (ref.kind === "topic") {
       const d = db.getDiscussion(ref.id);
       const m = d && db.getMeeting(d.meetingId);
@@ -496,6 +539,8 @@ export function agentApi(deps: AgentDeps) {
           url: `${baseUrl}/s/${room.id}`,
         };
       }
+      const projectRef = parseRef(refText);
+      if (projectRef?.kind === "project") return this.getProject(caller, projectRef.id, baseUrl);
       const r = resolve(caller, refText);
       const item = r.itemId ? db.getItem(r.itemId) : null;
       const where = {
@@ -534,7 +579,7 @@ export function agentApi(deps: AgentDeps) {
           url: refUrl(baseUrl, "topic", r.topic!.id),
         };
       }
-      const n = r.note;
+      const n = r.note.kind === "context" ? r.note : grouped(r.room.id, [r.note])[0];
       // The decision behind a to-do: from its own topic first, else the item's latest decision.
       const sameTopic = r.topic ? db.meetingNotes(r.meeting.id).filter((x) => x.discussionId === r.topic!.id && x.id !== n.id) : [];
       const updates = n.kind === "action" ? db.noteUpdates(n.id) : [];
@@ -550,6 +595,7 @@ export function agentApi(deps: AgentDeps) {
         on_screen: onScreen(n, baseUrl),
         owner: n.owner ?? undefined,
         status: n.kind === "action" ? stateOf(n, work) : undefined,
+        project: projectInfo(n),
         ...workInfo(work),
         plan: plan ? { text: plan.text, by: plan.by, actor: plan.actor, at: new Date(plan.ts).toISOString(), versions: plan.versions } : undefined,
         ...(review ? { plan_version: review.plan.id } : {}),
@@ -591,7 +637,7 @@ export function agentApi(deps: AgentDeps) {
         .filter(Boolean)
         .join(", ");
       const ref = refOf(r.ref.kind, r.note?.id ?? r.topic!.id);
-      const what = { action: "to-do", decision: "decision", question: "open question", context: "line of context", topic: "topic" }[r.ref.kind];
+      const what = { action: "to-do", decision: "decision", question: "open question", context: "line of context", topic: "topic", project: "project" }[r.ref.kind];
       const text = r.note?.text ?? r.topic!.topic;
       const decided =
         r.note?.kind === "decision"
@@ -620,19 +666,82 @@ export function agentApi(deps: AgentDeps) {
       return lines.join("\n");
     },
 
+    /** One project: what it is for, what is open and decided in it, and the agenda items linked to it. */
+    getProject(caller: Caller, projectId: string, baseUrl: string) {
+      const roomId = (db.raw.prepare("SELECT room_id FROM projects WHERE id = ?").get(projectId) as { room_id: string } | undefined)?.room_id;
+      if (!roomId) throw new AgentError("That project doesn't exist any more.");
+      const room = space(roomId, caller);
+      const graph = db.projectGraph(room.id);
+      const p = db.listProjects(room.id, graph).find((x) => x.id === projectId)!;
+      const inIt = <T extends Note>(notes: T[]) => db.withProjects(room.id, notes, graph).filter((n) => n.project === p.id);
+      const todos = inIt(db.memberActions(caller.user.id).filter((n) => n.roomId === room.id));
+      const open = todos.filter((n) => !isClosed(stateOf(n)));
+      const work = workOn(open);
+      const standing = settledView(db, room.id);
+      return {
+        kind: "project",
+        ...projectRow(p, baseUrl),
+        archived: p.archived || undefined,
+        space: { id: room.id, name: room.name },
+        counts: {
+          open_todos: open.length,
+          done_todos: todos.filter((n) => stateOf(n) === "done").length,
+          decisions: inIt(standing.decided.filter((n) => !n.replacedBy)).length,
+          open_questions: inIt(standing.open.filter((n) => !isClosed(stateOf(n)))).length,
+        },
+        open_todos: open.slice(0, 50).map((n) => ({ ...actionInfo(n, work.get(n.id)), project: undefined, url: refUrl(baseUrl, "action", n.id) })),
+        decisions: inIt(standing.decided.filter((n) => !n.replacedBy))
+          .slice(0, 30)
+          .map((n) => ({ ref: refOf("decision", n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, "decision", n.id) })),
+        open_questions: inIt(standing.open.filter((n) => !isClosed(stateOf(n))))
+          .slice(0, 30)
+          .map((n) => ({ ref: refOf("question", n.id), text: n.text, url: refUrl(baseUrl, "question", n.id) })),
+        agenda_items: db
+          .listItems(room.id)
+          .filter((i) => i.projectId === p.id)
+          .map((i) => ({ id: i.id, title: i.title, stand_url: `${baseUrl}/items/${i.id}` })),
+        how: "A to-do is in this project when someone set it, or when its agenda item links here. Give a to-do a project with create_action or update_action (project).",
+      };
+    },
+
+    /** Makes a project in a space, when the person asks for one. A name an archived project has brings it back. */
+    createProject(caller: Caller, args: { space: string; name: string; goal?: string; itemId?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const room = findSpace(caller, args.space);
+      try {
+        const existed = db.findProject(room.id, args.name);
+        const p = db.createProject(room.id, { name: args.name, goal: args.goal, fromItemId: args.itemId ?? null }, byOf(caller));
+        deps.notify(room.id, "followups");
+        return {
+          [existed ? "brought_back" : "created"]: projectRow(p, baseUrl),
+          linked_item: args.itemId ? db.getItem(args.itemId)?.title : undefined,
+          space: room.name,
+          next: "Give to-dos this project with create_action or update_action (project: its ref or name). To-dos on a linked agenda item join it by themselves.",
+        };
+      } catch (err) {
+        if (err instanceof ProjectError) throw new AgentError(err.message);
+        throw err;
+      }
+    },
+
     /** Where a reference lives, for the web app's /ref/... links. */
     locate(caller: Caller, kind: string, id: string) {
+      if (kind === "project") {
+        const roomId = (db.raw.prepare("SELECT room_id FROM projects WHERE id = ?").get(id) as { room_id: string } | undefined)?.room_id;
+        if (!roomId) throw new AgentError("That project doesn't exist any more.");
+        return { meetingId: null, roomId: space(roomId, caller).id, itemId: null };
+      }
       const r = resolve(caller, `stand:${kind}/${id}`);
       return { meetingId: r.meeting.id, roomId: r.room.id, itemId: r.itemId, added: r.meeting.added || undefined };
     },
 
-    listActions(caller: Caller, opts: { space: string; status?: "open" | "done" | "all"; owner?: string }, baseUrl: string) {
+    listActions(caller: Caller, opts: { space: string; status?: "open" | "done" | "all"; owner?: string; project?: string }, baseUrl: string) {
       const status = opts.status ?? "open";
       const room = findSpace(caller, opts.space);
       const who = opts.owner?.trim().toLowerCase();
-      const rows = db
-        .memberActions(caller.user.id)
-        .filter((n) => n.roomId === room.id)
+      const project = opts.project?.trim() ? projectFor(room.id, opts.project) : undefined;
+      const rows = grouped(room.id, db.memberActions(caller.user.id).filter((n) => n.roomId === room.id))
+        .filter((n) => project === undefined || (n.project ?? null) === project)
         .filter((n) => (status === "all" ? true : status === "done" ? !!n.doneAt : !n.doneAt))
         .filter((n) => {
           if (!who) return true;
@@ -645,6 +754,7 @@ export function agentApi(deps: AgentDeps) {
         space: { id: room.id, name: room.name },
         status,
         owner: opts.owner || undefined,
+        project: project === undefined ? undefined : project ? { ref: refOf("project", project), name: db.projectName(project) } : "unassigned",
         count: rows.length,
         actions: workRows(rows.slice(0, 100), baseUrl).map((w) => ({ ...w, space: undefined })),
         note: rows.length > 100 ? "Showing the newest 100. Filter by status or owner to see the rest." : undefined,
@@ -724,6 +834,15 @@ export function agentApi(deps: AgentDeps) {
           .filter((i) => i.source !== "slide")
           .slice(0, 25)
           .map((i) => ({ id: i.id, title: i.externalId ? `${i.externalId} ${i.title}` : i.title })),
+        projects: (() => {
+          const active = db.listProjects(row.id).filter((p) => !p.archived);
+          return active.length
+            ? active.map((p) => {
+                const { url: _u, ...shown } = projectRow(p, "");
+                return shown;
+              })
+            : undefined;
+        })(),
         latest_meeting_id: db.latestMeeting(row.id) ?? undefined,
         live: deps.liveMeeting?.(row.id) ?? null,
         chat: (() => {
@@ -1118,6 +1237,7 @@ export function agentApi(deps: AgentDeps) {
       const room = findSpace(caller, args.space);
       const text = oneLine(args.text, 500);
       if (!text) throw new AgentError("A to-do needs its text: what needs doing, in a line.");
+      const project = args.project?.trim() ? projectFor(room.id, args.project) : undefined;
       let itemId: string | null = null;
       if (args.itemId) {
         const item = db.getItem(args.itemId);
@@ -1126,10 +1246,11 @@ export function agentApi(deps: AgentDeps) {
       }
       const note = db.addTask(room.id, { text, owner: ownerFor(caller, args.owner ?? "me"), itemId }, byOf(caller));
       db.setAddedActor(note.id, actorOf(caller));
-      const { now, update } = applyChange(caller, room.id, note, { ...args, adding: true });
+      if (project !== undefined) db.setNoteProject(room.id, note.id, { projectId: project, by: byOf(caller) });
+      const { now, update } = applyChange(caller, room.id, db.getNote(note.id) ?? note, { ...args, adding: true });
       deps.notify(room.id, "followups");
       return {
-        created: { ...actionInfo(now), space: room.name, item: itemId ? db.getItem(itemId)?.title : undefined, url: refUrl(baseUrl, "action", now.id) },
+        created: { ...actionInfo(grouped(room.id, [now])[0]), space: room.name, item: itemId ? db.getItem(itemId)?.title : undefined, url: refUrl(baseUrl, "action", now.id) },
         log: update ? updateInfo(update, baseUrl) : undefined,
         shows_on: `The space's Tasks tab in Stand, and the next meeting's check-in while it's open.`,
       };
@@ -1232,7 +1353,7 @@ export function agentApi(deps: AgentDeps) {
       const standing = new Map(settledView(db, room.id).decided.map((n) => [n.id, n]));
       const line = (kind: RefKind) => (n: Note) => ({
         ...decisionInfo(standing.get(n.id)), ref: refOf(kind, n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, kind, n.id) });
-      const actions = db.memberActions(caller.user.id).filter((n) => n.roomId === room.id);
+      const actions = grouped(room.id, db.memberActions(caller.user.id).filter((n) => n.roomId === room.id));
       const open = actions.filter((n) => !isClosed(stateOf(n)));
       const work = workOn(open);
       const closed = actions.filter((n) => (n.doneAt ?? 0) >= since);
@@ -1327,15 +1448,18 @@ export function agentApi(deps: AgentDeps) {
       const text = args.text === undefined ? note.text : oneLine(args.text, 500);
       if (!text) throw new AgentError("A to-do can't have empty text. To close it, set status done or dropped.");
       const owner = args.owner === undefined ? note.owner : ownerFor(caller, args.owner);
+      const project = args.project?.trim() ? projectFor(r.room.id, args.project) : undefined;
+      const moved = project !== undefined && !(note.projectSetBy != null && (note.projectId ?? null) === project);
+      if (moved) note = db.setNoteProject(r.room.id, note.id, { projectId: project, by: byOf(caller) }) ?? note;
       if (text !== note.text || owner !== note.owner)
         // Who added a to-do by hand is what its pill shows, so an edit keeps that name.
         note = db.editNote(note.id, { text, owner }, r.meeting.added ? (note.editedBy ?? byOf(caller)) : byOf(caller)) ?? note;
       const { now, update, unchanged } = applyChange(caller, r.room.id, note, args);
-      if (unchanged && text === r.note.text && owner === r.note.owner)
-        throw new AgentError("Nothing to change: give text, owner, status or a summary.");
+      if (unchanged && text === r.note.text && owner === r.note.owner && !moved)
+        throw new AgentError("Nothing to change: give text, owner, project, status or a summary.");
       deps.notify(r.room.id, "followups");
       return {
-        updated: { ...actionInfo(now), url: refUrl(baseUrl, "action", now.id) },
+        updated: { ...actionInfo(grouped(r.room.id, [now])[0]), url: refUrl(baseUrl, "action", now.id) },
         log: update ? updateInfo(update, baseUrl) : undefined,
       };
     },
@@ -1643,6 +1767,8 @@ interface TaskChange {
   summary?: string;
   /** Why it was dropped. */
   reason?: string;
+  /** A project's ref or name, or "unassigned". */
+  project?: string;
   links?: string[];
   /** The to-do is being added now: its summary is what it's about, not news on it. */
   adding?: boolean;

@@ -42,6 +42,7 @@ export const toItem = (r: Row): Item => ({
   slideNo: (r.slide_no as number) ?? null,
   slide: r.slide_json ? JSON.parse(r.slide_json as string) : null,
   taskId: (r.note_id as string) ?? null,
+  projectId: (r.project_id as string) ?? null,
 });
 
 export const toDeck = (r: Row): Deck => ({
@@ -207,7 +208,7 @@ export const toJot = (r: Row): Jot => ({
 });
 
 export const toNote = (r: Row): Note => ({
-  ...(r.topic != null ? { topic: r.topic as string } : {}),
+  ...(r.project_set_by != null ? { projectId: (r.project_id as string) ?? null, projectSetBy: r.project_set_by as string } : {}),
   id: r.id as string,
   meetingId: r.meeting_id as string,
   itemId: (r.item_id as string) ?? null,

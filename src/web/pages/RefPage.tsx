@@ -3,7 +3,7 @@ import { Navigate, useParams } from "react-router-dom";
 import { api } from "../api.ts";
 
 /** A Stand reference link (/ref/action/<id>) opens a to-do or open question in its space's task
- *  drawer, and anything else in the meeting recap it came from. */
+ *  drawer, a project as its space's Tasks tab filtered to it, and anything else in the meeting recap it came from. */
 export function RefPage() {
   const { kind = "", id = "" } = useParams();
   const [to, setTo] = useState<string | null>(null);
@@ -12,7 +12,13 @@ export function RefPage() {
     api.locateRef(kind, id).then(
       (r) =>
         setTo(
-          kind === "action" || kind === "question" ? `/s/${r.roomId}?task=${id}` : r.added ? `/s/${r.roomId}` : `/meetings/${r.meetingId}`,
+          kind === "action" || kind === "question"
+            ? `/s/${r.roomId}?task=${id}`
+            : kind === "project"
+              ? `/s/${r.roomId}?project=${id}`
+              : r.added
+                ? `/s/${r.roomId}`
+                : `/meetings/${r.meetingId}`,
         ),
       (e: Error) => setError(e.message),
     );

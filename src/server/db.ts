@@ -4,7 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { initConxt } from "./conxt.ts";
 import { initGithub } from "./github.ts";
-import { initProjects } from "./projects.ts";
+import { initSources } from "./sources.ts";
 import { migrate } from "./db/schema.ts";
 import { transactions } from "./db/tx.ts";
 import { agendaStore } from "./db/agenda.ts";
@@ -15,6 +15,7 @@ import { decksStore } from "./db/decks.ts";
 import { meetingsStore } from "./db/meetings.ts";
 import { notesStore } from "./db/notes.ts";
 import { plansStore } from "./db/plans.ts";
+import { projectsStore } from "./db/projects.ts";
 import { reviewsStore } from "./db/reviews.ts";
 import { roomsStore } from "./db/rooms.ts";
 import { tokensStore } from "./db/tokens.ts";
@@ -22,6 +23,7 @@ import { upNextStore } from "./db/upNext.ts";
 import { updatesStore } from "./db/updates.ts";
 import { usersStore } from "./db/users.ts";
 
+export { ProjectError } from "./db/projects.ts";
 export type { DraftDiscussion, IdeaSlideSaved, OpenMeeting, ReviewKind, ReviewRow, ReviewSlideRow } from "./db/rows.ts";
 
 export type DB = ReturnType<typeof openDb>;
@@ -33,7 +35,7 @@ export function openDb(file?: string) {
   migrate(db);
   initConxt(db);
   initGithub(db);
-  initProjects(db);
+  initSources(db);
 
   const tx = transactions(db);
   const users = usersStore(db);
@@ -47,6 +49,7 @@ export function openDb(file?: string) {
   const captures = capturesStore(db);
   const upNext = upNextStore(db, { updates, captures });
   const plans = plansStore(db);
+  const projects = projectsStore(db);
   const brainstorms = brainstormsStore(db);
   const reviews = reviewsStore(db);
   const chat = chatStore(db);
@@ -63,6 +66,7 @@ export function openDb(file?: string) {
     ...upNext,
     ...captures,
     ...plans,
+    ...projects,
     ...brainstorms,
     ...reviews,
     ...updates,

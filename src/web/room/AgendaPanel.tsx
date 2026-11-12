@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Deck, Item, Note, RoomState, Segment, UpNext, UpNextSuggestion } from "../../shared/protocol.ts";
+import type { Project } from "../../shared/projects.ts";
 import { api } from "../api.ts";
 import {
   ChatIcon,
@@ -56,6 +57,21 @@ export function AgendaPanel(props: {
   const [dropping, setDropping] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLElement>(null);
+  // The space's projects, for the project an agenda line links to and its menu. Read again when a link changes.
+  const [projects, setProjects] = useState<Project[]>([]);
+  const links = state.items.map((i) => `${i.id}:${i.projectId ?? ""}`).join(",");
+  useEffect(() => {
+    api.projects(roomId).then(setProjects, () => {});
+  }, [roomId, links]);
+  const projectName = (id: string | null | undefined) => projects.find((p) => p.id === id)?.name ?? null;
+  /** "Make project" from an agenda line, "Link to project", "Remove project link". */
+  const linkItem = (it: Item, run: () => Promise<unknown>, done: string) => {
+    setPop(null);
+    void run().then(() => {
+      toast({ text: done });
+      api.projects(roomId).then(setProjects, () => {});
+    }, errorToast("Couldn't change the project"));
+  };
 
   // Whoever moves the meeting (the host, a suggestion, a slide flip), the item in focus stays in view.
   useEffect(() => {
@@ -147,6 +163,11 @@ export function AgendaPanel(props: {
               {it.slideNo && <span className="slide-no">{it.slideNo}</span>}
               {it.title}
             </span>
+            {projectName(it.projectId) && (
+              <span className="item-project" title="The project this line links to: its tasks go in it">
+                {projectName(it.projectId)}
+              </span>
+            )}
             {active && (it.externalId || n > 0 || a > 0 || e > 0 || u || state.carried?.[it.id]) && (
               <span
                 className="item-meta"
@@ -202,6 +223,38 @@ export function AgendaPanel(props: {
           <a className="icon" href={`/items/${it.id}`} target="_blank" rel="noreferrer" title="History of this item">
             <HistoryIcon />
           </a>
+          {it.source !== "slide" && (
+            <span className="pop-wrap">
+              <button className="icon" title="Project" aria-label={`Project for ${it.title}`} onClick={() => setPop((p) => (p === `item:${it.id}` ? null : `item:${it.id}`))}>
+                <MoreIcon />
+              </button>
+              {pop === `item:${it.id}` && (
+                <div className="add-menu row-menu" role="menu">
+                  {!it.projectId && !projects.some((p) => p.name.toLowerCase() === it.title.trim().toLowerCase() && !p.archived) && (
+                    <button
+                      role="menuitem"
+                      onClick={() => linkItem(it, () => api.createProject(roomId, { name: it.title.slice(0, 80), fromItemId: it.id }), `Made the project ${short(it.title)}`)}
+                    >
+                      <span>Make project</span>
+                    </button>
+                  )}
+                  {projects.filter((p) => !p.archived && p.id !== it.projectId).length > 0 && <span className="row-menu-label">Link to project</span>}
+                  {projects
+                    .filter((p) => !p.archived && p.id !== it.projectId)
+                    .map((p) => (
+                      <button key={p.id} role="menuitem" onClick={() => linkItem(it, () => api.setItemProject(roomId, it.id, p.id), `Linked to ${p.name}`)}>
+                        <span>{p.name}</span>
+                      </button>
+                    ))}
+                  {it.projectId && (
+                    <button role="menuitem" className="danger-text" onClick={() => linkItem(it, () => api.setItemProject(roomId, it.id, null), "Took the project link off")}>
+                      <span>Remove project link</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </span>
+          )}
           {canSteer && (
             <button
               className="icon"

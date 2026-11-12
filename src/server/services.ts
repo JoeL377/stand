@@ -21,7 +21,7 @@ import { startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { labeled } from "./usage.ts";
 import { PlanBriefs } from "./planBrief.ts";
-import { Projects, setProjects } from "./projects.ts";
+import { Sources, setSources } from "./sources.ts";
 import { RoomSession } from "./room.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { linkSnaps } from "./snaps.ts";
@@ -237,10 +237,10 @@ export function startServices() {
   shipWatch.start();
   doneDecks.start();
 
-  // A space's project: GitHub repos it links, which Stand reads and Ask Stand knows (projects.ts).
-  const projects = new Projects(db.raw, path.join(config.dataDir, "repos"), githubApp);
-  setProjects(projects);
-  projects.start();
+  // A space's sources: GitHub repos it links, which Stand reads and Ask Stand knows (sources.ts).
+  const sources = new Sources(db.raw, path.join(config.dataDir, "repos"), githubApp);
+  setSources(sources);
+  sources.start();
 
   // Chat between meetings (chat.ts). Sessions left open by the last run close here if they went quiet.
   const spaceEvents = new SpaceEvents();
@@ -275,7 +275,7 @@ export function startServices() {
     doneDecks,
     githubApp,
     shipWatch,
-    projects,
+    sources,
     chat,
     spaceEvents,
     agents,
