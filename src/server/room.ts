@@ -28,7 +28,7 @@ import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, type ListItem, ListKeeper } from ".
 import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, finishBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { DiagramKeeper, sessionBackground, saveDraftSpec } from "./designSession.ts";
 import { PilotSeat } from "./pilot.ts";
-import { projectDigest, repoTools } from "./projects.ts";
+import { sourceDigest, repoTools } from "./sources.ts";
 import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, draftOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
@@ -1747,7 +1747,7 @@ export class RoomSession implements SpeechSink {
         .map((n) => ({ text: n.text, owner: n.owner, ts: n.ts })),
       questions: this.db.spaceNotes(this.roomId, "question", 40).map((n) => ({ text: n.text, ts: n.ts })),
       notes: this.db.spaceJots(this.roomId, 0, 40).map((j) => ({ text: j.text, by: j.by, ts: j.ts })),
-      project: projectDigest(this.db.raw, this.roomId),
+      repo: sourceDigest(this.db.raw, this.roomId),
     };
   }
 

@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
-import type { ProjectsStatus, SpaceProject } from "../shared/protocol.ts";
+import type { SourcesStatus, SpaceSource } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { fmtAgo } from "./util.ts";
 
-/** The space's project: GitHub repos Stand reads (never writes to) so Ask Stand can answer about the code. */
-export function ProjectPanel({ roomId }: { roomId: string }) {
-  const [status, setStatus] = useState<ProjectsStatus | null>(null);
+/** The space's sources: GitHub repos Stand reads (never writes to) so Ask Stand can answer about the code. */
+export function SourcePanel({ roomId }: { roomId: string }) {
+  const [status, setStatus] = useState<SourcesStatus | null>(null);
   const [pick, setPick] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
-    api.projects(roomId).then(
+    api.sources(roomId).then(
       (s) => active && setStatus(s),
       (e: Error) => active && setError(e.message),
     );
@@ -21,7 +21,7 @@ export function ProjectPanel({ roomId }: { roomId: string }) {
     };
   }, [roomId]);
 
-  async function change(label: string, action: () => Promise<ProjectsStatus>) {
+  async function change(label: string, action: () => Promise<SourcesStatus>) {
     setBusy(label);
     setError("");
     try {
@@ -36,32 +36,32 @@ export function ProjectPanel({ roomId }: { roomId: string }) {
   }
 
   if (!status) return error ? <p className="error">{error}</p> : null;
-  const linked = new Set(status.projects.map((p) => `${p.owner}/${p.repo}`.toLowerCase()));
+  const linked = new Set(status.sources.map((p) => `${p.owner}/${p.repo}`.toLowerCase()));
   const choices = (status.linkable ?? []).filter((r) => !linked.has(`${r.owner}/${r.repo}`.toLowerCase()));
 
   return (
-    <section className="project-panel">
-      <h3>Project</h3>
+    <section className="source-panel">
+      <h3>Sources</h3>
       <p className="muted small">Link the space's GitHub repo so Ask Stand can answer about the code and what shipped. Stand reads it and never writes to it.</p>
       {error && (
         <p className="error" role="alert">
           {error}
         </p>
       )}
-      {status.projects.map((p) => (
-        <ProjectRow
+      {status.sources.map((p) => (
+        <SourceRow
           key={`${p.owner}/${p.repo}`}
           p={p}
           canManage={status.canManage}
           busy={busy}
-          onPull={() => void change(`pull:${p.owner}/${p.repo}`, () => api.pullProject(roomId, p.owner, p.repo))}
+          onPull={() => void change(`pull:${p.owner}/${p.repo}`, () => api.pullSource(roomId, p.owner, p.repo))}
           onUnlink={() => {
             if (window.confirm(`Unlink ${p.owner}/${p.repo}? Stand deletes its copy, and Ask Stand stops reading it.`))
-              void change(`unlink:${p.owner}/${p.repo}`, () => api.unlinkProject(roomId, p.owner, p.repo));
+              void change(`unlink:${p.owner}/${p.repo}`, () => api.unlinkSource(roomId, p.owner, p.repo));
           }}
         />
       ))}
-      {!status.projects.length && <p>No repo linked</p>}
+      {!status.sources.length && <p>No repo linked</p>}
       {!status.available && <p className="muted small">The Stand GitHub App isn't set up on this server.</p>}
       {status.available && status.canManage && (
         <>
@@ -91,12 +91,12 @@ export function ProjectPanel({ roomId }: { roomId: string }) {
                   ))}
                 </select>
               </label>
-              <label className="project-consent">
+              <label className="source-consent">
                 <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
                 Everyone with this space's link can ask Stand about this repo's code, and Stand sends what it reads to Anthropic's models. Files like .env and keys are never shown, but other secrets committed to the repo could be.
               </label>
               <div className="sp-manage-foot">
-                <button type="button" disabled={!!busy || !confirmed || !pick} onClick={() => void change("link", () => api.linkProject(roomId, pick))}>
+                <button type="button" disabled={!!busy || !confirmed || !pick} onClick={() => void change("link", () => api.linkSource(roomId, pick))}>
                   {busy === "link" ? "Linking…" : "Link repo"}
                 </button>
               </div>
@@ -108,10 +108,10 @@ export function ProjectPanel({ roomId }: { roomId: string }) {
   );
 }
 
-function ProjectRow({ p, canManage, busy, onPull, onUnlink }: { p: SpaceProject; canManage: boolean; busy: string | null; onPull: () => void; onUnlink: () => void }) {
+function SourceRow({ p, canManage, busy, onPull, onUnlink }: { p: SpaceSource; canManage: boolean; busy: string | null; onPull: () => void; onUnlink: () => void }) {
   const name = `${p.owner}/${p.repo}`;
   return (
-    <div className="project-row">
+    <div className="source-row">
       <a href={p.url} target="_blank" rel="noreferrer">
         {name}
       </a>

@@ -20,7 +20,7 @@ import type {
   Jot,
   MeetingRecap,
   Note,
-  ProjectsStatus,
+  SourcesStatus,
   Snap,
   SpaceFeed,
   SpaceMembers,
@@ -112,13 +112,13 @@ export const api = {
   createToken: (label: string, scope: AgentToken["scope"]) => call<{ token: string; info: AgentToken }>("POST", "/api/tokens", { label, scope }),
   revokeToken: (id: string) => call<{ ok: true }>("DELETE", `/api/tokens/${id}`),
   github: () => call<GithubStatus>("GET", "/api/github"),
-  projects: (roomId: string) => call<ProjectsStatus>("GET", `/api/rooms/${roomId}/projects`),
+  sources: (roomId: string) => call<SourcesStatus>("GET", `/api/rooms/${roomId}/sources`),
   /** Linking clones the repo first, which can take a while. */
-  linkProject: (roomId: string, repo: string) => call<ProjectsStatus>("POST", `/api/rooms/${roomId}/projects`, { repo }, SLOW_REQUEST_MS),
-  pullProject: (roomId: string, owner: string, repo: string) =>
-    call<ProjectsStatus>("POST", `/api/rooms/${roomId}/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull`, {}, SLOW_REQUEST_MS),
-  unlinkProject: (roomId: string, owner: string, repo: string) =>
-    call<ProjectsStatus>("DELETE", `/api/rooms/${roomId}/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`),
+  linkSource: (roomId: string, repo: string) => call<SourcesStatus>("POST", `/api/rooms/${roomId}/sources`, { repo }, SLOW_REQUEST_MS),
+  pullSource: (roomId: string, owner: string, repo: string) =>
+    call<SourcesStatus>("POST", `/api/rooms/${roomId}/sources/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull`, {}, SLOW_REQUEST_MS),
+  unlinkSource: (roomId: string, owner: string, repo: string) =>
+    call<SourcesStatus>("DELETE", `/api/rooms/${roomId}/sources/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`),
   locateRef: (kind: string, id: string) => call<{ meetingId: string; roomId: string; itemId: string | null; added?: boolean }>("GET", `/api/refs/${kind}/${id}`),
   refPrompt: (kind: string, id: string) => call<{ text: string }>("GET", `/api/refs/${kind}/${id}/prompt`),
   config: () => call<Capabilities>("GET", "/api/config"),

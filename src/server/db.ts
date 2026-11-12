@@ -4,7 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { initConxt } from "./conxt.ts";
 import { initGithub } from "./github.ts";
-import { initProjects } from "./projects.ts";
+import { initSources } from "./sources.ts";
 import { migrate } from "./db/schema.ts";
 import { transactions } from "./db/tx.ts";
 import { agendaStore } from "./db/agenda.ts";
@@ -33,7 +33,7 @@ export function openDb(file?: string) {
   migrate(db);
   initConxt(db);
   initGithub(db);
-  initProjects(db);
+  initSources(db);
 
   const tx = transactions(db);
   const users = usersStore(db);

@@ -663,8 +663,8 @@ export interface GithubStatus {
   installations: GithubInstallation[];
 }
 
-/** A GitHub repo linked to a space as its project: Stand keeps a read-only copy and Ask Stand reads it. */
-export interface SpaceProject {
+/** A GitHub repo linked to a space as a source: Stand keeps a read-only copy and Ask Stand reads it. */
+export interface SpaceSource {
   owner: string;
   repo: string;
   branch: string;
@@ -685,13 +685,13 @@ export interface LinkableRepo {
   private: boolean;
 }
 
-/** A space's projects, as its settings show them. */
-export interface ProjectsStatus {
+/** A space's sources, as its settings show them. */
+export interface SourcesStatus {
   /** Whether this server has the Stand GitHub App set up. */
   available: boolean;
   /** Only the space's creator and its admins link and unlink repos. */
   canManage: boolean;
-  projects: SpaceProject[];
+  sources: SpaceSource[];
   /** For someone who manages the space: repos they can link. Null when they can't, or GitHub couldn't be asked. */
   linkable: LinkableRepo[] | null;
   /** Why linkable is null, when it's GitHub's fault. */

@@ -3,7 +3,7 @@
 // a pull request in those repos closes (POST /api/github/webhook), so a to-do reported ready with
 // that PR (or whose ref is in the PR's description) is checked off right away, and the two-minute
 // check in shipWatch.ts reads those repos as the app. The app only asks to read: pull requests, and
-// contents for a repo linked to a space as its project (projects.ts).
+// contents for a repo linked to a space as a source (sources.ts).
 
 import { createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
@@ -245,7 +245,7 @@ export class GithubApp {
     return out.filter((r) => r.owner && r.repo);
   }
 
-  /** A token that can only read one repo (its code, metadata and PRs), for an hour. A project's
+  /** A token that can only read one repo (its code, metadata and PRs), for an hour. A source's
    *  pulls use only this, so a space can read exactly the repo it linked and nothing else. */
   async readToken(installationId: number, repo: string, now = Date.now()): Promise<string> {
     const key = `${installationId}:${repo.toLowerCase()}`;

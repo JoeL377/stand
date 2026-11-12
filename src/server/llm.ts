@@ -13,7 +13,7 @@ import { LIST_SYSTEM, type ListAnswer, ListAnswerSchema } from "./liveList.ts";
 import { MAP_SYSTEM, type MapAnswer, MapAnswerSchema } from "./brainstorm.ts";
 import { DIAGRAM_SYSTEM, type DiagramAnswer, DiagramAnswerSchema, SEED_SYSTEM } from "./designSession.ts";
 import { ANSWER_SYSTEM, type Answer, AnswerSchema, OPTIONS_SYSTEM, type OptionsAnswer, OptionsAnswerSchema, readPartial, type RunUsage } from "./meetingAgent.ts";
-import { REPO_TOOL_CALLS, type RepoTools } from "./projects.ts";
+import { REPO_TOOL_CALLS, type RepoTools } from "./sources.ts";
 import { findQuote, type Said } from "./quotes.ts";
 import { recordUsage } from "./usage.ts";
 
@@ -967,7 +967,7 @@ When a capture fits the slide it is already under, answer with that slide. When 
   }
 
   /** One ✦ Stand run that may search the web twice, with what it cost. With a space's repo it can also search
-   *  and read the code (projects.ts RepoTools), up to REPO_TOOL_CALLS times. It streams: onDraft hears each web
+   *  and read the code (sources.ts RepoTools), up to REPO_TOOL_CALLS times. It streams: onDraft hears each web
    *  search as it starts, each repo step, and the answer as it's written (the JSON so far, read leniently). */
   private async searchRun<T extends z.ZodTypeAny>(
     label: string,

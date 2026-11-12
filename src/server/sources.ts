@@ -1,8 +1,8 @@
-// A space's project: a GitHub repo linked to it, which Stand reads and never writes to. The space's
+// A space's sources: a GitHub repo linked to it, which Stand reads and never writes to. The space's
 // creator links a repo from a Stand GitHub App installation they connected themselves. Stand keeps
 // a bare copy of the repo's default branch under DATA_DIR/repos, pulls it every 10 minutes with a
 // token that can read only that repo, and boils it down to a short digest (its files, README,
-// merged PRs and the week's commits) that Ask Stand reads in a meeting. Design: docs/github-projects.md.
+// merged PRs and the week's commits) that Ask Stand reads in a meeting. Design: docs/github-sources.md.
 //
 // The copy is a plain bare repo with no remote configured: each fetch names the URL and gets the
 // token as a header for that one command, so nothing that could push is ever stored. It's a full
@@ -12,12 +12,12 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { LinkableRepo, SpaceProject } from "../shared/protocol.ts";
+import type { LinkableRepo, SpaceSource } from "../shared/protocol.ts";
 import type { MergedPr, PullRequestDetail } from "./github.ts";
 
-export const PROJECT_PULL_MS = 10 * 60_000;
+export const SOURCE_PULL_MS = 10 * 60_000;
 /** Most repos one space may link. */
-export const MAX_PROJECTS = 3;
+export const MAX_SOURCES = 3;
 /** Repos bigger than this (GitHub's packed size) aren't copied. */
 export const MAX_REPO_KB = 1_000_000;
 /** About 3k tokens: the digest sits in every Ask Stand prompt in the space. */
@@ -27,9 +27,12 @@ const COMMIT_DAYS = 7;
 const COMMITS_MAX = 40;
 const PER_DIR = 20;
 
-export function initProjects(sql: DatabaseSync) {
+export function initSources(sql: DatabaseSync) {
+  // Named space_projects before "project" came to mean a group of tasks.
+  const has = (name: string) => !!sql.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+  if (has("space_projects") && !has("space_sources")) sql.exec("ALTER TABLE space_projects RENAME TO space_sources");
   sql.exec(`
-    CREATE TABLE IF NOT EXISTS space_projects (
+    CREATE TABLE IF NOT EXISTS space_sources (
       room_id TEXT NOT NULL REFERENCES rooms(id),
       owner TEXT NOT NULL, repo TEXT NOT NULL,
       installation_id INTEGER NOT NULL,
@@ -41,8 +44,8 @@ export function initProjects(sql: DatabaseSync) {
   `);
 }
 
-/** What projects need from GitHub: the Stand GitHub App (github.ts). */
-export interface ProjectGithub {
+/** What sources need from GitHub: the Stand GitHub App (github.ts). */
+export interface SourceGithub {
   linkableRepos(userId: string): Promise<Array<LinkableRepo & { installationId: number; defaultBranch: string; sizeKb: number }>>;
   readToken(installationId: number, repo: string): Promise<string>;
   mergedPrs(owner: string, repo: string, token: string): Promise<MergedPr[]>;
@@ -73,7 +76,7 @@ export const runGit: Git = (args, opts = {}) =>
   });
 
 /** A mistake in what someone asked for, said so they can fix it. */
-export class ProjectError extends Error {}
+export class SourceError extends Error {}
 
 /** Files never shown to a model, even when they're committed. */
 export function hiddenPath(p: string): boolean {
@@ -140,9 +143,9 @@ export interface DigestInput {
 const day = (ts: number) => new Date(ts).toISOString().slice(0, 10);
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
 
-/** The project as Ask Stand reads it: what the repo holds and what landed in it lately. */
+/** The source as Ask Stand reads it: what the repo holds and what landed in it lately. */
 export function buildDigest(d: DigestInput): string {
-  const head = `Project: github.com/${d.owner}/${d.repo}, branch ${d.branch} at ${d.sha.slice(0, 7)} (pulled ${day(d.pulledAt)})`;
+  const head = `Repo: github.com/${d.owner}/${d.repo}, branch ${d.branch} at ${d.sha.slice(0, 7)} (pulled ${day(d.pulledAt)})`;
   const parts = [head, `Files:\n${treeOutline(d.files) || "(empty)"}`];
   if (d.prs.length) parts.push(`Merged pull requests, newest first:\n${d.prs.map((p) => `- #${p.number} ${clip(p.title, 120)} (${p.author || "?"}, ${day(p.mergedAt)})`).join("\n")}`);
   parts.push(
@@ -155,15 +158,15 @@ export function buildDigest(d: DigestInput): string {
   return clip(parts.join("\n\n"), DIGEST_MAX);
 }
 
-/** The digests of a space's projects, for Ask Stand's prompt; null when it has none pulled. */
-export function projectDigest(sql: DatabaseSync, roomId: string): string | null {
-  const rows = sql.prepare("SELECT digest FROM space_projects WHERE room_id = ? AND digest IS NOT NULL ORDER BY linked_at").all(roomId) as Array<{ digest: string }>;
+/** The digests of a space's sources, for Ask Stand's prompt; null when it has none pulled. */
+export function sourceDigest(sql: DatabaseSync, roomId: string): string | null {
+  const rows = sql.prepare("SELECT digest FROM space_sources WHERE room_id = ? AND digest IS NOT NULL ORDER BY linked_at").all(roomId) as Array<{ digest: string }>;
   return rows.length ? rows.map((r) => r.digest).join("\n\n---\n\n") : null;
 }
 
 type Row = Record<string, any>;
 
-const toProject = (r: Row, names: (id: string) => string | null): SpaceProject => ({
+const toProject = (r: Row, names: (id: string) => string | null): SpaceSource => ({
   owner: r.owner,
   repo: r.repo,
   branch: r.default_branch,
@@ -175,7 +178,7 @@ const toProject = (r: Row, names: (id: string) => string | null): SpaceProject =
   url: `https://github.com/${r.owner}/${r.repo}`,
 });
 
-export class Projects {
+export class Sources {
   private pulling = new Map<string, Promise<void>>();
   private timer?: ReturnType<typeof setInterval>;
   private busy = false;
@@ -185,7 +188,7 @@ export class Projects {
     private sql: DatabaseSync,
     /** Where the copies live: DATA_DIR/repos. */
     private dir: string,
-    private github: ProjectGithub | null,
+    private github: SourceGithub | null,
     private git: Git = runGit,
     /** Where a repo is fetched from; tests point it at a local repo. */
     private remote: (owner: string, repo: string) => string = (o, r) => `https://github.com/${o}/${r}.git`,
@@ -193,12 +196,12 @@ export class Projects {
 
   private names = (id: string) => ((this.sql.prepare("SELECT name FROM users WHERE id = ?").get(id) as Row | undefined)?.name as string | undefined) ?? null;
 
-  list(roomId: string): SpaceProject[] {
-    return (this.sql.prepare("SELECT * FROM space_projects WHERE room_id = ? ORDER BY linked_at").all(roomId) as Row[]).map((r) => toProject(r, this.names));
+  list(roomId: string): SpaceSource[] {
+    return (this.sql.prepare("SELECT * FROM space_sources WHERE room_id = ? ORDER BY linked_at").all(roomId) as Row[]).map((r) => toProject(r, this.names));
   }
 
   private row(roomId: string, owner: string, repo: string): Row | undefined {
-    return this.sql.prepare("SELECT * FROM space_projects WHERE room_id = ? AND lower(owner) = lower(?) AND lower(repo) = lower(?)").get(roomId, owner, repo) as Row | undefined;
+    return this.sql.prepare("SELECT * FROM space_sources WHERE room_id = ? AND lower(owner) = lower(?) AND lower(repo) = lower(?)").get(roomId, owner, repo) as Row | undefined;
   }
 
   repoDir(roomId: string, owner: string, repo: string) {
@@ -213,19 +216,19 @@ export class Projects {
 
   /** Links a repo to a space and pulls it once. The caller checks the person may change the space;
    *  this checks they connected the repo on GitHub themselves. */
-  async link(roomId: string, userId: string, input: string, now = Date.now()): Promise<SpaceProject> {
-    if (!this.github) throw new ProjectError("The Stand GitHub App isn't set up on this server.");
+  async link(roomId: string, userId: string, input: string, now = Date.now()): Promise<SpaceSource> {
+    if (!this.github) throw new SourceError("The Stand GitHub App isn't set up on this server.");
     const want = parseRepo(input);
-    if (!want) throw new ProjectError("Pick a repo as owner/name.");
-    if (this.row(roomId, want.owner, want.repo)) throw new ProjectError("That repo is already linked to this space.");
-    if (this.list(roomId).length >= MAX_PROJECTS) throw new ProjectError(`A space can link up to ${MAX_PROJECTS} repos.`);
+    if (!want) throw new SourceError("Pick a repo as owner/name.");
+    if (this.row(roomId, want.owner, want.repo)) throw new SourceError("That repo is already linked to this space.");
+    if (this.list(roomId).length >= MAX_SOURCES) throw new SourceError(`A space can link up to ${MAX_SOURCES} repos.`);
     const repos = await this.github.linkableRepos(userId);
     const r = repos.find((x) => x.owner.toLowerCase() === want.owner.toLowerCase() && x.repo.toLowerCase() === want.repo.toLowerCase());
-    if (!r) throw new ProjectError("You can only link a repo from a GitHub connection you made. Connect GitHub on the Connect an agent page and include this repo.");
-    if (r.sizeKb > MAX_REPO_KB) throw new ProjectError("That repo is too big for Stand to copy (over 1 GB).");
-    if (!BRANCH.test(r.defaultBranch)) throw new ProjectError("Stand can't read that repo's default branch name.");
+    if (!r) throw new SourceError("You can only link a repo from a GitHub connection you made. Connect GitHub on the Connect an agent page and include this repo.");
+    if (r.sizeKb > MAX_REPO_KB) throw new SourceError("That repo is too big for Stand to copy (over 1 GB).");
+    if (!BRANCH.test(r.defaultBranch)) throw new SourceError("Stand can't read that repo's default branch name.");
     this.sql
-      .prepare("INSERT INTO space_projects (room_id, owner, repo, installation_id, default_branch, linked_by, linked_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .prepare("INSERT INTO space_sources (room_id, owner, repo, installation_id, default_branch, linked_by, linked_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(roomId, r.owner, r.repo, r.installationId, r.defaultBranch, userId, now);
     await this.pull(roomId, r.owner, r.repo);
     return this.list(roomId).find((p) => p.owner === r.owner && p.repo === r.repo)!;
@@ -235,12 +238,12 @@ export class Projects {
   unlink(roomId: string, owner: string, repo: string): boolean {
     const r = this.row(roomId, owner, repo);
     if (!r) return false;
-    this.sql.prepare("DELETE FROM space_projects WHERE room_id = ? AND owner = ? AND repo = ?").run(roomId, r.owner, r.repo);
+    this.sql.prepare("DELETE FROM space_sources WHERE room_id = ? AND owner = ? AND repo = ?").run(roomId, r.owner, r.repo);
     fs.rmSync(this.repoDir(roomId, r.owner, r.repo), { recursive: true, force: true });
     return true;
   }
 
-  /** Fetches the repo's default branch and rebuilds its digest. A failure is kept on the project to show. */
+  /** Fetches the repo's default branch and rebuilds its digest. A failure is kept on the source to show. */
   pull(roomId: string, owner: string, repo: string): Promise<void> {
     const key = `${roomId}/${owner}/${repo}`.toLowerCase();
     const running = this.pulling.get(key);
@@ -277,25 +280,25 @@ export class Projects {
       const prs = await this.github.mergedPrs(r.owner, r.repo, token).catch(() => []);
       const digest = buildDigest({ owner: r.owner, repo: r.repo, branch: r.default_branch, sha, pulledAt: now, files, readme, prs, commits });
       this.sql
-        .prepare("UPDATE space_projects SET head_sha = ?, pulled_at = ?, error = NULL, digest = ? WHERE room_id = ? AND owner = ? AND repo = ?")
+        .prepare("UPDATE space_sources SET head_sha = ?, pulled_at = ?, error = NULL, digest = ? WHERE room_id = ? AND owner = ? AND repo = ?")
         .run(sha, now, digest, roomId, r.owner, r.repo);
     } catch (e) {
       const message = clip((e as Error).message || "Couldn't pull from GitHub.", 200);
-      console.warn(`[projects] ${r.owner}/${r.repo} for ${roomId}: ${message}`);
-      this.sql.prepare("UPDATE space_projects SET error = ? WHERE room_id = ? AND owner = ? AND repo = ?").run(message, roomId, r.owner, r.repo);
+      console.warn(`[sources] ${r.owner}/${r.repo} for ${roomId}: ${message}`);
+      this.sql.prepare("UPDATE space_sources SET error = ? WHERE room_id = ? AND owner = ? AND repo = ?").run(message, roomId, r.owner, r.repo);
     }
   }
 
   /** Ask Stand's tools over the space's pulled repos, for one run; null when it has none. */
   tools(roomId: string): RepoTools | null {
-    const rows = (this.sql.prepare("SELECT * FROM space_projects WHERE room_id = ? AND head_sha IS NOT NULL ORDER BY linked_at").all(roomId) as Row[])
+    const rows = (this.sql.prepare("SELECT * FROM space_sources WHERE room_id = ? AND head_sha IS NOT NULL ORDER BY linked_at").all(roomId) as Row[])
       .map((r) => ({ owner: r.owner as string, repo: r.repo as string, sha: r.head_sha as string, installationId: r.installation_id as number, digest: (r.digest as string) ?? "", dir: this.repoDir(roomId, r.owner, r.repo) }))
       .filter((r) => fs.existsSync(path.join(r.dir, "HEAD")));
     return rows.length ? new RepoTools(rows, this.git, this.github) : null;
   }
 
   start() {
-    this.timer = setInterval(() => void this.pullAll(), PROJECT_PULL_MS);
+    this.timer = setInterval(() => void this.pullAll(), SOURCE_PULL_MS);
     this.timer.unref();
     void this.pullAll();
   }
@@ -304,7 +307,7 @@ export class Projects {
     clearInterval(this.timer);
   }
 
-  /** One pass over every project, one at a time. A call while a pass runs makes it go round once more. */
+  /** One pass over every source, one at a time. A call while a pass runs makes it go round once more. */
   async pullAll() {
     if (this.busy) {
       this.again = true;
@@ -314,7 +317,7 @@ export class Projects {
     try {
       do {
         this.again = false;
-        const rows = this.sql.prepare("SELECT room_id, owner, repo FROM space_projects ORDER BY linked_at").all() as Row[];
+        const rows = this.sql.prepare("SELECT room_id, owner, repo FROM space_sources ORDER BY linked_at").all() as Row[];
         for (const r of rows) await this.pull(r.room_id, r.owner, r.repo);
       } while (this.again);
     } finally {
@@ -360,7 +363,7 @@ const blobUrl = (r: LinkedRepo, p: string) => `https://github.com/${r.owner}/${r
 function cleanPath(p: string): string {
   const s = p.trim().replace(/^\.?\/+/, "").replace(/\/+$/, "");
   if (s === "." || s === "") return "";
-  if (s.startsWith(":") || s.split("/").some((part) => part === ".." || part === "")) throw new ProjectError(`${p} isn't a path in the repo.`);
+  if (s.startsWith(":") || s.split("/").some((part) => part === ".." || part === "")) throw new SourceError(`${p} isn't a path in the repo.`);
   return s;
 }
 
@@ -378,7 +381,7 @@ export class RepoTools {
   constructor(
     private repos: LinkedRepo[],
     private git: Git,
-    private github: ProjectGithub | null,
+    private github: SourceGithub | null,
   ) {
     // The digest is in the prompt, so its PRs and commits count as seen.
     for (const r of repos) {
@@ -457,16 +460,16 @@ export class RepoTools {
   private pick(name: string | undefined, all: boolean): LinkedRepo[] {
     if (name) {
       const r = this.repos.find((x) => `${x.owner}/${x.repo}`.toLowerCase() === name.toLowerCase());
-      if (!r) throw new ProjectError(`No linked repo is called ${name}. Linked: ${this.names.join(", ")}.`);
+      if (!r) throw new SourceError(`No linked repo is called ${name}. Linked: ${this.names.join(", ")}.`);
       return [r];
     }
     if (all) return this.repos;
     if (this.repos.length === 1) return this.repos;
-    throw new ProjectError(`Say which repo: ${this.names.join(" or ")}.`);
+    throw new SourceError(`Say which repo: ${this.names.join(" or ")}.`);
   }
 
   private async search(pattern: string, under: string | undefined, repo: string | undefined) {
-    if (!pattern.trim()) throw new ProjectError("Give a pattern to search for.");
+    if (!pattern.trim()) throw new SourceError("Give a pattern to search for.");
     const p = under ? cleanPath(under) : "";
     const label = this.repos.length > 1;
     const out: string[] = [];
@@ -478,7 +481,7 @@ export class RepoTools {
       } catch (e) {
         // git grep exits 1 when nothing matches.
         if ((e as { exitCode?: number }).exitCode === 1) continue;
-        throw new ProjectError(`The search failed: ${clip((e as Error).message, 200)}`);
+        throw new SourceError(`The search failed: ${clip((e as Error).message, 200)}`);
       }
       for (const line of text.split("\n")) {
         const m = /^(.*?):(\d+):(.*)$/.exec(line.startsWith(`${r.sha}:`) ? line.slice(r.sha.length + 1) : line);
@@ -497,13 +500,13 @@ export class RepoTools {
   private async read(file: string, from: number | undefined, to: number | undefined, repo: string | undefined) {
     const [r] = this.pick(repo, false);
     const p = cleanPath(file);
-    if (p && hiddenPath(p)) throw new ProjectError(`${p} is never shown: it could hold secrets.`);
+    if (p && hiddenPath(p)) throw new SourceError(`${p} is never shown: it could hold secrets.`);
     const spec = `${r.sha}:${p}`;
     const type = await this.git(["cat-file", "-t", spec], { cwd: r.dir }).then(
       (t) => t.trim(),
       () => null,
     );
-    if (!type) throw new ProjectError(`There's no ${p} in ${r.owner}/${r.repo}. Use repo_search to find it.`);
+    if (!type) throw new SourceError(`There's no ${p} in ${r.owner}/${r.repo}. Use repo_search to find it.`);
     if (type === "tree") {
       const entries = (await this.git(["ls-tree", "-z", spec], { cwd: r.dir }))
         .split("\0")
@@ -516,7 +519,7 @@ export class RepoTools {
       this.step(`Looked in ${p || "the top level"}`);
       return `${r.owner}/${r.repo} ${p || "(top level)"}:\n${entries.join("\n") || "(empty)"}`;
     }
-    if (type !== "blob") throw new ProjectError(`${p} isn't a file.`);
+    if (type !== "blob") throw new SourceError(`${p} isn't a file.`);
     const text = await this.git(["cat-file", "blob", spec], { cwd: r.dir });
     this.step(`Read ${p}`);
     if (text.slice(0, 8000).includes("\0")) return `${p} is a binary file.`;
@@ -537,7 +540,7 @@ export class RepoTools {
     const args = ["log", `-n${LOG_ROWS}`, "--date=short", "--format=%h%x1f%an%x1f%ad%x1f%s", "--regexp-ignore-case", "--fixed-strings"];
     if (query) args.push(`--grep=${query}`);
     if (since) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new ProjectError("Give since as YYYY-MM-DD.");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new SourceError("Give since as YYYY-MM-DD.");
       args.push(`--since=${since}`);
     }
     args.push(r.sha);
@@ -557,8 +560,8 @@ export class RepoTools {
 
   private async pr(n: number | undefined, repo: string | undefined) {
     const [r] = this.pick(repo, false);
-    if (!n || n < 1) throw new ProjectError("Give the PR's number.");
-    if (!this.github?.pullRequest) throw new ProjectError("Stand can't read PRs here.");
+    if (!n || n < 1) throw new SourceError("Give the PR's number.");
+    if (!this.github?.pullRequest) throw new SourceError("Stand can't read PRs here.");
     const token = await this.github.readToken(r.installationId, r.repo);
     const pr = await this.github.pullRequest(r.owner, r.repo, n, token);
     this.step(`Opened PR #${n}`);
@@ -614,9 +617,9 @@ export class RepoTools {
   }
 }
 
-let shared: Projects | null = null;
-/** The server's projects, so a meeting room can hand Ask Stand its space's repo tools. */
-export function setProjects(p: Projects | null) {
+let shared: Sources | null = null;
+/** The server's sources, so a meeting room can hand Ask Stand its space's repo tools. */
+export function setSources(p: Sources | null) {
   shared = p;
 }
 export function repoTools(roomId: string): RepoTools | null {

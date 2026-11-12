@@ -1784,14 +1784,14 @@ a.sh-pill:hover { text-decoration: none; }
 .conxt-panel .conxt-consent input { width: auto; margin-top: 4px; }
 .conxt-delivery { border-top: 1px solid var(--line); padding: 10px 0; }
 .conxt-delivery > span { margin-left: 12px; font-size: 13px; }
-.project-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
-.project-panel h3 { margin: 0 0 8px; }
-.project-panel select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; background: var(--panel-2); }
-.project-panel .project-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
-.project-panel .project-consent input { width: auto; margin-top: 4px; }
-.project-row { border-top: 1px solid var(--line); padding: 10px 0; }
-.project-row > span { margin-left: 12px; }
-.project-row .error { margin: 6px 0 0; }
+.source-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.source-panel h3 { margin: 0 0 8px; }
+.source-panel select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; background: var(--panel-2); }
+.source-panel .source-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
+.source-panel .source-consent input { width: auto; margin-top: 4px; }
+.source-row { border-top: 1px solid var(--line); padding: 10px 0; }
+.source-row > span { margin-left: 12px; }
+.source-row .error { margin: 6px 0 0; }
 .members-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
 .members-panel h3 { margin: 0 0 8px; }
 .members-row { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding: 10px 0; }
