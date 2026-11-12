@@ -1,3 +1,4 @@
+import { Timeline } from "../Timeline.tsx";
 import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -293,7 +294,7 @@ export function RecapPage() {
               <TopicIcon /> Chapters
             </h2>
             <button className="link small" onClick={() => setOpen((o) => ({ ...o, all: !o.all }))}>
-              {open_.all ? "Hide transcript" : `Whole transcript (${segments.length})`}
+              {open_.all ? "Hide transcript" : `Whole transcript (${data.timeline?.length || segments.length})`}
             </button>
           </div>
           <SnapStrip snaps={looseSnaps} />
@@ -313,7 +314,7 @@ export function RecapPage() {
           {leftover.map(({ d, g }) => (
             <TopicRow key={d.id} d={d} segments={g.segments} snaps={onTopic(d.id)} />
           ))}
-          {open_.all && <Turns segments={segments} />}
+          {open_.all && (data.timeline?.length ? <Timeline entries={data.timeline} /> : <Turns segments={segments} />)}
         </section>
       )}
 

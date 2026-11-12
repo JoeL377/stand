@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, Participant } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { useDismiss } from "../useDismiss.ts";
-import { ShareIcon } from "../icons.tsx";
+import { MicOffIcon, ShareIcon } from "../icons.tsx";
 import { Avatar } from "./Stage.tsx";
 
 /** How many faces the top bar shows before "+N". */
@@ -42,7 +42,7 @@ export function People(props: {
         className="people-btn"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        title={`In the room: ${everyone.map((p) => p.name).join(", ")}`}
+        title={`In the room: ${everyone.map((p) => (p.muted ? `${p.name} (muted)` : p.name)).join(", ")}`}
       >
         <span className="people-stack">
           {shown.map((p) => (
@@ -53,11 +53,17 @@ export function People(props: {
                 talking.has(p.id) && "talking",
                 p.notRecording && "unheard",
                 p.isSharing && "sharing",
+                p.muted && "muted",
               ]
                 .filter(Boolean)
                 .join(" ")}
             >
               <Avatar id={p.id} name={p.name} picture={p.picture} size={24} />
+              {p.muted && (
+                <span className="people-mute" role="img" aria-label={`${p.id === participantId ? "You are" : `${p.name.split(" ")[0]} is`} muted`}>
+                  <MicOffIcon />
+                </span>
+              )}
             </span>
           ))}
           {everyone.length > SHOWN && <span className="people-more">+{everyone.length - SHOWN}</span>}
@@ -68,7 +74,7 @@ export function People(props: {
             <Bars />
           </span>
         )}
-        {/* A crossed-out mic would read as muted; this says what it means. */}
+        {/* A crossed-out mic means muted (on the face); this says what not recorded means. */}
         {unheard.length > 0 && (
           <span className="people-unheard" title={`What ${unheard.map((p) => p.name.split(" ")[0]).join(" and ")} say${unheard.length === 1 ? "s" : ""} isn't in the notes: their browser can't transcribe it.`}>
             {unheard.length === 1 ? `${first(unheard[0])} not recorded` : `${unheard.length} not recorded`}
@@ -115,6 +121,11 @@ function PersonRow(props: { p: Participant; me: boolean; demo: boolean; talking:
         {props.me && <span className="muted"> (you)</span>}
       </span>
       {props.talking && <Bars />}
+      {p.muted && (
+        <span className="people-tag" title={`${p.name.split(" ")[0]}'s mic is off`}>
+          <MicOffIcon /> Muted
+        </span>
+      )}
       {p.isSharing && (
         <span className="people-tag green" title={`${p.name} is sharing their screen`}>
           <ShareIcon /> Sharing

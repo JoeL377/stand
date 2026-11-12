@@ -244,13 +244,41 @@ const reviewStarted = now - 5 * DAY;
 const reviewCall = db.startMeeting(room.id);
 const slideItems = db.listItems(room.id).slice(0, 3);
 slideItems.forEach((it, i) => db.addSegment({ meetingId: reviewCall.id, itemId: it.id, speakerId: team[i].id, speakerName: team[i].name, kind: "speech", text: `Here's ${it.title.toLowerCase()}.`, ts: reviewStarted + (i + 1) * 4 * MIN }));
-db.addNote(reviewCall.id, slideItems[0].id, { kind: "action", text: "Keep the order summary pinned while the page scrolls", owner: maya.name }, null);
-db.addNote(reviewCall.id, slideItems[0].id, { kind: "question", text: "Does the one-page layout work with long addresses?", owner: null }, null);
-db.addNote(reviewCall.id, slideItems[1].id, { kind: "decision", text: "Saved cards ship to everyone this week", owner: null }, null);
-db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Put the order number in the subject line", owner: maya.name }, null);
-db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Test the email in Outlook", owner: leo.name }, null);
-db.addNote(reviewCall.id, null, { kind: "decision", text: "Reviews run every other Thursday", owner: null }, null);
-db.addNote(reviewCall.id, null, { kind: "action", text: "Invite support to the next review", owner: sam.name }, null);
+// What was caught, each a minute after the slide it was said on (the timeline places it there).
+const reviewNotes: Array<[Note, number]> = [
+  [db.addNote(reviewCall.id, slideItems[0].id, { kind: "action", text: "Keep the order summary pinned while the page scrolls", owner: maya.name }, null), 5],
+  [db.addNote(reviewCall.id, slideItems[0].id, { kind: "question", text: "Does the one-page layout work with long addresses?", owner: null }, null), 6],
+  [db.addNote(reviewCall.id, slideItems[1].id, { kind: "decision", text: "Saved cards ship to everyone this week", owner: null }, null), 10],
+  [db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Put the order number in the subject line", owner: maya.name }, null), 13],
+  [db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Test the email in Outlook", owner: leo.name }, null), 14],
+  [db.addNote(reviewCall.id, null, { kind: "decision", text: "Reviews run every other Thursday", owner: null }, null), 16],
+  [db.addNote(reviewCall.id, null, { kind: "action", text: "Invite support to the next review", owner: sam.name }, null), 17],
+];
+// A line whose words point at the screen, said while Priya was sharing hers.
+db.addSegment({ meetingId: reviewCall.id, itemId: slideItems[0].id, speakerId: priya.id, speakerName: priya.name, kind: "speech", text: "As you can see here, the order summary scrolls off the top on a long cart.", ts: reviewStarted + 4 * MIN + 55_000 });
+// Typed in the call's chat, an Ask Stand question, and a report Priya's agent posted while it ran.
+db.addSegment({ meetingId: reviewCall.id, itemId: slideItems[0].id, speakerId: priya.id, speakerName: priya.name, kind: "chat", text: "The PR: https://github.com/acme-demo/checkout/pull/31", ts: reviewStarted + 4 * MIN + 40_000 });
+db.addSegment({ meetingId: reviewCall.id, itemId: slideItems[1].id, speakerId: maya.id, speakerName: maya.name, kind: "chat", text: "Does this cover Apple Pay too?", ts: reviewStarted + 8 * MIN + 50_000 });
+db.saveAgentCards(reviewCall.id, [
+  {
+    id: "previewask1",
+    kind: "answer",
+    about: sam.id,
+    question: "Did we decide anything about saved cards before?",
+    status: "ready",
+    by: sam.name,
+    at: reviewStarted + 9 * MIN,
+    readyAt: reviewStarted + 9 * MIN + 20_000,
+    options: [],
+    fromSpace: [],
+    note: "Yes. Two weeks ago the team agreed saved cards go to returning shoppers first, behind a flag.",
+    picked: null,
+    dismissed: null,
+    model: "claude-opus-5-5",
+    costUsd: 0.01,
+  },
+]);
+const duringReview = db.addUpdate({ roomId: room.id, itemId: slideItems[0].id, noteId: summaryBar.id, noteText: summaryBar.text, userId: priya.id, userName: priya.name, client: "Claude Code", status: "progress", text: "Pinned the summary on scroll; pushed to the same PR.", links: [] });
 setOutcome(db, slideItems[0].id, "fixes", sam.name);
 setOutcome(db, slideItems[1].id, "ship", priya.name);
 setOutcome(db, slideItems[2].id, "not_yet", sam.name);
@@ -362,6 +390,22 @@ says(maya, "Thanks!\nOne more thing: the receipt wording changed, so the screens
 const raw = new DatabaseSync(file);
 for (const m of [earlier, latest]) raw.prepare("UPDATE meetings SET started_at = ?, ended_at = ? WHERE id = ?").run(m.started, m.ended, m.id);
 raw.prepare("UPDATE meetings SET started_at = ?, ended_at = ? WHERE id = ?").run(reviewStarted, reviewStarted + 18 * MIN, reviewCall.id);
+for (const [n, min] of reviewNotes) raw.prepare("UPDATE notes SET ts = ? WHERE id = ?").run(reviewStarted + min * MIN, n.id);
+raw.prepare("UPDATE updates SET ts = ? WHERE id = ?").run(reviewStarted + 7 * MIN, duringReview.id);
+// What the main view showed: each slide, Priya's screen for a while on the first, the second picture of the last.
+const stageView = (itemId: string, more: object = {}) => JSON.stringify({ itemId, tab: "main", taskMode: null, shot: null, snapId: null, sharing: null, ...more });
+const stageRows: Array<[number, string]> = [
+  [4 * MIN - 10_000, stageView(slideItems[0].id)],
+  [4 * MIN + 30_000, stageView(slideItems[0].id, { sharing: priya.name })],
+  [7 * MIN + 30_000, stageView(slideItems[0].id)],
+  [8 * MIN - 10_000, stageView(slideItems[1].id)],
+  [12 * MIN - 10_000, stageView(slideItems[2].id)],
+  [13 * MIN + 20_000, stageView(slideItems[2].id, { shot: 1 })],
+];
+stageRows.forEach(([at, view], i) => raw.prepare("INSERT INTO stage_events (id, meeting_id, ts, view_json) VALUES (?, ?, ?, ?)").run(`previewstage${i}`, reviewCall.id, reviewStarted + at, view));
+slideItems.forEach((it, i) =>
+  raw.prepare("INSERT INTO focus_events (id, meeting_id, item_id, actor, reason, ts) VALUES (?, ?, ?, ?, 'manual', ?)").run(`previewfocus${i}`, reviewCall.id, it.id, sam.name, reviewStarted + (i + 1) * 4 * MIN - 10_000),
+);
 raw.prepare("UPDATE reviews SET started_at = ? WHERE id = ?").run(reviewStarted, pastReview.review.id);
 const hoursAgo = (h: number) => now - h * 3_600_000;
 raw.prepare("UPDATE updates SET ts = ? WHERE note_id = ?").run(hoursAgo(30), key.id);

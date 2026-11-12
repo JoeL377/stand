@@ -8,6 +8,7 @@ import { useFrameSampler } from "./useFrameSampler.ts";
 import { AgendaPanel } from "./AgendaPanel.tsx";
 import { People } from "./People.tsx";
 import { Stage } from "./Stage.tsx";
+import { usePresenceSounds } from "../roomSounds.ts";
 import { SidePanel } from "./SidePanel.tsx";
 import { costLines, fmtCost, fmtDuration, keyOf } from "../util.ts";
 import { macApp } from "../macApp.ts";
@@ -96,6 +97,13 @@ export function Meeting(props: {
   useEffect(() => {
     if (caps.transcription === "browser") send({ type: "recording", on: recording });
   }, [recording, send, room.connected, caps.transcription]);
+
+  // Everyone sees who is muted, on their face in the top bar.
+  useEffect(() => {
+    send({ type: "mic", on: media.micOn });
+  }, [media.micOn, send, room.connected]);
+  // A soft sound when someone else joins the call or leaves it.
+  usePresenceSounds(state?.participants.map((p) => p.id) ?? null, participantId, !state?.ending);
 
   // Tell the room when we start/stop sharing, and feed the agent snapshots.
   const sharing = Boolean(media.localScreen);
@@ -518,6 +526,7 @@ export function Meeting(props: {
         <SidePanel
           notes={room.notes}
           list={room.list}
+          cards={room.agentCards}
           state={state}
           segments={room.segments}
           notesBusy={room.notesBusy}
