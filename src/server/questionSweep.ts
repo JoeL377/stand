@@ -9,6 +9,7 @@ import type { SweepProposal } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
 import { openQuestions, settledView } from "./spaceSettle.ts";
+import { forSpace } from "./usage.ts";
 
 /** How many questions one sweep reads, oldest first. */
 export const SWEEP_MAX = 120;
@@ -46,7 +47,7 @@ async function sweep(db: DB, agent: Agent, roomId: string, now: number): Promise
   if (before?.basis === basis) return before.proposals;
   const asked = questions.map((n, i) => ({ n, key: `Q${i + 1}` }));
   const decided = decisions.map((n, i) => ({ n, key: `D${i + 1}` }));
-  const rows = await agent.sweepQuestions(
+  const rows = await forSpace(agent, roomId).sweepQuestions!(
     { name: room.name, purpose: room.purpose },
     {
       today: now,

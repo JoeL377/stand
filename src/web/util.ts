@@ -37,6 +37,7 @@ const TASK_NAMES: Record<string, string> = {
   settleSpace: "Decisions check",
   doneDeck: "Done since",
   suggestProjects: "Project suggestions",
+  sweepQuestions: "Question sweep",
   taskBrief: "Plan brief",
 };
 
