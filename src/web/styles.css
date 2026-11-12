@@ -2359,6 +2359,8 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .checkin-text { flex-basis: 100%; white-space: normal; }
 }
 .sh-task-group + .sh-task-group { margin-top: 6px; }
+/* Owner groups inside a project run on without a gap: the column of faces at the right shows the grouping. */
+.sh-task-group.by-owner + .sh-task-group.by-owner { margin-top: 0; }
 .sh-group.waiting { color: var(--accent-text); }
 .sh-group.mentioned { color: var(--accent-text); }
 .task-verb { margin-left: 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); vertical-align: 1px; }
@@ -2935,7 +2937,15 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .sh-project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sh-project-fold .count { color: var(--muted); font-weight: 500; font-size: 12px; }
 .sh-project.unassigned .sh-project-fold { color: var(--muted); }
-.sh-project-goal { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+/* Who has a project's open to-dos, on its header line: a small face and a count each (the goal is the name's tooltip). */
+.sh-project-owners { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 10px; overflow: hidden; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sh-owner-tally { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+
+/* The row's date, and its project when the section already says it, wait at the right and show on hover. */
+.followups li > .row-quiet { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; opacity: 0; transition: opacity 0.12s ease; }
+.followups li > .row-quiet .rc-pill-wrap, .followups li > .row-quiet .project-picker { margin-left: 0; }
+.followups li:hover > .row-quiet, .followups li:focus-within > .row-quiet, .followups li.opened > .row-quiet { opacity: 1; }
+@media (hover: none) { .followups li > .row-quiet { opacity: 1; } }
 .sh-project-menu { position: relative; margin-left: auto; flex: none; }
 .sh-panel .sh-project-more { height: 24px; min-height: 0; padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 16px; line-height: 1; }
 .sh-project-more:hover { color: var(--text); }
@@ -3643,7 +3653,7 @@ button.chat-caught-text { padding: 0; }
 .td-phone-acts { display: none; }
 @media (max-width: 760px) {
   .sh-panel.tasks .followups li > .sh-archive, .sh-panel.tasks .followups li > .cfa { display: none; }
-  .sh-panel.tasks .by-owner .followups li > .rc-face, .sh-panel.tasks .by-owner .followups li > .owner-picker { display: none; }
+  .sh-panel.tasks .followups li > .row-quiet, .sh-panel.tasks .sh-project-owners { display: none; }
   .sh-panel.tasks .followups .project-picker:has(.unset), .sh-panel.tasks .followups .task-from { display: none; }
   .sh-panel.tasks .followups .project-picker { margin-left: 0; }
   /* A title that wraps keeps its checkbox on the first line, not floating in the middle of the row. */
