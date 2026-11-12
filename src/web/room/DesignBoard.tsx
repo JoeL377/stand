@@ -1,80 +1,183 @@
 // A design session's diagram (server/designSession.ts): boxes for the things being designed and
-// labelled arrows for how they relate. What Stand heard shows dashed, with Keep and Drop, and joins
-// the diagram only when someone keeps it. A click on a box or an arrow opens what's behind it, on
-// your screen only. Context a session was given (MCP start_design_session) sits behind a Context button. In the call it grows as the team talks; on the session's page it is the record.
+// labelled arrows for how they relate. A box has a kind (a person, a screen, a data store…) that
+// gives it a mark and a shape, and boxes that belong together sit in a group with a caption. Each
+// box shows its one line description, and what was said about it as notes under it; the Text pill
+// hides both. What Stand heard shows dashed, with Keep and Drop, and joins the diagram only when
+// someone keeps it. A click on a box or an arrow opens what's behind it, on your screen only.
+// Context a session was given (MCP start_design_session) sits behind a Context button. In the call
+// it grows as the team talks; on the session's page it is the record.
+//
+// React Flow draws it (pan, pinch, the boxes as components) and ELK places it (designLayout.ts).
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import dagre from "@dagrejs/dagre";
-import type { BrainstormView, DesignArrow, DesignBox } from "../../shared/protocol.ts";
-import { CaughtMarks, Face, KIND, KINDS, clock } from "./BrainMap.tsx";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import "@xyflow/react/dist/base.css";
+import { AppWindow, CircleArrowRight, Database, Server, Split, User } from "lucide-react";
+import type { BrainstormView, DesignArrow, DesignBox, DesignGroup, DesignKind } from "../../shared/protocol.ts";
+import { CaughtMarks, Face, KINDS, clock } from "./BrainMap.tsx";
 import { Markdown } from "../Markdown.tsx";
+import { NOTES_SHOWN, fitView, layoutDiagram, type Laid } from "./designLayout.ts";
 
-const BOX_W = 176;
-const PAD = 28;
-const LOOP_H = 28;
-
-/** How tall a box draws, so the layout leaves room for it: its label's lines, and the row of marks. */
-const boxHeight = (b: DesignBox) => {
-  const lines = Math.min(3, Math.max(1, Math.ceil(b.label.length / 20)));
-  return 22 + lines * 19 + (b.points.length || b.caught.length ? 20 : 0) + (b.suggested ? 26 : 0);
+/** What each kind of box is called, and its mark. A plain thing has neither. */
+const SORT: Record<DesignKind, { label: string; Icon: typeof User | null }> = {
+  thing: { label: "Part", Icon: null },
+  person: { label: "Person", Icon: User },
+  screen: { label: "Screen", Icon: AppWindow },
+  store: { label: "Data", Icon: Database },
+  service: { label: "Service", Icon: Server },
+  step: { label: "Step", Icon: CircleArrowRight },
+  decision: { label: "Decision", Icon: Split },
 };
 
-export interface Laid {
-  w: number;
-  h: number;
-  boxes: Array<{ box: DesignBox; x: number; y: number; w: number; h: number }>;
-  arrows: Array<{ arrow: DesignArrow; path: string; x: number; y: number }>;
+/** What the boxes and arrows need from the board. */
+const Board = createContext<{ text: boolean; openId: string | null; pick: (id: string) => void; onKeep?: (id: string) => void; onDrop?: (id: string) => void }>({ text: true, openId: null, pick: () => {} });
+
+type BoxNodeT = Node<{ box: DesignBox; body: number }, "box">;
+type GroupNodeT = Node<{ group: DesignGroup }, "frame">;
+type RelEdgeT = Edge<{ arrow: DesignArrow; path: string; x: number; y: number; from: string; to: string }, "rel">;
+
+function BoxNode({ data }: NodeProps<BoxNodeT>) {
+  const { box, body } = data;
+  const board = useContext(Board);
+  const { label, Icon } = SORT[box.kind ?? "thing"] ?? SORT.thing;
+  const act = (fn: ((id: string) => void) | undefined) => (e: React.MouseEvent) => (e.stopPropagation(), fn?.(box.id));
+  return (
+    <>
+      <Handle type="target" position={Position.Left} isConnectable={false} className="design-handle" />
+      <Handle type="source" position={Position.Right} isConnectable={false} className="design-handle" />
+      <div
+        role="button"
+        tabIndex={0}
+        className={`design-box kind-${box.kind ?? "thing"}${box.suggested ? " suggested" : ""}${board.openId === box.id ? " on" : ""}`}
+        style={{ height: body }}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), board.pick(box.id))}
+      >
+        <span className="design-name">
+          {Icon && (
+            <i className="design-kind" title={label}>
+              <Icon aria-label={label} />
+            </i>
+          )}
+          <strong dir="auto">{box.label}</strong>
+        </span>
+        {board.text && box.detail && (
+          <span className="design-detail" dir="auto">
+            {box.detail}
+          </span>
+        )}
+        {(box.caught.length > 0 || (!board.text && box.points.length > 0)) && (
+          <span className="brain-marks">
+            {!board.text && box.points.length > 0 && (
+              <i className="brain-badge" title={`${box.points.length} said about it`}>
+                {box.points.length}
+              </i>
+            )}
+            {KINDS.map((k) => {
+              const n = box.caught.filter((c) => c.kind === k.kind).length;
+              return n ? (
+                <i key={k.kind} className={`brain-kind ${k.kind}`} title={`${n} ${n === 1 ? k.one : k.many.toLowerCase()}`}>
+                  <k.Icon />
+                  {n > 1 && n}
+                </i>
+              ) : null;
+            })}
+          </span>
+        )}
+        {box.suggested && board.onKeep && (
+          <span className="design-ask nodrag nopan">
+            <button type="button" className="design-yes" onClick={act(board.onKeep)}>
+              Keep
+            </button>
+            <button type="button" className="design-no" onClick={act(board.onDrop)}>
+              Drop
+            </button>
+          </span>
+        )}
+      </div>
+      {board.text && box.points.length > 0 && (
+        <ul className="design-notes">
+          {box.points.slice(0, NOTES_SHOWN).map((p, i) => (
+            <li key={i} dir="auto">
+              {p.text}
+            </li>
+          ))}
+          {box.points.length > NOTES_SHOWN && <li className="more">+{box.points.length - NOTES_SHOWN} more</li>}
+        </ul>
+      )}
+    </>
+  );
 }
 
-/** Places the diagram: boxes in ranks, left to right on a wide board and top to bottom on a narrow
- *  one, with each arrow's label on its line. */
-export function layoutDiagram(boxes: DesignBox[], arrows: DesignArrow[], tall: boolean): Laid {
-  const g = new dagre.graphlib.Graph({ multigraph: true });
-  g.setGraph({ rankdir: tall ? "TB" : "LR", nodesep: 36, ranksep: tall ? 56 : 92, edgesep: 18, marginx: PAD, marginy: PAD });
-  g.setDefaultEdgeLabel(() => ({}));
-  const on = new Set(boxes.map((b) => b.id));
-  // An arrow from a box to itself is a loop under that box, in the gap the layout leaves between boxes.
-  const loops = arrows.filter((a) => a.from === a.to && on.has(a.from));
-  for (const b of boxes) g.setNode(b.id, { width: BOX_W, height: boxHeight(b) });
-  const drawn = arrows.filter((a) => a.from !== a.to && on.has(a.from) && on.has(a.to));
-  for (const a of drawn) g.setEdge(a.from, a.to, { width: Math.min(150, 16 + a.label.length * 6.4 + (a.suggested ? 44 : 0)), height: 22, labelpos: "c" }, a.id);
-  dagre.layout(g);
-  const size = g.graph() as { width?: number; height?: number };
-  return {
-    w: Math.max(1, size.width ?? 1),
-    h: Math.max(1, size.height ?? 1),
-    boxes: boxes.map((box) => {
-      const n = g.node(box.id) as { x: number; y: number; width: number; height: number };
-      return { box, x: n.x, y: n.y, w: n.width, h: n.height };
-    }),
-    arrows: [...loops.map((arrow) => {
-      const n = g.node(arrow.from) as { x: number; y: number; height: number };
-      const k = loops.filter((a) => a.from === arrow.from).indexOf(arrow);
-      const top = n.y + n.height / 2;
-      const y = top + k * 20 + LOOP_H - 12;
-      return { arrow, path: `M${n.x + 46},${top} C${n.x + 46},${y + 6} ${n.x - 46},${y + 6} ${n.x - 46},${top + 2}`, x: n.x, y };
-    }), ...drawn.map((arrow) => {
-      const e = g.edge({ v: arrow.from, w: arrow.to, name: arrow.id }) as { points: Array<{ x: number; y: number }>; x?: number; y?: number };
-      const p = e.points;
-      // A smooth line through the layout's points: straight to the first midpoint, then curves.
-      let path = `M${p[0].x},${p[0].y}`;
-      if (p.length < 3) path += p.slice(1).map((q) => ` L${q.x},${q.y}`).join("");
-      else {
-        for (let i = 1; i < p.length - 1; i++) {
-          const mx = (p[i].x + p[i + 1].x) / 2;
-          const my = (p[i].y + p[i + 1].y) / 2;
-          path += i === p.length - 2 ? ` Q${p[i].x},${p[i].y} ${p[i + 1].x},${p[i + 1].y}` : ` Q${p[i].x},${p[i].y} ${mx},${my}`;
-        }
-      }
-      const mid = p[Math.floor(p.length / 2)];
-      return { arrow, path, x: e.x ?? mid.x, y: e.y ?? mid.y };
-    })],
-  };
+function GroupNode({ data }: NodeProps<GroupNodeT>) {
+  const board = useContext(Board);
+  return (
+    <div className="design-group">
+      <strong dir="auto">{data.group.label}</strong>
+      {board.text && data.group.detail && <span dir="auto">{data.group.detail}</span>}
+    </div>
+  );
 }
+
+function RelEdge({ id, data }: EdgeProps<RelEdgeT>) {
+  const board = useContext(Board);
+  if (!data) return null;
+  const { arrow } = data;
+  const on = board.openId === arrow.id || board.openId === arrow.from || board.openId === arrow.to;
+  const act = (fn: ((id: string) => void) | undefined) => (e: React.MouseEvent) => (e.stopPropagation(), fn?.(arrow.id));
+  return (
+    <>
+      <BaseEdge id={id} path={data.path} interactionWidth={0} className={`design-line${arrow.suggested ? " suggested" : ""}${on ? " on" : ""}`} markerEnd={`url(#design-tip${on ? "-on" : arrow.suggested ? "-suggested" : ""})`} />
+      <EdgeLabelRenderer>
+        <span className={`design-rel nodrag nopan${arrow.suggested ? " suggested" : ""}${board.openId === arrow.id ? " on" : ""}`} style={{ left: data.x, top: data.y }}>
+          <button type="button" onClick={(e) => (e.stopPropagation(), board.pick(arrow.id))} title={`${data.from} ${arrow.label || "relates to"} ${data.to}`}>
+            {arrow.label || "relates to"}
+          </button>
+          {arrow.suggested && board.onKeep && (
+            <>
+              <button type="button" className="design-yes" aria-label="Keep this arrow" title="Keep" onClick={act(board.onKeep)}>
+                ✓
+              </button>
+              <button type="button" className="design-no" aria-label="Drop this arrow" title="Drop" onClick={act(board.onDrop)}>
+                ✕
+              </button>
+            </>
+          )}
+        </span>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const nodeTypes = { box: BoxNode, frame: GroupNode };
+const edgeTypes = { rel: RelEdge };
+
+/** Brings the whole diagram back into view when it is laid out again or the board changes size. */
+function Fit({ laid, size, tall }: { laid: Laid; size: { w: number; h: number }; tall: boolean }) {
+  const flow = useReactFlow();
+  const first = useRef(true);
+  useEffect(() => {
+    if (!size.w || !size.h) return;
+    void flow.setViewport(fitView(laid, size, tall), { duration: first.current ? 0 : 300 });
+    first.current = false;
+  }, [laid, size.w, size.h, tall]);
+  return null;
+}
+
+const TEXT_KEY = "stand.design.text";
+const savedText = (): boolean | null => {
+  try {
+    const v = localStorage.getItem(TEXT_KEY);
+    return v === null ? null : v === "1";
+  } catch {
+    return null;
+  }
+};
 
 export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: string) => void; onDrop?: (id: string) => void; className?: string }) {
   const { brainstorm } = props;
-  const { boxes, arrows } = brainstorm.design ?? { boxes: [], arrows: [] };
+  const design = brainstorm.design ?? { boxes: [], arrows: [] };
+  const { boxes, arrows } = design;
+  const groups = design.groups ?? [];
   const frame = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
@@ -87,11 +190,32 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
     return () => ro.disconnect();
   }, []);
   const tall = size.w > 0 && size.w < 620;
+  // Descriptions and notes show unless you turned them off; a phone starts without them.
+  const [textPick, setTextPick] = useState<boolean | null>(savedText);
+  const text = textPick ?? !tall;
+  const hasText = boxes.some((b) => b.detail || b.points.length) || groups.some((g) => g.detail);
+  const setText = (v: boolean) => {
+    setTextPick(v);
+    try {
+      localStorage.setItem(TEXT_KEY, v ? "1" : "0");
+    } catch {
+      // Private windows: the choice lasts for this visit.
+    }
+  };
+
   // Laid out again only when what's on the diagram changes, not on every broadcast.
-  const key = JSON.stringify([boxes.map((b) => [b.id, b.label, b.points.length, b.caught.length, !!b.suggested]), arrows.map((a) => [a.id, a.from, a.to, a.label, !!a.suggested]), tall]);
-  const laid = useMemo(() => layoutDiagram(boxes, arrows, tall), [key]);
-  // The whole diagram fits the board, down to a size that still reads; past that the board scrolls.
-  const fit = size.w && size.h ? Math.min(1.3, Math.max(tall ? 0.7 : 0.6, Math.min(size.w / laid.w, size.h / laid.h))) : 1;
+  const key = JSON.stringify([boxes.map((b) => [b.id, b.label, b.detail, b.kind, b.group, b.points.map((p) => p.text), b.caught.length, !!b.suggested]), arrows.map((a) => [a.id, a.from, a.to, a.label, !!a.suggested]), groups, tall, text]);
+  const [laid, setLaid] = useState<Laid | null>(null);
+  useEffect(() => {
+    if (!size.w || !boxes.length) return;
+    let current = true;
+    void layoutDiagram(design, { tall, text })
+      .then((l) => current && setLaid(l))
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [key, size.w > 0]);
 
   const [openId, setOpenId] = useState<string | null>(null);
   const context = brainstorm.context ?? [];
@@ -111,8 +235,30 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
   const name = (id: string) => boxes.find((b) => b.id === id)?.label ?? "";
   const waiting = boxes.filter((b) => b.suggested).length + arrows.filter((a) => a.suggested).length;
   const live = brainstorm.status === "live";
-  const act = (fn: ((id: string) => void) | undefined, id: string) => (e: React.MouseEvent) => (e.stopPropagation(), fn?.(id));
-  const openAt = laid.boxes.find((p) => p.box.id === openId)?.x ?? laid.arrows.find((p) => p.arrow.id === openId)?.x ?? 0;
+
+  // The places come from the last layout; what each box says comes from the diagram as it is now.
+  const nodes = useMemo<Array<BoxNodeT | GroupNodeT>>(() => {
+    if (!laid) return [];
+    const frames = laid.groups.flatMap((g): GroupNodeT[] => {
+      const group = groups.find((x) => x.id === g.group.id);
+      return group ? [{ id: g.group.id, type: "frame", position: { x: g.x, y: g.y }, width: g.w, height: g.h, data: { group }, zIndex: -1, selectable: false, focusable: false, className: "design-frame-node" }] : [];
+    });
+    const parts = laid.boxes.flatMap((p): BoxNodeT[] => {
+      const box = boxes.find((b) => b.id === p.box.id);
+      return box ? [{ id: box.id, type: "box", position: { x: p.x, y: p.y }, width: p.w, height: p.h, data: { box, body: p.body }, zIndex: 1 }] : [];
+    });
+    return [...frames, ...parts];
+  }, [laid, brainstorm.design]);
+  const edges = useMemo<RelEdgeT[]>(() => {
+    if (!laid) return [];
+    return laid.arrows.flatMap((p): RelEdgeT[] => {
+      const arrow = arrows.find((a) => a.id === p.arrow.id);
+      return arrow ? [{ id: arrow.id, type: "rel", source: arrow.from, target: arrow.to, data: { arrow, path: p.path, x: p.x, y: p.y, from: name(arrow.from), to: name(arrow.to) }, focusable: false }] : [];
+    });
+  }, [laid, brainstorm.design]);
+  const openAt = laid?.boxes.find((p) => p.box.id === openId)?.x ?? laid?.arrows.find((p) => p.arrow.id === openId)?.x ?? 0;
+  const view = laid && size.w ? fitView(laid, size, tall) : null;
+  const board = useMemo(() => ({ text, openId, pick, onKeep: props.onKeep, onDrop: props.onDrop }), [text, openId, props.onKeep, props.onDrop]);
 
   return (
     <div className={`brain design${tall ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} onClick={() => (setOpenId(null), setShowContext(false))}>
@@ -125,6 +271,11 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
             Context <i>{context.length}</i>
           </button>
         )}
+        {hasText && (
+          <button type="button" className={`design-context design-text${text ? " on" : ""}`} aria-pressed={text} title={text ? "Hide descriptions and notes" : "Show descriptions and notes"} onClick={(e) => (e.stopPropagation(), setText(!text))}>
+            Text
+          </button>
+        )}
         {waiting > 0 && <span className="design-waiting">{waiting} {live ? "suggested" : "left as suggestions"}</span>}
         {brainstorm.busy && <span className="design-busy">Listening…</span>}
       </div>
@@ -132,78 +283,41 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
         {boxes.length === 0 ? (
           <p className="design-empty muted">{live ? "Start talking it through. What Stand hears shows here as suggestions, and joins the diagram when someone keeps it." : "Nothing was put on this diagram."}</p>
         ) : (
-          <div className="design-fit" style={{ width: laid.w * fit, height: laid.h * fit }}>
-            <div className="design-canvas" style={{ width: laid.w, height: laid.h, transform: `scale(${fit})` }}>
-              <svg className="design-lines" width={laid.w} height={laid.h} aria-hidden>
+          laid && (
+            <Board.Provider value={board}>
+              <svg className="design-defs" aria-hidden>
                 <defs>
-                  <marker id="design-tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
-                  </marker>
+                  {["", "-suggested", "-on"].map((k) => (
+                    <marker key={k} id={`design-tip${k}`} className={`design-tip${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                      <path d="M0,0 L10,5 L0,10 z" />
+                    </marker>
+                  ))}
                 </defs>
-                {laid.arrows.map(({ arrow, path }) => (
-                  <path key={arrow.id} d={path} className={`${arrow.suggested ? "suggested" : ""}${openId === arrow.id || openId === arrow.from || openId === arrow.to ? " on" : ""}`} markerEnd="url(#design-tip)" />
-                ))}
               </svg>
-              {laid.arrows.map(({ arrow, x, y }) => (
-                <span key={arrow.id} className={`design-rel${arrow.suggested ? " suggested" : ""}${openId === arrow.id ? " on" : ""}`} style={{ left: x, top: y }}>
-                  <button type="button" onClick={(e) => (e.stopPropagation(), pick(arrow.id))} title={`${name(arrow.from)} ${arrow.label || "relates to"} ${name(arrow.to)}`}>
-                    {arrow.label || "relates to"}
-                  </button>
-                  {arrow.suggested && props.onKeep && (
-                    <>
-                      <button type="button" className="design-yes" aria-label="Keep this arrow" title="Keep" onClick={act(props.onKeep, arrow.id)}>
-                        ✓
-                      </button>
-                      <button type="button" className="design-no" aria-label="Drop this arrow" title="Drop" onClick={act(props.onDrop, arrow.id)}>
-                        ✕
-                      </button>
-                    </>
-                  )}
-                </span>
-              ))}
-              {laid.boxes.map(({ box, x, y, w, h }) => (
-                <div
-                  key={box.id}
-                  role="button"
-                  tabIndex={0}
-                  className={`design-box${box.suggested ? " suggested" : ""}${openId === box.id ? " on" : ""}`}
-                  style={{ left: x - w / 2, top: y - h / 2, width: w, minHeight: h }}
-                  onClick={(e) => (e.stopPropagation(), pick(box.id))}
-                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), pick(box.id))}
+              <ReactFlowProvider>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
+                  defaultViewport={view ?? undefined}
+                  minZoom={0.3}
+                  maxZoom={1.6}
+                  nodesDraggable={false}
+                  nodesConnectable={false}
+                  elementsSelectable={false}
+                  zoomOnScroll={false}
+                  zoomOnDoubleClick={false}
+                  preventScrolling={false}
+                  onNodeClick={(e, n) => n.type === "box" && (e.stopPropagation(), pick(n.id))}
+                  aria-label="Design diagram"
                 >
-                  <strong dir="auto">{box.label}</strong>
-                  {(box.points.length > 0 || box.caught.length > 0) && (
-                    <span className="brain-marks">
-                      {box.points.length > 0 && (
-                        <i className="brain-badge" title={`${box.points.length} said about it`}>
-                          {box.points.length}
-                        </i>
-                      )}
-                      {KINDS.map((k) => {
-                        const n = box.caught.filter((c) => c.kind === k.kind).length;
-                        return n ? (
-                          <i key={k.kind} className={`brain-kind ${k.kind}`} title={`${n} ${n === 1 ? k.one : k.many.toLowerCase()}`}>
-                            <k.Icon />
-                            {n > 1 && n}
-                          </i>
-                        ) : null;
-                      })}
-                    </span>
-                  )}
-                  {box.suggested && props.onKeep && (
-                    <span className="design-ask">
-                      <button type="button" className="design-yes" onClick={act(props.onKeep, box.id)}>
-                        Keep
-                      </button>
-                      <button type="button" className="design-no" onClick={act(props.onDrop, box.id)}>
-                        Drop
-                      </button>
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+                  <Fit laid={laid} size={size} tall={tall} />
+                  {!tall && <Controls showInteractive={false} position="bottom-left" fitViewOptions={{ padding: 0.04, maxZoom: 1.15 }} />}
+                </ReactFlow>
+              </ReactFlowProvider>
+            </Board.Provider>
+          )
         )}
       </div>
       {showContext && shownPiece && (
@@ -238,9 +352,9 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
         </aside>
       )}
       {(openBox || openArrow) && (
-        <aside className={`brain-card ${!tall && openAt * fit > size.w / 2 ? "left" : "right"}`} role="dialog" aria-label={openBox?.label ?? "Arrow"} onClick={(e) => e.stopPropagation()}>
+        <aside className={`brain-card ${!tall && view && openAt * view.zoom + view.x > size.w / 2 ? "left" : "right"}`} role="dialog" aria-label={openBox?.label ?? "Arrow"} onClick={(e) => e.stopPropagation()}>
           <header>
-            <span className="brain-crumb plain">{(openBox ?? openArrow)!.suggested ? "Suggested" : openBox ? "Part" : "Relation"}</span>
+            <span className="brain-crumb plain">{(openBox ?? openArrow)!.suggested ? "Suggested" : openBox ? [SORT[openBox.kind ?? "thing"]?.label ?? "Part", groups.find((g) => g.id === openBox.group)?.label].filter(Boolean).join(" · ") : "Relation"}</span>
             <button type="button" className="brain-x" aria-label="Close" onClick={() => setOpenId(null)}>
               ✕
             </button>

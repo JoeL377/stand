@@ -242,7 +242,9 @@ export interface BrainstormRow {
 export const shownDiagram = (d: DesignDiagram): DesignDiagram => {
   const boxes = d.boxes.filter((b) => !b.removed);
   const on = new Set(boxes.map((b) => b.id));
-  return { boxes, arrows: d.arrows.filter((a) => !a.removed && on.has(a.from) && on.has(a.to)) };
+  const used = new Set(boxes.map((b) => b.group));
+  const groups = (d.groups ?? []).filter((g) => used.has(g.id));
+  return { boxes, arrows: d.arrows.filter((a) => !a.removed && on.has(a.from) && on.has(a.to)), ...(groups.length ? { groups } : {}) };
 };
 
 export const toBrainstormView = (b: BrainstormRow, busy = false): BrainstormView => ({

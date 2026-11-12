@@ -558,7 +558,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
         diagram: z
           .string()
           .optional()
-          .describe("The diagram to start from, one line each: `Task: a to-do with an owner` for a part, `Task -> Project: belongs to` for a relation. Mermaid arrows work too. Left out, the board starts empty"),
+          .describe("The diagram to start from, one line each: `Task: a to-do with an owner` for a part, `Task -> Project: belongs to` for a relation. Say what kind a part is in brackets after its name, so it is drawn as more than a box: `Inbox (screen): where to-dos land`, with person, screen, store, service, step or decision. A line `## Planning: how work is lined up` opens a group, and the parts first named under it are drawn together inside it; use groups when the design has areas. A mermaid flowchart works too, with its subgraphs as groups. Left out, the board starts empty"),
         ref: z.string().optional().describe("The to-do the draft spec is saved on, stand:action/<id>. Left out, the session makes a new to-do when it ends"),
         model: modelField,
       },

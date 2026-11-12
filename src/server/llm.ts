@@ -1363,13 +1363,13 @@ export class HeuristicAgent implements Agent {
   /** Demo mode's stand-in for a design session's pass: a NEW line that says "a task belongs to a
    *  project" suggests those two boxes and that arrow. Enough to see suggestions without a model. */
   async designDiagram(_context: string, talk: string): Promise<DiagramAnswer | null> {
-    const out: DiagramAnswer = { boxes: [], arrows: [], extend: [], caught: [] };
+    const out: DiagramAnswer = { boxes: [], arrows: [], extend: [], caught: [], place: [], groups: [] };
     const have = new Map([...talk.matchAll(/^- \[(b\d+)\] (.+?)(?: \(suggested\))?:/gm)].map((m) => [m[2].toLowerCase(), m[1]]));
     const end = (name: string, line: number) => {
       const label = name.trim().replace(/^./, (c) => c.toUpperCase());
       const id = have.get(label.toLowerCase());
       if (id) return id;
-      out.boxes.push({ label, detail: `Raised as part of the design.`, by: null, line });
+      out.boxes.push({ label, detail: `Raised as part of the design.`, kind: "thing", group: null, by: null, line });
       have.set(label.toLowerCase(), `new${out.boxes.length}`);
       return `new${out.boxes.length}`;
     };

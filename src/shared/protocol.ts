@@ -280,12 +280,29 @@ export interface BrainNode {
   removed?: boolean;
 }
 
+/** What sort of thing a box is: it decides the box's shape and mark on the board. */
+export const DESIGN_KINDS = ["thing", "person", "screen", "store", "service", "step", "decision"] as const;
+export type DesignKind = (typeof DESIGN_KINDS)[number];
+
+/** Boxes that belong together on a design session's diagram, drawn inside one frame with a caption. */
+export interface DesignGroup {
+  /** g2. */
+  id: string;
+  label: string;
+  /** One line on what the group holds. */
+  detail: string | null;
+}
+
 /** A box on a design session's diagram (server/designSession.ts): one of the things being designed. */
 export interface DesignBox {
   /** b3. */
   id: string;
   label: string;
   detail: string | null;
+  /** Left out for a plain thing. */
+  kind?: DesignKind;
+  /** The group it sits in (g2), if any. */
+  group?: string | null;
   /** First name of who raised it; null for one the session started with. */
   by: string | null;
   ts: number;
@@ -327,6 +344,8 @@ export interface DesignContext {
 export interface DesignDiagram {
   boxes: DesignBox[];
   arrows: DesignArrow[];
+  /** The groups boxes sit in. As sent, only the ones with a box on the diagram. */
+  groups?: DesignGroup[];
 }
 
 /** A brainstorm: one sentence in the middle and the map the talk drew around it. */
