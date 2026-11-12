@@ -26,6 +26,7 @@ test("the preview's sample data still loads, with something in each state", () =
   assert.ok(todos.some((n) => n.state === "dropped"));
   assert.equal(db.roomLinks(room.id, "depends_on").length, 1);
   assert.equal(db.roomLinks(room.id, "conflicts").length, 1);
+  assert.equal(db.roomLinks(room.id, "leaves").length, 1);
 });
 
 test("it wipes its folder, so it won't run on one that isn't named preview", () => {

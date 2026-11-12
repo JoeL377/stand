@@ -2154,6 +2154,8 @@ a.sh-pill:hover { text-decoration: none; }
 .td-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
 .td-done-when { margin: 0 0 8px; font-size: 13px; }
 .td-done-when strong { margin-right: 4px; font-weight: 600; }
+.td-answer { margin: 0; font-size: 14px; }
+.td-section .answer-form { margin: 0; }
 .td-section { margin-top: 18px; }
 .td-section h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .td-section h3 .count { font-weight: 500; }
@@ -2349,6 +2351,39 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .sh-group.waiting { color: var(--accent-text); }
 .sh-group.mentioned { color: var(--accent-text); }
 .task-verb { margin-left: 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); vertical-align: 1px; }
+/* On an open question it is a button: it opens the answer box under the line (Questions.tsx). */
+button.task-answer { height: auto; min-height: 0; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); box-shadow: none; line-height: 18px; color: var(--accent-text); cursor: pointer; }
+button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-color: var(--accent); background: var(--panel-2); }
+.answer-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 4px; }
+.answer-form input { flex: 1 1 220px; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: inherit; font: inherit; font-size: 13px; }
+.answer-form button { height: 30px; padding: 0 12px; font-size: 12.5px; }
+.answer-form button.link { padding: 0; }
+.answer-form .error { flex-basis: 100%; }
+.followups.one-line li:has(.answer-form) { align-items: flex-start; }
+.followups.one-line li:has(.answer-form) > .check { margin-top: 2px; }
+/* The sweep of open questions: Stand's proposals, each with a tick. */
+.sweep-pop { width: min(720px, 100%); max-height: calc(100vh - 32px); }
+.sweep-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sweep-head h2 { margin: 0; font-size: 16px; }
+.sweep-head .agent-mark { font-size: 15px; }
+.sweep-lead, .sweep-working { margin: 0; font-size: 13px; }
+.sweep-working { animation: notes-pulse 1.6s ease-in-out infinite; }
+.sweep-list { list-style: none; margin: 0; padding: 0; min-height: 0; overflow-y: auto; border-top: 1px solid var(--line); }
+.sweep-list li { border-bottom: 1px solid var(--line); }
+.sweep-list label { display: flex; align-items: flex-start; gap: 10px; padding: 9px 2px; cursor: pointer; }
+.sweep-list input { flex: none; width: auto; margin: 3px 0 0; padding: 0; }
+.sweep-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13.5px; }
+.sweep-q { font-weight: 500; }
+.sweep-q .muted { font-weight: 400; font-size: 12px; white-space: nowrap; }
+.sweep-why { font-size: 13px; }
+.sweep-note { font-size: 12px; }
+.sweep-foot { display: flex; justify-content: flex-end; gap: 8px; }
+@media (prefers-reduced-motion: reduce) { .sweep-working { animation: none; } }
+@media (max-width: 640px) {
+  .dialog-backdrop:has(> .sweep-pop) { padding: 0; place-items: stretch; }
+  .sweep-pop { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .sweep-list { flex: 1; }
+}
 .followups li.done.dropped .check, .sh-done .followups li.done.dropped .check { background: var(--panel-2); border-color: var(--line); color: var(--muted); }
 /* A card opened from the card list: the topic as it stood then, on this screen only. */
 .topic-now.rewound { border-style: dashed; border-color: var(--line); }
@@ -2877,6 +2912,8 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 /* The Tasks tab: one section per project, then Unassigned. */
 .sh-task-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
 .sh-task-tools .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
+.sh-task-tools .rp-pill .agent-mark { font-size: 12px; }
+.sh-task-tools .rp-pill .count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .sh-project-sort { margin-left: auto; display: flex; }
 .sh-project-sort select { height: 24px; padding: 0 22px 0 10px; border: 1px solid var(--line); border-radius: 999px; background-color: var(--panel); color: var(--muted); font: inherit; font-size: 12px; }
 .sh-project-live { flex: none; color: var(--accent-text); font-size: 12px; font-weight: 500; }

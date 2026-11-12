@@ -22,6 +22,7 @@ import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, Gr
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
+import { AnswerForm, SweepPop, answeredToast } from "../Questions.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { fmtDate, fmtTime } from "../util.ts";
@@ -876,12 +877,15 @@ function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; 
 }
 
 type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
+/** The sweep is offered once a space has this many open questions. */
+const SWEEP_FROM = 5;
 
 /**
  * One list for everything still to do in the space: to-dos (Do) and open questions (Answer). Tasks
  * where a comment tags you come first, then work waiting on someone's look (a PR reported ready),
  * then the rest grouped by owner, yours first, then folded Done and Dropped. Anyone can tick a task
- * off, drop it or reopen it, with Undo.
+ * off, drop it or reopen it, with Undo. An open question takes an answer under its line, and the
+ * sweep closes the ones Stand proposes and someone confirms (Questions.tsx).
  */
 function TasksTab(props: {
   projectPicker: (n: Note) => React.ReactNode;
@@ -911,6 +915,10 @@ function TasksTab(props: {
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
   const [adding, setAdding] = useState(false);
+  // The open question someone is writing an answer to.
+  const [answering, setAnswering] = useState<string | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+  const asked = props.open.filter((n) => n.kind === "question").length;
   // Which project sections someone folded, kept in this browser.
   const foldKey = `stand.projectFold.${props.roomId}`;
   const [folded, setFolded] = useState<Set<string>>(() => {
@@ -1016,7 +1024,7 @@ function TasksTab(props: {
         props.reload();
         if (state !== "open")
           toast({
-            text: state === "dropped" ? "Dropped" : n.kind === "question" ? "Answered" : "Done",
+            text: state === "dropped" ? "Dropped" : n.kind === "question" ? "Closed without an answer" : "Done",
             action: { label: "Undo", run: () => void api.setTask(props.roomId, n.id, { state: "open" }).then(props.reload, errorToast("Couldn't undo it")) },
           });
         return saved;
@@ -1043,11 +1051,39 @@ function TasksTab(props: {
       openId={props.openId}
       onOpen={(n) => props.onOpen(n.id)}
       onToggle={(n, d) => move(n, d ? "done" : "open")}
+      below={(n) =>
+        !closed &&
+        answering === n.id && (
+          <AnswerForm
+            roomId={props.roomId}
+            note={n}
+            onCancel={() => setAnswering(null)}
+            onDone={(done) => {
+              setAnswering(null);
+              props.reload();
+              answeredToast(props.roomId, done, props.reload);
+            }}
+          />
+        )
+      }
       after={(n: TaskNote) => (
         <>
           {!closed && tagged.has(n.id) && <MentionPill mentions={tagged.get(n.id)!} />}
           {props.projectPicker(n)}
-          {n.kind === "question" && <span className="task-verb">Answer</span>}
+          {n.kind === "question" &&
+            (closed ? (
+              !n.answeredBy && <span className="task-verb">Answer</span>
+            ) : (
+              <button
+                type="button"
+                className="task-verb task-answer"
+                aria-expanded={answering === n.id}
+                title="Write the answer. Stand keeps it as a decision and closes the question."
+                onClick={() => setAnswering(answering === n.id ? null : n.id)}
+              >
+                Answer
+              </button>
+            ))}
           {n.saidDone && !n.doneAt && <SaidDonePill quote={n.saidDone} onUndo={() => notSaid(n)} />}
           {!closed && n.state === "doing" && !work[n.id]?.working && <span className="rc-pill task-doing">Doing</span>}
           {closed && <ClosedPill note={n} />}
@@ -1129,6 +1165,7 @@ function TasksTab(props: {
         </button>
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
+      {sweeping && <SweepPop roomId={props.roomId} count={asked} onClose={() => setSweeping(false)} onClosed={props.reload} />}
       <div className="sh-task-tools">
         <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only the tasks you own">
           Mine
@@ -1147,6 +1184,15 @@ function TasksTab(props: {
         ) : (
           <button type="button" className="rp-pill" onClick={() => setAdding(true)}>
             + Project
+          </button>
+        )}
+        {!props.mine && !props.projectFilter && asked >= SWEEP_FROM && (
+          <button type="button" className="rp-pill" onClick={() => setSweeping(true)} title="Stand proposes which open questions are settled or no longer matter. Nothing closes until you confirm.">
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>
+            Sweep questions
+            <span className="count">{asked}</span>
           </button>
         )}
         {canSort && (
@@ -1879,6 +1925,17 @@ function PointList(props: {
               {props.projectPicker?.(n)}
               {n.quote && <QuoteMark quote={n.quote} />}
               {n.from && <FromChip from={n.from} />}
+              {n.answers && (
+                <span className="rc-pill-wrap">
+                  <span className="rc-pill" tabIndex={0} aria-label={`Answers: ${n.answers}`}>
+                    Answer
+                  </span>
+                  <span className="rc-pop" role="tooltip">
+                    <span className="rc-pop-meta">Answers the question</span>
+                    <span className="rc-pop-crux">{n.answers}</span>
+                  </span>
+                </span>
+              )}
               {n.replacedBy && <ReplacedChip by={n.replacedBy} />}
               {n.mayBeReplacedBy && props.onReplaced && <MaybeReplaced by={n.mayBeReplacedBy} onAnswer={(replaced) => props.onReplaced!(n.id, n.mayBeReplacedBy!.noteId, replaced)} />}
             </span>

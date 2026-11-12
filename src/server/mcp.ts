@@ -23,6 +23,7 @@ Before starting on a to-do, call start_work with its ref: one call marks it as y
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Both list mentions_you: tasks where someone tagged your person with @Name in a comment and waits on them. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. When your person asks for a review of that plan, or it has a question the team must decide, request_design_review puts it on the space's next design review with your questions; don't ask for one otherwise. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action. When you split a to-do into smaller to-dos, give each one parent, so they show as its parts and follow its project.
+A space's open questions -> list_questions. When you can answer one, or your person says one no longer matters -> close_question: an answer is kept as a decision linked to the question, and a drop takes a reason.
 A project is a named group of a space's to-dos, open questions and decisions: a feature or a workstream. list_spaces lists each space's projects. When one fits a new to-do, give it with create_action (project); move a to-do with update_action. When your person asks for a new project -> create_project. What's in one -> get with its ref, or list_actions with project. list_spaces lists projects in the team's order, most important first; when your person asks to change it -> order_projects. A project with suggested: true is Stand's suggestion; if it is right, confirm it with update_action (project).
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
@@ -100,6 +101,20 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: READ,
     },
     ({ space, status, owner, project }) => run(() => api.listActions(caller, { space, status, owner, project }, baseUrl)),
+  );
+
+  server.registerTool(
+    "list_questions",
+    {
+      title: "List a space's open questions",
+      description:
+        "The open questions in one Stand space, oldest first, as its Tasks tab lists them: asked in a meeting or a chat, and nobody answered or dropped them and no later decision settled them. Each has its ref, the day it was asked and its project. Use it to find questions you can answer from your work, or old ones to clear with your person; close_question closes one.",
+      inputSchema: {
+        space: z.string().describe("The space's id or name (from list_spaces)"),
+      },
+      annotations: READ,
+    },
+    ({ space }) => run(() => api.listQuestions(caller, { space }, baseUrl)),
   );
 
   server.registerTool(
@@ -477,6 +492,24 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     },
     ({ space, text, item_id, owner, status, summary, reason, links, project, parent, model }) =>
       run(() => api.createAction(as(model), { space, text, itemId: item_id, owner, status, summary, reason, links, project, parent }, baseUrl)),
+  );
+
+  server.registerTool(
+    "close_question",
+    {
+      title: "Answer or drop a Stand open question",
+      description:
+        "Closes one open question. Give exactly one of answer, decision or drop. answer: Stand keeps it as a decision linked to the question, because a resolved question becomes a decision, so write it as a line that stands on its own (\"Host on Fly.io\", not \"Fly\" or \"Yes\"). decision: a decision the space already has that answers it; nothing new is written. drop: nobody needs the answer any more, with why in a line. The question moves to Done or Dropped on the Tasks tab, as closed by this person via this agent. Answer from what you know: your work, the repo, or what your person tells you. Don't guess, and ask your person before you drop questions in bulk.",
+      inputSchema: {
+        ref: z.string().describe("The question's reference, stand:question/<id>"),
+        answer: z.string().optional().describe("The answer, in a line that stands on its own. Kept as a decision"),
+        decision: z.string().optional().describe("Or the decision that already answers it, stand:decision/<id>"),
+        drop: z.string().optional().describe("Or why nobody needs the answer any more, in a line"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ ref, answer, decision, drop, model }) => run(() => api.closeQuestion(as(model), { ref, answer, decision, drop }, baseUrl)),
   );
 
   server.registerTool(
