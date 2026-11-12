@@ -3416,6 +3416,12 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
   .sh-panel.tasks .by-owner .followups li > .rc-face { display: none; }
   .sh-panel.tasks .followups .topic-picker:has(.unset), .sh-panel.tasks .followups .task-from { display: none; }
   .sh-panel.tasks .followups .topic-picker { margin-left: 0; }
+  /* A title that wraps keeps its checkbox on the first line, not floating in the middle of the row. */
+  .sh-panel.tasks .followups.one-line li { align-items: flex-start; }
+  .sh-panel.tasks .followups.one-line li > .check { margin-top: 2px; }
+  /* What follows the title (topic, working pill) starts flush under the title when it drops to its own line. */
+  .sh-panel.tasks .followups.one-line .fu-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+  .sh-panel.tasks .followups.one-line .fu-text .rc-pill-wrap, .sh-panel.tasks .followups.one-line .fu-text .topic-pill { margin-left: 0; }
   .sh-panel.tasks .followups .topic-pill { padding: 0; margin-left: 6px; border: 0; background: none; box-shadow: none; height: auto; min-height: 0; font-size: 12px; font-weight: 400; color: var(--muted); max-width: 140px; }
   .td-phone-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
   .td-phone-acts > button { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; }
