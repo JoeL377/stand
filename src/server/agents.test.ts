@@ -1145,10 +1145,15 @@ test("agents read a space's chat: where it stands, the stretches since a date, a
   const [topic] = db.replaceDiscussions(first.sessionId, null, [
     { topic: "When the invite flow ships", positions: [{ speaker: "Joe Liang", position: "Monday" }], outcome: "action", segmentIds: [first.id], continuesId: null },
   ]);
-  db.syncNotes(first.sessionId, null, [
+  const [copy] = db.syncNotes(first.sessionId, null, [
     { kind: "action", text: "Finish the email copy", owner: "Andy", discussionId: topic.id },
     { kind: "question", text: "Who reviews the copy?", owner: null, discussionId: topic.id },
   ]);
+  // A to-do from chat says so: the stretch it came from, not a meeting.
+  const got = api.get(caller, `stand:action/${copy.id}`, "") as { meeting?: unknown; chat?: { id: string; on: string } };
+  assert.deepEqual([got.meeting, got.chat?.id], [undefined, first.sessionId]);
+  const listed = (api.listActions(caller, { space: room.id }, "") as { actions: Array<{ text: string; from_meeting?: string; from_chat?: string }> }).actions.find((t) => t.text === "Finish the email copy")!;
+  assert.deepEqual([listed.from_meeting, typeof listed.from_chat], [undefined, "string"]);
   const filed = api.getChat(caller, { chatId: first.sessionId });
   assert.deepEqual(filed.topics.map((t) => [t.topic, t.outcome]), [["When the invite flow ships", "action"]]);
   assert.deepEqual([filed.to_dos.map((t) => t.text), filed.open_questions.map((q) => q.text), filed.decided], [["Finish the email copy"], ["Who reviews the copy?"], []]);

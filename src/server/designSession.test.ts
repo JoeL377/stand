@@ -3,11 +3,11 @@ import { test } from "node:test";
 import type { BrainCaught, Segment } from "../shared/protocol.ts";
 import { brainstormsOf, finishBrainstorm, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
-import { type DiagramAnswer, DiagramKeeper, MAX_WAITING, diagramMermaid, draftSpec, isDiagramText, mermaidIn, parseSeed, saveDraftSpec, seedFromAnswer } from "./designSession.ts";
+import { type DiagramAnswer, DiagramKeeper, MAX_WAITING, UNTITLED, diagramMermaid, draftSpec, isDiagramText, mermaidIn, parseSeed, saveDraftSpec, seedFromAnswer } from "./designSession.ts";
 
 const T0 = 1_700_000_000_000;
 const seg = (n: number, speakerName: string, text: string): Segment => ({ id: `s${n}`, meetingId: "m", itemId: null, speakerId: speakerName, speakerName, kind: "speech", text, ts: T0 + n * 1000 }) as Segment;
-const none: DiagramAnswer = { boxes: [], arrows: [], extend: [], caught: [] };
+const none: DiagramAnswer = { boxes: [], arrows: [], extend: [], caught: [], place: [], groups: [], topic: null };
 
 test("a starting diagram is read as typed: boxes, arrows, and a mermaid flowchart", () => {
   const d = parseSeed(["Task: a to-do with an owner", "- Project: a group of tasks", "Task -> Project: belongs to", "Decision", "Question → Decision: becomes", "We talked about a lot of things today."].join("\n"), T0);
@@ -24,7 +24,7 @@ test("a starting diagram is read as typed: boxes, arrows, and a mermaid flowchar
   assert.equal(isDiagramText("We met on Tuesday and talked about how tasks should work.\nNobody agreed on what a project is, which is a problem."), false);
   assert.equal(mermaidIn("# Plan\n\n```mermaid\nflowchart LR\n  a --> b\n```\n\ntext"), "flowchart LR\n  a --> b\n");
   // Notes the model read: its boxes and arrows, all kept.
-  const fromModel = seedFromAnswer({ ...none, boxes: [{ label: "Idea", detail: "Something raised.", by: null, line: 0 }, { label: "Spec", detail: "A written plan.", by: null, line: 0 }], arrows: [{ from: "new1", to: "new2", label: "turns into", by: null, line: 0 }] }, T0);
+  const fromModel = seedFromAnswer({ ...none, boxes: [{ label: "Idea", detail: "Something raised.", kind: "thing", group: null, by: null, line: 0 }, { label: "Spec", detail: "A written plan.", kind: "thing", group: null, by: null, line: 0 }], arrows: [{ from: "new1", to: "new2", label: "turns into", by: null, line: 0 }] }, T0);
   assert.deepEqual([fromModel.boxes.map((b) => b.label), fromModel.arrows.map((a) => [a.from, a.to, a.label])], [["Idea", "Spec"], [["b1", "b2", "turns into"]]]);
 });
 
@@ -37,10 +37,13 @@ test("what Stand hears is a suggestion until someone keeps it, and a dropped one
   const talk = [seg(1, "Joe Liang", "A task should belong to one project."), seg(2, "Janesh", "And we need an idea, which can become a task.")];
 
   answers.push({
-    boxes: [{ label: "Idea", detail: "Something raised that isn't a to-do yet.", by: "Janesh", line: 2 }, { label: "task", detail: "Same thing again.", by: "Joe", line: 1 }],
+    boxes: [{ label: "Idea", detail: "Something raised that isn't a to-do yet.", kind: "thing", group: null, by: "Janesh", line: 2 }, { label: "task", detail: "Same thing again.", kind: "thing", group: null, by: "Joe", line: 1 }],
     arrows: [{ from: "b1", to: "b2", label: "Belongs to.", by: "Joe", line: 1 }, { from: "new1", to: "b1", label: "becomes", by: "Janesh", line: 2 }, { from: "new2", to: "b2", label: "is in", by: null, line: 1 }],
     extend: [{ id: "b1", point: "Has exactly one project", by: "Joe", line: 1 }],
     caught: [{ id: "new1", item: "li_1" }, { id: "b1", item: "li_1" }],
+    place: [],
+    groups: [],
+    topic: null,
   });
   assert.equal(await k.run(talk, ["Joe Liang", "Janesh"], caught, T0, T0 + 5000), true);
   let d = k.all();
@@ -61,7 +64,7 @@ test("what Stand hears is a suggestion until someone keeps it, and a dropped one
 
   // Dropped: it leaves the diagram, the model is told, and the same thing isn't suggested again.
   assert.equal(k.drop("a1"), true);
-  answers.push({ ...none, boxes: [{ label: "Sprint", detail: "A two week box.", by: "Joe", line: 1 }], arrows: [{ from: "b2", to: "b1", label: "has many", by: "Joe", line: 1 }] });
+  answers.push({ ...none, boxes: [{ label: "Sprint", detail: "A two week box.", kind: "thing", group: null, by: "Joe", line: 1 }], arrows: [{ from: "b2", to: "b1", label: "has many", by: "Joe", line: 1 }] });
   talk.push(seg(8, "Joe Liang", "Maybe sprints. And a project has many tasks."));
   await k.run(talk, ["Joe Liang"], caught, T0, T0 + 9000);
   assert.match(asked[1], /Dropped by the team[^]*Task --Belongs to--> Project/);
@@ -69,13 +72,13 @@ test("what Stand hears is a suggestion until someone keeps it, and a dropped one
   d = k.all();
   assert.deepEqual(d.arrows.filter((a) => !a.removed).map((a) => a.id), ["a2"]);
   assert.equal(k.drop("b4"), true);
-  answers.push({ ...none, boxes: [{ label: "Sprint", detail: "Again.", by: null, line: 1 }] });
+  answers.push({ ...none, boxes: [{ label: "Sprint", detail: "Again.", kind: "thing", group: null, by: null, line: 1 }] });
   talk.push(seg(12, "Janesh", "Sprints, really?"));
   await k.run(talk, ["Janesh"], caught, T0, T0 + 13000);
   assert.deepEqual(k.all().boxes.filter((b) => !b.removed).map((b) => b.label), ["Task", "Project", "Idea"]);
 
   // The board stays calm: past a handful waiting, new suggestions are left out.
-  answers.push({ ...none, boxes: Array.from({ length: MAX_WAITING + 4 }, (_, i) => ({ label: `Zq${i} thing${i}`, detail: `Part number ${i}.`, by: null, line: 1 })) });
+  answers.push({ ...none, boxes: Array.from({ length: MAX_WAITING + 4 }, (_, i) => ({ label: `Zq${i} thing${i}`, detail: `Part number ${i}.`, kind: "thing" as const, group: null, by: null, line: 1 })) });
   talk.push(seg(20, "Joe Liang", "Lots of things."));
   await k.run(talk, ["Joe Liang"], caught, T0, T0 + 21000);
   assert.equal(k.all().boxes.filter((b) => b.suggested && !b.removed).length, MAX_WAITING);
@@ -92,7 +95,7 @@ test("the session ends as a draft spec on its to-do, and its page shows the diag
   const db = openDb(":memory:");
   const room = db.createRoom("Conxt 1.0", null, "");
   const diagram = parseSeed("Task: a to-do with an owner\nProject: a group of tasks\nTask -> Project: belongs to", T0);
-  diagram.boxes.push({ id: "b3", label: "Sprint", detail: "Not agreed.", by: "Joe", ts: T0, quote: null, points: [], caught: [], suggested: true });
+  diagram.boxes.push({ id: "b3", label: "Sprint", detail: "Not agreed.", kind: "thing", group: null, by: "Joe", ts: T0, quote: null, points: [], caught: [], suggested: true });
   diagram.boxes[0].points.push({ text: "Has one owner", by: "Joe", ts: T0, quote: null });
   diagram.boxes[0].caught.push({ id: "n1", kind: "decision", text: "A task has one project", owner: null, done: false });
   const b = startBrainstorm(db, room.id, "Stand's primitives", "Joe Liang", T0, { diagram, seed: "Task: a to-do", taskId: null });
@@ -134,4 +137,69 @@ test("the session ends as a draft spec on its to-do, and its page shows the diag
   assert.equal(saveDraftSpec(db, { ...next, meetingId: m.id }, []), taskId);
   assert.equal(db.planVersions(taskId).length, 2);
   assert.equal(saveDraftSpec(db, { ...next, diagram: { boxes: [diagram.boxes[2]], arrows: [] } }, []), null);
+});
+
+test("kinds and groups: read from a starting diagram, suggested by a pass, and written back as mermaid", async () => {
+  const d = parseSeed(
+    ["Host (person): whoever runs the call", "## Capture: what the call hears", "Transcript (store): every line said", "Notes pass (service): files lines under items", "## Review", "Recap (screen): what people read after", "Verdict (decision)", "Transcript -> Notes pass: feeds", "Notes pass -> Recap: fills"].join("\n"),
+    T0,
+  );
+  assert.deepEqual(d.boxes.map((b) => [b.label, b.kind ?? null, b.group ?? null]), [["Host", "person", null], ["Transcript", "store", "g1"], ["Notes pass", "service", "g1"], ["Recap", "screen", "g2"], ["Verdict", "decision", "g2"]]);
+  assert.deepEqual(d.groups, [{ id: "g1", label: "Capture", detail: "what the call hears" }, { id: "g2", label: "Review", detail: null }]);
+  // A heading over everything, or over one box, isn't a group.
+  assert.equal(parseSeed("# Design\nTask: a to-do\nProject: tasks together").groups, undefined);
+  assert.equal(parseSeed("Task: a to-do\n## Later\nProject: tasks together").groups, undefined);
+
+  // Mermaid shapes and subgraphs come back as the same kinds and groups.
+  const back = parseSeed(diagramMermaid(d), T0);
+  assert.deepEqual(back.boxes.map((b) => [b.label, b.kind ?? null, b.group ?? null]).sort(), d.boxes.map((b) => [b.label, b.kind ?? null, b.group ?? null]).sort());
+  assert.deepEqual(back.groups?.map((g) => g.label), ["Capture", "Review"]);
+  assert.equal(back.arrows.length, 2);
+  assert.match(draftSpec("Calls", d, []), /## Groups\n\n- \*\*Capture\*\*: what the call hears \(Transcript, Notes pass\)/);
+
+  // The model's starting diagram keeps its kinds and groups.
+  const seeded = seedFromAnswer({ ...none, boxes: [{ label: "Inbox", detail: "Where to-dos land.", kind: "screen", group: "Triage", by: null, line: 0 }, { label: "Rule", detail: "Sorts what arrives.", kind: "service", group: "triage", by: null, line: 0 }, { label: "Owner", detail: "Who picks it up.", kind: "person", group: null, by: null, line: 0 }], groups: [{ label: "Triage", detail: "Sorting what comes in" }] }, T0);
+  assert.deepEqual(seeded.boxes.map((b) => [b.label, b.kind, b.group ?? null]), [["Owner", "person", null], ["Inbox", "screen", "g1"], ["Rule", "service", "g1"]]);
+  assert.deepEqual(seeded.groups, [{ id: "g1", label: "Triage", detail: "Sorting what comes in" }]);
+
+  // A pass: a new box arrives with its kind in a group, and a loose box is placed into it.
+  const answers: DiagramAnswer[] = [{ ...none, boxes: [{ label: "Digest", detail: "A daily mail of what changed.", kind: "screen", group: "Review", by: "Joe", line: 1 }, { label: "Queue", detail: "Holds work.", kind: "store", group: "Plumbing", by: "Joe", line: 1 }], place: [{ id: "b1", group: "Review" }, { id: "b2", group: "Review" }], groups: [{ label: "Plumbing", detail: "Under the hood" }] }];
+  let context = "";
+  const k = new DiagramKeeper({ designDiagram: async (_c, talk) => ((context = talk), answers.shift() ?? null) }, "Calls", T0, d);
+  assert.equal(await k.run([seg(1, "Joe Liang", "We need a digest and a queue.")], ["Joe Liang"], [], T0, T0 + 5000), true);
+  assert.match(context, /\[b2\] Transcript: every line said \[store, in group Capture\]/);
+  assert.match(context, /Groups so far:\n- Capture: what the call hears\n- Review/);
+  const all = k.all();
+  const by = (label: string) => all.boxes.find((b) => b.label === label)!;
+  assert.deepEqual([by("Digest").kind, by("Digest").group, by("Digest").suggested], ["screen", "g2", true]);
+  // The host had no group and joins Review; the transcript stays where the room saw it.
+  assert.deepEqual([by("Host").group, by("Transcript").group], ["g2", "g1"]);
+  assert.deepEqual(all.groups?.find((g) => g.label === "Plumbing"), { id: "g3", label: "Plumbing", detail: "Under the hood" });
+});
+
+test("a session started without a topic is named by the first pass that hears one, and only once", async () => {
+  const answers: DiagramAnswer[] = [{ ...none }, { ...none, topic: "Review flow." }, { ...none, topic: "Something else" }];
+  const contexts: string[] = [];
+  const k = new DiagramKeeper({ designDiagram: async (c) => (contexts.push(c), answers.shift() ?? null) }, UNTITLED, T0);
+  const talk = [seg(1, "Joe Liang", "Hello.")];
+  assert.equal(await k.run(talk, ["Joe Liang"], [], T0, T0 + 2000), false);
+  assert.match(contexts[0], /What the team is designing: \(not named yet/);
+  talk.push(seg(5, "Joe Liang", "We're designing the review flow."));
+  assert.equal(await k.run(talk, ["Joe Liang"], [], T0, T0 + 6000), true);
+  assert.equal(k.prompt, "Review flow");
+  talk.push(seg(9, "Joe Liang", "And more."));
+  assert.equal(await k.run(talk, ["Joe Liang"], [], T0, T0 + 10000), false);
+  assert.equal(k.prompt, "Review flow");
+  assert.match(contexts[2], /What the team is designing: Review flow/);
+});
+
+test("general kinds: a design that isn't software reads and writes back the same", () => {
+  const d = parseSeed(["Faster onboarding (goal): New customers live in a week", "Slow handoffs (problem): Sales to success takes days", "Kickoff call (step): The first call with the customer", "Welcome pack (document): What we send on day one", "Kickoff call -> Welcome pack: sends", "Welcome pack -> Faster onboarding: serves", "Slow handoffs -> Kickoff call: delays"].join("\n"), T0);
+  // A box named before any group stays loose when an arrow under a group points at it.
+  const loose = parseSeed("Goal: where it ends\n## Flow\nOne: first\nTwo: second\nTwo -> Goal: serves\n## Other\nThree: x\nFour: y");
+  assert.equal(loose.boxes[0].group, undefined);
+  assert.deepEqual(d.boxes.map((b) => [b.label, b.kind]), [["Faster onboarding", "goal"], ["Slow handoffs", "problem"], ["Kickoff call", "step"], ["Welcome pack", "document"]]);
+  const back = parseSeed(diagramMermaid(d), T0);
+  assert.deepEqual(back.boxes.map((b) => [b.label, b.kind]), d.boxes.map((b) => [b.label, b.kind]));
+  assert.deepEqual(back.arrows.map((a) => [a.from, a.to, a.label]), d.arrows.map((a) => [a.from, a.to, a.label]));
 });

@@ -3349,21 +3349,57 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .design-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .design-waiting { flex: none; padding: 2px 9px; border-radius: 999px; border: 1px dashed color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--accent); font-size: 12px; }
 .design-busy { flex: none; color: var(--muted); font-size: 12px; }
-.design-frame { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: safe center; padding: 8px; }
-.design-empty { max-width: 380px; margin: 0; text-align: center; font-size: 14px; line-height: 1.5; }
-.design-fit { position: relative; flex: none; }
-.design-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
-.design-lines { position: absolute; inset: 0; color: color-mix(in srgb, var(--text) 38%, var(--bg)); overflow: visible; }
-.design-lines path:not([fill]) { fill: none; stroke: currentColor; stroke-width: 1.5; }
-.design-lines path.suggested { stroke-dasharray: 5 5; color: color-mix(in srgb, var(--accent) 70%, var(--bg)); }
-.design-lines path.on { color: var(--accent); stroke-width: 2; }
-.design-lines marker path { stroke: none; }
-.design-box { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 9px 12px; border-radius: 10px; border: 1.5px solid color-mix(in srgb, var(--text) 30%, var(--line)); background: var(--panel); color: var(--text); text-align: center; cursor: pointer; transition: left 0.35s ease, top 0.35s ease, border-color 0.2s, box-shadow 0.2s; }
-.design-box strong { font-size: 14px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-.design-box:hover { border-color: var(--text); }
+.design-frame { flex: 1; min-height: 0; position: relative; display: grid; place-items: center; }
+.design-empty { max-width: 380px; margin: 0; padding: 8px; text-align: center; font-size: 14px; line-height: 1.5; }
+.design-defs { position: absolute; width: 0; height: 0; }
+.design-tip path { fill: color-mix(in srgb, var(--text) 38%, var(--bg)); }
+.design-tip-suggested path { fill: color-mix(in srgb, var(--accent) 70%, var(--bg)); }
+.design-tip-on path { fill: var(--accent); }
+.design .react-flow { position: absolute; inset: 0; background: transparent; }
+.design .react-flow__pane { cursor: grab; }
+.design .react-flow__pane.dragging { cursor: grabbing; }
+.design .react-flow__node { cursor: pointer; transition: transform 0.35s ease; }
+.design .react-flow__node.design-frame-node { pointer-events: none !important; cursor: default; }
+.design .react-flow__attribution { background: transparent; font-size: 9px; opacity: 0.45; }
+.design .react-flow__attribution a { color: var(--muted); text-decoration: none; }
+.design .react-flow__controls { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); box-shadow: none; }
+.design .react-flow__controls-button { all: unset; box-sizing: border-box; width: 26px; height: 26px; display: grid; place-items: center; cursor: pointer; color: var(--muted); }
+.design .react-flow__controls-button + .react-flow__controls-button { border-top: 1px solid var(--line); }
+.design .react-flow__controls-button:hover { background: var(--panel-2); color: var(--text); }
+.design .react-flow__controls-button svg { width: 11px; height: 11px; fill: currentColor; max-width: none; max-height: none; }
+.design-handle { opacity: 0; pointer-events: none; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
+.design .react-flow__edge-path.design-line { fill: none; stroke: color-mix(in srgb, var(--text) 38%, var(--bg)); stroke-width: 1.5; }
+.design .react-flow__edge-path.design-line.suggested { stroke-dasharray: 5 5; stroke: color-mix(in srgb, var(--accent) 70%, var(--bg)); }
+.design .react-flow__edge-path.design-line.on { stroke: var(--accent); stroke-width: 2; }
+.design-box { --kind: color-mix(in srgb, var(--text) 30%, var(--line)); box-sizing: border-box; width: 100%; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 12px; border-radius: 10px; border: 1.5px solid color-mix(in srgb, var(--kind) 55%, var(--line)); background: var(--panel); color: var(--text); text-align: left; overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s; }
+.design-name { display: flex; align-items: flex-start; gap: 7px; min-width: 0; }
+.design-box strong { min-width: 0; font-size: 14px; font-weight: 600; line-height: 19px; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.design-kind { flex: none; width: 19px; height: 19px; border-radius: 5px; display: grid; place-items: center; color: var(--kind); background: color-mix(in srgb, var(--kind) 16%, transparent); }
+.design-kind svg { width: 12px; height: 12px; }
+.design-detail { font-size: 12px; line-height: 16px; color: var(--muted); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.design-box .brain-marks { align-self: flex-start; }
+/* Each kind has its own colour and a shape of its own, so a diagram isn't a wall of the same box. */
+.design-box.kind-person { --kind: #d99a4e; border-radius: 22px; padding-inline: 14px; }
+.design-box.kind-screen { --kind: #5b9df0; border-top-width: 6px; border-radius: 8px; }
+.design-box.kind-store { --kind: #3fb28f; border-bottom-width: 5px; border-radius: 10px 10px 14px 14px; }
+.design-box.kind-service { --kind: #a07ee8; border-radius: 3px; }
+.design-box.kind-step { --kind: #6f9fb8; border-left-width: 5px; }
+.design-box.kind-goal { --kind: #4f9f58; border-style: double; border-width: 4px; border-radius: 12px; }
+.design-box.kind-problem { --kind: #c2599a; border-radius: 3px 16px 3px 16px; }
+.design-box.kind-document { --kind: #8a8f98; border-radius: 2px 14px 2px 2px; }
+.design-box.kind-decision { --kind: #e07a6a; border-radius: 16px 3px 16px 3px; }
+.react-flow__node:hover .design-box { border-color: color-mix(in srgb, var(--kind) 60%, var(--text)); }
 .design-box.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .design-box.suggested { border-style: dashed; border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
 .design-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* What was said about a box: plain lines under it, tied to it by a rule. */
+.design-notes { list-style: none; margin: 5px 0 0 11px; padding: 0 0 0 8px; border-left: 1.5px solid var(--line); }
+.design-notes li { font-size: 11.5px; line-height: 15px; color: color-mix(in srgb, var(--text) 72%, var(--bg)); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.design-notes li.more { color: var(--muted); }
+.design-group { box-sizing: border-box; width: 100%; height: 100%; padding: 9px 14px; border-radius: 14px; border: 1px solid var(--line); background: color-mix(in srgb, var(--text) 3%, transparent); display: flex; flex-direction: column; gap: 1px; }
+.design-group strong { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.design-group span { font-size: 12px; line-height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.design-text.on { border-color: color-mix(in srgb, var(--text) 45%, var(--line)); }
 .design-ask { display: inline-flex; gap: 6px; }
 .design-yes, .design-no { all: unset; box-sizing: border-box; cursor: pointer; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.4; }
 .design-yes { background: var(--accent); color: #fff; }
@@ -3384,7 +3420,6 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 /* In a call the sentence is already in the header above the board. */
 .design:not(.bp-map) .design-what { display: none; }
 .design:not(.bp-map) .design-top:empty { display: none; }
-.design.narrow .design-frame { align-items: start; }
 /* A design session's background, given through the MCP: a button on the board, a card to read it in. */
 .design-context { all: unset; flex: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); font-size: 12px; font-weight: 500; }
 .design-context:hover, .design-context.on { background: var(--panel-2); }
@@ -3453,6 +3488,23 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .chat-edit textarea { display: block; width: 100%; min-height: 38px; max-height: 180px; padding: 8px 10px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 8px; resize: none; field-sizing: content; }
 .chat-edit-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; font-size: 13px; }
 .chat-edit-foot button[type="submit"] { height: 28px; padding: 0 12px; font-size: 13px; }
+/* What Stand caught from the talk, under the message it came from, in the meeting transcript's colours. */
+.chat-caught { display: flex; align-items: flex-start; gap: 8px; margin: 4px 8px 4px 46px; padding: 6px 8px 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--ok) 9%, var(--panel)); }
+.chat-caught .agent-mark { flex: none; font-size: 13px; line-height: 18px; color: var(--ok-text); }
+.chat-caught-body { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.chat-caught-label { flex: none; font-size: 12px; color: var(--ok-text); }
+.chat-caught-text { font-size: 13px; line-height: 1.4; color: var(--text); text-align: left; overflow-wrap: anywhere; }
+button.chat-caught-text { padding: 0; }
+.chat-caught-owner { color: var(--muted); }
+.chat-caught.closed .chat-caught-text { color: var(--muted); text-decoration: line-through; }
+.chat-caught-remove { flex: none; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); visibility: hidden; }
+.chat-caught:hover .chat-caught-remove, .chat-caught:focus-within .chat-caught-remove { visibility: visible; }
+.chat-recap { margin: 8px 8px 4px 46px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.chat-recap-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--muted); }
+.chat-recap-head .agent-mark { font-size: 13px; color: var(--accent-text); }
+.chat-recap-summary { margin: 4px 0 0; line-height: 1.5; }
+.chat-recap-topics { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.chat-recap-topics li { padding: 1px 8px; border-radius: 999px; font-size: 12px; color: var(--muted); background: var(--hover); }
 .chat-compose { flex: none; position: relative; }
 .chat-compose .mention-box textarea { display: block; min-height: 42px; max-height: 180px; padding: 10px 46px 10px 12px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 10px; resize: none; field-sizing: content; }
 .chat-compose .chat-send { right: 8px; bottom: 8px; width: 26px; height: 26px; min-height: 0; }
@@ -3460,6 +3512,7 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .sp-side-text.unread { font-weight: 600; color: var(--side-strong); }
 @media (hover: none) {
   .chat-msg-tools { position: static; display: inline-flex; align-self: flex-start; border: 0; background: none; box-shadow: none; }
+  .chat-caught-remove { visibility: visible; }
 }
 /* On a phone the page scrolls, not the thread, and the box to write in stays at the foot of the screen. */
 @media (max-width: 760px) {

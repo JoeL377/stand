@@ -6,6 +6,7 @@ import type { Note } from "../shared/protocol.ts";
 import { agentApi } from "./agents.ts";
 import { buildBrief } from "./brief.ts";
 import { Chat } from "./chat.ts";
+import { ChatCapture } from "./chatCapture.ts";
 import { capabilities, config } from "./config.ts";
 import { ConxtDelivery, parseDestinations } from "./conxt.ts";
 import { configureAppDefault } from "./conxtDefault.ts";
@@ -243,8 +244,20 @@ export function startServices() {
 
   // Chat between meetings (chat.ts). Sessions left open by the last run close here if they went quiet.
   const spaceEvents = new SpaceEvents();
-  const chat = new Chat(db, (roomId, e) => spaceEvents.send(roomId, e));
+  // What is written there is read for to-dos, open questions and decisions, as a meeting's talk is (chatCapture.ts).
+  const capture = config.chatCapture
+    ? new ChatCapture(db, agent, (roomId, e) => spaceEvents.send(roomId, e), { quietMs: config.chatCaptureQuietMs ?? undefined, maxWaitMs: config.chatCaptureMaxWaitMs ?? undefined })
+    : null;
+  const chat = new Chat(
+    db,
+    (roomId, e) => {
+      spaceEvents.send(roomId, e);
+      capture?.heard(e);
+    },
+    { quietMs: config.chatQuietMs ?? undefined },
+  );
   chat.start();
+  capture?.start();
 
   new ConxtDelivery(db, conxtDestinations).start();
   setConxtGlossary(new ConxtGlossary(db.raw, conxtDestinations));

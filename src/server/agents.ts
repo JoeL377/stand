@@ -471,7 +471,7 @@ export function agentApi(deps: AgentDeps) {
   }
 
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
-  function workRows(all: Array<Note & { roomId: string; roomName: string; meetingStartedAt: number; addedByHand?: boolean }>, baseUrl: string) {
+  function workRows(all: Array<Note & { roomId: string; roomName: string; meetingStartedAt: number; addedByHand?: boolean; fromChat?: boolean }>, baseUrl: string) {
     const rows = groupedByRoom(all);
     const items = new Map<string, Item | null>();
     const work = workOn(rows);
@@ -494,7 +494,9 @@ export function agentApi(deps: AgentDeps) {
         space: n.roomName as string | undefined,
         item: item ? { id: item.id, title: item.title, key: item.externalId ?? undefined } : undefined,
         decided: decision?.text,
-        from_meeting: n.addedByHand ? undefined : day(n.meetingStartedAt),
+        from_meeting: n.addedByHand || n.fromChat ? undefined : day(n.meetingStartedAt),
+        // Caught in the space's chat (get_chat), not said in a meeting.
+        from_chat: n.fromChat ? day(n.meetingStartedAt) : undefined,
         added: n.addedByHand ? { by: n.editedBy ?? undefined, actor: n.addedActor ?? parseActor(n.editedBy) ?? undefined, on: day(n.meetingStartedAt) } : undefined,
         url: refUrl(baseUrl, "action", n.id),
       };
@@ -544,7 +546,9 @@ export function agentApi(deps: AgentDeps) {
       const where = {
         space: { id: r.room.id, name: r.room.name, purpose: r.room.purpose || undefined },
         item: itemInfo(item, baseUrl),
-        meeting: r.meeting.added ? undefined : { id: r.meeting.id, on: day(r.meeting.startedAt), live: r.meeting.endedAt === null || undefined },
+        meeting: r.meeting.added || r.meeting.chat ? undefined : { id: r.meeting.id, on: day(r.meeting.startedAt), live: r.meeting.endedAt === null || undefined },
+        // Caught in the space's chat: the stretch it came from, which get_chat reads.
+        chat: r.meeting.chat ? { id: r.meeting.id, on: day(r.meeting.startedAt) } : undefined,
         // A to-do someone added by hand (create_action) rather than one a meeting caught.
         added: r.meeting.added
           ? { by: r.note?.editedBy ?? undefined, actor: r.note?.addedActor ?? parseActor(r.note?.editedBy) ?? undefined, on: day(r.meeting.startedAt) }
@@ -1698,7 +1702,8 @@ export function agentApi(deps: AgentDeps) {
         const name = (id: string) => d.boxes.find((x) => x.id === id)?.label ?? id;
         const state = (x: { suggested?: boolean }) => (x.suggested ? "suggested, not kept" : undefined);
         return {
-          parts: d.boxes.map((x) => ({ ...circle({ ...x, parent: "-" }), state: state(x) })),
+          parts: d.boxes.map((x) => ({ ...circle({ ...x, parent: "-" }), kind: x.kind, group: d.groups?.find((g) => g.id === x.group)?.label, state: state(x) })),
+          groups: d.groups?.length ? d.groups.map((g) => ({ name: g.label, holds: g.detail ?? undefined })) : undefined,
           relations: d.arrows.map((x) => ({ from: name(x.from), relation: x.label || "relates to", to: name(x.to), state: state(x) })),
           context: row.context.length ? row.context.map((c) => ({ title: c.title, text: c.text, url: c.url ?? undefined, by: c.by ?? undefined })) : undefined,
           spec_on: row.taskId ? `stand:action/${row.taskId}` : undefined,

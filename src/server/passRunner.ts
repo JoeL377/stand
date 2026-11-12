@@ -25,6 +25,8 @@ export class PassRunner {
       keepEarlier?: boolean;
       /** After every pass, worked or not: the owner decides whether to schedule the next. */
       settled?: () => void;
+      /** A pass that waits doesn't keep the process running (chat capture, which outlives any one call). */
+      background?: boolean;
     },
   ) {}
 
@@ -47,6 +49,7 @@ export class PassRunner {
       this.timer = null;
       void this.run();
     }, ms);
+    if (this.opts.background) this.timer.unref();
   }
 
   /** Resolves once no pass is running (at once when none is). */

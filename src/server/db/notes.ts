@@ -27,6 +27,10 @@ function actedOnBy(db: DatabaseSync) {
 export function notesStore(db: DatabaseSync, tx: Tx) {
   const actedOn = actedOnBy(db);
   return {
+    /** Whether someone did something with a note (see actedOnBy), so it is theirs to close, not to delete. */
+    noteActedOn(id: string): boolean {
+      return actedOn(id);
+    },
     /** Writes a notes run for one item in one meeting. Each note updates the row it continues (by
      *  its id, else by its exact wording) or is added, so a note keeps its id, its tick, where its
      *  task stands, its project and who did what through every run, reworded or not. A row the run
@@ -450,7 +454,7 @@ export function notesStore(db: DatabaseSync, tx: Tx) {
       ).map((r) => ({ ...toNote(r), meetingStartedAt: r.m_started as number }));
     },
     /** Open action items in the spaces this user is in, newest meeting first. */
-    memberActions(userId: string): Array<Note & { roomId: string; roomName: string; meetingStartedAt: number; addedByHand: boolean }> {
+    memberActions(userId: string): Array<Note & { roomId: string; roomName: string; meetingStartedAt: number; addedByHand: boolean; fromChat: boolean }> {
       return (
         db
           .prepare(
@@ -466,6 +470,7 @@ export function notesStore(db: DatabaseSync, tx: Tx) {
         roomName: r.room_name as string,
         meetingStartedAt: r.m_started as number,
         addedByHand: r.m_kind === "added",
+        fromChat: r.m_kind === "chat",
       }));
     },
     /** Keeps who added a note by hand. */

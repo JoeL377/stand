@@ -1,6 +1,6 @@
 import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
-import type { ChatMessage, ChatSession, ChatThread } from "../shared/chat.ts";
+import type { ChatCaught, ChatMessage, ChatSession, ChatThread } from "../shared/chat.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type { Project } from "../shared/projects.ts";
 import type {
@@ -212,11 +212,15 @@ export const api = {
   chat: (roomId: string) => call<ChatThread>("GET", `/api/rooms/${roomId}/chat`),
   /** A page of a channel's messages: those before a seq, or those after one. */
   chatMessages: (channelId: string, page: { before?: number; after?: number }) =>
-    call<{ messages: ChatMessage[]; sessions: ChatSession[] }>("GET", `/api/channels/${channelId}/messages?${page.after !== undefined ? `after=${page.after}` : `before=${page.before ?? ""}`}`),
+    call<{ messages: ChatMessage[]; sessions: ChatSession[]; caught: ChatCaught[] }>("GET", `/api/channels/${channelId}/messages?${page.after !== undefined ? `after=${page.after}` : `before=${page.before ?? ""}`}`),
   /** key: sent again with the same one, a message is saved once. */
   sendChat: (roomId: string, body: { text: string; key: string; replyTo?: string }) => call<ChatMessage>("POST", `/api/rooms/${roomId}/chat/messages`, body),
   editChat: (id: string, text: string) => call<ChatMessage>("PATCH", `/api/chat/messages/${id}`, { text }),
   deleteChat: (id: string) => call<ChatMessage>("DELETE", `/api/chat/messages/${id}`),
+  /** What Stand caught from one session of chat. */
+  chatCaught: (sessionId: string) => call<ChatCaught>("GET", `/api/chat/sessions/${sessionId}/caught`),
+  /** A line Stand caught from chat that isn't one. */
+  removeCaught: (noteId: string) => call<{ removed: string }>("DELETE", `/api/chat/caught/${noteId}`),
   readChat: (channelId: string, upTo: number) => call<{ readUpTo: number }>("POST", `/api/channels/${channelId}/read`, { upTo }),
   token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };

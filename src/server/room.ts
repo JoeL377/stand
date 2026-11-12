@@ -425,8 +425,14 @@ export class RoomSession implements SpeechSink {
   private saveBrainstorm() {
     if (!this.brain) return;
     const map = this.brain.map;
-    if (map instanceof DiagramKeeper) this.db.saveDesignDiagram(this.brain.id, map.all());
-    else this.db.saveBrainstormMap(this.brain.id, map.all());
+    if (map instanceof DiagramKeeper) {
+      this.db.saveDesignDiagram(this.brain.id, map.all());
+      // A session that started without a topic was just named from the talk.
+      if (map.prompt !== this.db.getBrainstorm(this.brain.id)?.prompt) {
+        this.db.renameBrainstorm(this.brain.id, map.prompt);
+        this.itemsChanged();
+      }
+    } else this.db.saveBrainstormMap(this.brain.id, map.all());
     this.broadcastBrainstorm();
   }
 
