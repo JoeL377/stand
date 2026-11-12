@@ -122,6 +122,11 @@ export function projectsStore(db: DatabaseSync) {
       });
     },
 
+    /** A project's name, without working out what is in it. */
+    projectName(id: string): string | null {
+      return (row(id)?.name as string) ?? null;
+    },
+
     getProject(roomId: string, id: string): Project | null {
       return store.listProjects(roomId).find((p) => p.id === id) ?? null;
     },
