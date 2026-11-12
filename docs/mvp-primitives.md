@@ -43,6 +43,8 @@ Stand's `notes` table holds all three, so this adds to it and moves nothing.
 
 **One new table, `links`:** from · to · relation · who · when.
 
+**One level above tasks: projects** (`src/shared/projects.ts`, table `projects`). A project is a named group of tasks, questions and decisions in one space: a feature or a workstream. A task is in zero or one project, and a project can't hold a project. Context has no project. A note's own `project_id` is only what someone set by hand (`project_set_by`); otherwise Stand works it out on each read: from the agenda item (the to-do it shows, its project link, or the link of its deck's item), then from the parent task, else Unassigned. People and agents (`create_project`) make projects. This replaces the free-text topic label, whose labels became projects once. The GitHub repo a space links, which the code called its project, is now a **source** (`space_sources`, `src/server/sources.ts`).
+
 | Relation | Meaning |
 | --- | --- |
 | `leaves` | This task left this decision or context |
@@ -61,10 +63,10 @@ The strategy doc's rule is why person, space and links go in now: every write ca
 | Are the primitives context, decisions and tasks? | Yes |
 | Do they link to each other? | Yes, through `links` |
 | Do tasks have children? | One level, through `parent_id`. A spec is a task with children |
-| Do we support epics? | No. Add it when a team asks |
+| Do we support epics? | Yes, as projects: one level above tasks, one per task, no nesting (decided Nov 11 and 12) |
 | Tight or loose? | Loose: a task needs only text. Owner and done-when are asked for, not required |
 | How does the review queue work now it's multiplayer? | It's not a primitive (Oct 20). It's everything heard but not kept, plus open decide tasks. Anyone in the space can act on it, and nothing waits on it |
 
 ## What it rules out for now
 
-More verbs, per-team custom states, priorities, tags, approvals or holds of any kind, and scopes finer than a space. All can be added later without changing the three kinds.
+More verbs, per-team custom states, priorities, tags, approvals or holds of any kind, and scopes finer than a space other than a project. All can be added later without changing the three kinds.

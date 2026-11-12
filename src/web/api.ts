@@ -2,6 +2,7 @@ import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
 import type { ChatMessage, ChatSession, ChatThread } from "../shared/chat.ts";
 import type { DraftSlide } from "../shared/outline.ts";
+import type { Project } from "../shared/projects.ts";
 import type {
   BrainstormSummary,
   BrainstormView,
@@ -81,6 +82,8 @@ export interface RoomInfo {
   synthesisInstructions: string;
   items: Item[];
   decks: Deck[];
+  /** The space's projects in order, archived ones too. */
+  projects: Project[];
   people: Array<{ name: string; picture: string | null }>;
   meetings: Array<{ id: string; startedAt: number; endedAt: number | null; summary: string | null; segmentCount: number }>;
   /** Open action items from the room's past meetings. */
@@ -176,8 +179,16 @@ export const api = {
   setFollowUp: (roomId: string, noteId: string, done: boolean) => call<Note>("PATCH", `/api/rooms/${roomId}/followups/${noteId}`, { done }),
   confirmReplaced: (roomId: string, noteId: string, by: string, replaced: boolean) =>
     call<unknown>("POST", `/api/rooms/${roomId}/decisions/${noteId}/replaced`, { by, replaced }),
-  setNoteTopic: (roomId: string, noteId: string, topic: string | null) =>
-    call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/topic`, { topic }),
+  projects: (roomId: string) => call<Project[]>("GET", `/api/rooms/${roomId}/projects`),
+  createProject: (roomId: string, input: { name: string; goal?: string; fromItemId?: string }) => call<Project>("POST", `/api/rooms/${roomId}/projects`, input),
+  updateProject: (roomId: string, projectId: string, change: { name?: string; goal?: string | null; position?: number; archived?: boolean }) =>
+    call<Project>("PATCH", `/api/rooms/${roomId}/projects/${projectId}`, change),
+  deleteProject: (roomId: string, projectId: string) => call<{ ok: true }>("DELETE", `/api/rooms/${roomId}/projects/${projectId}`),
+  /** A project's id, null for Unassigned, or "auto" to follow the rules again. */
+  setNoteProject: (roomId: string, noteId: string, projectId: string | null | "auto") =>
+    call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/project`, projectId === "auto" ? { auto: true } : { projectId }),
+  /** Links an agenda item to a project, or takes the link off. Returns the agenda. */
+  setItemProject: (roomId: string, itemId: string, projectId: string | null) => call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { projectId }),
   setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
   planReview: (id: string, version?: string) =>
