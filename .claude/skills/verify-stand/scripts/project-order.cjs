@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // The order of a space's projects, the way a person and an agent change it: make three projects on the
-// Tasks tab, drag one by its handle to the top, move it down from its menu, reload to see the order
-// kept, then set the order over the MCP and see the Tasks tab follow.
+// Tasks tab, switch from Active first to Team order, drag one by its handle to the top, move it down
+// from its menu, reload to see the order kept, then set the order over the MCP and see the Tasks tab
+// follow. Then Active first: an agent adds to-dos and starts on one, and the Tasks tab puts the project
+// with work in progress first while list_spaces keeps the team's order.
 //
 //   NODE_PATH="$(npm root -g)" node project-order.cjs <run dir> [--headed]
 
@@ -51,6 +53,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const consoleErrors = [];
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
   let roomId;
+  let tool;
+  const sortBy = (value) => page.getByLabel("Project order").selectOption(value);
   const onScreen = () => page.locator("section.sh-project:not(.unassigned)").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
   const onServer = async () => (await api(`/api/rooms/${roomId}/projects`)).map((p) => p.name);
   const settled = async (want) => {
@@ -86,6 +90,14 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       await snap("three-projects");
     });
     check("new projects go last, in the order made", same(await onScreen(), ["Alpha", "Beta", "Gamma"]), await onScreen());
+    check("the Tasks tab opens on Active first", (await page.getByLabel("Project order").inputValue()) === "active");
+    check("Active first has no drag handle", (await page.locator(".sh-project-grip").count()) === 0);
+
+    await step("switch to Team order", async () => {
+      await sortBy("team");
+      await page.locator(".sh-project-grip").first().waitFor({ state: "attached" });
+      await snap("team-order");
+    });
     check("each project head has a drag handle", (await page.locator(".sh-project-grip").count()) === 3);
 
     await step("drag Gamma by its handle to the top", async () => {
@@ -116,6 +128,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       await snap("after-reload");
     });
     check("after a reload the screen shows the kept order", same(await onScreen(), ["Alpha", "Gamma", "Beta"]), await onScreen());
+    check("after a reload the Tasks tab is still on Team order", (await page.getByLabel("Project order").inputValue()) === "team");
 
     await step("drag Alpha to the bottom", async () => {
       const grip = page.getByRole("region", { name: "Alpha" }).locator(".sh-project-grip");
@@ -137,7 +150,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
         const text = await r.text();
         return text.startsWith("{") ? JSON.parse(text) : JSON.parse(text.split("\ndata: ").pop());
       };
-      const tool = async (id, name, args) => JSON.parse((await call(id, "tools/call", { name, arguments: args })).result.content[0].text);
+      tool = async (id, name, args) => JSON.parse((await call(id, "tools/call", { name, arguments: args })).result.content[0].text);
       await call(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "verify", version: "1" } });
       const tools = (await call(2, "tools/list", {})).result.tools;
       check("MCP offers order_projects", tools.some((t) => t.name === "order_projects"));
@@ -158,6 +171,52 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     });
     check("the Tasks tab shows the agent's order", same(await onScreen(), ["Alpha", "Gamma", "Beta"]), await onScreen());
 
+    let gammaTodo;
+    await step("an agent adds a to-do to Gamma, then one to Beta", async () => {
+      gammaTodo = (await tool(10, "create_action", { space: roomId, text: "Gamma work", project: "Gamma", owner: "unassigned" })).created.ref;
+      await page.waitForTimeout(20);
+      await tool(11, "create_action", { space: roomId, text: "Beta work", project: "Beta", owner: "unassigned" });
+      await page.reload();
+      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("region", { name: "Beta" }).waitFor();
+    });
+    check("Team order does not move for new to-dos", same(await onScreen(), ["Alpha", "Gamma", "Beta"]), await onScreen());
+
+    await step("switch to Active first", async () => {
+      await sortBy("active");
+      await settled(["Beta", "Gamma", "Alpha"]);
+      await snap("active-first-newest");
+    });
+    check("Active first puts the newest to-do's project first and the empty one last", same(await onScreen(), ["Beta", "Gamma", "Alpha"]), await onScreen());
+    check("Active first hides the drag handles", (await page.locator(".sh-project-grip").count()) === 0);
+    await page.getByRole("button", { name: "Gamma: more" }).click();
+    check("Active first has no Move up or Move down", (await page.getByRole("menuitem", { name: /^Move/ }).count()) === 0);
+    await page.keyboard.press("Escape");
+
+    await step("the agent starts on Gamma's to-do", async () => {
+      await tool(12, "start_work", { ref: gammaTodo, note: "On it", model: "claude-opus-5-5" });
+      await page.reload();
+      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("region", { name: "Gamma" }).getByText("1 in progress").waitFor();
+      await settled(["Gamma", "Beta", "Alpha"]);
+      await snap("active-first-in-progress");
+    });
+    check("work in progress puts Gamma first", same(await onScreen(), ["Gamma", "Beta", "Alpha"]), await onScreen());
+    check("the server's order is still the team's", same(await onServer(), ["Alpha", "Gamma", "Beta"]), await onServer());
+    {
+      const mine = (await tool(13, "list_spaces", {})).find((s) => s.id === roomId);
+      fs.writeFileSync(path.join(out, "mcp-list_spaces-activity.json"), JSON.stringify(mine, null, 2));
+      const seen = (mine.projects ?? []).map((p) => [p.name, p.in_progress ?? 0, !!p.latest_activity]);
+      check("list_spaces keeps the team's order and says where the work is", same(seen, [["Alpha", 0, false], ["Gamma", 1, true], ["Beta", 0, true]]), seen);
+    }
+
+    await step("back to Team order", async () => {
+      await sortBy("team");
+      await settled(["Alpha", "Gamma", "Beta"]);
+      await snap("team-order-again");
+    });
+    check("Team order is as the team left it", same(await onScreen(), ["Alpha", "Gamma", "Beta"]), await onScreen());
+
     await step("with a project filter on, there is no handle", async () => {
       const id = (await api(`/api/rooms/${roomId}/projects`)).find((p) => p.name === "Gamma").id;
       await page.goto(`${base}/s/${roomId}?project=${id}`);
@@ -165,6 +224,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       await page.getByRole("region", { name: "Gamma" }).waitFor();
     });
     check("a filtered list has no drag handle", (await page.locator(".sh-project-grip").count()) === 0);
+    check("a filtered list has no order switch", (await page.getByLabel("Project order").count()) === 0);
   } catch {
     // step() recorded it
   } finally {

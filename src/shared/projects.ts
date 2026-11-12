@@ -78,3 +78,43 @@ export function ruledProjectOf(note: ProjectNote, g: ProjectGraph, steps = 0): s
 export function matchesProject(projectId: string | null, filter: string): boolean {
   return !filter || (filter === "none" ? !projectId : projectId === filter);
 }
+
+/** What is happening in a project now, for the Active first order. */
+export interface ProjectActivity {
+  /** Open to-dos someone is on: an agent at work, or one a person moved to Doing. */
+  inProgress: number;
+  /** When its newest open to-do was added or last reported on. 0 with nothing open. */
+  latest: number;
+}
+
+/** One open to-do of a project, as the Active first order reads it. */
+export interface ActiveTask {
+  project: string | null | undefined;
+  /** When it was added. */
+  ts: number;
+  /** Someone is on it now. */
+  inProgress: boolean;
+  /** When the last report on it came in, if any. */
+  reportedAt?: number;
+}
+
+/** Each project's activity, from the open to-dos. A project with none is left out. */
+export function projectActivity(tasks: ActiveTask[]): Map<string, ProjectActivity> {
+  const out = new Map<string, ProjectActivity>();
+  for (const t of tasks) {
+    if (!t.project) continue;
+    const a = out.get(t.project) ?? { inProgress: 0, latest: 0 };
+    out.set(t.project, { inProgress: a.inProgress + (t.inProgress ? 1 : 0), latest: Math.max(a.latest, t.ts, t.reportedAt ?? 0) });
+  }
+  return out;
+}
+
+/** The Active first order: projects with work in progress, then the others, each by its newest to-do.
+ *  Projects that tie keep the order they came in, which is the team's. */
+export function activeFirst<T extends { id: string }>(projects: T[], activity: Map<string, ProjectActivity>): T[] {
+  const of = (p: T) => activity.get(p.id) ?? { inProgress: 0, latest: 0 };
+  return projects
+    .map((p, i) => ({ p, i, a: of(p) }))
+    .sort((x, y) => Number(y.a.inProgress > 0) - Number(x.a.inProgress > 0) || y.a.latest - x.a.latest || x.i - y.i)
+    .map((x) => x.p);
+}

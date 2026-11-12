@@ -16,7 +16,7 @@ import { parseActor, type Actor } from "../shared/actors.ts";
 import type { Channel, ChatSession } from "../shared/chat.ts";
 import { IDEA_OUTCOMES, REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import type { ActionWork, BrainCaught, BrainNode, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
-import type { Project } from "../shared/projects.ts";
+import { projectActivity, type Project } from "../shared/projects.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import { type DB, ProjectError } from "./db.ts";
 import { IDEA_SLIDES_MAX, ideaReviewView, reviewedIdeas, setUpIdeaReview } from "./ideaReview.ts";
@@ -844,6 +844,14 @@ export function agentApi(deps: AgentDeps) {
     },
 
     listSpaces(caller: Caller) {
+      // What is going on in each project, as the Tasks tab's Active first order reads it.
+      const open = groupedByRoom(db.memberActions(caller.user.id).filter((n) => !isClosed(stateOf(n))));
+      const work = workOn(open);
+      const reported = new Map<string, number>();
+      for (const u of db.notesUpdates(open.map((n) => n.id))) if (u.noteId) reported.set(u.noteId, u.ts);
+      const activity = projectActivity(
+        open.map((n) => ({ project: n.project, ts: n.ts, inProgress: stateOf(n, work.get(n.id)) === "doing", reportedAt: reported.get(n.id) })),
+      );
       return db.spaceRows(caller.user.id).map((row) => ({
         id: row.id,
         name: row.name,
@@ -860,7 +868,8 @@ export function agentApi(deps: AgentDeps) {
           return active.length
             ? active.map((p) => {
                 const { url: _u, ...shown } = projectRow(p, "");
-                return shown;
+                const a = activity.get(p.id);
+                return { ...shown, in_progress: a?.inProgress || undefined, latest_activity: a ? new Date(a.latest).toISOString() : undefined };
               })
             : undefined;
         })(),
