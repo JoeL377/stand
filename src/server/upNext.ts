@@ -360,7 +360,7 @@ export function addUpNext(db: DB, roomId: string, s: Pick<UpNextSuggestion, "key
   for (const key of s.merged) {
     const [kind, id] = key.split(":");
     const note = kind === "note" ? db.getNote(id) : null;
-    if (note && note.roomId === roomId) db.moveNote(note.id, itemId);
+    if (note && note.roomId === roomId) db.moveNoteKeepingProject(roomId, note.id, itemId);
   }
   return itemId;
 }
@@ -389,7 +389,7 @@ function addOne(db: DB, roomId: string, key: string, meeting: { id: string }): s
   const title = note.text.length > 140 ? `${note.text.slice(0, 139)}…` : note.text;
   const created = newAgendaLine(db, roomId, title, from ? `Carried over from “${from.title}”` : "Carried over");
   if (!created) return null;
-  db.moveNote(note.id, created);
+  db.moveNoteKeepingProject(roomId, note.id, created);
   return created;
 }
 

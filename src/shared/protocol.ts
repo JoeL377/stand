@@ -206,6 +206,12 @@ export interface Note {
   project?: string | null;
   /** What the rules give without the hand-set project: what "Follow the agenda" goes back to. */
   ruledProject?: string | null;
+  /** The project Stand suggests (shared/projects.ts rule 4). Nobody confirmed it. */
+  suggestedProjectId?: string | null;
+  /** When Stand last read it to suggest a project. Kept so a restored note isn't read again. */
+  projectJudgedAt?: number | null;
+  /** True when project is only Stand's suggestion: the rules before it give nothing. */
+  projectSuggested?: boolean;
   id: string;
   meetingId: string;
   itemId: string | null;
@@ -661,6 +667,12 @@ export interface TaskDetail {
   waitsOn: TaskLink[];
   /** To-dos that wait on this one. */
   blocking: TaskLink[];
+  /** The to-do it is a part of, if any. */
+  parent: TaskLink | null;
+  /** A to-do's parts: the to-dos and open questions whose parent it is. */
+  parts: TaskLink[];
+  /** The space's open to-dos it can be made a part of, newest first. Empty when it has parts. */
+  parentChoices: TaskLink[];
   /** The people in its space, whom a comment can tag with @Name. */
   people: Array<{ id: string; name: string }>;
   /** Comments on it that tag you and wait on you, newest first. */

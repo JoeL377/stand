@@ -1,8 +1,8 @@
 // One to-do or open question opened beside the space's task list: what it is, where it came from,
-// its spec, what it waits on and what waits on it, and what's been reported on it. The page's
+// its spec, the to-do it is a part of and its parts, what it waits on and what waits on it, and what's been reported on it. The page's
 // ?task=<id> opens it, so a link can land on it.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import type { DesignReviewState } from "../shared/designReview.ts";
@@ -18,10 +18,11 @@ import { LastReview, designReviewHref } from "./pages/DesignReviewPage.tsx";
 import { PlanReviewBody } from "./PlanReview.tsx";
 import { MentionText } from "./Mentions.tsx";
 import { errorToast } from "./Toasts.tsx";
+import { useDismiss } from "./useDismiss.ts";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
 
-export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, acts }: {
+export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange, acts }: {
   /** What a phone's row no longer shows (topic, drop, archive); the drawer shows it on phones only. */
   acts?: (note: Note) => React.ReactNode;
   id: string;
@@ -29,6 +30,8 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, acts }: {
   onClose: () => void;
   /** The comments that tag you here stopped waiting on you: the list moves the task back. */
   onMentionsChange?: () => void;
+  /** It changed in a way the list shows (its parent, so its section): the list reloads. */
+  onListChange?: () => void;
 }) {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
@@ -174,6 +177,15 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, acts }: {
               ) : <p className="muted">No plan yet.</p>}
             </section>
 
+            {!task.parts.length && (task.parent || task.parentChoices.length > 0) && <PartOf
+                task={task}
+                onOpen={onOpen}
+                onSaved={() => {
+                  void load();
+                  onListChange?.();
+                }}
+              />}
+            <Links title="Parts" links={task.parts} onOpen={onOpen} />
             <Links title="Waits on" links={task.waitsOn} onOpen={onOpen} />
             <Links title="Blocking" links={task.blocking} onOpen={onOpen} />
 
@@ -359,6 +371,103 @@ function Links({ title, links, onOpen }: { title: string; links: TaskLink[]; onO
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/** "Part of": the to-do this one is a part of, and a small popup to pick one of the space's open to-dos or take it off. */
+function PartOf({ task, onOpen, onSaved }: { task: TaskDetail; onOpen: (id: string) => void; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const inputId = useId();
+  const ref = useDismiss<HTMLSpanElement>(open, () => {
+    if (!saving) setOpen(false);
+  });
+  const { parent } = task;
+  const typed = value.trim().toLowerCase();
+  const shown = task.parentChoices.filter((c) => c.id !== parent?.id && (!typed || c.text.toLowerCase().includes(typed))).slice(0, 50);
+
+  async function save(parentId: string | null) {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api.setNoteParent(task.roomId, task.note.id, parentId);
+      onSaved();
+      setOpen(false);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="td-section">
+      <h3>Part of</h3>
+      {parent ? (
+        <ul className="td-links">
+          <li>
+            <button type="button" onClick={() => onOpen(parent.id)}>
+              <span className={`td-state ${parent.state}`}>{STATE_LABEL[parent.state]}</span>
+              <span className="td-link-text">{parent.text}</span>
+              {parent.owner && <span className="muted">{parent.owner}</span>}
+            </button>
+          </li>
+        </ul>
+      ) : (
+        <p className="muted">Not a part of another to-do.</p>
+      )}
+      <span className="project-picker td-parent" ref={ref}>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => {
+            setValue("");
+            setError("");
+            setOpen(!open);
+          }}
+        >
+          {parent ? "Change" : "Make it a part of a to-do"}
+        </button>
+        {open && (
+          <span
+            className="project-pop"
+            role="dialog"
+            aria-label="Part of"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!saving) setOpen(false);
+              }
+            }}
+          >
+            <label htmlFor={inputId}>Part of</label>
+            <input id={inputId} autoFocus placeholder="Find a to-do" value={value} disabled={saving} onChange={(e) => setValue(e.target.value)} />
+            <span className="project-options" role="listbox" aria-label="To-dos">
+              {shown.map((c) => (
+                <button key={c.id} type="button" role="option" aria-selected={false} title={c.text} disabled={saving} onClick={() => void save(c.id)}>
+                  {c.text}
+                </button>
+              ))}
+              {!shown.length && <span className="project-default">{typed ? "No open to-do matches." : "No other open to-dos."}</span>}
+            </span>
+            {parent && (
+              <button type="button" className="project-default" disabled={saving} onClick={() => void save(null)}>
+                Remove
+              </button>
+            )}
+            {error && (
+              <span className="error" role="alert">
+                {error}
+              </span>
+            )}
+          </span>
+        )}
+      </span>
     </section>
   );
 }

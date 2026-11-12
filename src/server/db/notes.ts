@@ -8,7 +8,8 @@ import type { Tx } from "./tx.ts";
 
 /** Whether a person or an agent did something with a note, so a notes run must not delete it: it
  *  was ticked, edited, given a project or a task state, added by someone, or something hangs on it
- *  (a plan, an update or comment, a mention, a screenshot, a link, a check, a slide, an agenda item). */
+ *  (a plan, an update or comment, a mention, a screenshot, a link, a check, a slide, an agenda item,
+ *  a part). */
 function actedOnBy(db: DatabaseSync) {
   const own = db.prepare(
     `SELECT 1 FROM notes WHERE id = ? AND (done_at IS NOT NULL OR edited_by IS NOT NULL OR topic IS NOT NULL OR project_set_by IS NOT NULL OR added_actor_json IS NOT NULL
@@ -19,13 +20,17 @@ function actedOnBy(db: DatabaseSync) {
        OR EXISTS (SELECT 1 FROM mentions WHERE note_id = ?1) OR EXISTS (SELECT 1 FROM work_shots WHERE note_id = ?1)
        OR EXISTS (SELECT 1 FROM links WHERE from_id = ?1 OR to_id = ?1) OR EXISTS (SELECT 1 FROM decision_checks WHERE note_id = ?1)
        OR EXISTS (SELECT 1 FROM review_slides WHERE note_id = ?1) OR EXISTS (SELECT 1 FROM items WHERE note_id = ?1)
-       OR EXISTS (SELECT 1 FROM brainstorms WHERE task_id = ?1)`,
+       OR EXISTS (SELECT 1 FROM brainstorms WHERE task_id = ?1) OR EXISTS (SELECT 1 FROM notes WHERE parent_id = ?1)`,
   );
   return (id: string) => !!own.get(id) || !!hangs.get(id);
 }
 
+/** A mistake in the parent someone asked for, said so they can fix it. */
+export class ParentError extends Error {}
+
 export function notesStore(db: DatabaseSync, tx: Tx) {
   const actedOn = actedOnBy(db);
+  const inSpace = db.prepare("SELECT n.id, n.kind, n.parent_id FROM notes n JOIN meetings m ON m.id = n.meeting_id WHERE n.id = ? AND m.room_id = ?");
   return {
     /** Whether someone did something with a note (see actedOnBy), so it is theirs to close, not to delete. */
     noteActedOn(id: string): boolean {
@@ -141,7 +146,13 @@ export function notesStore(db: DatabaseSync, tx: Tx) {
         n.state ?? null, n.doneWhen ?? null, n.parentId ?? null, n.closedBy ?? null, n.dropReason ?? null,
         n.saidDone ? JSON.stringify(n.saidDone) : null, n.checkedAt ?? null,
       );
-      db.prepare("UPDATE notes SET project_id = ?, project_set_by = ? WHERE id = ?").run(n.projectSetBy ? (n.projectId ?? null) : null, n.projectSetBy ?? null, n.id);
+      db.prepare("UPDATE notes SET project_id = ?, project_set_by = ?, suggested_project_id = ?, project_judged_at = ? WHERE id = ?").run(
+        n.projectSetBy ? (n.projectId ?? null) : null,
+        n.projectSetBy ?? null,
+        n.suggestedProjectId ?? null,
+        n.projectJudgedAt ?? null,
+        n.id,
+      );
       db.prepare("UPDATE notes SET done_actor_json = ?, added_actor_json = ? WHERE id = ?").run(
         n.doneAt && n.doneActor ? JSON.stringify(n.doneActor) : null,
         n.addedActor ? JSON.stringify(n.addedActor) : null,
@@ -418,6 +429,31 @@ export function notesStore(db: DatabaseSync, tx: Tx) {
     /** Moves a carried to-do or question onto an agenda item, so it shows (and can be checked off) there. */
     moveNote(noteId: string, itemId: string | null) {
       db.prepare("UPDATE notes SET item_id = ? WHERE id = ?").run(itemId, noteId);
+    },
+    /** Throws a ParentError when that to-do can't be the parent: tasks have one level, through parent_id.
+     *  childId null: a to-do not added yet. */
+    checkParent(roomId: string, childId: string | null, parentId: string) {
+      if (childId === parentId) throw new ParentError("A to-do can't be a part of itself. Pick another to-do.");
+      const parent = inSpace.get(parentId, roomId) as Row | undefined;
+      if (!parent || parent.kind !== "action") throw new ParentError("The parent must be a to-do in this space. Pick one of its to-dos.");
+      if (parent.parent_id && db.prepare("SELECT 1 FROM notes WHERE id = ?").get(parent.parent_id as string))
+        throw new ParentError("That to-do is a part of another to-do, and tasks have one level. Pick the to-do it is a part of, or another one.");
+      if (childId && db.prepare("SELECT 1 FROM notes WHERE parent_id = ? LIMIT 1").get(childId))
+        throw new ParentError("This to-do has parts of its own, so it can't be a part of another. Take its parts off first.");
+    },
+    /** Makes a to-do or open question a part of a to-do of its space, or takes it off (null). Null when the
+     *  space has no such note. */
+    setNoteParent(roomId: string, noteId: string, parentId: string | null): Note | null {
+      const child = inSpace.get(noteId, roomId) as Row | undefined;
+      if (!child) return null;
+      if (child.kind !== "action" && child.kind !== "question") throw new ParentError("Only a to-do or an open question can be a part of a to-do.");
+      if (parentId) this.checkParent(roomId, noteId, parentId);
+      db.prepare("UPDATE notes SET parent_id = ? WHERE id = ?").run(parentId, noteId);
+      return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
+    },
+    /** A to-do's parts: the to-dos and open questions whose parent it is, oldest first. */
+    noteParts(id: string): Note[] {
+      return (db.prepare("SELECT * FROM notes WHERE parent_id = ? AND kind IN ('action', 'question') ORDER BY ts, rowid").all(id) as Row[]).map(toNote);
     },
     meetingNotes(meetingId: string): Note[] {
       return (db.prepare("SELECT * FROM notes WHERE meeting_id = ? ORDER BY ts, rowid").all(meetingId) as Row[]).map(toNote);

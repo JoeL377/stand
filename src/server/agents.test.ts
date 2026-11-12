@@ -1244,3 +1244,59 @@ test("list_spaces keeps the team's order and says where the work is: in_progress
   assert.ok(Date.parse(after[1].latest_activity!) >= action.ts, "a report on a to-do moves latest_activity");
   assert.equal(db.listProjects(room.id)[0].id, quiet.id);
 });
+
+test("agents see Stand's suggested project as suggested, find it under the project, and confirm it", () => {
+  const { api, db, joe, room } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const ref = (api.createProject(agent, { space: room.id, name: "Billing" }, "x").created as { ref: string }).ref;
+  const todo = api.createAction(agent, { space: room.id, text: "Send the invoices" }, "x").created as { ref: string };
+  db.suggestNoteProject(room.id, parseRef(todo.ref)!.id, parseRef(ref)!.id);
+
+  const listed = api.listActions(agent, { space: room.id, project: ref }, "x");
+  assert.deepEqual(listed.actions.map((a) => [a.ref, a.project]), [[todo.ref, { ref, name: "Billing", suggested: true }]], "the filter includes a suggested to-do");
+  assert.deepEqual((api.get(agent, todo.ref, "x") as { project: unknown }).project, { ref, name: "Billing", suggested: true });
+  const inIt = () => api.get(agent, ref, "x") as { open_todos: Array<{ ref: string; suggested?: boolean }>; how: string };
+  assert.deepEqual(inIt().open_todos.map((t) => [t.ref, t.suggested]), [[todo.ref, true]], "the project lists it as suggested");
+  assert.match(inIt().how, /Stand suggested it/);
+
+  const confirmed = api.updateAction(agent, { ref: todo.ref, project: ref }, "x");
+  assert.deepEqual(confirmed.updated.project, { ref, name: "Billing" }, "set by hand now: no suggested");
+  assert.ok(db.getNote(parseRef(todo.ref)!.id)?.projectSetBy, "confirmed by hand");
+  assert.deepEqual((api.get(agent, todo.ref, "x") as { project: unknown }).project, { ref, name: "Billing" });
+  assert.deepEqual(inIt().open_todos.map((t) => [t.ref, t.suggested]), [[todo.ref, undefined]]);
+});
+
+test("agents give a to-do a parent: it shows as a part, follows the parent's project, and a bad parent changes nothing", () => {
+  const { api, db, joe, room } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const ref = (api.createProject(agent, { space: room.id, name: "Search" }, "x").created as { ref: string }).ref;
+  const spec = api.createAction(agent, { space: room.id, text: "Spec the search", project: ref }, "x").created;
+  const part = api.createAction(agent, { space: room.id, text: "Index the notes", parent: spec.ref }, "x").created;
+  assert.equal(part.parent, spec.ref);
+  assert.deepEqual(part.project, { ref, name: "Search" }, "no project of its own: it follows its parent's");
+
+  const count = () => db.memberActions(joe.id).length;
+  const before = count();
+  assert.throws(() => api.createAction(agent, { space: room.id, text: "Too deep", parent: part.ref }), /is a part of another to-do, and tasks have one level/);
+  assert.throws(() => api.createAction(agent, { space: room.id, text: "Not a to-do", parent: ref }), /A parent is a to-do's ref/);
+  assert.equal(count(), before, "a bad parent adds nothing");
+
+  type Got = { parent?: { ref: string; text: string; status: string }; parts?: Array<{ ref: string; text: string; status: string; owner?: string }> };
+  assert.deepEqual((api.get(agent, spec.ref, "x") as Got).parts, [{ ref: part.ref, text: "Index the notes", status: "open", owner: joe.name }]);
+  assert.equal((api.get(agent, spec.ref, "x") as Got).parent, undefined);
+  assert.deepEqual((api.get(agent, part.ref, "x") as Got).parent, { ref: spec.ref, text: "Spec the search", status: "open" });
+  assert.deepEqual((api.startWork(agent, { ref: part.ref }, "x") as Got).parent?.ref, spec.ref, "start_work carries it");
+  const rows = api.listActions(agent, { space: room.id }, "x").actions;
+  assert.deepEqual([rows.find((a) => a.ref === part.ref)?.parent, rows.find((a) => a.ref === spec.ref)?.parent], [spec.ref, undefined]);
+  assert.equal(api.listMyWork(agent, { space: room.id }, "x").work.find((a) => a.ref === part.ref)?.parent, spec.ref);
+
+  const loose = api.createAction(agent, { space: room.id, text: "Tune the ranking" }, "x").created;
+  assert.equal(api.updateAction(agent, { ref: loose.ref, parent: spec.ref }, "x").updated.parent, spec.ref);
+  assert.equal(api.updateAction(agent, { ref: loose.ref, parent: "none" }, "x").updated.parent, undefined);
+  assert.throws(() => api.updateAction(agent, { ref: loose.ref, parent: "none" }, "x"), /Nothing to change/);
+  assert.throws(() => api.updateAction(agent, { ref: spec.ref, text: "Spec it again", parent: loose.ref }, "x"), /has parts of its own/);
+  const kept = db.getNote(parseRef(spec.ref)!.id)!;
+  assert.deepEqual([kept.text, kept.parentId], ["Spec the search", null], "a bad parent changes nothing");
+});

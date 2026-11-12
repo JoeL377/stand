@@ -578,6 +578,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               load();
               api.spaces().then(setSpaces, () => {});
             }}
+            onListChange={load}
           />
         )}
         </div>

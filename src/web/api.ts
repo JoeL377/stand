@@ -187,6 +187,8 @@ export const api = {
   /** A project's id, null for Unassigned, or "auto" to follow the rules again. */
   setNoteProject: (roomId: string, noteId: string, projectId: string | null | "auto") =>
     call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/project`, projectId === "auto" ? { auto: true } : { projectId }),
+  /** The to-do it is a part of, or null to take it off. */
+  setNoteParent: (roomId: string, noteId: string, parentId: string | null) => call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/parent`, { parentId }),
   /** Links an agenda item to a project, or takes the link off. Returns the agenda. */
   setItemProject: (roomId: string, itemId: string, projectId: string | null) => call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { projectId }),
   setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>

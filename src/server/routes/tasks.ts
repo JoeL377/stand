@@ -62,6 +62,11 @@ export function taskRoutes(app: Express, ctx: Services) {
           return x ? [{ id: x.id, text: x.text, owner: x.owner ?? null, state: stateOf(x) }] : [];
         });
       const { roomId, meetingStartedAt: _s, meetingEndedAt: _e, ...note } = db.withProjects(n.roomId, [n])[0];
+      const parts = n.kind === "action" ? db.noteParts(n.id) : [];
+      // One level: a to-do with parts has no parent, and a parent is a to-do that is no part itself.
+      const choices = parts.length
+        ? []
+        : db.openActions(n.roomId).filter((x) => x.id !== n.id && (!x.parentId || !db.getNote(x.parentId))).reverse();
       const detail: TaskDetail = {
         note,
         roomId,
@@ -69,6 +74,9 @@ export function taskRoutes(app: Express, ctx: Services) {
         work: workOf(n, db.notesUpdates([n.id]), db.noteWorkShots([n.id]), true),
         waitsOn: linked(links.filter((l) => l.fromId === n.id).map((l) => l.toId)),
         blocking: linked(links.filter((l) => l.toId === n.id).map((l) => l.fromId)),
+        parent: (n.parentId && linked([n.parentId])[0]) || null,
+        parts: linked(parts.map((x) => x.id)),
+        parentChoices: choices.map((x) => ({ id: x.id, text: x.text, owner: x.owner ?? null, state: stateOf(x) })),
         people: db.roomPeople(n.roomId),
         mentionsYou: db.openMentions(req.user!.id, n.roomId).filter((u) => u.noteId === n.id).map(mentionView),
       };

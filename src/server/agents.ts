@@ -18,7 +18,7 @@ import { IDEA_OUTCOMES, REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import type { ActionWork, BrainCaught, BrainNode, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
 import { projectActivity, type Project } from "../shared/projects.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
-import { type DB, ProjectError } from "./db.ts";
+import { type DB, ParentError, ProjectError } from "./db.ts";
 import { IDEA_SLIDES_MAX, ideaReviewView, reviewedIdeas, setUpIdeaReview } from "./ideaReview.ts";
 import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
@@ -72,6 +72,8 @@ export interface AgentDeps {
   db: DB;
   /** Tells people in a live call that something changed on their space. */
   notify: (roomId: string, what: "updates" | "followups") => void;
+  /** A project was made or brought back: Stand files what nobody filed again soon (projectSuggest.ts). */
+  projectsChanged?: (roomId: string) => void;
   /** The meeting brief (stand.meeting-brief/v1) for a meeting. */
   brief: (meetingId: string, baseUrl: string, transcript: boolean) => unknown;
   /** The space's suggested agenda as people see it in the app. */
@@ -184,11 +186,12 @@ export function agentApi(deps: AgentDeps) {
     ready: work?.ready ? { by: work.ready.by, since: new Date(work.ready.since).toISOString(), pr: work.ready.pr ?? undefined } : undefined,
   });
 
-  /** The project a note is in, when the note came through grouped (it has project worked out). */
+  /** The project a note is in, when the note came through grouped (it has project worked out).
+   *  suggested: Stand suggested it and nobody confirmed it. */
   const projectInfo = (n: Note) => {
     if (n.project === undefined) return undefined;
     const name = n.project ? db.projectName(n.project) : null;
-    return n.project && name ? { ref: refOf("project", n.project), name } : "unassigned";
+    return n.project && name ? { ref: refOf("project", n.project), name, ...(n.projectSuggested ? { suggested: true } : {}) } : "unassigned";
   };
   /** Notes of one space with the project each is in (shared/projects.ts). */
   const grouped = <T extends Note>(roomId: string, notes: T[]): T[] => db.withProjects(roomId, notes);
@@ -222,11 +225,39 @@ export function agentApi(deps: AgentDeps) {
     );
   };
 
+  /** The to-do an agent named as a parent: its ref, or "none" (null). It must be a to-do that can have
+   *  parts (db.checkParent); childId null for one not added yet. */
+  const parentFor = (roomId: string, input: string, childId: string | null): string | null => {
+    const v = input.trim();
+    if (/^(none|no parent)$/i.test(v)) return null;
+    const ref = parseRef(v);
+    if (ref?.kind !== "action") throw new AgentError('A parent is a to-do\'s ref (stand:action/<id>), or "none" to take it off.');
+    try {
+      db.checkParent(roomId, childId, ref.id);
+    } catch (err) {
+      if (err instanceof ParentError) throw new AgentError(err.message);
+      throw err;
+    }
+    return ref.id;
+  };
+  /** The to-do a to-do or question is a part of, and its own parts, for get. */
+  const familyOf = (n: Note) => {
+    const parent = n.parentId ? db.getNote(n.parentId) : null;
+    const parts = n.kind === "action" ? db.noteParts(n.id) : [];
+    return {
+      parent: parent ? { ref: refOf("action", parent.id), text: parent.text, status: stateOf(parent) } : undefined,
+      parts: parts.length
+        ? parts.map((x) => ({ ref: refOf(x.kind === "question" ? "question" : "action", x.id), text: x.text, status: stateOf(x), owner: x.owner ?? undefined }))
+        : undefined,
+    };
+  };
+
   const actionInfo = (n: Note, work?: Work) => ({
     ref: refOf("action", n.id),
     text: n.text,
     owner: n.owner ?? undefined,
     project: projectInfo(n),
+    parent: n.parentId && db.getNote(n.parentId) ? refOf("action", n.parentId) : undefined,
     status: stateOf(n, work),
     ...workInfo(work),
     done_by: n.doneBy ?? undefined,
@@ -596,6 +627,7 @@ export function agentApi(deps: AgentDeps) {
         owner: n.owner ?? undefined,
         status: n.kind === "action" ? stateOf(n, work) : undefined,
         project: projectInfo(n),
+        ...(n.kind === "action" || n.kind === "question" ? familyOf(n) : {}),
         ...workInfo(work),
         plan: plan ? { text: plan.text, by: plan.by, actor: plan.actor, at: new Date(plan.ts).toISOString(), versions: plan.versions } : undefined,
         ...(review ? { plan_version: review.plan.id } : {}),
@@ -689,7 +721,7 @@ export function agentApi(deps: AgentDeps) {
           decisions: inIt(standing.decided.filter((n) => !n.replacedBy)).length,
           open_questions: inIt(standing.open.filter((n) => !isClosed(stateOf(n)))).length,
         },
-        open_todos: open.slice(0, 50).map((n) => ({ ...actionInfo(n, work.get(n.id)), project: undefined, url: refUrl(baseUrl, "action", n.id) })),
+        open_todos: open.slice(0, 50).map((n) => ({ ...actionInfo(n, work.get(n.id)), project: undefined, ...(n.projectSuggested ? { suggested: true } : {}), url: refUrl(baseUrl, "action", n.id) })),
         decisions: inIt(standing.decided.filter((n) => !n.replacedBy))
           .slice(0, 30)
           .map((n) => ({ ref: refOf("decision", n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, "decision", n.id) })),
@@ -700,7 +732,7 @@ export function agentApi(deps: AgentDeps) {
           .listItems(room.id)
           .filter((i) => i.projectId === p.id)
           .map((i) => ({ id: i.id, title: i.title, stand_url: `${baseUrl}/items/${i.id}` })),
-        how: "A to-do is in this project when someone set it, or when its agenda item links here. Give a to-do a project with create_action or update_action (project).",
+        how: "A to-do is in this project when someone set it, when its agenda item links here, or when Stand suggested it and nobody confirmed it yet (suggested: true). Give a to-do a project, or confirm a suggestion, with create_action or update_action (project).",
       };
     },
 
@@ -712,6 +744,7 @@ export function agentApi(deps: AgentDeps) {
         const existed = db.findProject(room.id, args.name);
         const p = db.createProject(room.id, { name: args.name, goal: args.goal, fromItemId: args.itemId ?? null }, byOf(caller));
         deps.notify(room.id, "followups");
+        deps.projectsChanged?.(room.id);
         return {
           [existed ? "brought_back" : "created"]: projectRow(p, baseUrl),
           linked_item: args.itemId ? db.getItem(args.itemId)?.title : undefined,
@@ -1268,6 +1301,7 @@ export function agentApi(deps: AgentDeps) {
       const text = oneLine(args.text, 500);
       if (!text) throw new AgentError("A to-do needs its text: what needs doing, in a line.");
       const project = args.project?.trim() ? projectFor(room.id, args.project) : undefined;
+      const parent = args.parent?.trim() ? parentFor(room.id, args.parent, null) : undefined;
       let itemId: string | null = null;
       if (args.itemId) {
         const item = db.getItem(args.itemId);
@@ -1277,6 +1311,7 @@ export function agentApi(deps: AgentDeps) {
       const note = db.addTask(room.id, { text, owner: ownerFor(caller, args.owner ?? "me"), itemId }, byOf(caller));
       db.setAddedActor(note.id, actorOf(caller));
       if (project !== undefined) db.setNoteProject(room.id, note.id, { projectId: project, by: byOf(caller) });
+      if (parent) db.setNoteParent(room.id, note.id, parent);
       const { now, update } = applyChange(caller, room.id, db.getNote(note.id) ?? note, { ...args, adding: true });
       deps.notify(room.id, "followups");
       return {
@@ -1480,13 +1515,16 @@ export function agentApi(deps: AgentDeps) {
       const owner = args.owner === undefined ? note.owner : ownerFor(caller, args.owner);
       const project = args.project?.trim() ? projectFor(r.room.id, args.project) : undefined;
       const moved = project !== undefined && !(note.projectSetBy != null && (note.projectId ?? null) === project);
+      const parent = args.parent?.trim() ? parentFor(r.room.id, args.parent, note.id) : undefined;
+      const reparented = parent !== undefined && parent !== (note.parentId ?? null);
       if (moved) note = db.setNoteProject(r.room.id, note.id, { projectId: project, by: byOf(caller) }) ?? note;
+      if (reparented) note = db.setNoteParent(r.room.id, note.id, parent) ?? note;
       if (text !== note.text || owner !== note.owner)
         // Who added a to-do by hand is what its pill shows, so an edit keeps that name.
         note = db.editNote(note.id, { text, owner }, r.meeting.added ? (note.editedBy ?? byOf(caller)) : byOf(caller)) ?? note;
       const { now, update, unchanged } = applyChange(caller, r.room.id, note, args);
-      if (unchanged && text === r.note.text && owner === r.note.owner && !moved)
-        throw new AgentError("Nothing to change: give text, owner, project, status or a summary.");
+      if (unchanged && text === r.note.text && owner === r.note.owner && !moved && !reparented)
+        throw new AgentError("Nothing to change: give text, owner, project, parent, status or a summary.");
       deps.notify(r.room.id, "followups");
       return {
         updated: { ...actionInfo(grouped(r.room.id, [now])[0]), url: refUrl(baseUrl, "action", now.id) },
@@ -1799,6 +1837,8 @@ interface TaskChange {
   reason?: string;
   /** A project's ref or name, or "unassigned". */
   project?: string;
+  /** The to-do it is a part of: its ref, or "none". */
+  parent?: string;
   links?: string[];
   /** The to-do is being added now: its summary is what it's about, not news on it. */
   adding?: boolean;

@@ -2,7 +2,9 @@
 // Projects (shared/projects.ts), the way a person uses them: make one on the Tasks tab, make one from an
 // agenda line in a call, run the scripted demo on that line, then read the Tasks tab, where the call's
 // to-dos sit in that project grouped by who has them. Then move one with the picker, filter by
-// project, and read the same through the MCP.
+// project, and read the same through the MCP. Last, Stand's suggestion: a to-do that names a project
+// gets the dashed "<name>?" pill after the pass, Confirm makes it a normal pill, and a part set in the
+// task drawer shows under "Part of" and "Parts".
 //
 //   NODE_PATH="$(npm root -g)" node projects.cjs <run dir> [--headed]
 
@@ -52,6 +54,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
   page.on("dialog", (d) => d.accept());
   let roomId;
+  let namedId;
   try {
     await step("sign in and make a space", async () => {
       await page.goto(base);
@@ -175,10 +178,56 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
       check("get reads a project with its agenda line and what is open in it", read.kind === "project" && read.agenda_items.length === 1 && read.open_questions.length > 0, read.counts);
       const onboarding = await tool(8, "get", { ref: mine.projects.find((p) => p.name === "Onboarding").ref });
       check("get lists the to-do the picker moved in", onboarding.open_todos.length === 1 && onboarding.counts.open_todos === 1, onboarding.counts);
+      // No project given, and its words name one: what Stand's pass should file.
+      namedId = (await tool(9, "create_action", { space: roomId, text: "Record the onboarding video", owner: "unassigned" })).created.ref.split("/").pop();
       await page.goto(`${base}/s/${roomId}`);
       await page.getByRole("tab", { name: /^Tasks/ }).click();
       await page.getByRole("region", { name: "Agent work" }).waitFor();
       await snap("tasks-agent-project");
+    });
+
+    const pill = () => page.getByRole("region", { name: "Onboarding" }).locator(".followups li", { hasText: "Record the onboarding video" }).locator(".project-pill");
+    await step("Stand suggests Onboarding for a to-do that names it", async () => {
+      // A new project has the pass run a minute later; the local instance's heuristic agent files a
+      // to-do whose words name exactly one project.
+      await page.request.post(`${base}/api/rooms/${roomId}/projects`, { data: { name: "Pricing" } });
+      const deadline = Date.now() + 150_000;
+      for (;;) {
+        await page.goto(`${base}/s/${roomId}`);
+        await page.getByRole("tab", { name: /^Tasks/ }).click();
+        await page.locator(".sh-panel").waitFor(); await page.waitForTimeout(1000);
+        if (await pill().count()) break;
+        if (Date.now() > deadline) throw new Error("no suggestion after 150 s");
+        await page.waitForTimeout(10_000);
+      }
+      await snap("tasks-suggested");
+    });
+    check("the suggested pill reads Onboarding? with a dashed outline", (await pill().innerText()) === "Onboarding?" && (await pill().getAttribute("class")).includes("suggested"), await pill().innerText());
+    const shown = (await api(`/api/rooms/${roomId}`)).followUps.find((f) => f.id === namedId);
+    check("the server says it is only a suggestion", shown?.projectSuggested === true && shown?.projectSetBy == null, shown && [shown.project, shown.projectSuggested]);
+
+    await step("Confirm makes it a normal pill", async () => {
+      await pill().click();
+      const pop = page.getByRole("dialog", { name: "Change project" });
+      await pop.getByText("Stand suggests Onboarding").waitFor();
+      await snap("picker-suggestion");
+      await pop.getByRole("button", { name: "Confirm" }).click();
+      await page.waitForFunction(() => !document.querySelector(".project-pill.suggested"));
+      await snap("tasks-confirmed");
+    });
+    check("the pill reads Onboarding, set by hand", (await pill().innerText()) === "Onboarding" && !(await pill().getAttribute("class")).includes("suggested"), await pill().innerText());
+
+    await step("make it a part of another to-do in the task drawer", async () => {
+      await page.goto(`${base}/s/${roomId}?task=${namedId}`);
+      const drawer = page.getByRole("complementary", { name: "Task" });
+      await drawer.getByRole("button", { name: "Make it a part of a to-do" }).click();
+      await page.getByRole("dialog", { name: "Part of" }).getByRole("option", { name: "Write the onboarding guide" }).click();
+      await drawer.locator(".td-links", { hasText: "Write the onboarding guide" }).waitFor();
+      await snap("drawer-part-of");
+      await drawer.locator(".td-links button", { hasText: "Write the onboarding guide" }).click();
+      await drawer.getByRole("heading", { name: /^Parts/ }).waitFor();
+      check("the parent lists it under Parts", (await drawer.innerText()).includes("Record the onboarding video"));
+      await snap("drawer-parts");
     });
   } catch {
     // step() recorded it
