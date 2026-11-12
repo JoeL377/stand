@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, QuestionSweep, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { activeFirst, matchesProject, projectActivity, type Project } from "../../shared/projects.ts";
 import { ProjectPicker } from "../ProjectPicker.tsx";
 import { OwnerPicker } from "../OwnerPicker.tsx";
@@ -551,6 +551,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               me={user.name}
               people={members}
               deck={projectFilter ? null : deck}
+              sweep={feed?.questionSweep ?? null}
               open={[...todos, ...questions].filter(matching)}
               closed={[...done, ...closedQuestions].filter(matching)}
               mentions={feed?.mentions ?? []}
@@ -878,15 +879,13 @@ function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; 
 }
 
 type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
-/** The sweep is offered once a space has this many open questions. */
-const SWEEP_FROM = 5;
 
 /**
  * One list for everything still to do in the space: to-dos (Do) and open questions (Answer). Tasks
  * where a comment tags you come first, then work waiting on someone's look (a PR reported ready),
  * then the rest grouped by owner, yours first, then folded Done and Dropped. Anyone can tick a task
  * off, drop it or reopen it, with Undo. An open question takes an answer under its line, and the
- * sweep closes the ones Stand proposes and someone confirms (Questions.tsx).
+ * sweep closes the ones Stand proposed and someone confirms (Questions.tsx).
  */
 function TasksTab(props: {
   projectPicker: (n: Note) => React.ReactNode;
@@ -902,6 +901,8 @@ function TasksTab(props: {
   people: string[];
   /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
   deck: DoneDeck | null;
+  /** The open questions Stand's last sweep proposes to close. */
+  sweep: QuestionSweep | null;
   open: TaskNote[];
   closed: TaskNote[];
   /** Comments that tag you and wait on you, newest first. */
@@ -918,7 +919,9 @@ function TasksTab(props: {
   const [adding, setAdding] = useState(false);
   // The open question someone is writing an answer to.
   const [answering, setAnswering] = useState<string | null>(null);
-  const [sweeping, setSweeping] = useState(false);
+  // The sweep someone has open, as it was when they opened it.
+  const [sweeping, setSweeping] = useState<QuestionSweep | null>(null);
+  const { sweep } = props;
   const asked = props.open.filter((n) => n.kind === "question").length;
   // Which project sections someone folded, kept in this browser.
   const foldKey = `stand.projectFold.${props.roomId}`;
@@ -1166,7 +1169,7 @@ function TasksTab(props: {
         </button>
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
-      {sweeping && <SweepPop roomId={props.roomId} count={asked} onClose={() => setSweeping(false)} onClosed={props.reload} />}
+      {sweeping && <SweepPop roomId={props.roomId} count={asked} sweep={sweeping} onClose={() => setSweeping(null)} onClosed={props.reload} />}
       <div className="sh-task-tools">
         <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only the tasks you own">
           Mine
@@ -1187,13 +1190,18 @@ function TasksTab(props: {
             + Project
           </button>
         )}
-        {!props.mine && !props.projectFilter && asked >= SWEEP_FROM && (
-          <button type="button" className="rp-pill" onClick={() => setSweeping(true)} title="Stand proposes which open questions are settled or no longer matter. Nothing closes until you confirm.">
+        {!props.mine && !props.projectFilter && sweep && (
+          <button
+            type="button"
+            className="rp-pill"
+            onClick={() => setSweeping(sweep)}
+            title={`Stand thinks ${sweep.proposals.length === 1 ? "1 open question is" : `${sweep.proposals.length} open questions are`} settled or no longer ${sweep.proposals.length === 1 ? "matters" : "matter"}. Nothing closes until you confirm.`}
+          >
             <span className="agent-mark" aria-hidden>
               ✦
             </span>
             Sweep questions
-            <span className="count">{asked}</span>
+            <span className="count">{sweep.proposals.length}</span>
           </button>
         )}
         {canSort && (

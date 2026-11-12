@@ -127,9 +127,9 @@ export function answerOf(db: DB, question: Pick<Note, "id">): Note | null {
 
 /** The questions the space page lists as open, oldest first: nobody answered, dropped or archived
  *  them, and no later decision settled them. */
-export function openQuestions(db: DB, roomId: string) {
+export function openQuestions(db: DB, roomId: string, view = settledView(db, roomId)) {
   const gone = new Set(db.listArchived(roomId).map((a) => a.ref));
-  return settledView(db, roomId)
-    .open.filter((n) => !isClosed(stateOf(n)) && !gone.has(`question:${n.id}`))
+  return view.open
+    .filter((n) => !isClosed(stateOf(n)) && !gone.has(`question:${n.id}`))
     .reverse();
 }

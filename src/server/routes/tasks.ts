@@ -6,14 +6,14 @@ import { AgentError } from "../agents.ts";
 import type { DB } from "../db.ts";
 import { mentionView, recordMentions } from "../mentions.ts";
 import { changeReview, logThreadChange, reviewFor } from "../planReview.ts";
-import { sweepQuestions } from "../questionSweep.ts";
+import { keepOpen } from "../questionSweep.ts";
 import { answerOf } from "../spaceSettle.ts";
 import { readyToShip, workingOn, workLog } from "../workLog.ts";
 import type { Services } from "../services.ts";
 import { notFound, route } from "./http.ts";
 
 export function taskRoutes(app: Express, ctx: Services) {
-  const { db, agent, planBriefs, sessions, doneDecks, agents, specTouched } = ctx;
+  const { db, planBriefs, sessions, doneDecks, agents, specTouched } = ctx;
   // Whether an agent is on each of these to-dos, and what's been reported on them. ?ids=a,b,c
   app.get(
     "/api/work",
@@ -210,13 +210,16 @@ export function taskRoutes(app: Express, ctx: Services) {
 
   // Close open questions, one or a swept list at once: { rows: [{ id, answer } | { id, decisionId } | { id, drop }] }.
   // An answer is kept as a decision the question points to. A row that can't close (already closed,
-  // gone) is left out of the reply.
+  // gone) is left out of the reply. keep: the sweep's proposals someone unticked, which Stand
+  // doesn't propose again (questionSweep.ts).
   app.post(
     "/api/rooms/:id/questions/close",
     route((req, res) => {
       const roomId = req.params.id;
       if (!db.isMember(roomId, req.user!.id)) return notFound(res);
       const rows: unknown[] = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 200) : [];
+      const keep: unknown[] = Array.isArray(req.body?.keep) ? req.body.keep.slice(0, 200) : [];
+      keepOpen(db, roomId, keep.filter((id): id is string => typeof id === "string"));
       const caller = { user: req.user!, token: null };
       const closed: QuestionClosed[] = [];
       let refused: string | null = null;
@@ -241,18 +244,6 @@ export function taskRoutes(app: Express, ctx: Services) {
       if (!closed.length && refused) return void res.status(400).json({ error: refused });
       if (closed.length) doneDecks.schedule(roomId);
       res.json({ closed });
-    }),
-  );
-
-  // Stand's proposals for the space's open questions (questionSweep.ts): which a decision answers
-  // and which nobody needs answered any more. It changes nothing; the close above does.
-  app.post(
-    "/api/rooms/:id/questions/sweep",
-    route(async (req, res) => {
-      if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
-      const proposals = await sweepQuestions(db, agent, req.params.id);
-      if (!proposals) return void res.status(422).json({ error: "Stand couldn't read the questions just now. Try again in a moment." });
-      res.json({ proposals });
     }),
   );
 

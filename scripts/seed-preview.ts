@@ -371,6 +371,18 @@ db.addLink(room.id, shipDecision.id, flagDecision.id, "conflicts", "Sam Rivera v
 // A question someone answered: the answer is a decision the question points to.
 api.closeQuestion({ user: leo, token: null }, { ref: `stand:question/${earlier.note("Does a retry need the shopper's card").id}`, answer: "A retry reuses the saved payment method; the shopper isn't asked again" });
 
+// What Stand's last sweep of the open questions proposes to close, as its pass keeps it (questionSweep.ts).
+db.saveQuestionSweep(room.id, {
+  at: now - 3 * 3_600_000,
+  seen: [],
+  rows: [
+    { id: earlier.note("Who is on call").id, how: "drop", by: null, why: "A check on one week that has passed" },
+    { id: earlier.note("Should guest checkout wait").id, how: "answered", by: shipDecision.id, why: "Decided once the fraud numbers came in low" },
+    { id: reviewNotes[1][0].id, how: "drop", by: null, why: "The layout shipped" },
+  ],
+  kept: [],
+});
+
 // What's true in the space.
 const old = api.addContext(samsAgent, { space: room.id, text: "Stripe is the only card processor" });
 api.addContext(samsAgent, { space: room.id, text: "Stripe takes cards; Adyen takes everything in the EU", replaces: old.created.ref });

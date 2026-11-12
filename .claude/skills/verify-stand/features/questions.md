@@ -6,9 +6,10 @@ An open question is a task with the verb Answer (`notes.kind = 'question'`). It 
 
 - Space page → Tasks → **Answer** after an open question's text. It opens a box under the line; Enter saves. The toast's Undo opens the question again and takes back the decision the answer made.
 - The task drawer of a question: an **Answer** section with the same box, or the answer once it has one.
-- Tasks → **✦ Sweep questions** (shown from 5 open questions, with no project filter and Mine off). Stand lists the questions it thinks a decision answers or nobody needs any more, each ticked. **Close N questions** closes the ticked ones in one step. Nothing closes before that.
+- Tasks → **✦ Sweep questions** with the number of proposals (shown when Stand's last sweep proposes something, with no project filter and Mine off). It lists the questions Stand thinks a decision answers or nobody needs any more, each ticked. **Close N questions** closes the ticked ones in one step. Nothing closes before that. An unticked one stays open and Stand doesn't propose it again; with none ticked the button is **Keep them all open**.
+- The sweep itself runs in the background (`src/server/questionSweep.ts`): in a space with 5 or more open questions, when a meeting or a chat stretch ends, 10 minutes after an agent's change between meetings, and as the server starts. It asks the model only the first time and then after 5 new questions, decisions or lines of context (or one, when the last sweep is a week old). The result is kept in `question_sweep` and comes with the feed as `questionSweep`. Opening the list never asks the model. `QUESTION_SWEEP=off` stops it.
 - A closed question is under Done (pill **Answered**, the answer on hover) or Dropped (the reason on hover). The answer is on the Decisions tab with an **Answer** pill that shows its question.
-- API: `POST /api/rooms/:id/questions/close` with `{ rows: [{ id, answer } | { id, decisionId } | { id, drop }] }`, `POST /api/rooms/:id/questions/sweep` for the proposals, and `PATCH /api/rooms/:id/tasks/:noteId` with `{ state: "open", undoAnswer? }` to open one again.
+- API: `POST /api/rooms/:id/questions/close` with `{ rows: [{ id, answer } | { id, decisionId } | { id, drop }], keep?: [id] }` (keep: the proposals someone unticked), `GET /api/rooms/:id/feed` for the proposals (`questionSweep`), and `PATCH /api/rooms/:id/tasks/:noteId` with `{ state: "open", undoAnswer? }` to open one again.
 - MCP: `list_questions` (open ones, oldest first), `close_question` with one of `answer`, `decision` or `drop`. `get` on a question gives `status` (open, answered, dropped), `answered_by` and `why_dropped`; on a decision, `answers`.
 
 ## Drive it
@@ -26,11 +27,10 @@ NODE_PATH="$(npm root -g)" node .claude/skills/verify-stand/scripts/questions.cj
 kill "$(cat "$RUN/server.pid")" "$(cat "$RUN/vite.pid")"
 ```
 
-It sweeps (unticks one, closes two), answers one under its line, checks Done and the Decisions tab, undoes an answer, answers one from the drawer, then lists and drops one over the MCP. Each change is read back from `/api/rooms/<id>/feed`. About 20 seconds. Seed again before a second run: the journey closes the sample questions.
+It opens the kept sweep (unticks one, closes two, checks the unticked one isn't proposed again), answers one under its line, checks Done and the Decisions tab, undoes an answer, answers one from the drawer, then lists and drops one over the MCP. Each change is read back from `/api/rooms/<id>/feed`. About 20 seconds. Seed again before a second run: the journey closes the sample questions.
 
 ## Gotchas
 
-- **The sweep's model pass is not driven.** Without a key the page says "Stand couldn't read the questions just now", and the script checks that. It then answers the sweep request itself with proposals built from the space's own questions and decisions; the close that follows is real. `questionSweep.test.ts` covers the pass with a scripted model. What a real model proposes on a real space is unverified here.
+- **The sweep's model pass is not driven.** Without a key nothing sweeps, so the sample data carries a kept sweep with three proposals (`scripts/seed-preview.ts`); the list, the close and the keep that follow are real. `questionSweep.test.ts` covers the pass and when it runs with a scripted model. What a real model proposes on a real space is unverified here.
 - A toast stays while the pointer is on it, so two "Answered" toasts can be up at once. The script dismisses them between steps.
-- In dev, React runs the sweep request twice; the server makes one read of it (`questionSweep.ts`).
 - Ticking a question's checkbox still closes it with no answer ("Closed without an answer").

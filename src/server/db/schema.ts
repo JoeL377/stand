@@ -164,6 +164,13 @@ CREATE TABLE IF NOT EXISTS space_settled (
   basis TEXT NOT NULL,
   rows_json TEXT NOT NULL
 );
+-- Stand's last sweep of a space's open questions (questionSweep.ts), as JSON: what it read, which
+-- questions it proposes to close, and the ones someone chose to keep open.
+CREATE TABLE IF NOT EXISTS question_sweep (
+  room_id TEXT PRIMARY KEY,
+  at INTEGER NOT NULL,
+  sweep_json TEXT NOT NULL
+);
 -- "Done since last time" (doneDeck.ts): what the space closed since its last meeting, as pages Claude
 -- laid out for the next one to open on. since: when that meeting ended; basis: what the pass read.
 CREATE TABLE IF NOT EXISTS space_done (

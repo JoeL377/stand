@@ -695,6 +695,13 @@ export interface QuestionClosed {
   decision?: { id: string; text: string; made: boolean };
 }
 
+/** Stand's last sweep of a space's open questions (server/questionSweep.ts): the proposals that
+ *  still hold, and when it read the questions. */
+export interface QuestionSweep {
+  at: number;
+  proposals: SweepProposal[];
+}
+
 /** Stand's proposal for one open question in a sweep of a space's questions. A person confirms it. */
 export interface SweepProposal {
   id: string;
@@ -1319,6 +1326,8 @@ export interface SpaceFeed {
   archived: ArchivedRow[];
   /** What the space got done since its last meeting, as the next meeting will open on it. */
   doneDeck?: DoneDeck | null;
+  /** The open questions Stand's last sweep proposes to close; null when there are none. */
+  questionSweep?: QuestionSweep | null;
   /** The space's next product review, with what a start would add to it; or the one running now. */
   review?: ReviewView | null;
   /** Reviews that ran, newest first: each keeps its page. */
