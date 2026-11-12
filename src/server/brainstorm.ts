@@ -58,6 +58,7 @@ export const MAP_SYSTEM = `You draw the map on the middle screen of a live team 
 Each time you get the map so far, with ids, and the last couple of minutes of transcript. Lines marked NEW are the ones you haven't seen yet. Return only what the NEW lines add; everything you don't name stays as it is. Often the answer is empty.
 
 - A direction (under "root") is a distinct angle on the centre that the talk has opened: an area, an approach, a kind of answer. Add one when someone raises an idea that fits no direction on the map, and name it for the angle, not for that one idea ("Onboarding", not "Add a welcome video"). Then add the idea under it. At most ${MAX_DIRECTIONS} directions: once they are there, put new ideas under the closest one.
+- The talk can move on from the centre. When you are told it is now on another topic, that topic is a direction of its own: open one named for it (unless the map has one for it already) and put what is said about it there, even when it doesn't answer the centre. Never drop ideas because they are off the centre.
 - An idea (under a direction) is something specific someone proposes, suggests or wonders about that answers the centre. Add it once it has actually been stated, not while the speaker is still finding the words. Not agreement, not small talk, not logistics, not a restatement of something on the map.
 - Before adding, check the map: when a circle already says it in other words, don't add it. When the NEW talk builds on an existing circle (a reason for it, a variation, a concern about it), use extend on that circle instead.
 - Labels are what people will read at a glance: at most 5 words, concrete, in the team's own words. The detail is one plain sentence.
@@ -103,6 +104,9 @@ export class MapKeeper {
     }
   }
 
+  /** The topic the call is on now, when it can move away from the centre (a topic's map). */
+  topicNow: (() => string | null) | null = null;
+
   all(): BrainNode[] {
     return this.nodes;
   }
@@ -142,8 +146,10 @@ export class MapKeeper {
     const lines = shown
       .map((s, k) => `${from + k >= firstNew ? "NEW " : ""}[${k + 1}] [${at(s.ts, meetingStartedAt)}] ${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
       .join("\n");
+    const now_ = this.topicNow?.() ?? null;
+    const moved = now_ && !similar(now_, this.prompt) ? now_ : null;
     const a = await this.model.brainstormMap(
-      `The centre of the map: ${this.prompt}\nPeople: ${people.join(", ")}`,
+      [`The centre of the map: ${this.prompt}`, moved ? `The talk is now on another topic: ${moved}` : "", `People: ${people.join(", ")}`].filter(Boolean).join("\n"),
       [
         `Map so far:\n${map}`,
         off.length ? `Taken off by the team, never add these again:\n${off.join("\n")}` : "",

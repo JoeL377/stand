@@ -31,10 +31,12 @@ export const DiagramAnswerSchema = z.object({
       z.object({
         label: z.string().describe("The thing's name as the team says it: at most 4 words, no full stop"),
         detail: z.string().describe("One sentence saying what it is or what it is for, in the speaker's terms"),
+        // A plain string, not an enum: the SDK can't hold the model to an enum, and one odd kind would
+        // fail the whole pass. A kind outside DESIGN_KINDS is read as thing.
         kind: z
-          .enum(DESIGN_KINDS)
+          .string()
           .describe(
-            "What sort of thing it is. For a design of anything: person (a person, a role, a team, a customer), step (a stage in a flow or something that happens), decision (a choice or a branch point), goal (an outcome the design is for), problem (a pain, a risk or a constraint it has to deal with), document (something written or made: a doc, a message, a deliverable), thing (none of these). Only when the design is of software: screen (something people look at or click), store (where data is kept, a record or a table), service (a system, an agent, an API or a tool that does work)",
+            "What sort of thing it is, one of: thing, person, step, decision, goal, problem, document, screen, store, service. For a design of anything: person (a person, a role, a team, a customer), step (a stage in a flow or something that happens), decision (a choice or a branch point), goal (an outcome the design is for), problem (a pain, a risk or a constraint it has to deal with), document (something written or made: a doc, a message, a deliverable), thing (none of these). Only when the design is of software: screen (something people look at or click), store (where data is kept, a record or a table), service (a system, an agent, an API or a tool that does work)",
           ),
         group: z.string().nullable().describe("The group it belongs in, by name: one from Groups so far when it fits, or a new name of at most 3 words. null when it stands alone"),
         by: z.string().nullable().describe("First name of who raised it; null if unclear"),
@@ -78,11 +80,13 @@ export type DiagramAnswer = z.infer<typeof DiagramAnswerSchema>;
 
 export const DIAGRAM_SYSTEM = `You keep the diagram on the middle screen of a live design session. The team is designing something by talking it through, and the diagram is their design so far. It can be a design of anything: a product or a system, but as often a process, a plan, a pitch, a pricing model, an event, how a team works. Take the subject as it comes and never bend it toward software. Each box is one thing in the design (for a process: a step, a role, a decision, a goal, a document; for software also a screen, a record, a service), and each arrow says in a few words how one box relates to another. Everyone looks at it while they talk, so it has to be right and it has to stay calm.
 
-What you add shows as a suggestion, dashed, until someone in the room keeps it. So suggest only what the team has actually said, and suggest little: an answer with nothing in it is the usual one.
+What you add shows as a suggestion, dashed, until someone in the room keeps it. So suggest only what the team has actually said, and suggest little: once the diagram has a few boxes, an answer with nothing in it is the usual one.
+
+While the diagram is empty, don't wait for a formal design: the room opened it to see something. As soon as someone describes how things fit together, even as an example ("say a signup form feeds the CRM, and sales gets an alert"), suggest those parts and how they relate. They stay suggestions until someone keeps them, so a first draft costs nothing.
 
 Each time you get the diagram so far, with ids, and the last couple of minutes of transcript. Lines marked NEW are the ones you haven't seen yet. Return only what the NEW lines add. You never rename, move or remove anything: the room does that.
 
-- A box is a thing the design is made of, named the way the team names it. Add one when someone introduces a thing the diagram doesn't have and talks about it as part of the design. Not an example, not a person, not a passing mention. Before adding, check the diagram: when a box already is that thing under another name, don't add it; use extend if the talk says something new about it.
+- A box is a thing the design is made of, named the way the team names it. Add one when someone introduces a thing the diagram doesn't have and talks about it as part of the design. Not a person, not a passing mention, and not an example once the diagram has boxes. Before adding, check the diagram: when a box already is that thing under another name, don't add it; use extend if the talk says something new about it.
 - An arrow is a relation someone stated: one thing belongs to, contains, becomes, creates, links to, replaces or depends on another. Read along the arrow it should make a short true sentence: "task belongs to project". Add one only when both ends are boxes (on the diagram or added in this answer) and the diagram doesn't already show that relation in either direction.
 - Every box has a kind, so the diagram is more than a wall of boxes: say what sort of thing it is, and use thing only when nothing else fits. Use screen, store and service only when the team is designing software; for anything else the other kinds are enough.
 - A group holds boxes that belong to the same area of the design (the same flow, the same side of a system, the same question). Three boxes about one area with no arrows between them should share a group. Reuse a group that is there before naming a new one, keep to a handful of groups, and never make a group for one box. place puts a box that is already on the diagram into a group; it never takes one out of the group it is in.
@@ -418,7 +422,8 @@ export class DiagramKeeper {
       }
       const seg = segOf(x.line);
       const b: DesignBox = { id: `b${++this.nb}`, label, detail: clip(x.detail.trim(), 240) || null, by: first(x.by), ts: seg.ts, quote: quote(seg), points: [], caught: [], suggested: true };
-      if (x.kind && x.kind !== "thing" && DESIGN_KINDS.includes(x.kind)) b.kind = x.kind;
+      const kind = x.kind?.trim().toLowerCase() as DesignKind;
+      if (kind && kind !== "thing" && DESIGN_KINDS.includes(kind)) b.kind = kind;
       const g = groupOf(x.group);
       if (g) b.group = g.id;
       this.boxes.push(b);

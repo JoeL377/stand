@@ -24,7 +24,7 @@ import type {
 } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, type ListItem, ListKeeper } from "./liveList.ts";
-import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, catchUp, finishBrainstorm, othersOfMeeting, parkBrainstorm, promptOf, resumeBrainstorm, toBrainstormView } from "./brainstorm.ts";
+import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, catchUp, finishBrainstorm, othersOfMeeting, promptOf, resumeBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { DiagramKeeper, sessionBackground, saveDraftSpec } from "./designSession.ts";
 import { PilotSeat } from "./pilot.ts";
 import { sourceDigest, repoTools } from "./sources.ts";
@@ -64,6 +64,8 @@ const DISMISS_QUIET_MS = 90_000;
 const FRAME_MIN_INTERVAL_MS = 4_000;
 /** The agent keeps a frame next to a note only if it saw it this recently. */
 const FRAME_BACKS_MS = 180_000;
+/** A diagram opened during a call also reads this much of the talk just before it. */
+const DIAGRAM_LOOK_BACK_MS = 90_000;
 /** The recap sees at most this many snaps, and this many bytes of them, so the request stays within the API's limits. */
 const RECAP_MAX_SNAPS = 20;
 /** A chapter this long gets moments in the recap, read from its remarks. */
@@ -343,14 +345,19 @@ export class RoomSession implements SpeechSink {
     };
     if (b.kind === "design") {
       // A design session: the same passes, drawing a diagram of boxes and arrows (designSession.ts).
+      // One opened in this call also reads what was said just before, which is often why it was opened.
       const model = this.agent.designDiagram ? { designDiagram: this.agent.designDiagram.bind(this.agent) } : { designDiagram: async () => null };
-      this.brain = { id: b.id, threadId: null, map: new DiagramKeeper(model, b.prompt, since, b.diagram, sessionBackground(b), inScope) };
+      const from = b.startedAt >= this.meetingStartedAt ? Math.max(this.meetingStartedAt, b.startedAt - DIAGRAM_LOOK_BACK_MS) - 1 : since;
+      this.brain = { id: b.id, threadId: null, map: new DiagramKeeper(model, b.prompt, from, b.diagram, sessionBackground(b), inScope) };
       return;
     }
     const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };
     const thread = b.threadId;
     if (!thread) return void (this.brain = { id: b.id, threadId: null, map: new MapKeeper(model, b.prompt, since, b.nodes, inScope) });
-    // A topic's map reads every line of its thread in this call, those said before it was opened too.
+    // A topic's map reads every line of its thread in this call, those said before it was opened too,
+    // and from then on the whole call: when the board moves to another topic, that topic becomes a
+    // direction of the same map instead of a map of its own.
+    const openedAt = Math.max(b.startedAt, this.meetingStartedAt);
     const onThread = (s: Segment) => {
       const board = this.board?.board();
       const t = board?.threads.find((x) => x.id === thread);
@@ -358,7 +365,12 @@ export class RoomSession implements SpeechSink {
       const open = board!.currentId === thread;
       return t.spans.some(([from, to], i) => s.ts >= from && (s.ts <= to || (open && i === t.spans.length - 1)));
     };
-    this.brain = { id: b.id, threadId: thread, map: new MapKeeper(model, b.prompt, this.meetingStartedAt - 1, b.nodes, (s) => inScope(s) && onThread(s)) };
+    const keeper = new MapKeeper(model, b.prompt, this.meetingStartedAt - 1, b.nodes, (s) => inScope(s) && (s.ts >= openedAt || onThread(s)));
+    keeper.topicNow = () => {
+      const board = this.board?.board();
+      return board?.threads.find((t) => t.id === board.currentId)?.title ?? null;
+    };
+    this.brain = { id: b.id, threadId: thread, map: keeper };
   }
 
   /** The stretches of the meeting a board thread was on screen. */
@@ -446,19 +458,12 @@ export class RoomSession implements SpeechSink {
     });
   }
 
-  /** The board moved: the map of the topic it left parks, and the map of the topic it came back to
-   *  goes on, unless someone stopped it or something else is drawing. */
+  /** The board moved. A map that is drawing keeps drawing: the new topic becomes a direction on it
+   *  (joe, 12 Nov: one map with several clusters, not a new map per topic). With nothing drawing,
+   *  the map of the topic the board came back to goes on, if one was parked and nobody stopped it. */
   private syncView() {
     return this.inTurn(async () => {
       const current = this.board?.board().currentId ?? null;
-      const brain = this.brain;
-      if (brain?.threadId && brain.threadId !== current) {
-        await this.lastLook();
-        if (this.ended || this.brain !== brain) return;
-        parkBrainstorm(this.db, brain.id, this.meetingId, this.threadSpans(brain.threadId));
-        this.brain = null;
-        this.broadcastBrainstorm();
-      }
       if (this.ended || this.brain || !current || this.db.brainstormLive(this.roomId)) return;
       const parked = this.db.brainstormOfThread(this.meetingId, current);
       if (!parked || parked.status !== "done" || parked.endedAt !== null) return;
