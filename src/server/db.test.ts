@@ -48,14 +48,15 @@ test("a notes run updates notes in place: a note keeps its row, and one someone 
     { kind: "action", text: "Write the rollout plan", owner: null },
   ]);
   db.setActionDone(room.id, fix.id, "Joe");
-  db.setNoteTopic(room.id, fix.id, "Release");
+  const release = db.createProject(room.id, { name: "Release" }, "Joe");
+  db.setNoteProject(room.id, fix.id, { projectId: release.id, by: "Joe" });
   db.addPlan(room.id, plan.id, "# Plan", "Agent");
   // The next run rewords the fix and leaves out the other two.
   const after = db.syncNotes(m.id, null, [{ id: fix.id, kind: "action", text: "Ship the fix today", owner: "Joe" }]);
   const byId = new Map(db.meetingNotes(m.id).map((n) => [n.id, n]));
   assert.equal(byId.get(fix.id)?.text, "Ship the fix today");
   assert.ok(byId.get(fix.id)?.doneAt, "still checked off");
-  assert.equal(byId.get(fix.id)?.topic, "Release", "and still in its topic");
+  assert.equal(byId.get(fix.id)?.projectId, release.id, "and still in its project");
   assert.ok(byId.has(plan.id), "a to-do with a plan stays, though the run left it out");
   assert.ok(!byId.has(info.id), "a note nobody acted on goes");
   assert.deepEqual(after.map((n) => n.id), [fix.id, plan.id], "the run gets back every note on the item, its own first");

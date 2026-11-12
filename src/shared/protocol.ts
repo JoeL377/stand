@@ -23,6 +23,8 @@ export interface Item {
   slide: SlideContent | null;
   /** The to-do this item walks through ("Present task"): what's said on it is filed under that to-do's item. */
   taskId?: string | null;
+  /** The project this item links to: its tasks are in that project unless someone set theirs. */
+  projectId?: string | null;
 }
 
 export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote" | "review" | "design";
@@ -196,8 +198,14 @@ export interface Segment {
 export type NoteKind = "summary" | "decision" | "action" | "question" | "context";
 
 export interface Note {
-  /** Optional cross-meeting topic. null inherits the agenda item; "" means no topic. */
-  topic?: string | null;
+  /** The project someone set by hand (shared/projects.ts). Null with projectSetBy: Unassigned by hand. */
+  projectId?: string | null;
+  /** Who set the project by hand; null: it follows the rules. */
+  projectSetBy?: string | null;
+  /** The project it is in by the rules, where the server worked it out for the page. */
+  project?: string | null;
+  /** What the rules give without the hand-set project: what "Follow the agenda" goes back to. */
+  ruledProject?: string | null;
   id: string;
   meetingId: string;
   itemId: string | null;
