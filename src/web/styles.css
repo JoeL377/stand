@@ -3755,3 +3755,6 @@ a .mention { color: inherit; }
   /* New chat shows on the Chat tab even when it isn't the open one. */
   .sh-tab .chat-marks .count { display: inline-block; }
 }
+
+/* A review row on the Meetings tab: its name gives way first, the count never shrinks. */
+.sh-what.sh-count { flex: none; }

@@ -128,6 +128,8 @@ export interface ReviewSummary {
   endedAt: number | null;
   meetingId: string | null;
   slides: number;
+  /** What tells this review from the others in a list: its first few slides, by their short names. */
+  titles?: string[];
   outcomes: Record<ReviewOutcome, number>;
 }
 
