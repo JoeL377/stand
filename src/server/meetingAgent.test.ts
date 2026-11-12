@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AGENT_MAX_RUNS, AgentKeeper, answerPrompt, AskCapture, costOf, draftOf, optionsPrompt, readPartial, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
+import { AGENT_MAX_RUNS, AgentKeeper, answerPrompt, AskCapture, costOf, draftOf, optionsPrompt, readPartial, SAY_EVERY_MS, SAY_MAX_CARDS, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
 import { type ListAnswer, ListKeeper } from "./liveList.ts";
 import type { Segment } from "../shared/protocol.ts";
 
@@ -177,4 +177,47 @@ test("a streaming run's draft: the words so far, options as they come, searches 
   assert.equal(keeper.get(card.id)?.draft?.options.length, 2);
   keeper.finish(card.id, { fields: { options: [], fromSpace: [], note: "Stay on Railway" }, model: "m", costUsd: 0 });
   assert.equal(keeper.get(card.id)?.draft, null);
+});
+
+test("a card from someone's own agent: ready at once, under their name, outside Stand's cap and its follow-ups", () => {
+  const k = new AgentKeeper();
+  const fable = { kind: "agent" as const, person: "Janesh Chhabra", personId: "u1", agent: "opencode", connection: "tok1", model: "claude-fable-5-2" };
+  const other = { ...fable, person: "Joe Liang", personId: "u2", connection: "tok2" };
+
+  const card = k.say(fable, { text: "The design misses retries.", detail: "## Why\nNo queue.", todo: "Add a retry queue", sources: [{ title: "fly.io", url: "https://fly.io/docs" }] }, 1_000);
+  assert.equal(card.kind, "answer");
+  assert.equal(card.status, "ready");
+  assert.equal(card.by, "Janesh Chhabra");
+  assert.equal(card.about, "u1");
+  assert.equal(card.question, "");
+  assert.equal(card.note, "The design misses retries.");
+  assert.equal(card.detail, "## Why\nNo queue.");
+  assert.deepEqual(card.agent, fable);
+  assert.equal(card.model, "claude-fable-5-2");
+  assert.equal(card.costUsd, null);
+
+  // One card every few seconds from one agent; another person's agent isn't held back by it.
+  assert.match(k.sayRefusal(fable, 1_000 + SAY_EVERY_MS - 1) ?? "", /every 5 seconds/);
+  assert.equal(k.sayRefusal(other, 1_001), null);
+  assert.equal(k.sayRefusal(fable, 1_000 + SAY_EVERY_MS), null);
+
+  // Stand doesn't follow up what the agent said, and a question typed on its card starts a card of its own.
+  assert.deepEqual(k.followUp(1_500), []);
+  assert.equal(k.ask("Joe", "u2", "And for two?", 2_000, card.id).follows, null);
+
+  // Anyone takes its next step, or dismisses it, as with Stand's cards.
+  assert.equal(k.takeTodo(card.id, "Joe", 3_000)?.picked?.by, "Joe");
+  assert.equal(k.dismiss(card.id, "Joe", 4_000)?.dismissed?.by, "Joe");
+
+  // Stand ran no model for these, so they leave its runs alone; each agent has its own count.
+  const busy = new AgentKeeper();
+  for (let i = 0; i < SAY_MAX_CARDS; i++) busy.say(fable, { text: `Point ${i}` }, i * SAY_EVERY_MS);
+  assert.equal(busy.canRun(), true);
+  assert.match(busy.sayRefusal(fable, SAY_MAX_CARDS * SAY_EVERY_MS) ?? "", /30 cards/);
+  assert.equal(busy.sayRefusal(other, SAY_MAX_CARDS * SAY_EVERY_MS), null);
+  for (let i = 0; i < AGENT_MAX_RUNS; i++) busy.ask("Joe", "u2", `Question ${i}`);
+  assert.equal(busy.canRun(), false);
+
+  // Kept with the meeting: it reads back as it was.
+  assert.deepEqual(new AgentKeeper(JSON.parse(JSON.stringify(k.all()))).get(card.id)?.agent, fable);
 });

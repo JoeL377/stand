@@ -330,3 +330,41 @@ test("the brief's timeline says who made each capture, apart from who it is for"
   assert.match(md, /Stand caught: Tell support \(stand:action\/n1\) \[owner: Huy\]/);
   assert.match(md, /Joe via Claude Code added: Draft the notes/);
 });
+
+test("what someone's own agent said in the call is a line by that agent, with its write-up", async () => {
+  const fable = { kind: "agent" as const, person: "Huy", agent: "opencode", connection: "tok1", model: "claude-fable-5-2" };
+  const t = buildTimeline({
+    ...base,
+    segments: [seg("s1", 1000, "Hello", "speech", "Huy")],
+    cards: [
+      card({ id: "ag_1", at: 2000, readyAt: 2000, note: "The design misses **retries**.", detail: "## Why\nNo queue.", agent: fable, model: fable.model }),
+      // Asked in the call (a later step): the question is the asker's, the answer the agent's.
+      card({ id: "ag_2", question: "And the cost?", at: 3000, readyAt: 3500, note: "About $20 a month.", agent: fable }),
+      card({ id: "ag_3", question: "Who owns it?", at: 4000, note: "Joe", model: "claude-sonnet-5-5" }),
+    ],
+  });
+  assert.deepEqual(
+    t.map((e) => e.id),
+    ["speech:s1", "agent:ag_1", "ask:ag_2", "ask:ag_3"],
+  );
+  const said = t[1];
+  assert.equal(said.kind, "agent");
+  assert.equal(timelineWho(said), "Huy via opencode");
+  assert.equal(said.actor?.model, "claude-fable-5-2");
+  // The same person as the one who spoke, so the same color.
+  assert.equal(said.whoId, "huy");
+  assert.equal(said.card, "ag_1");
+  assert.equal(said.text, "The design misses **retries**.");
+  assert.equal(said.detail, "## Why\nNo queue.");
+  assert.equal(said.itemId, "i1");
+  assert.equal(t[2].answeredBy?.kind, "agent");
+  assert.equal(t[2].answeredBy?.agent, "opencode");
+  assert.deepEqual(t[3].answeredBy, { kind: "stand", person: null, model: "claude-sonnet-5-5" });
+
+  const { buildBrief, briefToMarkdown } = await import("./brief.ts");
+  const brief = buildBrief({ meeting: { id: "m", roomId: "r", startedAt: 1000, endedAt: 9000, summary: null }, roomName: "Conxt", groups: [], decks: [], baseUrl: "https://stand.test", timeline: t, withTranscript: true });
+  const line = brief.timeline?.find((e) => e.kind === "agent");
+  assert.deepEqual(line?.by, { kind: "agent", person: "Huy", agent: "opencode", model: "claude-fable-5-2" });
+  assert.equal(line?.detail, "## Why\nNo queue.");
+  assert.match(briefToMarkdown(brief), /Huy via opencode: The design misses \*\*retries\*\*\.\n {2}- The full write-up:\n {4}## Why\n {4}No queue\./);
+});

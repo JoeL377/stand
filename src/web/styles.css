@@ -2663,7 +2663,22 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .card-entry-meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-entry-live { position: absolute; top: 11px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); animation: notes-pulse 1.4s ease-in-out infinite; }
 .card-entry .card-entry-body:has(+ .card-entry-live) { padding-right: 10px; }
-.card-entry.done .card-entry-mark, .card-entry.options .card-entry-mark { background: none; color: var(--accent-text); font-size: 13px; }
+.card-entry.done .card-entry-mark, .card-entry.options .card-entry-mark, .card-entry.said .card-entry-mark { background: none; color: var(--accent-text); font-size: 13px; }
+/* What someone's own agent said in the call (say_in_call): its person's name in their color, the words, and
+   the longer write-up folded under them. */
+.said-view .topic-now-label.ask { color: var(--accent-text); }
+.said-card { display: flex; flex-direction: column; gap: 12px; max-width: 760px; width: 100%; }
+.said-card-head { display: flex; align-items: baseline; gap: 8px; }
+.said-card-who { font-size: 15px; font-weight: 600; }
+.said-card-via { font-size: 12px; color: var(--muted); }
+.said-card-text.md { font-size: 16px; line-height: 1.65; }
+.said-card .agent-answer-todo { font-size: 14px; }
+.said-card .agent-answer-todo button { font-size: 12px; line-height: 22px; padding: 0 10px; }
+.said-card-detail, .tl-detail { border-top: 1px solid var(--line); padding-top: 10px; }
+.said-card-detail > summary, .tl-detail > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.said-card-detail > summary:hover, .tl-detail > summary:hover { color: var(--text); }
+.said-card-detail[open] > summary, .tl-detail[open] > summary { margin-bottom: 10px; }
+.tl-detail { margin-top: 6px; padding-top: 6px; }
 /* Something happening on a card, said on its line: the topic just changed or is about to, ✦ Stand is at work or just back. */
 .card-entry-signal { color: var(--accent-text); font-weight: 500; }
 .card-entry.signal.move { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); animation: card-entry-glow 1.6s ease-in-out 2; }

@@ -197,6 +197,12 @@ export function startServices() {
       const s = live(roomId);
       return s ? { meeting_id: s.meetingId, people: s.state().participants.map((p) => p.name) } : null;
     },
+    call: (roomId) => {
+      const s = live(roomId);
+      return s
+        ? { meetingId: s.meetingId, startedAt: s.meetingStartedAt, people: s.state().participants.map((p) => p.name), tail: (since) => s.tail(since), say: (actor, out) => s.agentSay(actor, out) }
+        : null;
+    },
     notify: (roomId, what) => {
       const s = live(roomId);
       if (s) what === "updates" ? s.updatesChanged() : s.followUpsChanged();

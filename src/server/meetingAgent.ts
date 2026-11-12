@@ -15,11 +15,18 @@
 // as the agent's log.
 import { partialParse } from "@anthropic-ai/sdk/_vendor/partial-json-parser/parser";
 import { z } from "zod";
+import type { Actor } from "../shared/actors.ts";
 import type { AgentCard, AgentDraft, AgentOption, Segment } from "../shared/protocol.ts";
 import { REPO_TOOL_CALLS } from "./sources.ts";
 
 /** Most runs one meeting may start: a cost cap while it's tried on real calls. */
 export const AGENT_MAX_RUNS = 20;
+/** Most cards one person's agent may put in one meeting (say_in_call), and how close together. */
+export const SAY_MAX_CARDS = 30;
+export const SAY_EVERY_MS = 5_000;
+/** How long such a card's words and its write-up may be. */
+export const SAY_TEXT_MAX = 1_200;
+export const SAY_DETAIL_MAX = 20_000;
 /** How long after the button comes up Stand keeps taking down the question: the last words'
  *  transcript lands a moment after they're said. */
 export const ASK_SETTLE_MS = 2_500;
@@ -274,6 +281,9 @@ export class AskCapture {
   }
 }
 
+/** Whether two actors are the same agent: the same connection, or with none, the same person. */
+const sameAgent = (a: Actor, b: Actor) => (a.connection || b.connection ? a.connection === b.connection : (a.personId ?? a.person) === (b.personId ?? b.person));
+
 /** Keeps one meeting's cards. */
 export class AgentKeeper {
   private cards: AgentCard[];
@@ -299,9 +309,36 @@ export class AgentKeeper {
     return this.cards.find((c) => c.kind === "options" && c.about === about && !c.dismissed && c.status !== "failed");
   }
 
-  /** Whether another run may start: under the meeting's cap. */
+  /** Whether another run may start: under the meeting's cap. A card from someone's own agent cost
+   *  Stand nothing, so it doesn't count. */
   canRun(): boolean {
-    return this.cards.length < AGENT_MAX_RUNS;
+    return this.cards.filter((c) => !c.agent).length < AGENT_MAX_RUNS;
+  }
+
+  /** Why someone's own agent can't put a card in the call right now, or null when it can. */
+  sayRefusal(agent: Actor, at = Date.now()): string | null {
+    const mine = this.cards.filter((c) => c.agent && sameAgent(c.agent, agent));
+    if (mine.length >= SAY_MAX_CARDS) return `This agent has put ${SAY_MAX_CARDS} cards in this call, which is the most one agent may.`;
+    const last = mine.at(-1);
+    if (last && at - last.at < SAY_EVERY_MS) return `One card every ${SAY_EVERY_MS / 1000} seconds. Wait a moment, and put what belongs together in one card.`;
+    return null;
+  }
+
+  /** Someone's own agent says something in the call (say_in_call): a finished answer card under its
+   *  person's name. Like Stand's cards it decides nothing; a next step waits for someone to take it. */
+  say(agent: Actor, out: { text: string; detail?: string | null; todo?: string | null; sources?: Array<{ title: string; url: string }> }, at = Date.now()): AgentCard {
+    const card = this.start(agent.personId ?? "", "", agent.person ?? "Someone", at);
+    card.kind = "answer";
+    card.status = "ready";
+    card.readyAt = at;
+    card.note = out.text;
+    card.sources = out.sources ?? [];
+    card.todo = out.todo || null;
+    card.follows = null;
+    card.model = agent.model ?? null;
+    card.agent = agent;
+    if (out.detail) card.detail = out.detail;
+    return card;
   }
 
   start(about: string, question: string, by: string, at = Date.now()): AgentCard {
@@ -339,7 +376,7 @@ export class AgentKeeper {
     if (follows !== undefined) {
       const up = follows ? this.get(follows) : undefined;
       // It shows on that card straight away, while Stand works on it.
-      card.follows = up?.kind === "answer" ? up.id : null;
+      card.follows = up?.kind === "answer" && !up.agent ? up.id : null;
       this.chosen.add(card.id);
     }
     return card;
@@ -379,7 +416,8 @@ export class AgentKeeper {
 
   /** The answers a new one may follow up on: the last two, if the latest came back a moment ago. */
   followUp(now = Date.now()): AgentCard[] {
-    const done = this.cards.filter((c) => c.kind === "answer" && c.status === "ready" && c.note);
+    // Stand follows up its own answers, not what someone's agent said.
+    const done = this.cards.filter((c) => c.kind === "answer" && c.status === "ready" && c.note && !c.agent);
     const last = done.at(-1);
     if (!last || now - (last.readyAt ?? last.at) > FOLLOW_MS) return [];
     return done.slice(-2);

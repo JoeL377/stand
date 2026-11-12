@@ -472,6 +472,11 @@ export interface AgentCard {
   costUsd: number | null;
   /** While it's working: what Stand has written so far, as it writes it, and what it searched the web for. */
   draft?: AgentDraft | null;
+  /** A card someone's own agent put in the call over the MCP (say_in_call): whose agent, which one and
+   *  the model it reported. Left out, the card is ✦ Stand's. Stand ran no model for it, so it has no cost. */
+  agent?: Actor;
+  /** A card from someone's own agent: a longer write-up in markdown, folded under its words. */
+  detail?: string;
 }
 /** The Pilot seat: the one person who drives ✦ Stand (types or holds Ask Stand) right now. */
 export interface PilotView {

@@ -1,6 +1,7 @@
 // A meeting's timeline: everything that happened in it, in the order it happened. What was said,
 // what was typed in the chat, what Stand caught, what Ask Stand was asked and answered, which item
-// or slide was up, and what agents did over the MCP while it ran. It is put together when it is
+// or slide was up, and what agents did over the MCP while it ran (their reports, and what they said
+// in the call). It is put together when it is
 // read (server/timeline.ts) from what each part already keeps, so nothing is stored twice.
 
 import { type Actor, parseActor } from "./actors.ts";
@@ -80,6 +81,9 @@ export interface TimelineEntry {
   points?: boolean;
   /** An agent's report: what kind of report. */
   status?: UpdateStatus;
+  /** What someone's own agent said in the call (say_in_call): its card's id, and its longer write-up in markdown. */
+  card?: string;
+  detail?: string;
 }
 
 /** "Joe via Claude Code", "Joe", or "Stand": who an entry is by, as one line. */
@@ -253,13 +257,18 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
 
   for (const c of input.cards) {
     if (c.status === "listening") continue;
+    // What someone's own agent said in the call over the MCP, with nobody asking it there: its own line.
+    if (c.agent && !c.question.trim()) {
+      if (c.note) add({ id: `agent:${c.id}`, kind: "agent", ts: c.at, ...by(known(c.agent)), text: c.note, itemId: itemAt(c.at), card: c.id, ...(c.detail && { detail: c.detail }), ...withShown(c.at) }, 2);
+      continue;
+    }
     const ready = c.status === "ready";
     // An answer card keeps the asker's id in `about`; an options card keeps the question's there.
     const rest = {
       ...by(person(c.by, c.kind === "answer" ? c.about : null)),
       itemId: itemAt(c.at),
       ...(c.status === "working" && { pending: true }),
-      ...(ready && { answeredBy: c.model ? { ...stand, model: c.model } : stand }),
+      ...(ready && { answeredBy: c.agent ? known(c.agent) : c.model ? { ...stand, model: c.model } : stand }),
       ...withShown(c.at),
     };
     if (c.kind === "answer") {

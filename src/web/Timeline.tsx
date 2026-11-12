@@ -218,20 +218,36 @@ export function AskRow({ e, onShow }: { e: TimelineEntry; onShow?: () => void })
   );
 }
 
-/** Something a person's agent (or a person) reported to the space while the meeting ran. */
-export function AgentRow({ e }: { e: TimelineEntry }) {
+/** Something a person's agent (or a person) reported to the space while the meeting ran, or what their
+ *  agent said in the call itself. onShow: a way to that card, in a call. */
+export function AgentRow({ e, onShow }: { e: TimelineEntry; onShow?: () => void }) {
   return (
     <div className="seg capture-event capture-agent" role="note">
       <div className="capture-head">
         <strong>
-          <ActorTag actor={e.actor} /> {VERB[e.status ?? ""] ?? "reported"}
+          <ActorTag actor={e.actor} /> {e.card ? "said in the call" : (VERB[e.status ?? ""] ?? "reported")}
         </strong>
         <span className="seg-time">{fmtTime(e.ts)}</span>
       </div>
-      <div className="capture-text">
-        <Linkified text={e.text} />
-      </div>
+      {e.card ? (
+        <Markdown className="capture-text" text={e.text} breaks />
+      ) : (
+        <div className="capture-text">
+          <Linkified text={e.text} />
+        </div>
+      )}
+      {e.detail && (
+        <details className="tl-detail">
+          <summary>The full write-up</summary>
+          <Markdown text={e.detail} />
+        </details>
+      )}
       <ShownChip shown={e.shown} />
+      {e.card && onShow && (
+        <button type="button" className="link small tl-show" onClick={onShow}>
+          Show on the board
+        </button>
+      )}
     </div>
   );
 }

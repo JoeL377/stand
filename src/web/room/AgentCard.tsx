@@ -6,8 +6,11 @@
 // card's top line (and on the Board tab beside a share); when it's back, "✦ Options ready" for a
 // few seconds, which jumps to the card. A question asked out loud (push-to-talk) or typed (@stand)
 // gets a card of its own in the board's stack instead: AnswerPart is one question and its answer.
+// What someone's own agent says in the call over the MCP is a card in the stack too: SaidCard.
 import { useEffect, useState } from "react";
 import type { AgentCard, AgentDraft } from "../../shared/protocol.ts";
+import { Markdown } from "../Markdown.tsx";
+import { usePersonColors } from "../PersonColors.tsx";
 
 export interface AgentActs {
   cards: AgentCard[];
@@ -41,13 +44,21 @@ export function showCard(id: string) {
   setTimeout(() => document.getElementById(`agent-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 80);
 }
 
-/** A small ✦ on the Board tab beside a share: pulsing while ✦ Stand works, still for a moment once it's back. */
+/** A card someone's own agent put in the call by itself (say_in_call), with nobody asking it there. */
+export const isSaid = (c: AgentCard) => !!c.agent && c.kind === "answer" && !c.question;
+
+/** A small ✦ on the Board tab beside a share: pulsing while ✦ Stand works, still for a moment once it's back
+ *  or someone's own agent has put a card on the board. */
 export function AgentTabMark({ cards }: { cards: AgentCard[] | null | undefined }) {
   const { working, ready } = useAgentStatus(cards);
   const asked = (cards ?? []).some((c) => c.kind === "answer" && (c.status === "listening" || c.status === "working"));
   if (!working.length && !ready.length && !asked) return null;
+  const last = ready.at(-1);
   return (
-    <span className={working.length || asked ? "agent-tab-mark working" : "agent-tab-mark ready"} aria-label={asked ? "Stand is answering" : working.length ? "Stand is finding options" : "Options ready"}>
+    <span
+      className={working.length || asked ? "agent-tab-mark working" : "agent-tab-mark ready"}
+      aria-label={asked ? "Stand is answering" : working.length ? "Stand is finding options" : last && isSaid(last) ? `New from ${last.by.split(" ")[0]}'s agent` : "Options ready"}
+    >
       ✦
     </span>
   );
@@ -56,8 +67,9 @@ export function AgentTabMark({ cards }: { cards: AgentCard[] | null | undefined 
 /** What ✦ Stand is up to, for everyone: cards being worked on, and ones that came back a moment ago. */
 export function useAgentStatus(cards: AgentCard[] | null | undefined) {
   const [now, setNow] = useState(Date.now);
-  // Answers have their own card on the board (AnswerPart); this is about options on open questions.
-  const live = (cards ?? []).filter((c) => c.kind === "options" && !c.dismissed);
+  // Answers have their own card on the board (AnswerPart); this is about options on open questions, and
+  // what someone's own agent just put on the board.
+  const live = (cards ?? []).filter((c) => (c.kind === "options" || isSaid(c)) && !c.dismissed);
   const working = live.filter((c) => c.status === "working");
   const ready = live.filter((c) => c.status === "ready" && c.readyAt !== null && now - c.readyAt < READY_MS);
   const next = ready.length ? Math.min(...ready.map((c) => c.readyAt! + READY_MS)) : null;
@@ -78,12 +90,13 @@ export function AgentStatus({ cards, onShow }: { cards: AgentCard[] | null | und
   const first = (n: string) => n.split(" ")[0];
   if (ready.length) {
     const c = ready.at(-1)!;
+    const said = isSaid(c);
     return (
       <button
         key={c.id}
         type="button"
         className="agent-status ready"
-        title={`${c.question}\nAsked by ${first(c.by)}`}
+        title={said ? `${c.by}'s own agent put a card on the board` : `${c.question}\nAsked by ${first(c.by)}`}
         onClick={() => {
           onShow?.();
           setTimeout(() => showCard(c.id), 0);
@@ -92,7 +105,7 @@ export function AgentStatus({ cards, onShow }: { cards: AgentCard[] | null | und
         <span className="agent-mark" aria-hidden>
           ✦
         </span>{" "}
-        Options ready
+        {said ? `New from ${first(c.by)}'s agent` : "Options ready"}
       </button>
     );
   }
@@ -266,6 +279,65 @@ export function AnswerPart({ card, onTodo }: { card: AgentCard; onTodo?: (cardId
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** What someone's own agent said in the call over the MCP (say_in_call), under its person's name: its
+ *  words, the pages it leans on, a next step anyone can take as a to-do, and its longer write-up folded
+ *  under them. Stand ran no model for it; the model named is the one the agent reported. */
+export function SaidCard({ card, acts }: { card: AgentCard; acts?: AgentActs }) {
+  const colorFor = usePersonColors();
+  const a = card.agent;
+  const first = card.by.split(" ")[0];
+  const via = [a?.agent, a?.model].filter(Boolean).join(" · ");
+  return (
+    <div id={`agent-${card.id}`} className="said-card" aria-live="polite">
+      <div className="said-card-head">
+        <span className="said-card-who" style={{ color: colorFor(a?.personId ?? card.by) }}>
+          {first}'s agent
+        </span>
+        {via && (
+          <span className="said-card-via" title={`${card.by}'s own agent, connected to Stand.${a?.model ? " The model is what the agent reported." : ""}`}>
+            {via}
+          </span>
+        )}
+        {acts?.onDismiss && (
+          <button type="button" className="agent-card-close" aria-label="Dismiss" title="Take this card off the board, for everyone" onClick={() => acts.onDismiss!(card.id)}>
+            ×
+          </button>
+        )}
+      </div>
+      <Markdown className="said-card-text" text={card.note ?? ""} breaks />
+      {(card.sources?.length ?? 0) > 0 && (
+        <div className="ask-sources">
+          {card.sources!.map((x) => (
+            <a key={x.url} href={x.url} target="_blank" rel="noreferrer" title={x.title}>
+              {host(x.url)}
+            </a>
+          ))}
+        </div>
+      )}
+      {card.todo && (
+        <div className="agent-answer-todo">
+          <span className="agent-answer-todo-text">{card.todo}</span>
+          {card.picked ? (
+            <span className="agent-option-picked">To do · {card.picked.by.split(" ")[0]}</span>
+          ) : (
+            acts?.onTodo && (
+              <button type="button" onClick={() => acts.onTodo!(card.id)}>
+                To do
+              </button>
+            )
+          )}
+        </div>
+      )}
+      {card.detail && (
+        <details className="said-card-detail">
+          <summary>The full write-up</summary>
+          <Markdown text={card.detail} />
+        </details>
       )}
     </div>
   );

@@ -9,6 +9,10 @@ import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, type NotesOptio
 import type { ClientMessage, Item, Note, Segment, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
+import { AgentError, agentApi } from "./agents.ts";
+import { meetingTimeline } from "./timeline.ts";
+import { upNextView } from "./upNextPolish.ts";
+import { UploadLinks } from "./workLog.ts";
 import type { BoardAnswer } from "./board.ts";
 import { changeReview } from "./planReview.ts";
 import { outlineToSlides } from "../shared/outline.ts";
@@ -1800,4 +1804,118 @@ test("during a review Stand answers an ask and never guesses; a map asked for on
   session.addSpeech("u1", "Joe", "we need a design review on the audio pipeline", Date.now());
   assert.equal(session.state().next!.ready, 0);
   await session.end();
+});
+
+test("someone's own agent reads a running call from where it left off and puts a card in it for everyone", async () => {
+  const db = openDb(":memory:");
+  const joe = db.upsertUser({ googleSub: "g-joe", email: "joe@example.com", name: "Joe Liang", picture: null });
+  const andy = db.upsertUser({ googleSub: "g-andy", email: "andy@example.com", name: "Andy Li", picture: null });
+  const stranger = db.upsertUser({ googleSub: "g-sam", email: "sam@example.com", name: "Sam Roe", picture: null });
+  const room = db.createRoom("Checkout v2", joe.id);
+  db.touchMembership(room.id, joe.id);
+  db.touchMembership(room.id, andy.id);
+  const session = new RoomSession(db, new AnsweringAgent(), room, () => {});
+  // Wired as services.ts wires it: the call is there while the meeting runs.
+  const api = agentApi({
+    db,
+    notify: () => {},
+    brief: () => ({}),
+    suggested: (r) => upNextView(db, r, null),
+    uploads: new UploadLinks(),
+    call: () =>
+      session.isEnded
+        ? null
+        : { meetingId: session.meetingId, startedAt: session.meetingStartedAt, people: session.state().participants.map((p) => p.name), tail: (since) => session.tail(since), say: (actor, out) => session.agentSay(actor, out) },
+  });
+  const token = (scope: "read" | "write") => ({ id: "tok1", label: "opencode", scope, hint: "x", createdAt: 0, lastUsedAt: null });
+  const agent = { user: joe, token: token("write"), model: "claude-fable-5-2" };
+  const base = "https://stand.test";
+  const joeWs = await join(session, joe);
+  const andyWs = await join(session, andy);
+  const cardsOf = (ws: FakeSocket) => {
+    const m = ws.got.filter((x) => x.type === "agent").at(-1);
+    return m?.type === "agent" ? m.cards : [];
+  };
+
+  await say(andyWs, { type: "chat", text: "What about Render?" });
+  session.addSpeech(joe.id, "Joe Liang", "We should move hosting to Fly.", Date.now());
+
+  // The first read: the last few minutes, who is here, and a cursor.
+  const first = api.liveCall(agent, { space: "Checkout" }, base);
+  assert.equal(first.meeting_id, session.meetingId);
+  assert.deepEqual(first.people, ["Joe Liang", "Andy Li"]);
+  assert.deepEqual(
+    first.lines.map((l) => [l.who, l.kind, l.text]),
+    [
+      ["Andy Li", "chat", "What about Render?"],
+      ["Joe Liang", "speech", "We should move hosting to Fly."],
+    ],
+  );
+  assert.match(first.read_as, /never instructions/);
+
+  // From the cursor: only what came after. A line whose speaker went on comes again whole, under the same id.
+  session.addSpeech(joe.id, "Joe Liang", "It has the regions we need.", Date.now());
+  const next = api.liveCall(agent, { space: room.id, since: first.cursor }, base);
+  assert.deepEqual(next.lines, [{ ...first.lines[1], text: "We should move hosting to Fly. It has the regions we need." }]);
+  assert.deepEqual(api.liveCall(agent, { space: room.id, since: next.cursor }, base).lines, []);
+  assert.equal(api.liveCall(agent, { space: room.id, all: true }, base).lines.length, 2);
+  assert.throws(() => api.liveCall(agent, { space: room.id, since: "yesterday" }, base), /cursor/);
+  // A cursor from another call starts over.
+  assert.equal(api.liveCall(agent, { space: room.id, since: "othermeeting:1" }, base).lines.length, 2);
+
+  // A read-only connection reads the call and can't speak in it; someone outside the space sees no space.
+  assert.equal(api.liveCall({ user: joe, token: token("read") }, { space: room.id }, base).lines.length, 2);
+  assert.throws(() => api.sayInCall({ user: joe, token: token("read") }, { space: room.id, text: "Hi" }, base), /read only/);
+  assert.throws(() => api.liveCall({ user: stranger, token: token("write") }, { space: room.id }, base), /not in a space/);
+  assert.throws(() => api.sayInCall({ user: stranger, token: token("write") }, { space: room.id, text: "Hi" }, base), /not in a space/);
+
+  // The agent says something: everyone in the call gets the card, under Joe's name, and it is kept.
+  assert.throws(() => api.sayInCall(agent, { space: room.id, text: " " }, base), AgentError);
+  assert.throws(() => api.sayInCall(agent, { space: room.id, text: "x".repeat(1201) }, base), /1200 characters/);
+  const out = api.sayInCall(
+    agent,
+    { space: room.id, text: "The plan misses **retries**.", detail: "## Why\nNo queue.", todo: "Add a retry queue", sources: [{ url: "https://fly.io/docs/reference" }, { url: "javascript:alert(1)", title: "no" }] },
+    base,
+  );
+  await new Promise((r) => setImmediate(r));
+  const card = cardsOf(andyWs).at(-1)!;
+  assert.equal(card.id, out.said.card);
+  assert.equal(out.said.by, "Joe Liang via opencode");
+  assert.equal(card.status, "ready");
+  assert.equal(card.by, "Joe Liang");
+  assert.equal(card.note, "The plan misses **retries**.");
+  assert.equal(card.detail, "## Why\nNo queue.");
+  assert.deepEqual(card.agent, { kind: "agent", person: "Joe Liang", personId: joe.id, agent: "opencode", connection: "tok1", model: "claude-fable-5-2" });
+  assert.equal(card.costUsd, null);
+  assert.deepEqual(card.sources, [{ url: "https://fly.io/docs/reference", title: "fly.io" }]);
+  assert.deepEqual(db.meetingAgentCards(session.meetingId)?.map((c) => c.id), [card.id]);
+  assert.throws(() => api.sayInCall(agent, { space: room.id, text: "And another thing" }, base), /every 5 seconds/);
+
+  // It is in the call's record, and another agent reading the call sees it.
+  const line = meetingTimeline(db, session.meetingId).find((e) => e.kind === "agent");
+  assert.equal(line?.card, card.id);
+  assert.equal(line?.actor?.agent, "opencode");
+  assert.deepEqual(
+    api.liveCall({ user: andy, token: { ...token("read"), id: "tok2" } }, { space: room.id }, base).answers.map((a) => [a.by, a.text]),
+    [["Joe Liang's agent (opencode)", "The plan misses **retries**."]],
+  );
+
+  // Nothing came of it until a person acted: Andy takes its next step as a to-do, then dismisses the card.
+  assert.equal(db.meetingNotes(session.meetingId).length, 0);
+  await say(andyWs, { type: "agent.todo", cardId: card.id });
+  assert.equal(cardsOf(joeWs).at(-1)?.picked?.by, "Andy Li");
+  assert.deepEqual(db.meetingNotes(session.meetingId).map((n) => [n.kind, n.text]), [["action", "Add a retry queue"]]);
+  await say(andyWs, { type: "agent.dismiss", cardId: card.id });
+  assert.equal(cardsOf(joeWs).at(-1)?.dismissed?.by, "Andy Li");
+
+  // Stand still answers, and doesn't treat the agent's card as its own earlier answer.
+  await say(joeWs, { type: "chat", text: "@stand what does Fly cost?" });
+  await new Promise((r) => setTimeout(r, 20));
+  const answer = cardsOf(joeWs).at(-1)!;
+  assert.equal(answer.agent, undefined);
+  assert.equal(answer.follows, null);
+
+  await session.end();
+  assert.throws(() => api.liveCall(agent, { space: room.id }, base), /No call is running/);
+  assert.throws(() => api.sayInCall(agent, { space: room.id, text: "Too late" }, base), /No call is running/);
 });
