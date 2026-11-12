@@ -13,7 +13,10 @@
 // 21-77 s) and caught every core item (scripts/live-eval).
 import { z } from "zod";
 import type { ListNote, Note, NoteKind, Segment } from "../shared/protocol.ts";
-import { similar } from "./notesMerge.ts";
+import { overlap, similar } from "./notesMerge.ts";
+
+/** A line and a note of the same kind on the same item are the same thing when they share at least this much, and are each other's best match. */
+const TIE_OVERLAP = 0.35;
 
 export const LIST_DEBOUNCE_MS = 3_000;
 export const LIST_MAX_WAIT_MS = 8_000;
@@ -181,20 +184,29 @@ export class ListKeeper {
     if (it) it.noteId = noteId;
   }
 
-  /** Ties each line to the note a notes run wrote for it: the same kind, close in words, not tied to
-   *  another line. A line whose note is gone (a later run dropped it) is tied again. Matching by
-   *  words happens once, here; ticks then follow the id. Returns the lines tied now, with their notes. */
+  /** Ties each line to the note a notes run wrote for it: the same kind on the same item, the pair
+   *  that shares the most words, and enough of them. Best pairs go first, and each line and note is
+   *  in one tie. A line whose note is gone (a later run dropped it) is tied again. Matching by words
+   *  happens once, here; ticks then follow the id. Returns the lines tied now, with their notes. */
   linkNotes(notes: Note[]): Array<{ line: ListItem; note: Note }> {
     const byId = new Set(notes.map((n) => n.id));
     const taken = new Set(this.items.flatMap((i) => (i.noteId && byId.has(i.noteId) ? [i.noteId] : [])));
+    const loose = this.items.filter((i) => !i.heard && i.closed?.how !== "wrong" && !(i.noteId && byId.has(i.noteId)));
+    const pairs = loose
+      .flatMap((line) =>
+        notes
+          .filter((n) => n.kind === NOTE_KIND[line.kind] && n.itemId === line.itemId && !taken.has(n.id))
+          .map((note) => ({ line, note, score: overlap(line.text, note.text) })),
+      )
+      .filter((p) => p.score >= TIE_OVERLAP)
+      .sort((a, b) => b.score - a.score);
     const tied: Array<{ line: ListItem; note: Note }> = [];
-    for (const line of this.items) {
-      if (line.heard || line.closed?.how === "wrong" || (line.noteId && byId.has(line.noteId))) continue;
-      const note = notes.find((n) => n.kind === NOTE_KIND[line.kind] && !taken.has(n.id) && similar(n.text, line.text));
-      if (!note) continue;
-      line.noteId = note.id;
-      taken.add(note.id);
-      tied.push({ line, note });
+    for (const p of pairs) {
+      if (p.line.noteId && byId.has(p.line.noteId)) continue;
+      if (taken.has(p.note.id)) continue;
+      p.line.noteId = p.note.id;
+      taken.add(p.note.id);
+      tied.push({ line: p.line, note: p.note });
     }
     return tied;
   }

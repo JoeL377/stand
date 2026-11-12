@@ -160,3 +160,15 @@ test("lines are tied to the notes written for them once, by kind and words, and 
   const b = note("n2", "action", "Send Joe the repo link today");
   assert.deepEqual(k.linkNotes([b]).map((t) => t.note.id), ["n2"], "its note gone, it ties to the one written now");
 });
+
+test("a line ties to its best match on the same item, and a near miss on another item doesn't tie", () => {
+  const line = (id: string, kind: "todo" | "open", text: string, itemId = "i1") => ({ id, kind, who: null, text, itemId, said: T0, doneAt: null, doneBy: null, closed: null, answers: null });
+  const note = (id: string, kind: "action" | "question", text: string, itemId = "i1") => ({ id, meetingId: "m", itemId, kind, text, owner: null, ts: T0, doneAt: null, doneBy: null, discussionId: null });
+  const k = new ListKeeper({ liveList: async () => null }, T0, [line("li_1", "todo", "Build dependency linking between tasks"), line("li_2", "open", "Why is this call so expensive?")]);
+  const tied = k.linkNotes([
+    note("n1", "action", "Capture task dependency links in Stand"),
+    note("n2", "action", "Build the dependency linking between tasks"),
+    note("n3", "question", "Why this call is so expensive", "i2"),
+  ]);
+  assert.deepEqual(tied.map((t) => [t.line.id, t.note.id]), [["li_1", "n2"]]);
+});
