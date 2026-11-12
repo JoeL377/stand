@@ -1402,3 +1402,33 @@ test("finishing a brainstorm mid-call reads the talk no pass has read, then the 
   assert.equal(passes, 1, "no map passes once it's finished");
   await session.end();
 });
+
+test("a line on the board is tied to its note by id: a tick crosses either way, even after the note is reworded", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const [item] = db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "One", url: null, description: null }]);
+  const agent = Object.assign(new HeuristicAgent(), {
+    async liveList() {
+      return { add: [{ kind: "todo" as const, who: "Huy", text: "Send Joe the repo link", line: 1 }], change: [], close: [] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const huy = await join(session, { id: "u2", name: "Huy" });
+  session.addSpeech("u2", "Huy", "I'll send Joe the repo link", Date.now());
+  await (session as unknown as { listPasses: { run(): Promise<void> } }).listPasses.run();
+  const lastList = () => (huy.got.filter((m) => m.type === "list").at(-1) as Extract<ServerMessage, { type: "list" }>).items!;
+  const [line] = lastList();
+  // A notes run writes the same to-do; after it, the line is tied to that note.
+  const note = db.addNote(session.meetingId, item.id, { kind: "action", text: "Send Joe the link to the repo", owner: "Huy" }, null);
+  (session as unknown as { linkList(): void }).linkList();
+  assert.equal((db.meetingList(session.meetingId) ?? [])[0].noteId, note.id);
+  // Reworded past any match by words: the tie holds.
+  db.editNote(note.id, { text: "Share repository access with Joe", owner: "Huy" }, "Joe");
+  await say(huy, { type: "followup.done", noteId: line.id, done: true });
+  assert.equal(db.getNote(note.id)?.doneBy, "Huy", "the board's tick reached the note");
+  await say(huy, { type: "followup.done", noteId: note.id, done: false });
+  assert.equal(lastList()[0].doneAt, null, "and the note's untick reached the board");
+  await say(huy, { type: "task.state", noteId: note.id, state: "done" });
+  assert.equal(lastList()[0].doneBy, "Huy", "a Done from the check-in too");
+  await session.end();
+});

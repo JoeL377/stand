@@ -12,7 +12,7 @@
 // On the Oct 17 and Oct 22 replays it showed lines about 5 s after they were said (live notes:
 // 21-77 s) and caught every core item (scripts/live-eval).
 import { z } from "zod";
-import type { ListNote, NoteKind, Segment } from "../shared/protocol.ts";
+import type { ListNote, Note, NoteKind, Segment } from "../shared/protocol.ts";
 import { similar } from "./notesMerge.ts";
 
 export const LIST_DEBOUNCE_MS = 3_000;
@@ -95,6 +95,9 @@ export interface ListItem {
   heard?: boolean;
   /** Who confirmed a heard decision. */
   confirmedBy?: string | null;
+  /** The meeting note this line is, once a notes run wrote it (or a click made both): a tick on
+   *  either goes to the other by this id. Missing on lists saved before links. */
+  noteId?: string | null;
 }
 
 const at = (ms: number, start: number) => {
@@ -165,6 +168,35 @@ export class ListKeeper {
 
   get(id: string): ListItem | undefined {
     return this.items.find((i) => i.id === id);
+  }
+
+  /** The line that is this meeting note, if one is. */
+  byNote(noteId: string): ListItem | undefined {
+    return this.items.find((i) => i.noteId === noteId);
+  }
+
+  /** Ties a line to the note it is. */
+  link(id: string, noteId: string) {
+    const it = this.items.find((i) => i.id === id);
+    if (it) it.noteId = noteId;
+  }
+
+  /** Ties each line to the note a notes run wrote for it: the same kind, close in words, not tied to
+   *  another line. A line whose note is gone (a later run dropped it) is tied again. Matching by
+   *  words happens once, here; ticks then follow the id. Returns the lines tied now, with their notes. */
+  linkNotes(notes: Note[]): Array<{ line: ListItem; note: Note }> {
+    const byId = new Set(notes.map((n) => n.id));
+    const taken = new Set(this.items.flatMap((i) => (i.noteId && byId.has(i.noteId) ? [i.noteId] : [])));
+    const tied: Array<{ line: ListItem; note: Note }> = [];
+    for (const line of this.items) {
+      if (line.heard || line.closed?.how === "wrong" || (line.noteId && byId.has(line.noteId))) continue;
+      const note = notes.find((n) => n.kind === NOTE_KIND[line.kind] && !taken.has(n.id) && similar(n.text, line.text));
+      if (!note) continue;
+      line.noteId = note.id;
+      taken.add(note.id);
+      tied.push({ line, note });
+    }
+    return tied;
   }
 
   /** Someone checked a to-do off, or back on. */

@@ -146,3 +146,17 @@ test("a carried task someone calls finished is heard, by its id, and never added
   assert.deepEqual(k.heardDone.map((h) => [h.id, h.segment.id]), [["n2", "s1"]]);
   assert.deepEqual(k.notes("m"), []);
 });
+
+test("lines are tied to the notes written for them once, by kind and words, and tied again if the note goes", () => {
+  const k = new ListKeeper({ liveList: async () => null }, T0, [
+    { id: "li_1", kind: "todo", who: null, text: "Send Joe the repo link", itemId: "i1", said: T0, doneAt: null, doneBy: null, closed: null, answers: null },
+    { id: "li_2", kind: "open", who: null, text: "Send Joe the repo link?", itemId: "i1", said: T0, doneAt: null, doneBy: null, closed: null, answers: null },
+  ]);
+  const note = (id: string, kind: "action" | "question", text: string) => ({ id, meetingId: "m", itemId: "i1", kind, text, owner: null, ts: T0, doneAt: null, doneBy: null, discussionId: null });
+  const a = note("n1", "action", "Send Joe the link to the repo");
+  assert.deepEqual(k.linkNotes([a]).map((t) => [t.line.id, t.note.id]), [["li_1", "n1"]], "a to-do only ties to a to-do");
+  assert.deepEqual(k.linkNotes([a]), [], "once");
+  assert.equal(k.byNote("n1")?.id, "li_1");
+  const b = note("n2", "action", "Send Joe the repo link today");
+  assert.deepEqual(k.linkNotes([b]).map((t) => t.note.id), ["n2"], "its note gone, it ties to the one written now");
+});
