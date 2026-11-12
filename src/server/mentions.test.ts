@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mentionedIn } from "../shared/mentions.ts";
+import { mentionedIn, mentionSpans } from "../shared/mentions.ts";
 import { agentApi } from "./agents.ts";
 import { openDb } from "./db.ts";
 import { recordMentions } from "./mentions.ts";
@@ -36,6 +36,13 @@ test("the longer name wins, so @Joe Liang doesn't also tag a Joe", () => {
   const two = [{ id: "joe", name: "Joe" }, { id: "jl", name: "Joe Liang" }];
   assert.deepEqual(mentionedIn("@Joe Liang please", two), ["jl"]);
   assert.deepEqual(mentionedIn("@Joe please", two), ["joe"]);
+});
+
+test("mentionSpans gives where each tag is, from the @ to the end of the name", () => {
+  const text = "cc @Joe Liang, (@Andy) and joe@andy.com";
+  const spans = mentionSpans(text, people);
+  assert.deepEqual(spans.map((s) => [s.id, text.slice(s.start, s.end)]), [["joe", "@Joe Liang"], ["andy", "@Andy"]]);
+  assert.deepEqual(mentionSpans("@Joe Liang and @Joe Liang", people).map((s) => s.start), [0, 15]);
 });
 
 function setup() {

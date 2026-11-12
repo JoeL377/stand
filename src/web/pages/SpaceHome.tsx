@@ -9,6 +9,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { matchesProject, type Project } from "../../shared/projects.ts";
 import { ProjectPicker } from "../ProjectPicker.tsx";
+import { MentionText } from "../Mentions.tsx";
 import { stateOf } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
@@ -47,7 +48,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const chat = useSpaceChat(room.id, user.id);
+  // Someone tags you in chat while you're elsewhere on the page, or on another tab: a toast says so.
+  const tabNow = useRef<TabKey>("tasks");
+  const openChat = useRef(() => {});
+  const chat = useSpaceChat(room.id, user.id, (m) => {
+    if (tabNow.current === "chat" && document.visibilityState === "visible") return;
+    const said = m.text.length > 120 ? `${m.text.slice(0, 119)}…` : m.text;
+    toast({ text: `${firstName(m.author)} mentioned you in chat: “${said}”`, action: { label: "Open chat", run: () => openChat.current() }, ms: 10_000 });
+  });
   // The snap open big: one on its own, or a note's pictures with the note.
   const [viewing, setViewing] = useState<{ snaps: Snap[]; i: number; jot?: Jot } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -92,6 +100,16 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       localStorage.setItem(`stand.spaceTab.${room.id}`, key);
     } catch {}
   };
+  tabNow.current = tab;
+  openChat.current = () => pickTab("chat");
+  // The browser tab says how much is new in this space's chat, so it shows from another tab too.
+  useEffect(() => {
+    const was = document.title;
+    if (chat.unread > 0) document.title = `(${chat.mentions > 0 ? "@" : chat.unread}) ${was.replace(/^\([^)]*\) /, "")}`;
+    return () => {
+      document.title = was;
+    };
+  }, [chat.unread, chat.mentions]);
 
   const load = useCallback(() => {
     reload();
@@ -114,13 +132,18 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
 
   useEffect(() => {
     load();
+    // The other spaces' marks in the nav (new chat, mentions) keep up too.
+    const both = () => {
+      load();
+      api.spaces().then(setSpaces, () => {});
+    };
     api.spaces().then(setSpaces, () => {});
     // What others save shows up while the page is open, and when you come back to it.
-    const t = setInterval(load, 20_000);
-    window.addEventListener("focus", load);
+    const t = setInterval(both, 20_000);
+    window.addEventListener("focus", both);
     return () => {
       clearInterval(t);
-      window.removeEventListener("focus", load);
+      window.removeEventListener("focus", both);
     };
   }, [load]);
 
@@ -291,7 +314,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
 
   return (
   <PersonColors.Provider value={colorFor}>
-    <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread } : s))}>
+    <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread, chatMentions: chat.mentions } : s))}>
       <main className="sh-main">
         {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls and only the tabs stay. */}
         <div className="sh-top">
@@ -347,7 +370,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             >
               {t.icon}
               {t.label}
-              {counts[t.key] > 0 && <span className="count">{counts[t.key]}</span>}
+              {t.key === "chat" ? (
+                <ChatMarks unread={chat.unread} mentions={chat.mentions} />
+              ) : (
+                counts[t.key] > 0 && <span className="count">{counts[t.key]}</span>
+              )}
             </button>
           ))}
           {/* One pill at the end of the tab row filters Tasks and Decisions by project. */}
@@ -672,10 +699,10 @@ function JotRow(props: {
             onClick={() => setOpen((o) => !o)}
             title={open ? undefined : jot.text}
           >
-            {jot.text}
+            <MentionText text={jot.text} />
           </button>
         ) : (
-          <span className="sh-what">{jot.text}</span>
+          <span className="sh-what"><MentionText text={jot.text} /></span>
         )}
       </span>
       {mine && (
@@ -1211,7 +1238,7 @@ function MentionPill({ mentions }: { mentions: TaskMention[] }) {
         @ {who}
       </span>
       <span className="rc-pop" role="tooltip">
-        <span className="rc-pop-crux">“{latest.text.length > 280 ? `${latest.text.slice(0, 279)}…` : latest.text}”</span>
+        <span className="rc-pop-crux">“<MentionText text={latest.text.length > 280 ? `${latest.text.slice(0, 279)}…` : latest.text} />”</span>
         <span className="rc-pop-meta">
           {latest.by} · {fmtDate(latest.ts)} {fmtTime(latest.ts)}
           {mentions.length > 1 && ` · ${mentions.length} comments`}
@@ -1584,6 +1611,25 @@ function ArchivedList(props: { rows: ArchivedRow[]; open: boolean; onToggle: () 
   );
 }
 
+/** The Chat tab's marks: how many messages are new, and an @ when any of them tags you. */
+function ChatMarks({ unread, mentions }: { unread: number; mentions: number }) {
+  if (!unread) return null;
+  const label = `${unread} new ${unread === 1 ? "message" : "messages"}${mentions ? `, ${mentions} ${mentions === 1 ? "mentions" : "mention"} you` : ""}`;
+  return (
+    <span className="chat-marks" title={label}>
+      <span className="count fresh">{unread}</span>
+      {mentions > 0 && (
+        <>
+          <span className="sr-only">({mentions} {mentions === 1 ? "mentions" : "mention"} you)</span>
+          <span className="count mention" aria-hidden>
+            @
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
   { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
@@ -1724,7 +1770,7 @@ function SnapView(props: {
         </div>
         <img className="sh-view-img" src={snap.url} alt={of?.jot.text ?? snap.line ?? snap.caption ?? "Snap"} />
         {of ? (
-          <p className="sh-view-line sh-view-note">{of.jot.text}</p>
+          <p className="sh-view-line sh-view-note"><MentionText text={of.jot.text} /></p>
         ) : mine ? (
           <input
             className="sh-view-line edit"

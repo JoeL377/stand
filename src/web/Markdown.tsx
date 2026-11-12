@@ -8,6 +8,8 @@ import { Children, isValidElement, type HTMLAttributes } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Link } from "react-router-dom";
+import { mentionSpans, type Person } from "../shared/mentions.ts";
+import { mentionClass, useMentionScope } from "./Mentions.tsx";
 import { Mermaid } from "./Mermaid.tsx";
 
 const REF_RE = /\bstand:(action|decision|question|context|topic)\/([a-z0-9]{4,24})\b/gi;
@@ -18,17 +20,30 @@ const urlTransform = (url: string) => {
   return m ? `/ref/${m[1].toLowerCase()}/${m[2]}` : defaultUrlTransform(url);
 };
 
-type MdNode = { type: string; value?: string; url?: string; children?: MdNode[] };
+type MdNode = { type: string; value?: string; url?: string; children?: MdNode[]; data?: Record<string, unknown> };
+type Marks = { people: Person[]; me: string | null };
 
-/** Splits plain text into text, links for bare refs and, with breaks, a line break per newline. */
-function splitText(value: string, breaks: boolean): MdNode[] {
+/** Splits plain text into text, links for bare refs, marked @Names and, with breaks, a line break per newline. */
+function splitText(value: string, breaks: boolean, marks: Marks): MdNode[] {
   const out: MdNode[] = [];
-  const text = (s: string) => {
+  const lines = (s: string) => {
     if (!breaks) return s && out.push({ type: "text", value: s });
     s.split("\n").forEach((line, i) => {
       if (i > 0) out.push({ type: "break" });
       if (line) out.push({ type: "text", value: line });
     });
+  };
+  const text = (s: string) => {
+    const spans = marks.people.length && s.includes("@") ? mentionSpans(s, marks.people) : [];
+    let last = 0;
+    for (const m of spans) {
+      lines(s.slice(last, m.start));
+      const name = s.slice(m.start, m.end);
+      // Drawn as a span: remark-rehype reads hName, hProperties and hChildren.
+      out.push({ type: "mention", value: name, data: { hName: "span", hProperties: { className: mentionClass(m.id, marks.me).split(" ") }, hChildren: [{ type: "text", value: name }] } });
+      last = m.end;
+    }
+    lines(s.slice(last));
   };
   let last = 0;
   for (const m of value.matchAll(REF_RE)) {
@@ -41,12 +56,12 @@ function splitText(value: string, breaks: boolean): MdNode[] {
   return out;
 }
 
-/** A remark plugin for refs and breaks. Code and existing links are left alone. */
-const refsAndBreaks = (breaks: boolean) => () => (tree: MdNode) => {
+/** A remark plugin for refs, mentions and breaks. Code and existing links are left alone. */
+const refsAndBreaks = (breaks: boolean, marks: Marks) => () => (tree: MdNode) => {
   const walk = (node: MdNode) => {
     if (!node.children || node.type === "link") return;
     node.children = node.children.flatMap((c) => {
-      if (c.type === "text") return splitText(c.value ?? "", breaks);
+      if (c.type === "text") return splitText(c.value ?? "", breaks, marks);
       walk(c);
       return [c];
     });
@@ -104,9 +119,10 @@ const reviewPassages = ({ highlight, marked }: ReviewMarks) => () => (root: Rend
 
 /** Renders markdown. breaks: a single newline starts a new line, as in a chat message or a short report. */
 export function Markdown({ text, breaks = false, className, review }: { text: string; breaks?: boolean; className?: string; review?: ReviewMarks }) {
+  const marks = useMentionScope();
   return (
     <div className={`md${className ? ` ${className}` : ""}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm, refsAndBreaks(breaks)]} rehypePlugins={review ? [reviewPassages(review)] : []} components={components} urlTransform={urlTransform}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, refsAndBreaks(breaks, marks)]} rehypePlugins={review ? [reviewPassages(review)] : []} components={components} urlTransform={urlTransform}>
         {text}
       </ReactMarkdown>
     </div>

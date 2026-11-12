@@ -75,6 +75,23 @@ function WaitingCount(props: { count: number; collapsed: boolean }) {
   );
 }
 
+/** New chat in a space: a dot, or an @ when a message you haven't read tags you. */
+function ChatMark(props: { unread: number; mentions: number; collapsed: boolean }) {
+  const tick = useArrivalTick(props.mentions);
+  if (!props.unread) return null;
+  const folded = props.collapsed ? " folded" : "";
+  if (props.mentions > 0) {
+    const label = `${props.mentions} ${props.mentions === 1 ? "chat message mentions" : "chat messages mention"} you`;
+    return (
+      <span key={tick} className={`sp-chat-mark mention${folded}${tick > 0 ? " arriving" : ""}`} title={label} aria-label={label}>
+        @
+      </span>
+    );
+  }
+  const label = `${props.unread} unread in chat`;
+  return <span className={`sp-chat-mark${folded}`} title={label} aria-label={label} />;
+}
+
 /** One space in the nav. A space is the team's home, so you only have a few and they stay in view:
  *  one click goes in, and the mic starts talking there. */
 function SpaceRow(props: { space: SpaceSummary; collapsed: boolean }) {
@@ -90,8 +107,8 @@ function SpaceRow(props: { space: SpaceSummary; collapsed: boolean }) {
               {s.live && <span className="sp-side-dot live" />}
             </span>
             <span className={s.unread ? "sp-side-text unread" : "sp-side-text"}>{s.name}</span>
-            {!!s.unread && <span className="sr-only">({s.unread} unread in chat)</span>}
             {s.live && <span className="sr-only">(talking now)</span>}
+            <ChatMark unread={s.unread ?? 0} mentions={s.chatMentions ?? 0} collapsed={collapsed} />
             <WaitingCount count={(s.waiting ?? 0) + (s.mentions ?? 0)} collapsed={collapsed} />
           </>
         )}
