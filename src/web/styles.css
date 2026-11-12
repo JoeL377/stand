@@ -2867,6 +2867,13 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .project-options > button.on::after { content: " ✓"; color: var(--accent-text); }
 .project-options > .project-new { color: var(--accent-text); }
 .project-default.on { color: var(--text); font-weight: 600; }
+/* A to-do's owner (OwnerPicker): its face on the row, its name in the drawer, opens the people to give it to. */
+.owner-picker { display: inline-flex; position: relative; flex: none; }
+.owner-btn { display: inline-flex; align-items: center; height: auto; min-height: 0; padding: 0; border: 0; border-radius: 999px; background: none; box-shadow: none; color: inherit; font: inherit; cursor: pointer; }
+.owner-btn:hover .rc-face, .owner-btn:focus-visible .rc-face { box-shadow: 0 0 0 2px var(--accent-text); }
+.td-meta .owner-btn:hover { color: var(--text); text-decoration: underline; }
+.owner-pop { left: auto; right: 0; }
+.td-meta .owner-pop { left: 0; right: auto; }
 /* The Tasks tab: one section per project, then Unassigned. */
 .sh-task-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
 .sh-task-tools .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
@@ -2902,7 +2909,7 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 /* The live agenda: the project a line links to, and its menu's heading. */
 .item-project { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--accent-text); }
 .row-menu-label { display: block; padding: 6px 10px 2px; font-size: 11px; font-weight: 600; color: var(--muted); }
-@media (max-width: 600px) { .project-pop { position: fixed; left: 50%; right: auto; top: 30%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); } }
+@media (max-width: 600px) { .project-pop { position: fixed; left: 50%; right: auto; top: 30%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); } .td-meta .owner-pop { left: 50%; } }
 
 /* Captured meeting items, inline with the spoken transcript. */
 .seg.capture-event { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--ok) 9%, var(--panel)); }
@@ -3582,7 +3589,7 @@ button.chat-caught-text { padding: 0; }
 .td-phone-acts { display: none; }
 @media (max-width: 760px) {
   .sh-panel.tasks .followups li > .sh-archive, .sh-panel.tasks .followups li > .cfa { display: none; }
-  .sh-panel.tasks .by-owner .followups li > .rc-face { display: none; }
+  .sh-panel.tasks .by-owner .followups li > .rc-face, .sh-panel.tasks .by-owner .followups li > .owner-picker { display: none; }
   .sh-panel.tasks .followups .project-picker:has(.unset), .sh-panel.tasks .followups .task-from { display: none; }
   .sh-panel.tasks .followups .project-picker { margin-left: 0; }
   /* A title that wraps keeps its checkbox on the first line, not floating in the middle of the row. */

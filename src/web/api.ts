@@ -193,6 +193,8 @@ export const api = {
   setItemProject: (roomId: string, itemId: string, projectId: string | null) => call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { projectId }),
   setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
+  setTaskOwner: (roomId: string, noteId: string, owner: string | null) =>
+    call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}/owner`, { owner }),
   planReview: (id: string, version?: string) =>
     call<PlanReview>("GET", `/api/tasks/${id}/plan-review${version ? `?version=${encodeURIComponent(version)}` : ""}`),
   changePlanReview: (id: string, input: object) =>

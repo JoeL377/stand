@@ -18,6 +18,7 @@ import { LastReview, designReviewHref } from "./pages/DesignReviewPage.tsx";
 import { PlanReviewBody } from "./PlanReview.tsx";
 import { MentionText } from "./Mentions.tsx";
 import { errorToast } from "./Toasts.tsx";
+import { OwnerPicker } from "./OwnerPicker.tsx";
 import { useDismiss } from "./useDismiss.ts";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
@@ -30,7 +31,7 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange
   onClose: () => void;
   /** The comments that tag you here stopped waiting on you: the list moves the task back. */
   onMentionsChange?: () => void;
-  /** It changed in a way the list shows (its parent, so its section): the list reloads. */
+  /** It changed in a way the list shows (its parent or owner, so its section): the list reloads. */
   onListChange?: () => void;
 }) {
   const { user } = useAuth();
@@ -144,7 +145,22 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange
               />
             )}
             <p className="td-meta">
-              <span className={n.owner ? undefined : "muted"}>{n.owner ?? (n.kind === "question" ? "Anyone" : "Unassigned")}</span>
+              {n.kind === "action" ? (
+                <OwnerPicker
+                  note={n}
+                  roomId={task.roomId}
+                  people={task.people.map((p) => p.name)}
+                  me={user.name}
+                  onSaved={() => {
+                    void load();
+                    onListChange?.();
+                  }}
+                >
+                  <span className={n.owner ? undefined : "muted"}>{n.owner ?? "Unassigned"}</span>
+                </OwnerPicker>
+              ) : (
+                <span className={n.owner ? undefined : "muted"}>{n.owner ?? "Anyone"}</span>
+              )}
               {task.meeting ? (
                 <Link to={`/meetings/${task.meeting.id}`}>From the {task.meeting.chat ? "chat" : "meeting"} on {fmtDate(task.meeting.startedAt)}</Link>
               ) : (

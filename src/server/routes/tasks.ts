@@ -184,6 +184,26 @@ export function taskRoutes(app: Express, ctx: Services) {
     }),
   );
 
+  // Give a to-do to someone: { owner: "Name" }, or { owner: null } to leave it unassigned.
+  app.patch("/api/rooms/:id/tasks/:noteId/owner", route((req, res) => {
+    if (!db.isMember(req.params.id, req.user!.id)) return notFound(res);
+    const before = db.getNote(req.params.noteId);
+    if (!before || before.kind !== "action" || before.roomId !== req.params.id) return notFound(res);
+    const owner = req.body?.owner;
+    if (owner !== null && (typeof owner !== "string" || owner.trim().length > 80))
+      return void res.status(400).json({ error: "Use a name of 80 characters or fewer, or null to leave it unassigned." });
+    const next = owner === null ? null : owner.replace(/\s+/g, " ").trim() || null;
+    if (next !== before.owner) {
+      try {
+        agents.updateAction({ user: req.user!, token: null }, { ref: `stand:action/${before.id}`, owner: next ?? "unassigned" });
+      } catch (err) {
+        if (err instanceof AgentError) return void res.status(400).json({ error: err.message });
+        throw err;
+      }
+    }
+    res.json(db.getNote(before.id));
+  }));
+
   // Move a to-do or open question (the space page's Tasks tab): { state: "done" | "dropped" | "open", reason? },
   // or { saidDone: false } to take off a Said done mark Stand heard wrong.
   app.patch(

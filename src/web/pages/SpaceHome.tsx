@@ -9,6 +9,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { activeFirst, matchesProject, projectActivity, type Project } from "../../shared/projects.ts";
 import { ProjectPicker } from "../ProjectPicker.tsx";
+import { OwnerPicker } from "../OwnerPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
 import { stateOf } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
@@ -482,6 +483,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             <TasksTab
               roomId={room.id}
               me={user.name}
+              people={members}
               deck={projectFilter ? null : deck}
               open={[...todos, ...questions].filter(matching)}
               closed={[...done, ...closedQuestions].filter(matching)}
@@ -815,6 +817,8 @@ function TasksTab(props: {
   onMine: (on: boolean) => void;
   roomId: string;
   me: string;
+  /** The space's people, by name: who a to-do can be given to. */
+  people: string[];
   /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
   deck: DoneDeck | null;
   open: TaskNote[];
@@ -948,6 +952,14 @@ function TasksTab(props: {
     );
   const notSaid = (n: Note) => void api.setTask(props.roomId, n.id, { saidDone: false }).then(props.reload, errorToast("Couldn't change it"));
 
+  const face = (n: TaskNote) =>
+    n.owner ? (
+      <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`} />
+    ) : (
+      <span className="rc-face none" title={n.kind === "question" ? "Anyone" : "Unassigned"}>
+        ?
+      </span>
+    );
   const list = (notes: TaskNote[], closed = false) => (
     <FollowUpList
       oneLine
@@ -984,12 +996,12 @@ function TasksTab(props: {
             </button>
           )}
           <ArchiveButton onClick={() => props.onArchive(n)} />
-          {n.owner ? (
-            <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`} />
+          {n.kind === "action" ? (
+            <OwnerPicker note={n} roomId={props.roomId} people={props.people} me={props.me} onSaved={props.reload}>
+              {face(n)}
+            </OwnerPicker>
           ) : (
-            <span className="rc-face none" title={n.kind === "question" ? "Anyone" : "Unassigned"}>
-              ?
-            </span>
+            face(n)
           )}
         </>
       )}
