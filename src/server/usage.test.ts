@@ -10,6 +10,7 @@ import { openDb } from "./db.ts";
 import { HeuristicAgent } from "./llm.ts";
 import { brainstormRoutes } from "./routes/brainstorms.ts";
 import { deckRoutes } from "./routes/decks.ts";
+import { costRange, spaceRoutes } from "./routes/spaces.ts";
 import type { Services } from "./services.ts";
 import { costOf, forSpace, metered, recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
@@ -241,3 +242,72 @@ test("a deck drafted from a brief and a design session seeded from notes are kep
     await new Promise<void>((resolve) => (server.closeAllConnections(), server.close(() => resolve())));
   }
 }));
+
+test("the cost range is whole days in the viewer's time, up to now, clamped", () => {
+  const h = 3_600_000;
+  const midnight = Date.UTC(2026, 10, 12) - h; // 00:00 on Nov 12, an hour east of UTC
+  const day = (at: number) => new Date(at + h).toISOString().slice(0, 10);
+  // Asked at that midnight: 7 whole days, today the last.
+  const r = costRange("7", "60", midnight);
+  assert.deepEqual([r.since, r.until, r.dayOffsetMin], [midnight - 6 * 24 * h, midnight + 1, 60]);
+  const db = openDb(":memory:");
+  const room = db.createRoom("Shop");
+  const days = db.spaceCost(room.id, r).days.map((d) => d.day);
+  assert.deepEqual([days.length, days[0], days.at(-1)], [7, day(midnight - 6 * 24 * h), "2026-11-12"]);
+  // A minute before it: the 11th is today.
+  assert.equal(db.spaceCost(room.id, costRange(7, 60, midnight - 60_000)).days.at(-1)!.day, "2026-11-11");
+  for (const r of [costRange(undefined, undefined, midnight), costRange("abc", "x", midnight)]) {
+    assert.equal(r.dayOffsetMin, 0);
+    assert.equal(db.spaceCost(room.id, r).days.length, 30);
+  }
+  assert.equal(costRange(500, 2000, midnight).dayOffsetMin, 840);
+  assert.equal(costRange(0, -2000, midnight).dayOffsetMin, -840);
+  assert.equal(db.spaceCost(room.id, costRange(500, 0, midnight)).days.length, 90);
+  assert.equal(db.spaceCost(room.id, costRange(0, 0, midnight)).days.length, 1);
+  assert.equal(db.spaceCost(room.id, costRange("7.9", 0, midnight)).days.length, 7);
+});
+
+test("only a space's admins get what it spent; a member is refused as on the other manage routes, someone outside gets not found", async () => {
+  const db = openDb(":memory:");
+  const [joe, huy, eve] = ["Joe Liang", "Huy Ngo", "Eve Adams"].map((name) =>
+    db.upsertUser({ googleSub: null, email: `${name.split(" ")[0].toLowerCase()}@example.test`, name, picture: null }),
+  );
+  const room = db.createRoom("Growth", joe.id);
+  for (const u of [joe, huy]) db.touchMembership(room.id, u.id);
+  db.addUsage(usage({ roomId: room.id, task: "doneDeck", model: "claude-opus-5-5", input: 1_000_000, at: Date.now() - 60_000 }));
+  const app = express();
+  app.use(express.json());
+  app.use("/api", requireUser(db));
+  spaceRoutes(app, { db, sessions: new Map() } as unknown as Services);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const get = async (user: { id: string }, url: string) => {
+    const res = await fetch(base + url, { headers: { cookie: `standup_session=${db.createSession(user.id).id}` } });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+  try {
+    const now = Date.now();
+    const got = await get(joe, `/api/rooms/${room.id}/cost?days=7&tz=60`);
+    assert.equal(got.status, 200);
+    assert.deepEqual([got.body.usd, got.body.calls, got.body.groups.map((g: { where: string }) => g.where)], [4, 1, ["between"]]);
+    const day = (at: number) => new Date(at + 3_600_000).toISOString().slice(0, 10);
+    assert.deepEqual([got.body.days.length, got.body.days[0].day, got.body.days.at(-1).day], [7, day(now - 6 * 86_400_000), day(now)]);
+    assert.equal((await get(joe, `/api/rooms/${room.id}/cost?days=900`)).body.days.length, 90);
+    assert.equal((await get(joe, `/api/rooms/${room.id}/cost?days=-3`)).body.days.length, 1);
+    assert.equal((await get(joe, `/api/rooms/${room.id}/cost`)).body.days.length, 30);
+    // As changing its admins answers them.
+    const member = await get(huy, `/api/rooms/${room.id}/cost`);
+    const admins = await fetch(`${base}/api/rooms/${room.id}/members/${huy.id}`, {
+      method: "PUT",
+      headers: { cookie: `standup_session=${db.createSession(huy.id).id}`, "content-type": "application/json" },
+      body: JSON.stringify({ admin: true }),
+    });
+    assert.deepEqual([member.status, admins.status], [403, 403]);
+    assert.match(member.body.error, /^Only an admin of this space can /);
+    assert.match(((await admins.json()) as { error: string }).error, /^Only an admin of this space can /);
+    assert.deepEqual(await get(eve, `/api/rooms/${room.id}/cost`), { status: 404, body: { error: "Space not found" } });
+  } finally {
+    await new Promise<void>((resolve) => (server.closeAllConnections(), server.close(() => resolve())));
+  }
+});

@@ -28,11 +28,24 @@ const TASK_NAMES: Record<string, string> = {
   describeSnap: "Snaps",
   frameBacks: "Screen notes",
   matchScreen: "Screen reading",
+  findOptions: "Find options",
+  answer: "Ask Stand",
+  draftDeck: "Deck draft",
+  describeCapture: "Capture reading",
+  pickItem: "Note filing",
+  polishAgenda: "Agenda tidy",
+  settleSpace: "Decisions check",
+  doneDeck: "Done since",
+  suggestProjects: "Project suggestions",
+  taskBrief: "Plan brief",
 };
+
+/** A pass's name on screen; an unnamed one shows its method name. */
+export const taskName = (task: string) => TASK_NAMES[task] ?? task;
 
 /** One line per pass, most expensive first: "Topic card $1.10 (98 calls)". */
 export const costLines = (c: MeetingCost) =>
-  c.tasks.map((t) => `${TASK_NAMES[t.task] ?? t.task} ${fmtCost(t.usd)} (${t.calls} ${t.calls === 1 ? "call" : "calls"})`);
+  c.tasks.map((t) => `${taskName(t.task)} ${fmtCost(t.usd)} (${t.calls} ${t.calls === 1 ? "call" : "calls"})`);
 
 export const itemLabel = (it: Item | null | undefined) => (it ? it.title : "General discussion");
 
