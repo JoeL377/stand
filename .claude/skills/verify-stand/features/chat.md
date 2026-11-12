@@ -1,11 +1,12 @@
 # Chat
 
-What people in a space write to each other between meetings. The space page has a Chat tab: a thread with a box at its foot. A message shows on everyone's open page at once, with no reload. Your own messages can be changed and deleted. The tab counts what you have not read, and the space's name in the sidebar goes bold.
+What people in a space write to each other between meetings: a thread with a box at its foot. From 1200px wide it is the dock, a column at the right of the space page beside every tab. On a narrower screen it is the Chat tab. A message shows on everyone's open page at once, with no reload. Your own messages can be changed and deleted. The tab counts what you have not read, and the space's name in the sidebar goes bold.
 
 Under it, a space has a channel, a message is a chat segment, and a stretch of talk is a session: a `meetings` row of kind `chat` that closes after an hour of quiet. A session is not a meeting: the Meetings tab, the feed and Conxt leave it out.
 
 ## Sub-features
-- Send: Enter sends, Shift+Enter makes a new line, `@` lists the space's people. What you typed stays in the box when a send fails.
+- Dock: from 1200px there is no Chat tab. The **Chat** button in the page head (`aria-pressed`) and Command + J (Ctrl + J) open and close the dock; opening puts the cursor in the box. The button carries the unread marks while the dock is closed. Open or closed is kept in `localStorage` as `stand.chatDock` for all spaces, open by default. A saved Chat tab shows Tasks with the dock open. **Open chat** on a mention toast opens the dock. From 1360px the task drawer opens to the left of the dock (`[data-chat-dock]` on `<html>`); below that it covers the dock.
+- Send: Enter sends, Shift+Enter makes a new line, `@` lists the space's people. The message shows in the thread at once and the box clears; you can send the next before the first is saved. Sends go out one at a time, in order. A row not saved after 400 ms dims (`.chat-msg.pending`). A failed send stays as `.chat-msg.failed` with "Not sent.", **Retry** and **Delete**, and comes back after a reload (`sessionStorage`, `stand.chatUnsent.<roomId>`). The saved message carries the send's `key`, so the row is not shown twice when the stream brings it before the send answers.
 - Live: the page holds the space's event stream open (`GET /api/rooms/<id>/events`, server-sent events) and adds or changes rows as events arrive.
 - Change and delete: the tools show on your own message when the pointer is on it. A deleted message keeps its place and says "Message deleted".
 - Unread: a filled count on the Chat tab, a dot by the space in the nav, `(N)` in the browser tab's title, and `unread` on the space in `/api/spaces`. Looking at the tab reads everything shown. A "New" line marks where you had read to.
@@ -21,9 +22,15 @@ Under it, a space has a channel, a message is a chat segment, and a stretch of t
 
 `scripts/chat-capture.cjs <run>` proves capture, with the same two people. Launch with short waits, or the journey waits a minute for a run and an hour for the close: `CHAT_CAPTURE_QUIET_MS=1500 CHAT_QUIET_MS=30000 $S/launch.sh`. Handles: a caught line is `.chat-caught` (button `Remove this decision` / `Remove this to-do` / `Remove this open question`), the end of a closed stretch is `.chat-recap`. It checks the other person's thread without a reload, the Tasks and Decisions tabs, the task drawer ("From the chat on"), `/api/rooms/<id>/chat` (`caught`), and `get_chat`, `list_actions` and `whats_new` over `/mcp`.
 
+`chat.cjs`, `chat-capture.cjs` and `mentions.cjs` run at 1100px wide, where chat is a tab.
+
+`scripts/chat-dock.cjs <run>` drives the dock and send at once with two people at 1280px (launch with `CHAT_CAPTURE_QUIET_MS=1500`). Handles: the dock is `getByRole("complementary", { name: "Chat" })`, the head button `getByRole("button", { name: /^Chat/ })`, `Close chat`, `Retry`, `Delete`. It holds and fails sends with `page.route` on `/api/rooms/<id>/chat/messages`, checks the order on the other person's page and in `/api/rooms/<id>/chat`, and measures the task drawer beside the dock at 1440px.
+
 `scripts/mentions.cjs <run>` drives the mention and new-message marks with two people: the toast, the tab and nav marks, `chatMentions` in `/api/spaces`, the marked message for each person, the pill on a wide screen and on a phone, and the home card.
 
 ## Gotchas
+- `mentions.cjs` counts the unread dots in the whole sidebar. Run it on a clean instance, or before the other chat journeys: their spaces leave unread messages for the same people.
+- The task drawer slides in. Wait for its animations to finish before measuring it.
 - Buttons fade their color over 0.12 s, so a screenshot just after the pill turns from blue to amber can catch it grey. That is the fade, not the look.
 - Delete asks with the browser's `confirm()`; accept dialogs, as the journey does.
 - The first 401 in the console is the app asking who you are before sign-in. The journey leaves it out of its console check.

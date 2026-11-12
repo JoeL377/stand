@@ -3524,6 +3524,12 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .chat-msg-text a { color: var(--accent); }
 .chat-msg-edited { font-size: 11px; color: var(--muted); }
 .chat-msg.deleted .chat-msg-text { color: var(--muted); font-style: italic; }
+/* A message not saved yet: it looks sent, and dims only if the save takes a moment. */
+.chat-msg.pending .chat-msg-body { animation: chat-pending-dim 200ms ease 400ms both; }
+@keyframes chat-pending-dim { to { opacity: 0.55; } }
+.chat-msg.failed .chat-msg-text { color: var(--muted); }
+.chat-msg-unsent { margin: 2px 0 0; font-size: 12.5px; color: var(--danger); }
+.chat-msg-unsent .link { font-size: inherit; }
 .chat-msg-tools { position: absolute; top: -12px; right: 8px; display: none; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
 .chat-msg:hover .chat-msg-tools, .chat-msg:focus-within .chat-msg-tools { display: inline-flex; }
 .chat-msg-tools .icon-btn { width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
@@ -3654,9 +3660,24 @@ a .mention { color: inherit; }
 .chat-jump.mention, .chat-jump.mention:hover:not(:disabled) { background: var(--mention-you-strong); color: #2b1a00; }
 @keyframes chat-jump-in { from { opacity: 0; transform: translate(-50%, 6px); } }
 .chat-marks { display: inline-flex; align-items: center; gap: 4px; }
-.sh-tab .count.fresh, .sh-tab .count.mention { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
-.sh-tab .count.mention { padding: 0 4px; background: var(--mention-you-strong); color: #2b1a00; font-weight: 700; }
+.sh-tab .count.fresh, .sh-tab .count.mention, .sh-chat-toggle .count.fresh, .sh-chat-toggle .count.mention { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
+.sh-tab .count.mention, .sh-chat-toggle .count.mention { padding: 0 4px; background: var(--mention-you-strong); color: #2b1a00; font-weight: 700; }
 .sh-tab.chat.on .count.fresh { background: var(--accent-soft); color: var(--accent-text); }
+
+/* The chat dock (SpaceHome.tsx): on a wide screen, chat is a column at the right of the space page,
+   beside every tab. The page's own lists scroll in the column to its left. */
+.sh-dock { flex: none; width: 380px; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 16px 16px; border-left: 1px solid var(--line); box-sizing: border-box; background: var(--bg); }
+.sh-dock-head { flex: none; display: flex; align-items: center; gap: 8px; height: 32px; color: var(--muted); }
+.sh-dock-head strong { font-size: 14px; font-weight: 600; color: var(--text); }
+.sh-dock-head .icon-btn { margin-left: auto; margin-right: -6px; display: grid; place-items: center; }
+.sh-dock .space-chat { max-width: none; }
+.sh-dock .chat-msg { padding: 1px 4px; }
+.sh-dock .chat-caught { margin-left: 42px; margin-right: 4px; }
+.sh-chat-toggle.on { border-color: var(--text); }
+/* With room for both, the task drawer opens to the left of the dock, so chat stays in view. */
+@media (min-width: 1360px) {
+  [data-chat-dock] .task-drawer { right: 389px; }
+}
 
 /* The nav: a dot for new chat in a space, an @ when a message you haven't read tags you. */
 .sp-chat-mark { flex: none; margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }

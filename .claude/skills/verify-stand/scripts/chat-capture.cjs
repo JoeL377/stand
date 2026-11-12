@@ -69,7 +69,7 @@ const caught = (page, text) => page.locator(".chat-caught", { hasText: text });
   const browser = await chromium.launch({ channel: process.env.STAND_VERIFY_CHANNEL || undefined });
   const errors = [];
   const open = async () => {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const ctx = await browser.newContext({ viewport: { width: 1100, height: 800 } });
     const page = await ctx.newPage();
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
     page.on("dialog", (d) => d.accept());
@@ -210,7 +210,7 @@ const caught = (page, text) => page.locator(".chat-caught", { hasText: text });
       await snap("bo-phone", bo);
       const row = await caught(bo, TODO).boundingBox();
       check("on a phone the caught line fits the screen", !!row && row.x >= 0 && row.x + row.width <= 390, row && { x: Math.round(row.x), width: Math.round(row.width) });
-      await bo.setViewportSize({ width: 1280, height: 800 });
+      await bo.setViewportSize({ width: 1100, height: 800 });
     });
   } catch {
     // The failed step is in the summary.

@@ -6,6 +6,7 @@
 //   NODE_PATH="$(npm root -g)" node chat.cjs <run dir>
 //
 // STAND_VERIFY_CHANNEL=chrome uses the installed Chrome when Playwright's own Chromium won't start.
+// It runs at 1100px wide, where chat is a tab. From 1200px chat is the dock: chat-dock.cjs drives that.
 // Exit code 0 = every check passed; 1 = a check failed (see summary.json in the evidence folder).
 
 const fs = require("node:fs");
@@ -65,7 +66,7 @@ const thread = (page) => page.locator(".chat-thread");
   const browser = await chromium.launch({ channel: process.env.STAND_VERIFY_CHANNEL || undefined });
   const errors = [];
   const open = async () => {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const ctx = await browser.newContext({ viewport: { width: 1100, height: 800 } });
     const page = await ctx.newPage();
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
     page.on("dialog", (d) => d.accept());
@@ -242,7 +243,7 @@ const thread = (page) => page.locator(".chat-thread");
       check("on a phone the box to write in is on the screen", !!write && write.y + write.height <= 844, write && Math.round(write.y));
       const end = await thread(bo).getByText("Line 120", { exact: true }).boundingBox();
       check("on a phone the newest message is on the screen, above the box", !!end && !!write && end.y > 0 && end.y + end.height <= write.y, end && Math.round(end.y));
-      await bo.setViewportSize({ width: 1280, height: 800 });
+      await bo.setViewportSize({ width: 1100, height: 800 });
     });
 
   } catch {
