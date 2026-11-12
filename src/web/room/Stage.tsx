@@ -392,6 +392,8 @@ export function Stage(props: {
     try {
       await api.startBrainstorm(state.roomId, topic, what === "diagram" ? { seed: "", taskId: null } : undefined);
       setView(what);
+      // A slide, a share or a to-do has the middle: the one who took the card goes to the board's tab to see it drawn.
+      if (middleTaken) pickTab("board");
       return true;
     } catch (err) {
       errorToast(`Couldn't start the ${what}`)(err);
@@ -403,7 +405,8 @@ export function Stage(props: {
     <ViewPane
       view={view}
       onView={setView}
-      tabs={!runningExperience(state.items)}
+      // During a review the board is the card only, unless a map or a diagram someone asked for there is drawing.
+      tabs={!runningExperience(state.items) || !!live}
       card={card}
       brainstorm={props.brainstorm}
       others={props.brainstorms ?? []}
@@ -455,6 +458,7 @@ export function Stage(props: {
                 title="The board, just for you; the share keeps going"
               >
                 Board
+                {!boardOpen && live && <i className="view-dot" title={`A ${live.design ? "diagram" : "map"} is being drawn`} aria-label={`A ${live.design ? "diagram" : "map"} is being drawn`} />}
                 {!boardOpen && <AgentTabMark cards={props.agentCards} />}
               </button>
             )}

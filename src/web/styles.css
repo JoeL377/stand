@@ -3773,3 +3773,8 @@ a .mention { color: inherit; }
 .next-card .nudge-text strong { font-weight: 600; }
 .rc-asked { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-asked .agent-mark { font-size: 12px; color: var(--accent-text); }
+/* A phone's Agenda and Chat tabs: Stand's card, which lives on the board, as one line under the tabs. */
+.phone-next { display: flex; align-items: center; gap: 8px; margin: 0 8px 6px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 10px; background: var(--panel); font-size: 14px; }
+.phone-next .agent-mark { color: var(--accent-text); flex: none; }
+.phone-next-what { flex: 1; min-width: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--text); font: inherit; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage-tab .view-dot { display: inline-block; margin-left: 6px; vertical-align: middle; }

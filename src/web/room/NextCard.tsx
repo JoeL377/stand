@@ -9,6 +9,14 @@ import { errorToast, toast } from "../Toasts.tsx";
 
 const first = (name: string) => name.trim().split(/\s+/)[0];
 
+/** The card's question in one line, for where there is no room for the card (a phone's other tabs). */
+export function nextAsk(next: NextStep): string {
+  const on = next.topic ? ` ${next.kind === "map" || next.kind === "diagram" ? "of" : "on"} ${next.topic}` : "";
+  if (next.kind === "map") return `Draw a map${on || " of this"}?`;
+  if (next.kind === "diagram") return `Draw a diagram${on || " of this"}?`;
+  return `${next.kind === "design-review" ? "Design review" : "Product review"}${on}?`;
+}
+
 export function NextCard(props: {
   next: NextStep;
   roomId: string;
