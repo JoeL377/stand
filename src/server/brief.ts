@@ -28,6 +28,10 @@ export interface BriefTimelineEntry {
   ref?: string;
   /** A focus change: the item's short label, like "Slide 3". */
   label?: string | null;
+  /** What the main view showed then, in a line: on a capture, a question to Stand, an agent's report,
+   *  and a line whose words point at the screen (pointing: true). Up at the time, not proof of "about". */
+  on_screen?: string;
+  pointing?: boolean;
 }
 
 export const BRIEF_SCHEMA = "stand.meeting-brief/v1";
@@ -357,6 +361,8 @@ export function buildBrief(input: {
       ...(e.answer !== undefined && { answer: e.answer }),
       ...(e.ref && { ref: e.ref }),
       ...(e.label && { label: e.label }),
+      ...(e.kind !== "focus" && e.shown && e.shown.kind !== "item" && { on_screen: e.shown.label }),
+      ...(e.points && { pointing: true }),
     }));
   return brief;
 }
@@ -532,17 +538,17 @@ export function followUpsToMarkdown(f: FollowUpsFeed): string {
 /** One line of the timeline in Markdown: "- 14:02 Joe (chat): the link". */
 function timelineLine(e: BriefTimelineEntry): string {
   const at = e.at.slice(11, 16);
-  const ref = e.ref ? ` (${e.ref})` : "";
+  const ref = `${e.ref ? ` (${e.ref})` : ""}${e.on_screen ? ` [on screen: ${e.on_screen}]` : ""}`;
   switch (e.kind) {
     case "focus":
-      return `- ${at} → ${e.label ? `${e.label}: ` : ""}${e.text}${e.who ? ` (moved by ${e.who})` : ""}`;
+      return `- ${at} → ${e.label && !e.text.startsWith(e.label) ? `${e.label}: ` : ""}${e.text}${e.who ? ` (moved by ${e.who})` : ""}`;
     case "capture":
       return `- ${at} Caught: ${e.text}${ref}`;
     case "ask":
-      return `- ${at} ${e.who} asked Stand: ${e.text}${e.answer ? `\n  - Stand: ${e.answer.replace(/\n/g, "\n    ")}` : ""}`;
+      return `- ${at} ${e.who} asked Stand: ${e.text}${ref}${e.answer ? `\n  - Stand: ${e.answer.replace(/\n/g, "\n    ")}` : ""}`;
     case "agent":
       return `- ${at} ${e.who}: ${e.text}${ref}`;
     default:
-      return `- ${at} ${e.who}${e.kind === "chat" ? " (chat)" : ""}: ${e.text}`;
+      return `- ${at} ${e.who}${e.kind === "chat" ? " (chat)" : ""}: ${e.text}${ref}`;
   }
 }

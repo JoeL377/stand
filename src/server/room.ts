@@ -36,6 +36,7 @@ import { type Agent, type ItemNotesDraft, NotesTrouble, type OnDraft, type Recap
 import { meetingChapters } from "../shared/chapters.ts";
 import { currentDoneDeck } from "./doneDeck.ts";
 import { sampleSprint } from "./linear.ts";
+import type { StageView } from "../shared/timeline.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
@@ -525,7 +526,31 @@ export class RoomSession implements SpeechSink {
   }
 
   private broadcastState() {
+    this.logStage();
     this.broadcast({ type: "state", state: this.state() });
+  }
+
+  /** What the main view shows now. */
+  private stageView(): StageView {
+    const sharer = [...this.participants.values()].find((p) => p.isSharing);
+    return {
+      itemId: this.focusItemId,
+      tab: this.hostView?.tab ?? "main",
+      taskMode: this.hostView?.taskMode ?? null,
+      shot: this.hostView?.shot ?? null,
+      snapId: this.stageSnapId,
+      sharing: sharer?.name ?? null,
+    };
+  }
+  private lastStage = "";
+  /** Keeps what the main view shows each time it changes, so a line can say what it was said in front of. */
+  private logStage() {
+    if (this.ended) return;
+    const view = this.stageView();
+    const key = JSON.stringify(view);
+    if (key === this.lastStage) return;
+    this.lastStage = key;
+    this.db.logStage(this.meetingId, view);
   }
 
   /** The space was renamed while people are in it. */

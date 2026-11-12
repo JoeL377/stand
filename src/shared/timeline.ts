@@ -8,6 +8,40 @@ import type { AgentCard, Discussion, Item, ItemUpdate, Note, NoteKind, Segment, 
 
 export type TimelineKind = "speech" | "chat" | "capture" | "ask" | "focus" | "agent";
 
+/** What the call's main view showed at a moment, as the room kept it (stage_events). */
+export interface StageView {
+  itemId: string | null;
+  /** The board's tab in place of the deck or the share. */
+  tab: "main" | "board";
+  /** While a to-do is presented: its brief or its full spec. */
+  taskMode: "brief" | "spec" | null;
+  /** Which picture of a review slide is up, from 0. */
+  shot: number | null;
+  /** A still someone opened on the stage. */
+  snapId: string | null;
+  /** Who was sharing their screen, by name. */
+  sharing: string | null;
+}
+export interface StageEvent {
+  id: string;
+  ts: number;
+  view: StageView;
+}
+
+/** What was on screen when something was said or done. It says what was up, not that the words were
+ *  about it: `points` on a line is the (guessed) sign that they were. */
+export interface Shown {
+  kind: "item" | "slide" | "task" | "spec" | "board" | "screen" | "still";
+  /** In a line: "Saved cards", "Full spec: Build the retry worker", "Priya's screen: the pricing page". */
+  label: string;
+  itemId: string | null;
+  /** A presented to-do, as stand:action/<id>. */
+  ref?: string;
+  /** A still of it: the one on the stage, or the last one taken of the shared screen. */
+  snapId?: string;
+  snapUrl?: string;
+}
+
 export interface TimelineEntry {
   /** Unique within the timeline: the kind and the id of what it came from. */
   id: string;
@@ -31,6 +65,11 @@ export interface TimelineEntry {
   pending?: boolean;
   /** A focus change: the item's short label ("Slide 3", "ENG-142" or the review slide's name). */
   label?: string | null;
+  /** What the main view showed then. On a change of what's up, a capture, a question to Stand, an
+   *  agent's report, and a line that points at the screen. */
+  shown?: Shown;
+  /** A line said or typed: its words point at something on screen ("this button", "as you can see"). */
+  points?: boolean;
   /** An agent's report: what kind of report, and who wrote it. */
   status?: UpdateStatus;
   actor?: Actor | null;
@@ -66,6 +105,49 @@ export interface TimelineInput {
   /** The space's reports from the meeting's window (or any; the window is applied here). */
   updates: ItemUpdate[];
   itemById: (id: string) => Item | null;
+  /** What the main view showed, each time it changed. Left out for meetings from before it was kept. */
+  stage?: StageEvent[];
+  /** Stills of the shared screen, for what a share showed at a moment. */
+  snaps?: Array<{ id: string; ts: number; caption: string | null; url: string }>;
+}
+
+const POINTING =
+  /\b(this|that|these|those) (slide|page|screen|button|section|part|line|copy|chart|graph|table|diagram|box|picture|image|screenshot|number|field|form|link|tab|column|row|one here)\b|\b(right|over|up|down) (here|there)\b|\bas you can see\b|\bon (the|this) (left|right|screen|slide)\b|\bat the (top|bottom)\b|\bscroll(ing)? (up|down)\b|\blook(ing)? at (this|that)\b|\bwhat(\'s| is) on (the )?screen\b/i;
+
+/** Whether a line's words point at something on screen. A rule, so it costs nothing and can be wrong:
+ *  it marks a line worth a look, and never says what the line is about. */
+export function pointsAtScreen(text: string): boolean {
+  return POINTING.test(text);
+}
+
+/** What a view shows, as a thing to name and link. Null for General with nothing up. */
+export function shownOf(view: StageView, item: Item | null, snap?: { id: string; caption: string | null; url: string } | null): Shown | null {
+  const still = snap ? { snapId: snap.id, snapUrl: snap.url } : {};
+  if (view.snapId && snap) return { kind: "still", label: snap.caption ?? "A screenshot", itemId: view.itemId, ...still };
+  if (view.sharing) return { kind: "screen", label: `${view.sharing.split(" ")[0]}'s screen${snap?.caption ? `: ${snap.caption}` : ""}`, itemId: view.itemId, ...still };
+  if (view.tab === "board" && item) return { kind: "board", label: `The board on ${item.title}`, itemId: view.itemId };
+  if (!item) return null;
+  if (item.taskId) {
+    const spec = view.taskMode === "spec";
+    return { kind: spec ? "spec" : "task", label: `${spec ? "Full spec" : "Brief"}: ${item.title}`, itemId: item.id, ref: `stand:action/${item.taskId}` };
+  }
+  const key = itemKey(item);
+  const name = key && !item.title.startsWith(key) ? `${key}: ${item.title}` : item.title;
+  if (item.slide || item.slideNo) return { kind: "slide", label: view.shot ? `${name} (picture ${view.shot + 1})` : name, itemId: item.id };
+  return { kind: "item", label: name, itemId: item.id };
+}
+
+/** What changed on the main view between two moments, in a line; null when only the item did (the
+ *  focus log says that, with who moved it). */
+function stageChange(prev: StageView | null, view: StageView): string | null {
+  if (!prev) return view.sharing ? `${view.sharing} started sharing their screen` : null;
+  if (view.sharing !== prev.sharing) return view.sharing ? `${view.sharing} started sharing their screen` : `${prev.sharing} stopped sharing`;
+  if (view.snapId !== prev.snapId) return view.snapId ? "A screenshot went up on the stage" : "The screenshot came down";
+  if (view.itemId !== prev.itemId) return null;
+  if (view.tab !== prev.tab) return view.tab === "board" ? "The board went up" : "Back from the board";
+  if (view.taskMode !== prev.taskMode && view.taskMode) return view.taskMode === "spec" ? "The full spec went up" : "Back to the brief";
+  if (view.shot !== prev.shot && view.shot !== null) return `Picture ${view.shot + 1} went up`;
+  return null;
 }
 
 /** Everything in order. Ties keep focus first, then what was said, then what came of it. */
@@ -89,8 +171,34 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
     }
     return at;
   };
-  for (const s of input.segments)
-    add({ id: `${s.kind}:${s.id}`, kind: s.kind, ts: s.ts, who: s.speakerName, whoId: s.speakerId, text: s.text, itemId: s.itemId }, 1);
+  // What the main view showed at a moment: from the stage log when the meeting has one, else just the
+  // item that was up. A share shows the last still taken of it before then.
+  const stage = [...(input.stage ?? [])].sort((x, y) => x.ts - y.ts);
+  const stills = [...(input.snaps ?? [])].sort((x, y) => x.ts - y.ts);
+  const stillById = new Map(stills.map((p) => [p.id, p]));
+  const shownAt = (ts: number, itemId?: string | null): Shown | null => {
+    let view: StageView | null = null;
+    let since = 0;
+    for (const e of stage) {
+      if (e.ts > ts) break;
+      if (!view || e.view.sharing !== view.sharing) since = e.ts;
+      view = e.view;
+    }
+    view ??= { itemId: itemId === undefined ? itemAt(ts) : itemId, tab: "main", taskMode: null, shot: null, snapId: null, sharing: null };
+    const snap = view.snapId ? stillById.get(view.snapId) : view.sharing ? stills.filter((p) => p.ts >= since && p.ts <= ts).at(-1) : null;
+    return shownOf(view, view.itemId ? input.itemById(view.itemId) : null, snap);
+  };
+  const withShown = (ts: number, itemId?: string | null) => {
+    const shown = shownAt(ts, itemId);
+    return shown ? { shown } : {};
+  };
+
+  for (const s of input.segments) {
+    // A line carries what was up only when its words point at it, and there was more up than an agenda line.
+    const shown = pointsAtScreen(s.text) ? shownAt(s.ts, s.itemId) : null;
+    const pointing = shown && shown.kind !== "item" ? { shown, points: true } : {};
+    add({ id: `${s.kind}:${s.id}`, kind: s.kind, ts: s.ts, who: s.speakerName, whoId: s.speakerId, text: s.text, itemId: s.itemId, ...pointing }, 1);
+  }
 
   // A note is written a little after the words it came from: it sits right after that line, which is
   // its quote when it has one, else the last line of its discussion said before it was written.
@@ -105,7 +213,7 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
   for (const n of input.notes) {
     if (n.kind === "summary") continue;
     add(
-      { id: `capture:${n.id}`, kind: "capture", ts: anchor(n), who: n.owner, whoId: null, text: n.text, itemId: n.itemId, capture: n.kind, ref: `stand:${REF_KIND[n.kind]}/${n.id}` },
+      { id: `capture:${n.id}`, kind: "capture", ts: anchor(n), who: n.owner, whoId: null, text: n.text, itemId: n.itemId, capture: n.kind, ref: `stand:${REF_KIND[n.kind]}/${n.id}`, ...withShown(anchor(n), n.itemId) },
       2,
     );
   }
@@ -113,7 +221,7 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
   for (const c of input.cards) {
     if (c.status === "listening") continue;
     const ready = c.status === "ready";
-    const rest = { whoId: null, itemId: itemAt(c.at), ...(c.status === "working" && { pending: true }) };
+    const rest = { whoId: null, itemId: itemAt(c.at), ...(c.status === "working" && { pending: true }), ...withShown(c.at) };
     if (c.kind === "answer") {
       if (!c.question.trim()) continue;
       add({ id: `ask:${c.id}`, kind: "ask", ts: c.at, who: c.by, text: c.question, answer: ready ? c.note : null, ...rest }, 1);
@@ -138,9 +246,20 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
         text: item?.title ?? (f.itemId ? "Removed item" : "General"),
         itemId: f.itemId,
         label: itemKey(item),
+        ...withShown(f.ts, f.itemId),
       },
       0,
     );
+  }
+
+  // The main view changing without the item changing: a share starting, a spec opening, the board.
+  let before: StageView | null = null;
+  for (const e of stage) {
+    const what = stageChange(before, e.view);
+    before = e.view;
+    if (!what) continue;
+    const item = e.view.itemId ? input.itemById(e.view.itemId) : null;
+    add({ id: `stage:${e.id}`, kind: "focus", ts: e.ts, who: null, whoId: null, text: what, itemId: e.view.itemId, label: itemKey(item), ...withShown(e.ts) }, 0);
   }
 
   const end = meeting.endedAt ?? Number.MAX_SAFE_INTEGER;
@@ -159,6 +278,7 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
         ref: u.noteId ? `stand:action/${u.noteId}` : undefined,
         status: u.status,
         actor,
+        ...withShown(u.ts),
       },
       2,
     );

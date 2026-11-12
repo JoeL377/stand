@@ -224,3 +224,49 @@ test("a question to Stand and an agent's report go under the item that was up", 
   const done = buildTimeline({ ...base, segments: [seg("s1", 1000, "First slide")], cards, focus: [{ id: "f1", ts: 3400, itemId: "i3", actor: "Joe", reason: "manual" }] });
   assert.equal(done.find((e) => e.id === "ask:c2")?.itemId, "i3");
 });
+
+const view = (more: Partial<import("../shared/timeline.ts").StageView> = {}) => ({ itemId: "i1", tab: "main" as const, taskMode: null, shot: null, snapId: null, sharing: null, ...more });
+const slide = { id: "i1", title: "Saved cards at checkout", externalId: null, slideNo: 2, slide: { review: { name: "Saved cards" } }, taskId: null } as never;
+
+test("what was on screen: a capture and a pointing line carry it, a plain line doesn't", () => {
+  const t = buildTimeline({
+    ...base,
+    segments: [seg("s1", 2000, "Let's talk about retention"), seg("s2", 3000, "As you can see here, the total is cut off"), seg("s3", 6000, "This button is too small")],
+    notes: [note("n1", 3500, "action", "Fix the total", { quote: { segmentId: "s2", ts: 3000, speaker: "Joe", text: "the total is cut off" } })],
+    stage: [
+      { id: "g1", ts: 1500, view: view() },
+      { id: "g2", ts: 2500, view: view({ sharing: "Priya Shah" }) },
+      { id: "g3", ts: 5000, view: view() },
+    ],
+    snaps: [
+      { id: "p0", ts: 1000, caption: "an old still", url: "/api/snaps/p0.jpg?v=1" },
+      { id: "p1", ts: 2800, caption: "the checkout page", url: "/api/snaps/p1.jpg?v=1" },
+    ],
+    itemById: (id) => (id === "i1" ? slide : null),
+  });
+  const by = (id: string) => t.find((e) => e.id === id)!;
+  assert.equal(by("speech:s1").shown, undefined);
+  // Said while Priya shared: the last still taken of that share, not one from before it.
+  assert.deepEqual([by("speech:s2").points, by("speech:s2").shown?.kind, by("speech:s2").shown?.label, by("speech:s2").shown?.snapId], [true, "screen", "Priya's screen: the checkout page", "p1"]);
+  assert.equal(by("capture:n1").shown?.label, "Priya's screen: the checkout page");
+  // After the share: the slide itself, named once (its title already starts with its short name).
+  assert.deepEqual([by("speech:s3").points, by("speech:s3").shown?.kind, by("speech:s3").shown?.label], [true, "slide", "Saved cards at checkout"]);
+  // The share starting and stopping show as lines of their own; the first view (just the item) doesn't.
+  assert.deepEqual(
+    t.filter((e) => e.id.startsWith("stage:")).map((e) => e.text),
+    ["Priya Shah started sharing their screen", "Priya Shah stopped sharing"],
+  );
+});
+
+test("what was on screen: a presented to-do's spec gives its ref; a plain agenda line gives nothing to point at", () => {
+  const task = { id: "i1", title: "Build the retry worker", externalId: null, slideNo: null, slide: null, taskId: "n9" } as never;
+  const spec = buildTimeline({
+    ...base,
+    notes: [note("n1", 3000, "decision", "Cap retries at five")],
+    stage: [{ id: "g1", ts: 1500, view: view({ taskMode: "spec" }) }],
+    itemById: () => task,
+  });
+  assert.deepEqual(spec.find((e) => e.id === "capture:n1")?.shown, { kind: "spec", label: "Full spec: Build the retry worker", itemId: "i1", ref: "stand:action/n9" });
+  const plain = buildTimeline({ ...base, segments: [seg("s1", 2000, "Look at this button")], itemById: () => ({ id: "i1", title: "Pricing", externalId: null, slideNo: null, slide: null }) as never });
+  assert.equal(plain[0].points, undefined);
+});

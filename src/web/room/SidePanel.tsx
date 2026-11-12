@@ -54,7 +54,10 @@ export function SidePanel(props: {
     focus: [],
     updates: state.updates ?? [],
     itemById: (id) => state.items.find((i) => i.id === id) ?? null,
-  }).filter((e) => e.itemId === state.focusItemId);
+  })
+    .filter((e) => e.itemId === state.focusItemId)
+    // The panel is already the record of what's on screen, so "on screen" on each row would only repeat its title.
+    .map(({ shown: _shown, points: _points, ...e }) => e);
   const transcriptCount = shown.length;
   // Each time the board moved to another topic on this item, and who moved it (Stand by itself, or a person).
   const threads = props.board?.threads ?? [];

@@ -19,5 +19,7 @@ export function meetingTimeline(db: DB, meetingId: string): TimelineEntry[] {
     focus: db.focusEvents(m.id),
     updates: db.roomUpdates(m.roomId, m.startedAt, 1000),
     itemById: (id) => db.getItem(id),
+    stage: db.stageEvents(m.id),
+    snaps: db.meetingSnaps(m.id).map((p) => ({ id: p.id, ts: p.ts, caption: p.caption, url: `/api/snaps/${p.id}.${p.ext}?v=${p.version}` })),
   });
 }

@@ -1,3 +1,4 @@
+import { meetingTimeline } from "./timeline.ts";
 import { changeReview, logThreadChange, quotePassage, reviewFor } from "./planReview.ts";
 import { BrainstormError, shownDiagram, startBrainstorm } from "./brainstorm.ts";
 import { CONTEXT_MAX, CONTEXT_TEXT_MAX, parseSeed } from "./designSession.ts";
@@ -126,6 +127,22 @@ export function agentApi(deps: AgentDeps) {
       screenshots: shots.length ? shots.map((s) => ({ image_url: shotUrl(s, baseUrl), caption: s.caption ?? undefined })) : undefined,
       on: u.noteText ? clip(u.noteText, 120) : undefined,
       at: new Date(u.ts).toISOString(),
+    };
+  };
+
+  /** What the call's main view showed when a note was said (shared/timeline.ts): a slide, a to-do's
+   *  spec, someone's shared screen with its last still. Nothing for a plain agenda line, or a note
+   *  that wasn't caught in a call. */
+  const onScreen = (n: Note, baseUrl: string) => {
+    const shown = meetingTimeline(db, n.meetingId).find((e) => e.id === `capture:${n.id}`)?.shown;
+    if (!shown || shown.kind === "item") return undefined;
+    return {
+      what: shown.label,
+      kind: shown.kind,
+      ref: shown.ref,
+      url: shown.itemId ? `${baseUrl}/items/${shown.itemId}` : undefined,
+      image_url: shown.snapUrl ? `${baseUrl}${shown.snapUrl}` : undefined,
+      note: "What the meeting's main view showed when this was said. It was up at the time; the words may or may not be about it.",
     };
   };
 
@@ -526,6 +543,7 @@ export function agentApi(deps: AgentDeps) {
         kind: r.ref.kind,
         text: n.text,
         in_their_words: n.quote ? `${n.quote.speaker}: "${n.quote.text}"` : undefined,
+        on_screen: onScreen(n, baseUrl),
         owner: n.owner ?? undefined,
         status: n.kind === "action" ? stateOf(n, work) : undefined,
         ...workInfo(work),

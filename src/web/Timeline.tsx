@@ -3,7 +3,7 @@
 // It draws each kind the way the call's own transcript does, with chips to leave kinds out.
 
 import { useState } from "react";
-import { type TimelineEntry, type TimelineKind, timelineWho } from "../shared/timeline.ts";
+import { type Shown, type TimelineEntry, type TimelineKind, timelineWho } from "../shared/timeline.ts";
 import { Linkified } from "./Linkified.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { usePersonColors } from "./PersonColors.tsx";
@@ -69,12 +69,20 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
       return (
         <div className="seg board-move tl-focus" role="note">
           <span className="board-move-text">
-            {!e.who && (
+            {/* ✦ is Stand moving the focus by itself; a share or a spec going up is a person's doing. */}
+            {!e.who && !e.id.startsWith("stage:") && (
               <span className="agent-mark" aria-hidden>
                 ✦{" "}
               </span>
             )}
-            {e.who ? `${e.who} moved to` : "Moved to"} · <strong>{e.label && !e.text.startsWith(e.label) ? `${e.label}: ${e.text}` : e.text}</strong>
+            {/* A change on the main view that wasn't a move to another item: a share, a spec, the board. */}
+            {e.id.startsWith("stage:") ? (
+              <strong>{e.text}</strong>
+            ) : (
+              <>
+                {e.who ? `${e.who} moved to` : "Moved to"} · <strong>{e.label && !e.text.startsWith(e.label) ? `${e.label}: ${e.text}` : e.text}</strong>
+              </>
+            )}
           </span>
           <span className="seg-time">{fmtTime(e.ts)}</span>
         </div>
@@ -93,6 +101,7 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
             <Linkified text={e.text} />
           </div>
           {e.who && <span className="capture-owner">{e.who}</span>}
+          <ShownChip shown={e.shown} />
         </div>
       );
     case "ask":
@@ -112,9 +121,32 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
           <div className="seg-text">
             <Linkified text={e.text} />
           </div>
+          {e.points && <ShownChip shown={e.shown} pointing />}
         </div>
       );
   }
+}
+
+/** What the main view showed when something was said or done, as a quiet link to it. It says what was
+ *  up; `pointing` (the words point at the screen) is the only hint that they were about it. */
+export function ShownChip({ shown, pointing }: { shown?: Shown; pointing?: boolean }) {
+  if (!shown || shown.kind === "item") return null;
+  const href = shown.snapUrl ?? (shown.itemId ? `/items/${shown.itemId}` : null);
+  const title = pointing ? "These words point at what was on screen. Open what was up." : "What the main view showed at the time. Open it.";
+  const words = (
+    <>
+      <span className="tl-shown-k">{pointing ? "Pointing at" : "On screen"}</span> {shown.label}
+    </>
+  );
+  return href ? (
+    <a className="tl-shown" href={href} target="_blank" rel="noreferrer" title={title}>
+      {words}
+    </a>
+  ) : (
+    <span className="tl-shown" title={title}>
+      {words}
+    </span>
+  );
 }
 
 /** A question someone asked Stand, with its answer under it. onShow: a way to the card itself, in a call. */
@@ -134,6 +166,7 @@ export function AskRow({ e, onShow }: { e: TimelineEntry; onShow?: () => void })
       ) : (
         <span className="capture-owner">{e.pending ? "Stand is working on it…" : "No answer"}</span>
       )}
+      <ShownChip shown={e.shown} />
       {onShow && (
         <button type="button" className="link small tl-show" onClick={onShow}>
           Show on the board
@@ -156,6 +189,7 @@ export function AgentRow({ e }: { e: TimelineEntry }) {
       <div className="capture-text">
         <Linkified text={e.text} />
       </div>
+      <ShownChip shown={e.shown} />
     </div>
   );
 }
