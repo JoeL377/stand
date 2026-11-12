@@ -9,6 +9,7 @@ import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, type NotesOptio
 import type { ClientMessage, Item, Note, Segment, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
+import type { BoardAnswer } from "./board.ts";
 import { changeReview } from "./planReview.ts";
 import { outlineToSlides } from "../shared/outline.ts";
 import { config } from "./config.ts";
@@ -1561,5 +1562,134 @@ test("a line on the board is tied to its note by id: a tick crosses either way, 
   assert.equal(lastList()[0].doneAt, null, "and the note's untick reached the board");
   await say(huy, { type: "task.state", noteId: note.id, state: "done" });
   assert.equal(lastList()[0].doneBy, "Huy", "a Done from the check-in too");
+  await session.end();
+});
+
+/** A call whose board moves when the test says so, and whose map model names an idea per pass. */
+async function onTopics() {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const answers: Array<Partial<BoardAnswer>> = [];
+  const boardAsked: string[] = [];
+  const mapAsked: string[] = [];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async boardCard(context: string): Promise<BoardAnswer> {
+      boardAsked.push(context);
+      return { current: { sentences: [], dropSentences: [], positions: [], add: [], change: [], remove: [], now: "" }, retitle: null, shift: null, ...answers.shift() };
+    },
+    async boardDrift() {
+      return { verdict: "same" as const, title: null };
+    },
+    async brainstormMap(context: string, talk: string) {
+      mapAsked.push(`${context}\n${talk}`);
+      return { add: [{ under: "root", label: `Idea ${mapAsked.length}`, detail: "An idea.", by: "Joe", line: 1 }], extend: [], caught: [] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const inner = session as unknown as { board: { board(): { pending: unknown } }; boardPasses: { run(): Promise<void> }; mapPasses: { run(): Promise<void> }; viewTurn: Promise<void> };
+  // The call began twenty minutes ago, so its talk can be spread out.
+  const t0 = Date.now() - 20 * 60_000;
+  (session as unknown as { meetingStartedAt: number }).meetingStartedAt = t0 - 1000;
+  const settle = async () => {
+    await new Promise((r) => setTimeout(r, 10));
+    await inner.viewTurn;
+  };
+  // Two people, so each line stays its own.
+  const talk = (at: number, ...lines: string[]) => lines.forEach((text, i) => session.addSpeech(i % 2 ? "u2" : "u1", i % 2 ? "Huy" : "Joe", text, t0 + at + i * 1000));
+  /** The board's next pass, then a click on the move it proposes when it waits for one. */
+  const move = async (shift: NonNullable<BoardAnswer["shift"]>) => {
+    answers.push({ shift });
+    await inner.boardPasses.run();
+    if (inner.board.board().pending) await say(joe, { type: "board.accept", title: shift.title });
+    await settle();
+  };
+  const fresh = (title: string): NonNullable<BoardAnswer["shift"]> => ({ kind: "new", returnTo: null, title, card: { summary: [title], positions: [], items: [], now: "" } });
+  const back = (id: string, title: string): NonNullable<BoardAnswer["shift"]> => ({ kind: "return", returnTo: id, title, card: null });
+  const say_ = async (msg: ClientMessage) => {
+    await say(joe, msg);
+    await settle();
+  };
+  return { db, room, session, joe, inner, talk, move, fresh, back, say: say_, boardAsked, mapAsked };
+}
+
+test("the map of a topic is drawn from every line of that topic, those said before it was opened too", async () => {
+  const { db, room, session, inner, talk, move, fresh, say, mapAsked } = await onTopics();
+  talk(0, "we could charge per seat", "or a free tier for small teams");
+  await move(fresh("Pricing"));
+  talk(60_000, "onboarding could start with a welcome video", "or a sample space");
+  await move(fresh("Onboarding"));
+  await say({ type: "view.open" });
+  const map = db.brainstormLive(room.id)!;
+  assert.deepEqual([map.prompt, map.threadId, map.meetingId, map.startedBy], ["Onboarding", "t2", session.meetingId, "Joe"]);
+  await inner.mapPasses.run();
+  assert.equal(mapAsked.length, 1);
+  assert.match(mapAsked[0], /The centre of the map: Onboarding/);
+  assert.match(mapAsked[0], /welcome video/);
+  assert.doesNotMatch(mapAsked[0], /charge per seat/);
+  await session.end();
+});
+
+test("a topic's map parks when the board moves off it, goes on when the talk comes back, and stays stopped once stopped", async () => {
+  const { db, room, session, joe, inner, talk, move, fresh, back, say, boardAsked } = await onTopics();
+  talk(0, "we could charge per seat", "or a free tier for small teams");
+  await move(fresh("Pricing"));
+  talk(60_000, "onboarding could start with a welcome video", "or a sample space");
+  await move(fresh("Onboarding"));
+  assert.ok(boardAsked.every((c) => !c.includes("is brainstorming")));
+  await say({ type: "view.open" });
+  const id = db.brainstormLive(room.id)!.id;
+  await inner.mapPasses.run();
+  assert.deepEqual(db.getBrainstorm(id)!.nodes.map((n) => n.label), ["Idea 1"]);
+
+  // The board is told while the topic's map draws on it.
+  talk(120_000, "the video should be short", "and skippable");
+  await move(back("t1", "Pricing"));
+  assert.match(boardAsked.at(-1)!, /The group is brainstorming "Onboarding". Ideas for it belong to this thread\./);
+  const parked = db.getBrainstorm(id)!;
+  assert.deepEqual([parked.status, parked.endedAt], ["done", null]);
+  assert.ok(parked.spans?.length);
+  assert.equal(db.brainstormLive(room.id), null, "no map starts by itself on the new topic");
+  const sent = joe.got.flatMap((m) => (m.type === "brainstorm" ? [m] : [])).at(-1)!;
+  assert.equal(sent.brainstorm, null);
+  assert.deepEqual(sent.others.map((b) => [b.id, b.threadId]), [[id, "t2"]]);
+
+  talk(180_000, "pricing again: per seat is simpler", "yes per seat");
+  await move(back("t2", "Onboarding"));
+  assert.doesNotMatch(boardAsked.at(-1)!, /is brainstorming/);
+  const resumed = db.brainstormLive(room.id)!;
+  assert.deepEqual([resumed.id, resumed.nodes.map((n) => n.label)], [id, ["Idea 1"]]);
+
+  await say({ type: "view.stop" });
+  assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
+  talk(240_000, "back to pricing", "per seat it is");
+  await move(back("t1", "Pricing"));
+  talk(300_000, "onboarding once more", "the sample space");
+  await move(back("t2", "Onboarding"));
+  assert.equal(db.brainstormLive(room.id), null, "a stopped map doesn't go on by itself");
+  await say({ type: "view.open" });
+  assert.equal(db.brainstormLive(room.id)?.id, id, "opening it again goes on with the same map");
+
+  // Parked when the call ends: it is done with the call.
+  talk(360_000, "pricing to close", "done");
+  await move(back("t1", "Pricing"));
+  assert.equal(db.getBrainstorm(id)!.endedAt, null);
+  await session.end();
+  assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
+});
+
+test("opening a topic's map while a diagram draws saves the diagram's draft spec first", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const { parseSeed } = await import("./designSession.ts");
+  const { db, room, session, talk, move, fresh, say } = await onTopics();
+  const diagram = startBrainstorm(db, room.id, "Stand's primitives", "Joe", Date.now(), { diagram: parseSeed("Task: a to-do\nProject: a group of tasks", Date.now()), seed: null, taskId: null });
+  session.brainstormChanged();
+  talk(0, "we could charge per seat", "or a free tier for small teams");
+  await move(fresh("Pricing"));
+  await say({ type: "view.open" });
+  const saved = db.getBrainstorm(diagram.id)!;
+  assert.equal(saved.status, "done");
+  assert.match(db.notePlan(saved.taskId!)!.text, /^# Stand's primitives\n/);
+  assert.equal(db.brainstormLive(room.id)?.prompt, "Pricing");
   await session.end();
 });

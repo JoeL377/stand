@@ -371,6 +371,8 @@ export interface BrainstormView {
   /** Only on a brainstorm from before maps were views: the agenda item its talk was filed under. */
   itemId: string | null;
   meetingId: string | null;
+  /** The board thread it is the map of; null: it follows no topic. */
+  threadId: string | null;
   startedBy: string | null;
   startedAt: number;
   endedAt: number | null;
@@ -398,6 +400,7 @@ export interface BrainstormSummary {
   status: "live" | "done";
   startedAt: number;
   meetingId: string | null;
+  threadId: string | null;
   directions: number;
   ideas: number;
   /** Set when it is a design session: what its diagram holds. */
@@ -1037,6 +1040,8 @@ export type ClientMessage = (
   | { type: "brainstorm.remove"; id: string }
   /** Stop drawing the map or diagram running in the call; it is kept (anyone in the call). */
   | { type: "view.stop" }
+  /** Draw the map of the board's topic now, or continue it (anyone in the call). */
+  | { type: "view.open" }
   /** Keep or drop something on a design session's diagram, by its id (anyone in the call). Drop also takes a kept one off. */
   | { type: "design.keep"; id: string }
   | { type: "design.drop"; id: string }
@@ -1141,7 +1146,8 @@ export type ServerMessage =
   | { type: "cost"; cost: MeetingCost }
   /** The board's running list, after every change. Null when there's no model to keep one: the tabs read the live notes. */
   | { type: "list"; items: ListNote[] | null }
-  | { type: "brainstorm"; brainstorm: BrainstormView | null }
+  /** `others`: the other maps and diagrams of this call, oldest first. */
+  | { type: "brainstorm"; brainstorm: BrainstormView | null; others: BrainstormSummary[] }
   /** What ✦ Stand, the meeting's own agent, has put on the board so far (meetingAgent.ts). */
   | { type: "agent"; cards: AgentCard[] }
   /** Who pilots ✦ Stand, and who's asking to (server/pilot.ts), after every change. */

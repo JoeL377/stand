@@ -257,3 +257,17 @@ test("each move records who made it: the first thread, Stand by itself, a click,
   // And they come back after a restart.
   assert.equal(new BoardKeeper(model, T0, k.board()).board().moves!.length, 4);
 });
+
+test("a note from the room joins what the model is told, for that pass only", async () => {
+  const told: string[] = [];
+  const { model } = scripted([{ shift: shift("Onboarding") }, {}]);
+  const card = model.boardCard.bind(model);
+  model.boardCard = async (c, t) => (told.push(c), card(c, t));
+  const k = new BoardKeeper(model, T0);
+  const talk = [say(1, 0), say(2, 5 * S)];
+  await k.run(talk, [], [], null, T0 + 10 * S, 'The group is brainstorming "Onboarding". Ideas for it belong to this thread.');
+  talk.push(say(3, 40 * S), say(4, 45 * S));
+  await k.run(talk, [], [], null, T0 + 50 * S);
+  assert.match(told[0], /The group is brainstorming "Onboarding"/);
+  assert.doesNotMatch(told[1], /brainstorming/);
+});

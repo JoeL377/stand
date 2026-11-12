@@ -491,6 +491,8 @@ export function migrate(db: DatabaseSync) {
   // The ideas people starred on a brainstorm's page. Kept beside the map, not in it: the map is
   // rewritten by every pass of a running brainstorm.
   if (!brainCols.includes("stars_json")) db.exec("ALTER TABLE brainstorms ADD COLUMN stars_json TEXT");
+  // The map of a topic: the board thread it follows, and the stretches of the meeting it read.
+  if (!brainCols.includes("thread_id")) db.exec("ALTER TABLE brainstorms ADD COLUMN thread_id TEXT; ALTER TABLE brainstorms ADD COLUMN spans_json TEXT;");
   // A brainstorm used to lead the agenda with its sentence. A map is now a view beside the board: a
   // running one lets go of its item.
   db.exec(

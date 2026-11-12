@@ -514,6 +514,7 @@ export function Meeting(props: {
           segments={room.segments}
           board={room.board}
           brainstorm={room.brainstorm}
+          brainstorms={room.brainstorms}
           list={room.list}
           agentCards={room.agentCards}
           notes={room.notes}

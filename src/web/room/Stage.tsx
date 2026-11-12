@@ -9,7 +9,7 @@ import { ViewPane, type ViewTab } from "./Views.tsx";
 import { runningExperience } from "./Experiences.tsx";
 import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
 import { api } from "../api.ts";
-import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, ConxtLive, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { initials, keyOf } from "../util.ts";
@@ -48,6 +48,8 @@ export function Stage(props: {
   list: ListNote[] | null;
   /** The map or diagram drawing in this space (server/brainstorm.ts); each person looks at it from the board's pills. */
   brainstorm?: BrainstormView | null;
+  /** The other maps and diagrams of this call, oldest first. */
+  brainstorms?: BrainstormSummary[];
   /** What ✦ Stand has put on the board (server/meetingAgent.ts); null when the server runs no agent. */
   agentCards: AgentCard[] | null;
   notes: Note[];
@@ -359,6 +361,11 @@ export function Stage(props: {
     if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return;
     setDrawPop(what);
   };
+  const thread = props.board?.threads.find((t) => t.id === props.board?.currentId);
+  const open = () => {
+    if (live?.design && !confirm("Draw the map of this topic? The diagram stops, and is kept.")) return;
+    send({ type: "view.open" });
+  };
   const startDraw = async (what: "map" | "diagram", start: () => Promise<unknown>) => {
     try {
       await start();
@@ -376,11 +383,15 @@ export function Stage(props: {
       tabs={!runningExperience(state.items)}
       card={card}
       brainstorm={props.brainstorm}
+      others={props.brainstorms ?? []}
+      roomId={state.roomId}
+      topic={thread ? { id: thread.id, title: thread.title } : null}
       onRemove={steady ? (id) => send({ type: "brainstorm.remove", id }) : undefined}
       onKeep={steady ? (id) => send({ type: "design.keep", id }) : undefined}
       onDrop={steady ? (id) => send({ type: "design.drop", id }) : undefined}
       onDraw={steady ? draw("map") : undefined}
       onDrawDiagram={steady ? draw("diagram") : undefined}
+      onOpen={steady ? open : undefined}
       onStop={steady ? () => send({ type: "view.stop" }) : undefined}
     />
   );
