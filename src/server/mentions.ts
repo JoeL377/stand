@@ -23,3 +23,14 @@ export const mentionView = (u: ItemUpdate & { noteId: string }): TaskMention => 
   text: u.text,
   ts: u.ts,
 });
+
+/** How many chat messages you haven't read tag you, per space that has some. */
+export function unreadChatMentions(db: DB, userId: string): Map<string, number> {
+  const people = new Map<string, ReturnType<DB["roomPeople"]>>();
+  const out = new Map<string, number>();
+  for (const m of db.unreadChatWithAt(userId)) {
+    if (!people.has(m.roomId)) people.set(m.roomId, db.roomPeople(m.roomId));
+    if (mentionedIn(m.text, people.get(m.roomId)!).includes(userId)) out.set(m.roomId, (out.get(m.roomId) ?? 0) + 1);
+  }
+  return out;
+}

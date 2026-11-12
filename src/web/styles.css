@@ -23,6 +23,10 @@
   /* orange for small text on white */
   --warn-text: #b33c0b;
   --danger: #e5484d;
+  /* A mention of you: amber, apart from the blue of links and of mentions of others. */
+  --mention-you-bg: #fdefc8;
+  --mention-you-text: #8a4b00;
+  --mention-you-strong: #f0a92e;
   --stage: #0d0d0f;
   --radius: 8px;
   --shadow: 0 1px 2px rgb(15 15 15 / 0.04), 0 6px 20px rgb(15 15 15 / 0.06);
@@ -48,6 +52,8 @@
   --accent: #4c8df6;
   --accent-soft: rgb(76 141 246 / 0.16);
   --accent-text: #8fb5fa;
+  --mention-you-bg: rgb(240 169 46 / 0.2);
+  --mention-you-text: #f7c871;
   --shadow: 0 6px 24px rgb(0 0 0 / 0.4);
   color-scheme: dark;
 }
@@ -65,6 +71,8 @@
   --accent: #4c8df6;
   --accent-soft: rgb(76 141 246 / 0.18);
   --accent-text: #8fb5fa;
+  --mention-you-bg: rgb(240 169 46 / 0.2);
+  --mention-you-text: #f7c871;
   --stage: #0b0b0d;
   --shadow: 0 8px 28px rgb(0 0 0 / 0.45);
   color-scheme: dark;
@@ -3425,7 +3433,7 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 /* ---- The space's chat (SpaceChat.tsx): the thread scrolls, and the box to write in stays at its foot ---- */
 .sh-body.chat { overflow: hidden; padding-bottom: 16px; }
 .sh-panel.chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.space-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 860px; }
+.space-chat { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 860px; }
 .chat-thread { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 0 4px 6px 0; }
 /* A short thread sits at the foot, next to the box. */
 .chat-thread > :first-child { margin-top: auto; }
@@ -3563,4 +3571,43 @@ button.chat-caught-text { padding: 0; }
   .xp-menu button { padding: 9px 12px; font-size: 14px; }
   .xp-menu .xp-hint { display: none; }
   .xp-menu .xp-idea { max-width: 55vw; }
+}
+
+/* @Name in what people write: someone in the space in blue, and you in amber, everywhere text shows. */
+.mention { padding: 0 2px; border-radius: 4px; background: var(--accent-soft); color: var(--accent-text); font-weight: 500; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.mention.you { background: var(--mention-you-bg); color: var(--mention-you-text); font-weight: 600; }
+a .mention { color: inherit; }
+
+/* Chat: a message that tags you, the pill down to what came in below, and the Chat tab's marks. */
+.chat-msg.mentions-you { background: color-mix(in srgb, var(--mention-you-bg) 60%, transparent); box-shadow: inset 2px 0 0 var(--mention-you-strong); border-radius: 0 8px 8px 0; }
+.chat-msg.mentions-you:hover, .chat-msg.mentions-you:focus-within { background: var(--mention-you-bg); }
+.chat-jump { position: absolute; z-index: 3; left: 50%; bottom: 64px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; height: 30px; min-height: 0; padding: 0 14px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow); animation: chat-jump-in var(--dur-ui) var(--ease-out); }
+.chat-jump:hover:not(:disabled) { background: var(--accent); filter: brightness(1.06); }
+.chat-jump:active { transform: translateX(-50%) scale(0.97); transition: transform var(--dur-press) var(--ease-out); }
+.chat-jump.mention, .chat-jump.mention:hover:not(:disabled) { background: var(--mention-you-strong); color: #2b1a00; }
+@keyframes chat-jump-in { from { opacity: 0; transform: translate(-50%, 6px); } }
+.chat-marks { display: inline-flex; align-items: center; gap: 4px; }
+.sh-tab .count.fresh, .sh-tab .count.mention { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
+.sh-tab .count.mention { padding: 0 4px; background: var(--mention-you-strong); color: #2b1a00; font-weight: 700; }
+.sh-tab.chat.on .count.fresh { background: var(--accent-soft); color: var(--accent-text); }
+
+/* The nav: a dot for new chat in a space, an @ when a message you haven't read tags you. */
+.sp-chat-mark { flex: none; margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.sp-chat-mark.mention { position: relative; display: inline-flex; align-items: center; justify-content: center; width: auto; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: var(--mention-you-strong); color: #2b1a00; font-size: 11px; font-weight: 700; }
+.sp-chat-mark.mention.arriving { animation: sp-count-bump 450ms ease-out; }
+.sp-chat-mark + .sp-count { margin-left: 4px; }
+.sp-spacerow:hover .sp-chat-mark { visibility: hidden; }
+.sp-chat-mark.folded { position: absolute; right: -2px; bottom: -2px; margin: 0; box-shadow: 0 0 0 2px var(--side-ground); }
+.sp-chat-mark.mention.folded { min-width: 14px; height: 14px; padding: 0; font-size: 9px; }
+.sp-spacerow:hover .sp-chat-mark.folded { visibility: visible; }
+@media (prefers-reduced-motion: reduce) { .chat-jump, .sp-chat-mark.mention.arriving { animation: none; } }
+
+.sp-state.chat-new { color: var(--accent-text); background: var(--accent-soft); }
+.sp-state.chat-mention { color: var(--mention-you-text); background: var(--mention-you-bg); font-weight: 600; }
+
+@media (max-width: 760px) {
+  /* The page scrolls on a phone, so the pill sits just over the box to write in. */
+  .chat-jump { position: fixed; bottom: 76px; }
+  /* New chat shows on the Chat tab even when it isn't the open one. */
+  .sh-tab .chat-marks .count { display: inline-block; }
 }

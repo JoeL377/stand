@@ -1,4 +1,6 @@
-/** Text with any web addresses in it made clickable, so a link pasted into chat opens. */
+/** Text with any web addresses in it made clickable, so a link pasted into chat opens, and each @Name marked. */
+import { MentionText } from "./Mentions.tsx";
+
 const URL_RE = /\bhttps?:\/\/[^\s<>"']+/g;
 
 export function Linkified({ text }: { text: string }) {
@@ -8,7 +10,7 @@ export function Linkified({ text }: { text: string }) {
     // A sentence's closing punctuation isn't part of the link.
     const url = m[0].replace(/[.,;:!?)\]]+$/, "");
     const at = m.index ?? 0;
-    if (at > last) parts.push(text.slice(last, at));
+    if (at > last) parts.push(<MentionText key={`t${last}`} text={text.slice(last, at)} />);
     parts.push(
       <a key={at} href={url} target="_blank" rel="noreferrer">
         {url}
@@ -16,7 +18,7 @@ export function Linkified({ text }: { text: string }) {
     );
     last = at + url.length;
   }
-  if (last === 0) return <>{text}</>;
-  parts.push(text.slice(last));
+  if (last === 0) return <MentionText text={text} />;
+  parts.push(<MentionText key={`t${last}`} text={text.slice(last)} />);
   return <>{parts}</>;
 }

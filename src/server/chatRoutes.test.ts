@@ -6,6 +6,7 @@ import type { ChatCaught, ChatEvent, ChatMessage, ChatThread } from "../shared/c
 import { requireUser } from "./auth.ts";
 import { Chat } from "./chat.ts";
 import { openDb } from "./db.ts";
+import { unreadChatMentions } from "./mentions.ts";
 import { chatRoutes } from "./routes/chat.ts";
 import type { Services } from "./services.ts";
 import { SpaceEvents } from "./spaceEvents.ts";
@@ -111,6 +112,30 @@ test("people in a space send, read, change and delete its chat; nobody else gets
     assert.equal(gone.body.text, "");
     assert.ok(gone.body.deletedAt);
     assert.equal((await j("DELETE", "/api/chat/messages/nope")).status, 404);
+  } finally {
+    await close();
+  }
+});
+
+test("an unread chat message that tags you counts as a mention in that space until you read it", async () => {
+  const { db, joe, huy, room, as, close } = await setup();
+  const [j, h] = [as(joe), as(huy)];
+  try {
+    const channel = (await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.channel.id;
+    // Joe's own message never tags him (and sending reads what came before it).
+    await j("POST", `/api/rooms/${room.id}/chat/messages`, { text: "note to self @Joe Liang" });
+    await h("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Morning all" });
+    await h("POST", `/api/rooms/${room.id}/chat/messages`, { text: "@Joe can you look at the deploy?" });
+    await h("POST", `/api/rooms/${room.id}/chat/messages`, { text: "mail joe@example.test, cc @Huy Ngo" });
+    // A deleted message doesn't count.
+    const gone = await h<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "@Joe Liang never mind" });
+    await h("DELETE", `/api/chat/messages/${gone.body.id}`);
+    assert.equal(unreadChatMentions(db, joe.id).get(room.id), 1);
+    assert.equal(unreadChatMentions(db, huy.id).size, 0, "Huy wrote the message that tags him");
+
+    const last = (await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.messages.at(-1)!;
+    await j("POST", `/api/channels/${channel}/read`, { upTo: last.seq });
+    assert.equal(unreadChatMentions(db, joe.id).size, 0);
   } finally {
     await close();
   }
