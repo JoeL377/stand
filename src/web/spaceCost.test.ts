@@ -5,7 +5,7 @@ import { callsLabel, dayBars, daysSummary, usdLabel } from "./spaceCost.ts";
 const day = (d: string, usd: number, calls = 1, between = 0) => ({ day: d, usd, calls, between });
 
 test("a cost under a cent reads as under a cent, and nothing as nothing", () => {
-  assert.deepEqual([usdLabel(4.123), usdLabel(0.004), usdLabel(0.0099), usdLabel(0.01), usdLabel(0), usdLabel(12.34)], ["$4.12", "under $0.01", "under $0.01", "$0.01", "$0.00", "$12.3"]);
+  assert.deepEqual([usdLabel(4.123), usdLabel(0.004), usdLabel(0.0099), usdLabel(0.01), usdLabel(0), usdLabel(12.34)], ["$4.12", "under $0.01", "under $0.01", "$0.01", "$0.00", "$12.34"]);
   assert.deepEqual([callsLabel(1), callsLabel(310)], ["1 call", "310 calls"]);
 });
 

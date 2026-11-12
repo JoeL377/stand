@@ -160,14 +160,14 @@ function writeUsage(rooms) {
       await snap("panel-30-days", panel(rooms.cost));
     });
     const text = await panel(rooms.cost).innerText();
-    check("the total and the calls", text.includes("$26.6 · 6 calls"), text.split("\n").slice(0, 4));
+    check("the total and the calls", text.includes("$26.60 · 6 calls"), text.split("\n").slice(0, 4));
     for (const words of ["In calls", "In chat", "Between meetings", "What Stand does for the space, not for one meeting.", "Recap", "Topic card", "Live notes", "Project suggestions", "Agenda tidy", "Done since"])
       check(`shows "${words}"`, text.includes(words));
     check("a cost under a cent reads under $0.01", /Done since\s+under \$0\.01/.test(text), text.match(/Done since.*\n?.*/)?.[0]);
     check("no other space's row and no row without a space", !text.includes("$30.6") && !text.includes("$34.6"));
     check("30 bars", (await panel(rooms.cost).locator(".cost-day").count()) === 30, await panel(rooms.cost).locator(".cost-day").count());
     const label = await panel(rooms.cost).locator(".cost-days").getAttribute("aria-label");
-    check("the bars say what they show to a screen reader", /^Cost by day for the last 30 days: most on .+, \$20\.0$/.test(label ?? ""), label);
+    check("the bars say what they show to a screen reader", /^Cost by day for the last 30 days: most on .+, \$20\.00$/.test(label ?? ""), label);
     check("the day with the most is the tallest bar", (await panel(rooms.cost).locator(".cost-bar[style*='height: 100%']").count()) === 1);
 
     await step("switch to 7 days", async () => {
@@ -177,7 +177,7 @@ function writeUsage(rooms) {
     });
     const week = await panel(rooms.cost).innerText();
     check("7 bars", (await panel(rooms.cost).locator(".cost-day").count()) === 7, await panel(rooms.cost).locator(".cost-day").count());
-    check("the 7 day total leaves out the agenda tidy of 10 days ago", week.includes("$24.6 · 5 calls") && !week.includes("Agenda tidy"), week.split("\n").slice(0, 4));
+    check("the 7 day total leaves out the agenda tidy of 10 days ago", week.includes("$24.60 · 5 calls") && !week.includes("Agenda tidy"), week.split("\n").slice(0, 4));
 
     await step("the empty state on the second space", async () => {
       await panel(rooms.quiet).getByText("Nothing in this range yet.").waitFor();

@@ -1,9 +1,8 @@
 // What the Manage spaces cost panel shows (CostPanel.tsx), kept apart so it can be tested without a page.
 import type { SpaceCost } from "../shared/protocol.ts";
-import { fmtCost } from "./util.ts";
 
-/** "$4.12"; a cost under a cent reads "under $0.01", not "$0.00". */
-export const usdLabel = (usd: number) => (usd > 0 && usd < 0.01 ? "under $0.01" : fmtCost(usd));
+/** "$4.12", to the cent at any size so a column of them lines up; a cost under a cent reads "under $0.01", not "$0.00". */
+export const usdLabel = (usd: number) => (usd > 0 && usd < 0.01 ? "under $0.01" : `$${usd.toFixed(2)}`);
 
 export const callsLabel = (n: number) => `${n} ${n === 1 ? "call" : "calls"}`;
 
