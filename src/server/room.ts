@@ -936,6 +936,12 @@ export class RoomSession implements SpeechSink {
         if (me) me.notRecording = !msg.on;
         this.broadcastState();
         break;
+      case "mic":
+        // Sent again on every reconnect: only a change is worth telling everyone.
+        if (!me || me.muted === !msg.on) break;
+        me.muted = !msg.on;
+        this.broadcastState();
+        break;
       case "notes.retry": {
         const itemId = msg.itemId && this.items().some((i) => i.id === msg.itemId) ? msg.itemId : null;
         if (!this.ended) void this.refreshNotes(itemId);

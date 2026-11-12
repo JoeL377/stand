@@ -819,6 +819,24 @@ test("the host's view goes to everyone; nobody else can set it, and a new host s
   await session.end();
 });
 
+test("everyone sees who is muted, once their page has said", async () => {
+  const { session } = setup();
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  const muted = () => session.state().participants.map((p) => [p.id, p.muted]);
+  assert.deepEqual(muted(), [["u1", undefined], ["u2", undefined]]);
+  await say(joe, { type: "mic", on: false });
+  await say(ann, { type: "mic", on: true });
+  assert.deepEqual(muted(), [["u1", true], ["u2", false]]);
+  // Saying the same again (a reconnect) tells nobody anything.
+  const before = ann.got.length;
+  await say(joe, { type: "mic", on: false });
+  assert.equal(ann.got.length, before);
+  await say(joe, { type: "mic", on: true });
+  assert.deepEqual(muted(), [["u1", false], ["u2", false]]);
+  await session.end();
+});
+
 test("the room keeps what the main view showed each time it changed", async () => {
   const { db, session, items, meetingId } = setup();
   const joe = await join(session, { id: "u1", name: "Joe" });
