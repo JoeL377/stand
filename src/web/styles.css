@@ -3393,6 +3393,23 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .chat-edit textarea { display: block; width: 100%; min-height: 38px; max-height: 180px; padding: 8px 10px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 8px; resize: none; field-sizing: content; }
 .chat-edit-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; font-size: 13px; }
 .chat-edit-foot button[type="submit"] { height: 28px; padding: 0 12px; font-size: 13px; }
+/* What Stand caught from the talk, under the message it came from, in the meeting transcript's colours. */
+.chat-caught { display: flex; align-items: flex-start; gap: 8px; margin: 4px 8px 4px 46px; padding: 6px 8px 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--ok) 9%, var(--panel)); }
+.chat-caught .agent-mark { flex: none; font-size: 13px; line-height: 18px; color: var(--ok-text); }
+.chat-caught-body { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.chat-caught-label { flex: none; font-size: 12px; color: var(--ok-text); }
+.chat-caught-text { font-size: 13px; line-height: 1.4; color: var(--text); text-align: left; overflow-wrap: anywhere; }
+button.chat-caught-text { padding: 0; }
+.chat-caught-owner { color: var(--muted); }
+.chat-caught.closed .chat-caught-text { color: var(--muted); text-decoration: line-through; }
+.chat-caught-remove { flex: none; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); visibility: hidden; }
+.chat-caught:hover .chat-caught-remove, .chat-caught:focus-within .chat-caught-remove { visibility: visible; }
+.chat-recap { margin: 8px 8px 4px 46px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.chat-recap-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--muted); }
+.chat-recap-head .agent-mark { font-size: 13px; color: var(--accent-text); }
+.chat-recap-summary { margin: 4px 0 0; line-height: 1.5; }
+.chat-recap-topics { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.chat-recap-topics li { padding: 1px 8px; border-radius: 999px; font-size: 12px; color: var(--muted); background: var(--hover); }
 .chat-compose { flex: none; position: relative; }
 .chat-compose .mention-box textarea { display: block; min-height: 42px; max-height: 180px; padding: 10px 46px 10px 12px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 10px; resize: none; field-sizing: content; }
 .chat-compose .chat-send { right: 8px; bottom: 8px; width: 26px; height: 26px; min-height: 0; }
@@ -3400,6 +3417,7 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .sp-side-text.unread { font-weight: 600; color: var(--side-strong); }
 @media (hover: none) {
   .chat-msg-tools { position: static; display: inline-flex; align-self: flex-start; border: 0; background: none; box-shadow: none; }
+  .chat-caught-remove { visibility: visible; }
 }
 /* On a phone the page scrolls, not the thread, and the box to write in stays at the foot of the screen. */
 @media (max-width: 760px) {

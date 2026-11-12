@@ -4,7 +4,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 // (to-dos, decisions, open questions and the suggested agenda). Start talking turns it into the
 // meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { matchesTopic, topicKey, topicOf, topicOptions } from "../../shared/topics.ts";
@@ -99,6 +99,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       (e: Error) => setError(e.message),
     );
   }, [room.id, reload]);
+
+  // What Stand catches from the chat is the space's at once: the other tabs show it without waiting for the next poll.
+  const caughtNow = chat.thread?.caught.map((c) => c.lines.map((l) => l.id).join(",")).join("|");
+  const caughtBefore = useRef(caughtNow);
+  useEffect(() => {
+    if (caughtBefore.current !== undefined && caughtNow !== caughtBefore.current) load();
+    caughtBefore.current = caughtNow;
+  }, [caughtNow, load]);
 
   useEffect(() => {
     load();
@@ -367,7 +375,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         {showSession && <DesignSessionPop todos={todos.filter((t) => !t.doneAt)} onStart={startSession} onClose={() => setShowSession(false)} />}
 
         <section className={`sh-panel ${tab}`} role="tabpanel">
-          {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} />}
+          {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} />}
           {tab === "meetings" && (
             <>
               {error && !feed && (

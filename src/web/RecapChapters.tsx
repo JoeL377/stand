@@ -122,7 +122,7 @@ export function FromChip({ from }: { from: NoteFrom }) {
   const o = c && OUTCOME[c.outcome];
   return (
     <span className="rc-pill-wrap">
-      <Link className="rc-pill" to={`/meetings/${from.meetingId}${c ? `#${chapterAnchor(c.i)}` : ""}`} aria-label={c ? `From the chapter "${c.title}" on ${day}` : `From the meeting on ${day}`}>
+      <Link className="rc-pill" to={`/meetings/${from.meetingId}${c ? `#${chapterAnchor(c.i)}` : ""}`} aria-label={c ? `From the chapter "${c.title}" on ${day}` : `From the ${from.chat ? "chat" : "meeting"} on ${day}`}>
         {day}
       </Link>
       <span className="rc-pop" role="tooltip">
@@ -143,7 +143,7 @@ export function FromChip({ from }: { from: NoteFrom }) {
             )}
           </>
         ) : (
-          <span className="rc-pop-meta">Meeting on {fmtDate(from.startedAt)}</span>
+          <span className="rc-pop-meta">{from.chat ? "Chat" : "Meeting"} on {fmtDate(from.startedAt)}</span>
         )}
       </span>
     </span>

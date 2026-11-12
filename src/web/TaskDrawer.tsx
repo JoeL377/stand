@@ -142,7 +142,7 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, acts }: {
             <p className="td-meta">
               <span className={n.owner ? undefined : "muted"}>{n.owner ?? (n.kind === "question" ? "Anyone" : "Unassigned")}</span>
               {task.meeting ? (
-                <Link to={`/meetings/${task.meeting.id}`}>From the meeting on {fmtDate(task.meeting.startedAt)}</Link>
+                <Link to={`/meetings/${task.meeting.id}`}>From the {task.meeting.chat ? "chat" : "meeting"} on {fmtDate(task.meeting.startedAt)}</Link>
               ) : (
                 <span>Added{n.editedBy ? ` by ${n.editedBy}` : ""}</span>
               )}
