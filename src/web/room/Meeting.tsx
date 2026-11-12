@@ -762,7 +762,9 @@ function ConnectionPill(props: {
   if (connected) return null;
   const text = refused
     ? `Reconnecting · ${REFUSED[refused] ?? "that didn't go through, try again once Stand is back"}`
-    : waiting > 0
+    : trouble === "updating"
+      ? `Stand is updating · your audio keeps going${waiting > 0 ? ` · ${waiting} change${waiting === 1 ? "" : "s"} waiting` : ""}`
+      : waiting > 0
       ? `Reconnecting · ${waiting} change${waiting === 1 ? "" : "s"} waiting`
       : trouble === "blocked"
         ? "Can't open a live connection · a firewall or VPN may be blocking it"

@@ -1,0 +1,35 @@
+name: Deploy gate
+
+# Merging to main redeploys Stand, which cuts a call that's running. With Railway's
+# "Wait for CI" turned on, Railway deploys a commit on main only once its checks pass,
+# so this check waits until no call is live, then passes. A call that's still going
+# after five hours fails it; re-run the job to deploy.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-gate
+  cancel-in-progress: true
+
+jobs:
+  no-live-call:
+    runs-on: ubuntu-latest
+    timeout-minutes: 310
+    steps:
+      - name: Wait until no call is live
+        env:
+          STAND_URL: ${{ vars.STAND_URL || 'https://stand-production-3d3f.up.railway.app' }}
+        run: |
+          for i in $(seq 1 300); do
+            body=$(curl -fsS --max-time 20 "$STAND_URL/api/live" || echo '')
+            case "$body" in
+              *'"live":false'*) echo "No call is live: deploying."; exit 0 ;;
+              *'"live":true'*) echo "A call is live: waiting ($i min)." ;;
+              # Stand down, or a server from before /api/live: nothing to protect.
+              *) echo "Couldn't read $STAND_URL/api/live ($body): deploying."; exit 0 ;;
+            esac
+            sleep 60
+          done
+          echo "A call has been live for five hours. Re-run this job to deploy."
+          exit 1

@@ -2504,6 +2504,11 @@ export class RoomSession implements SpeechSink {
     }
   }
 
+  /** The server is stopping for an update: everyone's page says so, and reconnects to this meeting once it's back. */
+  restarting() {
+    this.broadcast({ type: "restarting" });
+  }
+
   /** Sends everyone to the recap and lets the space go. Once. */
   private release() {
     if (this.released) return;

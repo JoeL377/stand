@@ -1205,6 +1205,8 @@ export type ServerMessage =
   /** Who pilots ✦ Stand, and who's asking to (server/pilot.ts), after every change. */
   | { type: "pilot"; pilot: PilotView }
   | { type: "meeting.ended"; meetingId: string }
+  /** Stand is restarting for an update: the call carries on once it's back, and the audio never stops. */
+  | { type: "restarting" }
   /** The server has a message the client sent with this cid. */
   | { type: "ack"; cid: string }
   | { type: "pong" }
