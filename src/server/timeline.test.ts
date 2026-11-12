@@ -270,3 +270,63 @@ test("what was on screen: a presented to-do's spec gives its ref; a plain agenda
   const plain = buildTimeline({ ...base, segments: [seg("s1", 2000, "Look at this button")], itemById: () => ({ id: "i1", title: "Pricing", externalId: null, slideNo: null, slide: null }) as never });
   assert.equal(plain[0].points, undefined);
 });
+
+test("every action names exactly who did it: the person, their agent, or Stand", () => {
+  const t = buildTimeline({
+    ...base,
+    segments: [seg("s1", 1000, "Let's ship Friday", "speech", "Joe"), seg("s2", 1100, "ok", "chat", "Huy")],
+    notes: [
+      note("n1", 1200, "decision", "Ship Friday"),
+      note("n2", 1300, "action", "Tell support", { editedBy: "Huy", owner: "Joe" }),
+      note("n3", 1400, "action", "Draft the notes", { addedActor: { kind: "agent", person: "Joe", personId: "joe", agent: "Claude Code", model: "claude-fable-5-2" } }),
+    ],
+    cards: [card({ id: "c1", question: "When is the freeze?", by: "Huy", about: "huy", at: 1500, note: "Thursday", model: "claude-opus-5-5" })],
+    focus: [
+      { id: "f1", ts: 900, itemId: "i1", actor: "Joe", reason: "manual" },
+      { id: "f2", ts: 1600, itemId: "i2", actor: "system", reason: "suggestion" },
+    ],
+    stage: [
+      { id: "g1", ts: 900, view: { itemId: "i1", tab: "main", taskMode: null, shot: null, snapId: null, sharing: null } },
+      { id: "g2", ts: 1700, view: { itemId: "i2", tab: "main", taskMode: null, shot: null, snapId: null, sharing: "Huy" } },
+    ],
+    updates: [update({ id: "u1", ts: 1800, status: "ready", userName: "Joe", client: "Codex", actor: { kind: "agent", person: "Joe", agent: "Codex" } })],
+  });
+  const actor = (id: string) => t.find((e) => e.id === id)?.actor;
+  // A line: the speaker, with the id their lines carry.
+  assert.deepEqual(actor("speech:s1"), { kind: "person", person: "Joe", personId: "joe" });
+  // Caught from the talk: Stand. The owner is someone else, and is kept apart.
+  assert.deepEqual(actor("capture:n1"), { kind: "stand", person: null });
+  // Written by hand in the call: that person, found by name, with who it is for.
+  const byHand = t.find((e) => e.id === "capture:n2")!;
+  assert.deepEqual([byHand.actor, byHand.byHand, byHand.owner], [{ kind: "person", person: "Huy", personId: "huy" }, true, "Joe"]);
+  // Added by a person's agent: the person, the agent's name and its model.
+  assert.deepEqual(actor("capture:n3"), { kind: "agent", person: "Joe", personId: "joe", agent: "Claude Code", model: "claude-fable-5-2" });
+  // A question: the asker; the answer: Stand, with the model it ran.
+  const ask = t.find((e) => e.id === "ask:c1")!;
+  assert.deepEqual([ask.actor, ask.answeredBy], [{ kind: "person", person: "Huy", personId: "huy" }, { kind: "stand", person: null, model: "claude-opus-5-5" }]);
+  // A move: who moved it, or Stand by itself. A share: the sharer.
+  assert.deepEqual([actor("focus:f1"), actor("focus:f2"), actor("stage:g2")], [{ kind: "person", person: "Joe", personId: "joe" }, { kind: "stand", person: null }, { kind: "person", person: "Huy", personId: "huy" }]);
+  // A report: the agent's person takes the id their lines carry.
+  assert.deepEqual(actor("agent:u1"), { kind: "agent", person: "Joe", agent: "Codex", personId: "joe" });
+});
+
+test("the brief's timeline says who made each capture, apart from who it is for", async () => {
+  const { buildBrief, briefToMarkdown } = await import("./brief.ts");
+  const timeline = buildTimeline({
+    ...base,
+    segments: [seg("s1", 1000, "Let's ship Friday")],
+    notes: [note("n1", 1200, "action", "Tell support", { owner: "Huy" }), note("n2", 1300, "action", "Draft the notes", { addedActor: { kind: "agent", person: "Joe", agent: "Claude Code", model: "claude-fable-5-2" } })],
+  });
+  const brief = buildBrief({ meeting: { id: "m", roomId: "r", startedAt: 1000, endedAt: 9000, summary: null }, roomName: "Conxt", groups: [], decks: [], baseUrl: "https://stand.test", timeline, withTranscript: true });
+  const caught = brief.timeline!.filter((e) => e.kind === "capture");
+  assert.deepEqual(
+    caught.map((e) => [e.who, e.by, e.owner]),
+    [
+      ["Stand", { kind: "stand" }, "Huy"],
+      ["Joe via Claude Code", { kind: "agent", person: "Joe", agent: "Claude Code", model: "claude-fable-5-2" }, undefined],
+    ],
+  );
+  const md = briefToMarkdown(brief);
+  assert.match(md, /Stand caught: Tell support \(stand:action\/n1\) \[owner: Huy\]/);
+  assert.match(md, /Joe via Claude Code added: Draft the notes/);
+});

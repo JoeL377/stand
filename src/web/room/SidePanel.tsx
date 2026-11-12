@@ -2,7 +2,7 @@ import { usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useRef, useState } from "react";
 import type { AgentCard, Board, ClientMessage, Item, ListNote, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { buildTimeline, type TimelineEntry } from "../../shared/timeline.ts";
-import { AgentRow, AskRow } from "../Timeline.tsx";
+import { AgentRow, AskRow, MadeBy } from "../Timeline.tsx";
 import { showCard } from "./AgentCard.tsx";
 import { moverText } from "./TopicBoard.tsx";
 import type { Interim } from "./useRoomSocket.ts";
@@ -219,7 +219,7 @@ export function SidePanel(props: {
 type MoveRow = { key: string; ts: number; by: string | null; text: string; title: string };
 
 /** A line said or typed, as the timeline has it. */
-const lineOf = (s: Segment): TimelineEntry => ({ id: `${s.kind}:${s.id}`, kind: s.kind, ts: s.ts, who: s.speakerName, whoId: s.speakerId, text: s.text, itemId: s.itemId });
+const lineOf = (s: Segment): TimelineEntry => ({ id: `${s.kind}:${s.id}`, kind: s.kind, ts: s.ts, actor: { kind: "person", person: s.speakerName, personId: s.speakerId }, who: s.speakerName, whoId: s.speakerId, text: s.text, itemId: s.itemId });
 
 function Transcript(props: {
   /** What to show, in order (shared/timeline.ts). */
@@ -283,7 +283,7 @@ function Transcript(props: {
           if (e.kind === "agent") return <AgentRow key={e.id} e={e} />;
           if (e.kind === "capture") {
             const note = noteOf.get(sourceId(e));
-            return note ? <CaptureRow key={e.id} note={note} /> : null;
+            return note ? <CaptureRow key={e.id} note={note} entry={e} /> : null;
           }
           const seg = segOf.get(sourceId(e));
           return seg ? <SegmentRow key={e.id} segment={seg} items={items} send={send} tag={props.tagChat} /> : null;
@@ -301,7 +301,7 @@ function Transcript(props: {
 }
 
 /** Capture confirmations stay alongside the words they came from, including after reconnecting. */
-function CaptureRow({ note }: { note: Note }) {
+function CaptureRow({ note, entry }: { note: Note; entry: TimelineEntry }) {
   const heard = note.kind === "decision" && "heard" in note && !!note.heard;
   const label = note.kind === "action" ? "Added to Todo!"
     : note.kind === "decision" ? heard ? "Decision heard" : "Added to Decided!"
@@ -309,12 +309,11 @@ function CaptureRow({ note }: { note: Note }) {
   return (
     <div className={`seg capture-event capture-${note.kind}`} role="note">
       <div className="capture-head">
-        <span className="agent-mark" aria-hidden>✦</span>
         <strong>{label}</strong>
         <span className="seg-time">{fmtTime(note.ts)}</span>
       </div>
       <div className="capture-text"><Linkified text={note.text} /></div>
-      {note.owner && <span className="capture-owner">{note.owner}</span>}
+      <MadeBy e={entry} />
       {heard && <span className="capture-owner">Awaiting confirmation</span>}
     </div>
   );

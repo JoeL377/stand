@@ -37,6 +37,7 @@ export function brainstormRoutes(app: Express, ctx: Services) {
         if (s) {
           s.itemsChanged();
           s.brainstormChanged();
+          s.startedBy(req.user!.id);
           if (b.itemId) s.setFocus(b.itemId, req.user!.name, "manual");
         }
         res.json({ brainstorm: toBrainstormView(b) });

@@ -38,6 +38,7 @@ export function reviewRoutes(app: Express, ctx: Services) {
         const s = sessions.get(room.id);
         if (s) {
           s.itemsChanged();
+          s.startedBy(req.user!.id);
           s.setFocus(started.firstItemId, req.user!.name, "manual");
         }
         res.json({ review: reviewView(db, room.id), firstItemId: started.firstItemId });
@@ -77,6 +78,7 @@ export function reviewRoutes(app: Express, ctx: Services) {
         const s = sessions.get(room.id);
         if (s) {
           s.itemsChanged();
+          s.startedBy(req.user!.id);
           s.setFocus(started.firstItemId, req.user!.name, "manual");
         }
         res.json({ reviewId: started.review.id, firstItemId: started.firstItemId });

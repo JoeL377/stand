@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { ReviewStage } from "./ReviewStage.tsx";
 import { DesignStage } from "./DesignStage.tsx";
 import { specAuthor } from "../../shared/designReview.ts";
-import { BrainMap } from "./BrainMap.tsx";
+import { BrainViews } from "./BrainWords.tsx";
 import { DesignBoard } from "./DesignBoard.tsx";
 import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
@@ -524,7 +524,7 @@ export function Stage(props: {
               onDrop={props.offline || props.ending ? undefined : (id) => send({ type: "design.drop", id })}
             />
           ) : (
-            <BrainMap brainstorm={props.brainstorm!} onRemove={props.offline || props.ending ? undefined : (id) => send({ type: "brainstorm.remove", id })} />
+            <BrainViews brainstorm={props.brainstorm!} onRemove={props.offline || props.ending ? undefined : (id) => send({ type: "brainstorm.remove", id })} />
           )
         ) : reviewUp && focusItem ? (
           <div className="screen-empty">
