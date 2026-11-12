@@ -1682,7 +1682,7 @@ function PartsPill({ done, total, open, onToggle }: { done: number; total: numbe
   if (open !== undefined)
     return (
       <button type="button" className={open ? "rc-pill task-parts fold open" : "rc-pill task-parts fold"} aria-expanded={open} aria-label={`${label}. ${open ? "Hide" : "Show"} them`} onClick={onToggle}>
-        {done}/{total} {total === 1 ? "part" : "parts"}
+        {done}/{total}
       </button>
     );
   return (
