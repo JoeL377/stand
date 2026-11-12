@@ -72,6 +72,8 @@ export interface AgentDeps {
   db: DB;
   /** Tells people in a live call that something changed on their space. */
   notify: (roomId: string, what: "updates" | "followups") => void;
+  /** A project was made or brought back: Stand files what nobody filed again soon (projectSuggest.ts). */
+  projectsChanged?: (roomId: string) => void;
   /** The meeting brief (stand.meeting-brief/v1) for a meeting. */
   brief: (meetingId: string, baseUrl: string, transcript: boolean) => unknown;
   /** The space's suggested agenda as people see it in the app. */
@@ -742,6 +744,7 @@ export function agentApi(deps: AgentDeps) {
         const existed = db.findProject(room.id, args.name);
         const p = db.createProject(room.id, { name: args.name, goal: args.goal, fromItemId: args.itemId ?? null }, byOf(caller));
         deps.notify(room.id, "followups");
+        deps.projectsChanged?.(room.id);
         return {
           [existed ? "brought_back" : "created"]: projectRow(p, baseUrl),
           linked_item: args.itemId ? db.getItem(args.itemId)?.title : undefined,

@@ -3,11 +3,12 @@
 // as with the topic label before.
 import type { Express, Response } from "express";
 import { ParentError, ProjectError } from "../db.ts";
+import { SUGGEST_AFTER_PROJECT_MS } from "../projectSuggest.ts";
 import type { Services } from "../services.ts";
 import { memberRoom, notFound, route } from "./http.ts";
 
 export function projectRoutes(app: Express, ctx: Services) {
-  const { db, sessions, afterItemsChange } = ctx;
+  const { db, sessions, afterItemsChange, projectSuggester } = ctx;
   /** Runs a change and turns a mistake in what was asked into a 400 with its words. */
   const attempt = (res: Response, fn: () => void) => {
     try {
@@ -38,6 +39,7 @@ export function projectRoutes(app: Express, ctx: Services) {
         const project = db.createProject(room.id, { name: req.body?.name, goal: req.body?.goal, fromItemId }, req.user!.name);
         if (fromItemId) afterItemsChange(room.id);
         changed(room.id);
+        projectSuggester.schedule(room.id, SUGGEST_AFTER_PROJECT_MS);
         res.status(201).json(project);
       });
     }),
@@ -54,6 +56,8 @@ export function projectRoutes(app: Express, ctx: Services) {
         const project = db.updateProject(room.id, req.params.projectId, { name, goal, position, archived });
         if (!project) return notFound(res, "No such project in this space");
         changed(room.id);
+        // A new name or goal, or back from the archive: Stand reads what nobody filed again.
+        if (name !== undefined || goal !== undefined || archived === false) projectSuggester.schedule(room.id, SUGGEST_AFTER_PROJECT_MS);
         res.json(project);
       });
     }),

@@ -302,6 +302,41 @@ export function projectsStore(db: DatabaseSync) {
       if (!ruledProjectOf(n, g)) db.prepare("UPDATE notes SET suggested_project_id = ? WHERE id = ?").run(before, noteId);
     },
 
+    /** What the project pass asks about (projectSuggest.ts), newest first: open to-dos and open questions
+     *  of the space's ended meetings that nobody filed, Stand never read, and the rules give no project. */
+    projectCandidates(roomId: string, limit = 120): Note[] {
+      const rows = db
+        .prepare(
+          `SELECT n.* FROM notes n JOIN meetings m ON m.id = n.meeting_id
+           WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND n.kind IN ('action', 'question') AND n.done_at IS NULL
+             AND n.project_set_by IS NULL AND n.suggested_project_id IS NULL AND n.project_judged_at IS NULL
+           ORDER BY n.ts DESC, n.rowid DESC`,
+        )
+        .all(roomId) as Row[];
+      if (!rows.length) return [];
+      const g = store.projectGraph(roomId);
+      return rows
+        .map(toNote)
+        .filter((n) => !g.notes[n.id] || !projectOf(g.notes[n.id], g))
+        .slice(0, limit);
+    },
+
+    /** Whether nobody filed the note yet, by hand or by a suggestion. */
+    projectUnfiled(noteId: string): boolean {
+      return !!db.prepare("SELECT 1 FROM notes WHERE id = ? AND project_set_by IS NULL AND suggested_project_id IS NULL").get(noteId);
+    },
+
+    /** The project pass read these notes, so it doesn't ask about them again. */
+    markProjectJudged(noteIds: string[], at: number) {
+      const st = db.prepare("UPDATE notes SET project_judged_at = ? WHERE id = ?");
+      for (const id of noteIds) st.run(at, id);
+    },
+
+    /** Spaces with an active project. */
+    roomsWithProjects(): string[] {
+      return (db.prepare("SELECT DISTINCT room_id FROM projects WHERE archived_at IS NULL").all() as Row[]).map((r) => r.room_id as string);
+    },
+
     /** Links an agenda item to a project, or takes the link off (null). */
     setItemProject(roomId: string, itemId: string, projectId: string | null): Item | null {
       if (projectId) {

@@ -41,6 +41,9 @@ export const config = {
    *  Claude pass (upNextPolish.ts). */
   doneSince: env("DONE_SINCE") === "on",
   suggestedAgenda: env("SUGGESTED_AGENDA") === "on",
+  /** Stand's project suggestions (projectSuggest.ts): a pass that files a space's unfiled to-dos and
+   *  open questions into its projects, as suggestions a person confirms. PROJECT_SUGGEST=off stops it. */
+  projectSuggest: env("PROJECT_SUGGEST") !== "off",
   /** CHAT_QUIET_MS: the quiet that closes a session of chat (an hour), for a run that proves the close. */
   chatQuietMs: Number(env("CHAT_QUIET_MS") ?? 0) || null,
   /** Chat capture (chatCapture.ts): to-dos, open questions, decisions and topics from a space's
