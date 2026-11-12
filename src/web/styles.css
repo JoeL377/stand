@@ -2385,8 +2385,7 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .sweep-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sweep-head h2 { margin: 0; font-size: 16px; }
 .sweep-head .agent-mark { font-size: 15px; }
-.sweep-lead, .sweep-working { margin: 0; font-size: 13px; }
-.sweep-working { animation: notes-pulse 1.6s ease-in-out infinite; }
+.sweep-lead { margin: 0; font-size: 13px; }
 .sweep-list { list-style: none; margin: 0; padding: 0; min-height: 0; overflow-y: auto; border-top: 1px solid var(--line); }
 .sweep-list li { border-bottom: 1px solid var(--line); }
 .sweep-list label { display: flex; align-items: flex-start; gap: 10px; padding: 9px 2px; cursor: pointer; }
@@ -2397,7 +2396,6 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .sweep-why { font-size: 13px; }
 .sweep-note { font-size: 12px; }
 .sweep-foot { display: flex; justify-content: flex-end; gap: 8px; }
-@media (prefers-reduced-motion: reduce) { .sweep-working { animation: none; } }
 @media (max-width: 640px) {
   .dialog-backdrop:has(> .sweep-pop) { padding: 0; place-items: stretch; }
   .sweep-pop { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; }

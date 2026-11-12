@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
+import { currentSweep } from "./questionSweep.ts";
 
 const seed = (dataDir: string) =>
   spawnSync(process.execPath, ["--import", "tsx", "scripts/seed-preview.ts"], {
@@ -27,6 +28,7 @@ test("the preview's sample data still loads, with something in each state", () =
   assert.equal(db.roomLinks(room.id, "depends_on").length, 1);
   assert.equal(db.roomLinks(room.id, "conflicts").length, 1);
   assert.equal(db.roomLinks(room.id, "leaves").length, 1);
+  assert.equal(currentSweep(db, room.id)?.proposals.length, 3);
 });
 
 test("it wipes its folder, so it won't run on one that isn't named preview", () => {

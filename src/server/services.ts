@@ -22,6 +22,7 @@ import { createAgent } from "./llm.ts";
 import { labeled } from "./usage.ts";
 import { PlanBriefs } from "./planBrief.ts";
 import { ProjectSuggester, SUGGEST_AFTER_CHANGE_MS, SUGGEST_AFTER_PROJECT_MS } from "./projectSuggest.ts";
+import { QuestionSweeper } from "./questionSweep.ts";
 import { Sources, setSources } from "./sources.ts";
 import { RoomSession } from "./room.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
@@ -69,6 +70,8 @@ export function startServices() {
   );
   // Stand's project suggestions for to-dos nobody filed (projectSuggest.ts).
   const projectSuggester = new ProjectSuggester(db, agent, (roomId) => live(roomId)?.followUpsChanged());
+  // Stand's sweep of open questions, after enough new ones or new decisions (questionSweep.ts).
+  const questionSweeper = new QuestionSweeper(db, agent);
 
   /** The space's meeting, started or picked up as someone arrives. Null when there's no such space. */
   function session(roomId: string): RoomSession | null {
@@ -89,8 +92,9 @@ export function startServices() {
       room,
       (closed) => {
         if (sessions.get(roomId) === closed) sessions.delete(roomId);
-        // The recap is saved: what the meeting caught can be filed.
+        // The recap is saved: what the meeting caught can be filed, and read against the open questions.
         projectSuggester.schedule(roomId, 0);
+        questionSweeper.schedule(roomId, 0);
       },
       capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r, () => keytermsFor(roomId, room.name)) : undefined,
       polisher,
@@ -205,6 +209,7 @@ export function startServices() {
         polisher.schedule(roomId, POLISH_BATCH_MS);
         doneDecks.schedule(roomId);
         projectSuggester.schedule(roomId, SUGGEST_AFTER_CHANGE_MS);
+        questionSweeper.schedule(roomId);
       }
     },
     projectsChanged: (roomId) => projectSuggester.schedule(roomId, SUGGEST_AFTER_PROJECT_MS),
@@ -243,6 +248,7 @@ export function startServices() {
   shipWatch.start();
   doneDecks.start();
   projectSuggester.start();
+  questionSweeper.start();
 
   // A space's sources: GitHub repos it links, which Stand reads and Ask Stand knows (sources.ts).
   const sources = new Sources(db.raw, path.join(config.dataDir, "repos"), githubApp);
@@ -259,7 +265,10 @@ export function startServices() {
         (roomId, e) => {
           spaceEvents.send(roomId, e);
           // The run over a session that closed is its last: what it caught can be filed.
-          if (e.type === "notes" && db.getChannel(e.channelId)?.openSessionId !== e.sessionId) projectSuggester.schedule(roomId, 0);
+          if (e.type === "notes" && db.getChannel(e.channelId)?.openSessionId !== e.sessionId) {
+            projectSuggester.schedule(roomId, 0);
+            questionSweeper.schedule(roomId, 0);
+          }
         },
         { quietMs: config.chatCaptureQuietMs ?? undefined, maxWaitMs: config.chatCaptureMaxWaitMs ?? undefined },
       )

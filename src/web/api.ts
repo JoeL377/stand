@@ -29,7 +29,6 @@ import type {
   SpaceFeed,
   SpaceMembers,
   SpaceSummary,
-  SweepProposal,
   TaskDetail,
   UpNext,
   User,
@@ -200,10 +199,10 @@ export const api = {
   /** undoAnswer: with state open on a question, also takes back the decision its answer made. */
   setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false; undoAnswer?: string }) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
-  /** Closes open questions: each with an answer (kept as a decision), a decision the space has, or a drop with why. */
-  closeQuestions: (roomId: string, rows: QuestionClose[]) => call<{ closed: QuestionClosed[] }>("POST", `/api/rooms/${roomId}/questions/close`, { rows }),
-  /** Stand's proposals for the space's open questions. It reads them all, so it takes a while. */
-  sweepQuestions: (roomId: string) => call<{ proposals: SweepProposal[] }>("POST", `/api/rooms/${roomId}/questions/sweep`, undefined, SLOW_REQUEST_MS),
+  /** Closes open questions: each with an answer (kept as a decision), a decision the space has, or a drop with why.
+   *  keep: the sweep's proposals someone unticked, which Stand doesn't propose again. */
+  closeQuestions: (roomId: string, rows: QuestionClose[], keep: string[] = []) =>
+    call<{ closed: QuestionClosed[] }>("POST", `/api/rooms/${roomId}/questions/close`, { rows, keep }),
   setTaskOwner: (roomId: string, noteId: string, owner: string | null) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}/owner`, { owner }),
   planReview: (id: string, version?: string) =>

@@ -1,13 +1,13 @@
 // Closing open questions by hand: the answer box under a question (the answer is kept as a
-// decision the question points to), and the sweep, where Stand proposes which of a space's open
+// decision the question points to), and the sweep, where Stand has proposed which of a space's open
 // questions a decision answers or nobody needs any more, and a person closes the ones they agree with.
 
 import { useEffect, useState } from "react";
-import type { Note, QuestionClosed, SweepProposal } from "../shared/protocol.ts";
+import type { Note, QuestionClosed, QuestionSweep } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { CloseIcon } from "./icons.tsx";
 import { errorToast, toast } from "./Toasts.tsx";
-import { fmtDate } from "./util.ts";
+import { fmtAgo, fmtDate } from "./util.ts";
 
 const ANSWER_MAX = 500;
 
@@ -79,29 +79,20 @@ export function AnswerForm(props: { roomId: string; note: Pick<Note, "id" | "tex
   );
 }
 
-/** The sweep: Stand's proposals for the space's open questions, each ticked until someone unticks it. */
-export function SweepPop(props: { roomId: string; count: number; onClose: () => void; onClosed: () => void }) {
-  const [proposals, setProposals] = useState<SweepProposal[] | null>(null);
-  const [error, setError] = useState("");
+/** The sweep: what Stand's last read of the open questions proposes to close, each ticked until
+ *  someone unticks it. An unticked one stays open, and Stand doesn't propose it again. */
+export function SweepPop(props: { roomId: string; count: number; sweep: QuestionSweep; onClose: () => void; onClosed: () => void }) {
+  // As it was when the list opened: the page reads the space again while this is up.
+  const [{ at, proposals }] = useState(props.sweep);
   const [off, setOff] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const { roomId, onClose } = props;
-  useEffect(() => {
-    let live = true;
-    api.sweepQuestions(roomId).then(
-      (r) => live && setProposals(r.proposals),
-      (err) => live && setError((err as Error).message),
-    );
-    return () => {
-      live = false;
-    };
-  }, [roomId]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
-  const picked = (proposals ?? []).filter((p) => !off.has(p.id));
+  const picked = proposals.filter((p) => !off.has(p.id));
   const toggle = (id: string) =>
     setOff((prev) => {
       const next = new Set(prev);
@@ -110,18 +101,23 @@ export function SweepPop(props: { roomId: string; count: number; onClose: () => 
       return next;
     });
   const close = async () => {
-    if (saving || !picked.length) return;
+    if (saving) return;
     setSaving(true);
     try {
       const { closed } = await api.closeQuestions(
         roomId,
         picked.map((p) => (p.how === "answered" && p.decision ? { id: p.id, decisionId: p.decision.id } : { id: p.id, drop: p.why })),
+        [...off],
       );
-      toast({ text: `Closed ${closed.length} ${closed.length === 1 ? "question" : "questions"}. They are under Done and Dropped.` });
+      toast({
+        text: picked.length
+          ? `Closed ${closed.length} ${closed.length === 1 ? "question" : "questions"}. They are under Done and Dropped.`
+          : "Kept open. Stand won't propose them again.",
+      });
       props.onClosed();
       onClose();
     } catch (err) {
-      errorToast("Couldn't close them")(err);
+      errorToast(picked.length ? "Couldn't close them" : "Couldn't save that")(err);
       setSaving(false);
     }
   };
@@ -139,51 +135,36 @@ export function SweepPop(props: { roomId: string; count: number; onClose: () => 
             <CloseIcon size={16} />
           </button>
         </div>
-        {error ? (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        ) : !proposals ? (
-          <p className="muted sweep-working" role="status">
-            Stand is reading {props.count} open {props.count === 1 ? "question" : "questions"} against what the space decided. This takes up to a minute.
-          </p>
-        ) : !proposals.length ? (
-          <p className="muted">Stand found nothing to close: every open question still looks worth an answer.</p>
-        ) : (
-          <>
-            <p className="muted sweep-lead">
-              Stand thinks these {proposals.length} of {props.count} are settled or no longer matter. Untick the ones to keep open. Nothing closes until you say so.
-            </p>
-            <ul className="sweep-list">
-              {proposals.map((p) => (
-                <li key={p.id}>
-                  <label>
-                    <input type="checkbox" checked={!off.has(p.id)} disabled={saving} onChange={() => toggle(p.id)} />
-                    <span className="sweep-row">
-                      <span className="sweep-q">
-                        {p.text} <span className="muted">· {fmtDate(p.askedAt)}</span>
-                      </span>
-                      <span className="sweep-why">
-                        <span className={`rc-pill task-closed${p.how === "drop" ? " dropped" : ""}`}>{p.how === "drop" ? "Drop" : "Answered"}</span>{" "}
-                        {p.how === "answered" && p.decision ? p.decision.text : p.why}
-                      </span>
-                      {p.how === "answered" && p.why && <span className="sweep-note muted">{p.why}</span>}
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+        <p className="muted sweep-lead">
+          Stand read the open questions {fmtAgo(at)} and thinks these {proposals.length} of {props.count} are settled or no longer matter. Untick the ones to keep open: Stand
+          won't propose those again. Nothing closes until you say so.
+        </p>
+        <ul className="sweep-list">
+          {proposals.map((p) => (
+            <li key={p.id}>
+              <label>
+                <input type="checkbox" checked={!off.has(p.id)} disabled={saving} onChange={() => toggle(p.id)} />
+                <span className="sweep-row">
+                  <span className="sweep-q">
+                    {p.text} <span className="muted">· {fmtDate(p.askedAt)}</span>
+                  </span>
+                  <span className="sweep-why">
+                    <span className={`rc-pill task-closed${p.how === "drop" ? " dropped" : ""}`}>{p.how === "drop" ? "Drop" : "Answered"}</span>{" "}
+                    {p.how === "answered" && p.decision ? p.decision.text : p.why}
+                  </span>
+                  {p.how === "answered" && p.why && <span className="sweep-note muted">{p.why}</span>}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
         <div className="sweep-foot">
           <button type="button" onClick={onClose}>
-            {proposals && !proposals.length ? "Close" : "Cancel"}
+            Cancel
           </button>
-          {!!proposals?.length && (
-            <button type="button" className="primary" disabled={saving || !picked.length} onClick={() => void close()}>
-              {saving ? "Closing…" : `Close ${picked.length} ${picked.length === 1 ? "question" : "questions"}`}
-            </button>
-          )}
+          <button type="button" className="primary" disabled={saving} onClick={() => void close()}>
+            {saving ? "Saving…" : picked.length ? `Close ${picked.length} ${picked.length === 1 ? "question" : "questions"}` : "Keep them all open"}
+          </button>
         </div>
       </div>
     </div>

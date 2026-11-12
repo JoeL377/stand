@@ -15,6 +15,7 @@ import { forSpace } from "./usage.ts";
 import { newId } from "./ids.ts";
 import { archivedRows } from "./archive.ts";
 import { withFrom } from "./noteFrom.ts";
+import { currentSweep } from "./questionSweep.ts";
 import { settledView } from "./spaceSettle.ts";
 import { currentDoneDeck } from "./doneDeck.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
@@ -158,7 +159,8 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
   // Archived rows leave the page; the Archived list shows them instead.
   const gone = new Set(archived.map((a) => a.ref));
   const keep = (kind: string) => (x: { id: string }) => !gone.has(`${kind}:${x.id}`);
-  const { decided, open, answered } = settledView(db, roomId);
+  const view = settledView(db, roomId);
+  const { decided, open, answered } = view;
   // Each to-do, question and decision with the project it is in (shared/projects.ts).
   const graph = db.projectGraph(roomId);
   const grouped = <T extends Note>(notes: T[]) => db.withProjects(roomId, notes, graph);
@@ -166,6 +168,8 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
     archived,
     // Between meetings: what the next one will open on. During one: what it opened on.
     doneDeck: currentDoneDeck(db, roomId),
+    // The open questions Stand's last sweep proposes to close.
+    questionSweep: currentSweep(db, roomId, view),
     // The next product review: slides agents added, and finished work that will join it.
     review: reviewView(db, roomId, baseUrl),
     reviews: reviewsDone(db, roomId),

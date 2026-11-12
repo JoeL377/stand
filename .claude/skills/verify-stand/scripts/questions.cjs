@@ -8,9 +8,9 @@
 // question by hand, so it runs on the preview's sample data (features/questions.md says how):
 //   NODE_PATH="$(npm root -g)" node questions.cjs <run dir> [--headed]
 //
-// Without a model the sweep can't read the questions, so the script first shows what the page
-// says then, and after that answers the sweep request itself with proposals made from the
-// space's own questions and decisions. The close that follows is the real one.
+// Stand sweeps the questions by itself and keeps what it proposes; the page only shows that. With
+// no model here, the sample data carries a kept sweep (scripts/seed-preview.ts), and the close that
+// follows is the real one.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -86,42 +86,36 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
       check("the sweep is offered", (await page.getByRole("button", { name: /Sweep questions/ }).count()) === 1);
     });
 
-    await step("the sweep says so when Stand has no model", async () => {
-      await clearToasts();
-      await page.getByRole("button", { name: /Sweep questions/ }).click();
-      const pop = page.locator(".sweep-pop");
-      await pop.locator(".error").waitFor();
-      await snap("sweep-no-model");
-      check("it says it couldn't read them", /couldn't read the questions/.test(await pop.innerText()));
-      await pop.getByRole("button", { name: "Cancel" }).click();
-    });
-
     await step("sweep: untick one proposal, close the rest in one step", async () => {
+      await clearToasts();
       const f = await feed();
-      const q = (text) => f.open.find((n) => n.text === text);
-      const ship = f.decided.find((n) => n.text === SHIP);
-      const proposals = [
-        { id: q(ONCALL).id, text: ONCALL, askedAt: q(ONCALL).ts, how: "drop", why: "A check on one week that has passed" },
-        { id: q(WAIT).id, text: WAIT, askedAt: q(WAIT).ts, how: "answered", decision: { id: ship.id, text: ship.text }, why: "Decided once the fraud numbers came in low" },
-        { id: q(LONG).id, text: LONG, askedAt: q(LONG).ts, how: "drop", why: "The layout shipped" },
-      ];
-      await page.route("**/questions/sweep", (r) => r.fulfill({ json: { proposals } }));
-      await page.getByRole("button", { name: /Sweep questions/ }).click();
+      check("the feed carries what the last sweep proposes", f.questionSweep?.proposals.length === 3, f.questionSweep?.proposals.map((p) => p.text));
+      const asked = [];
+      const hear = (r) => /\/questions\//.test(r.url()) && asked.push(`${r.method()} ${new URL(r.url()).pathname}`);
+      page.on("request", hear);
+      const button = page.getByRole("button", { name: /Sweep questions/ });
+      check("the button counts the proposals, not the open questions", /3\s*$/.test(await button.innerText()), await button.innerText());
+      await button.click();
       const pop = page.locator(".sweep-pop");
       await pop.locator(".sweep-list li").first().waitFor();
+      check("opening the list asks the server for nothing", asked.length === 0, asked);
+      check("it says when Stand read the questions", /Stand read the open questions 3h ago/.test(await pop.innerText()));
       await pop.locator(".sweep-list li", { hasText: LONG }).getByRole("checkbox").uncheck();
       await snap("sweep-proposals");
       check("the button counts what is ticked", (await pop.getByRole("button", { name: "Close 2 questions" }).count()) === 1);
       await pop.getByRole("button", { name: "Close 2 questions" }).click();
       await page.locator(".toast", { hasText: "Closed 2 questions" }).waitFor();
       await clearToasts();
-      await page.unroute("**/questions/sweep");
+      check("one request closed them", asked.length === 1 && /^POST .*\/questions\/close$/.test(asked[0]), asked);
+      page.off("request", hear);
       const after = await feed();
       const closed = (text) => after.closedQuestions.find((n) => n.text === text);
       check("the dropped one says why", closed(ONCALL)?.state === "dropped" && closed(ONCALL)?.dropReason === "A check on one week that has passed", closed(ONCALL) && [closed(ONCALL).state, closed(ONCALL).dropReason]);
       check("the answered one points at the decision the space had", closed(WAIT)?.closedBy === "answered" && closed(WAIT)?.answeredBy === SHIP, closed(WAIT) && [closed(WAIT).closedBy, closed(WAIT).answeredBy]);
       check("no new decision was written for it", after.decided.filter((n) => n.text === SHIP).length === 1);
       check("the unticked one stays open", after.open.some((n) => n.text === LONG), after.open.map((n) => n.text));
+      check("and Stand doesn't propose it again", after.questionSweep === null, after.questionSweep);
+      await button.waitFor({ state: "detached" });
       await page.locator(".sh-done-toggle", { hasText: "Dropped" }).click();
       await page.locator(".sh-done li", { hasText: ONCALL }).locator(".rc-pill", { hasText: "Dropped" }).hover();
       await snap("after-sweep");
