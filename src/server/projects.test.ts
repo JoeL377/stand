@@ -242,6 +242,62 @@ test("a suggestion is confirmed or rejected by hand; following the agenda keeps 
   }
 });
 
+test("a suggestion that a task passes on stays a suggestion, and a firm project comes first", () => {
+  const { db, room, m } = setup();
+  try {
+    const a = db.createProject(room.id, { name: "A" }, "Sam");
+    const link = db.createProject(room.id, { name: "Link" }, "Sam");
+    const [parent, child] = db.syncNotes(m.id, null, [
+      { kind: "action", text: "Parent", owner: null },
+      { kind: "action", text: "Child", owner: null },
+    ]);
+    db.raw.prepare("UPDATE notes SET parent_id = ? WHERE id = ?").run(parent.id, child.id);
+    db.suggestNoteProject(room.id, parent.id, a.id);
+    let n = read(db, room.id, child.id);
+    assert.deepEqual([n.project, n.ruledProject, n.projectSuggested], [a.id, null, true], "the parent's suggestion, still a suggestion");
+    db.setNoteProject(room.id, parent.id, { projectId: a.id, by: "Sam" });
+    n = read(db, room.id, child.id);
+    assert.deepEqual([n.project, n.ruledProject, n.projectSuggested], [a.id, a.id, undefined], "the parent confirmed: the child is firm");
+    db.setNoteProject(room.id, parent.id, { projectId: null, by: "Sam" });
+    assert.equal(read(db, room.id, child.id).project, null, "a parent set to Unassigned by hand passes on no suggestion");
+
+    // An item that shows a task with a suggestion, and links a project of its own.
+    const [shownTodo] = db.syncNotes(m.id, null, [{ kind: "action", text: "Shown", owner: null }]);
+    db.suggestNoteProject(room.id, shownTodo.id, a.id);
+    const taskItem = db.taskItem(room.id, shownTodo.id, shownTodo.text, null);
+    const [said] = db.syncNotes(m.id, taskItem.id, [{ kind: "action", text: "Said on it", owner: null }]);
+    assert.deepEqual([read(db, room.id, said.id).project, read(db, room.id, said.id).projectSuggested], [a.id, true], "the shown task's suggestion");
+    db.setItemProject(room.id, taskItem.id, link.id);
+    n = read(db, room.id, said.id);
+    assert.deepEqual([n.project, n.projectSuggested], [link.id, undefined], "the item's link beats the shown task's suggestion");
+  } finally {
+    db.raw.close();
+  }
+});
+
+test("a project whose open to-dos are only suggestions can be archived, and stays archived", () => {
+  const { db, room, items, m } = setup();
+  try {
+    const a = db.createProject(room.id, { name: "A" }, "Sam");
+    const [x] = db.syncNotes(m.id, null, [{ kind: "action", text: "X", owner: null }]);
+    const [q] = db.syncNotes(m.id, items[0].id, [{ kind: "question", text: "Q?", owner: null }]);
+    db.endMeeting(m.id, null);
+    db.suggestNoteProject(room.id, x.id, a.id);
+    assert.equal(db.getProject(room.id, a.id)?.openTodos, 1, "the count shows it");
+    assert.equal(db.updateProject(room.id, a.id, { archived: true })?.archived, true);
+    assert.equal(read(db, room.id, x.id).project, null, "back to Unassigned");
+    assert.equal(db.listProjects(room.id)[0].archived, true);
+
+    // A move never suggests an archived project.
+    db.setItemProject(room.id, items[0].id, a.id);
+    assert.equal(read(db, room.id, q.id).project, a.id);
+    db.moveNoteKeepingProject(room.id, q.id, items[1].id);
+    assert.deepEqual([read(db, room.id, q.id).project, db.getNote(q.id)?.suggestedProjectId], [null, undefined]);
+  } finally {
+    db.raw.close();
+  }
+});
+
 test("deleting or archiving a project takes its suggestions off, so an archived one doesn't come back", () => {
   const { db, room, m } = setup();
   try {

@@ -690,7 +690,7 @@ export function agentApi(deps: AgentDeps) {
           decisions: inIt(standing.decided.filter((n) => !n.replacedBy)).length,
           open_questions: inIt(standing.open.filter((n) => !isClosed(stateOf(n)))).length,
         },
-        open_todos: open.slice(0, 50).map((n) => ({ ...actionInfo(n, work.get(n.id)), project: undefined, url: refUrl(baseUrl, "action", n.id) })),
+        open_todos: open.slice(0, 50).map((n) => ({ ...actionInfo(n, work.get(n.id)), project: undefined, ...(n.projectSuggested ? { suggested: true } : {}), url: refUrl(baseUrl, "action", n.id) })),
         decisions: inIt(standing.decided.filter((n) => !n.replacedBy))
           .slice(0, 30)
           .map((n) => ({ ref: refOf("decision", n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, "decision", n.id) })),
@@ -701,7 +701,7 @@ export function agentApi(deps: AgentDeps) {
           .listItems(room.id)
           .filter((i) => i.projectId === p.id)
           .map((i) => ({ id: i.id, title: i.title, stand_url: `${baseUrl}/items/${i.id}` })),
-        how: "A to-do is in this project when someone set it, or when its agenda item links here. Give a to-do a project with create_action or update_action (project).",
+        how: "A to-do is in this project when someone set it, when its agenda item links here, or when Stand suggested it and nobody confirmed it yet (suggested: true). Give a to-do a project, or confirm a suggestion, with create_action or update_action (project).",
       };
     },
 

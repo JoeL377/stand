@@ -3,6 +3,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Item, Note } from "../../shared/protocol.ts";
 import {
+  firmProjectOf,
   normalizeProjectName,
   PROJECT_GOAL_MAX,
   PROJECT_NAME_MAX,
@@ -10,6 +11,7 @@ import {
   type ProjectGraph,
   projectKey,
   projectOf,
+  projectSuggestedOf,
   ruledProjectOf,
 } from "../../shared/projects.ts";
 import { newId } from "../ids.ts";
@@ -43,6 +45,16 @@ export function projectsStore(db: DatabaseSync) {
     db
       .prepare("UPDATE notes SET project_judged_at = NULL WHERE suggested_project_id IS NULL AND project_judged_at IS NOT NULL AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)")
       .run(roomId);
+  /** The open to-dos of a space's ended meetings: the ones a project counts. */
+  const openTodoIds = (roomId: string) =>
+    (
+      db
+        .prepare(
+          `SELECT n.id FROM notes n JOIN meetings m ON m.id = n.meeting_id
+           WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND n.kind = 'action' AND n.done_at IS NULL`,
+        )
+        .all(roomId) as Row[]
+    ).map((r) => r.id as string);
 
   const store = {
     /** What the rules read for a space: every item (archived ones too, so a task keeps its project after
@@ -85,8 +97,7 @@ export function projectsStore(db: DatabaseSync) {
       return notes.map((n) => {
         if (n.kind === "context" || n.kind === "summary") return n;
         const ruledProject = ruledProjectOf(n, g);
-        const suggested = n.projectSetBy == null && !ruledProject && !!n.suggestedProjectId;
-        return { ...n, project: projectOf(n, g), ruledProject, ...(suggested ? { projectSuggested: true } : {}) };
+        return { ...n, project: projectOf(n, g), ruledProject, ...(projectSuggestedOf(n, g) ? { projectSuggested: true } : {}) };
       });
     },
 
@@ -97,15 +108,7 @@ export function projectsStore(db: DatabaseSync) {
       if (!rows.length) return [];
       const g = graph ?? store.projectGraph(roomId);
       const open = new Map<string, number>();
-      const openIds = (
-        db
-          .prepare(
-            `SELECT n.id FROM notes n JOIN meetings m ON m.id = n.meeting_id
-             WHERE m.room_id = ? AND m.ended_at IS NOT NULL AND n.kind = 'action' AND n.done_at IS NULL`,
-          )
-          .all(roomId) as Row[]
-      ).map((r) => r.id as string);
-      for (const id of openIds) {
+      for (const id of openTodoIds(roomId)) {
         const n = g.notes[id];
         const p = n ? projectOf(n, g) : null;
         if (p) open.set(p, (open.get(p) ?? 0) + 1);
@@ -179,7 +182,7 @@ export function projectsStore(db: DatabaseSync) {
     },
 
     /** Renames a project, changes its goal, moves it in the list, or archives it (only with no open
-     *  to-dos) or brings it back. Null when the space has no such project. */
+     *  to-dos in it firmly; Stand's suggestions don't count) or brings it back. Null when the space has no such project. */
     updateProject(roomId: string, id: string, change: { name?: unknown; goal?: unknown; position?: unknown; archived?: unknown }): Project | null {
       const r = row(id);
       if (!r || r.room_id !== roomId) return null;
@@ -202,7 +205,9 @@ export function projectsStore(db: DatabaseSync) {
       }
       if (change.archived !== undefined) {
         if (change.archived) {
-          const open = store.getProject(roomId, id)?.openTodos ?? 0;
+          // Only what is in it firmly holds it: Stand's suggestions are taken off below.
+          const g = store.projectGraph(roomId);
+          const open = openTodoIds(roomId).filter((x) => g.notes[x] && firmProjectOf(g.notes[x], g) === id).length;
           if (open > 0) throw new ProjectError(`This project has ${open} open ${open === 1 ? "to-do" : "to-dos"}. Close or move ${open === 1 ? "it" : "them"} first.`);
           db.prepare("UPDATE projects SET archived_at = COALESCE(archived_at, ?) WHERE id = ?").run(Date.now(), id);
           // A suggestion would bring it back once its to-do opens again (listProjects).
@@ -292,7 +297,7 @@ export function projectsStore(db: DatabaseSync) {
       const n = g.notes[noteId];
       const before = n ? projectOf(n, g) : null;
       db.prepare("UPDATE notes SET item_id = ? WHERE id = ?").run(itemId, noteId);
-      if (!n || !before || n.projectSetBy != null) return;
+      if (!n || !before || n.projectSetBy != null || row(before)?.archived_at != null) return;
       n.itemId = itemId;
       if (!ruledProjectOf(n, g)) db.prepare("UPDATE notes SET suggested_project_id = ? WHERE id = ?").run(before, noteId);
     },

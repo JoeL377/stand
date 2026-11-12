@@ -1256,9 +1256,13 @@ test("agents see Stand's suggested project as suggested, find it under the proje
   const listed = api.listActions(agent, { space: room.id, project: ref }, "x");
   assert.deepEqual(listed.actions.map((a) => [a.ref, a.project]), [[todo.ref, { ref, name: "Billing", suggested: true }]], "the filter includes a suggested to-do");
   assert.deepEqual((api.get(agent, todo.ref, "x") as { project: unknown }).project, { ref, name: "Billing", suggested: true });
+  const inIt = () => api.get(agent, ref, "x") as { open_todos: Array<{ ref: string; suggested?: boolean }>; how: string };
+  assert.deepEqual(inIt().open_todos.map((t) => [t.ref, t.suggested]), [[todo.ref, true]], "the project lists it as suggested");
+  assert.match(inIt().how, /Stand suggested it/);
 
   const confirmed = api.updateAction(agent, { ref: todo.ref, project: ref }, "x");
   assert.deepEqual(confirmed.updated.project, { ref, name: "Billing" }, "set by hand now: no suggested");
   assert.ok(db.getNote(parseRef(todo.ref)!.id)?.projectSetBy, "confirmed by hand");
   assert.deepEqual((api.get(agent, todo.ref, "x") as { project: unknown }).project, { ref, name: "Billing" });
+  assert.deepEqual(inIt().open_todos.map((t) => [t.ref, t.suggested]), [[todo.ref, undefined]]);
 });

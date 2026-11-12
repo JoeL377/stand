@@ -4,8 +4,10 @@
 //   2. from its agenda item: the project of the to-do the item shows, else the item's link, else the
 //      link of the agenda item its deck is presented under;
 //   3. from its parent task;
-//   4. suggested by Stand, until someone confirms or changes it;
+//   4. suggested by Stand: its own suggestion, else the one of the task rule 2 or 3 follows. It shows
+//      as not confirmed until someone confirms or changes it;
 //   5. else Unassigned.
+// Rules 1 to 3 give the firm project, and when they follow a task they take only its firm one.
 // The server and the browser share this file.
 
 export const PROJECT_NAME_MAX = 80;
@@ -24,7 +26,7 @@ export interface Project {
   position: number;
   /** Archived projects are out of the list and the picker. Their tasks keep the link. */
   archived: boolean;
-  /** Open to-dos in it, by the rules. */
+  /** Open to-dos in it, by the rules, Stand's suggestions too. */
   openTodos: number;
   createdBy: string | null;
   createdAt: number;
@@ -53,28 +55,62 @@ export interface ProjectNote {
 /** How far the rules follow other tasks before they stop, so a loop can't run forever. */
 const MAX_STEPS = 5;
 
-/** The note's project: rule 1, else the rules after it. */
+/** The note's project: its firm one (rules 1 to 3), else Stand's suggestion (rule 4). */
 export function projectOf(note: ProjectNote, g: ProjectGraph, steps = 0): string | null {
   if (note.projectSetBy != null) return note.projectId ?? null;
-  return ruledProjectOf(note, g, steps) ?? note.suggestedProjectId ?? null;
+  return ruledProjectOf(note, g, steps) ?? suggestedOf(note, g, steps);
 }
 
-/** What rules 2 and 3 give, leaving out what was set by hand and what Stand suggests. */
+/** The project from rules 1 to 3 only: what someone set or the agenda gives, never a suggestion. */
+export function firmProjectOf(note: ProjectNote, g: ProjectGraph, steps = 0): string | null {
+  if (note.projectSetBy != null) return note.projectId ?? null;
+  return ruledProjectOf(note, g, steps);
+}
+
+/** Whether the note's project is only Stand's suggestion: rules 1 to 3 give nothing. */
+export function projectSuggestedOf(note: ProjectNote, g: ProjectGraph): boolean {
+  return note.projectSetBy == null && !ruledProjectOf(note, g) && !!suggestedOf(note, g, 0);
+}
+
+/** What rules 2 and 3 give, leaving out what was set by hand and what Stand suggests. A task they
+ *  follow gives only its firm project. */
 export function ruledProjectOf(note: ProjectNote, g: ProjectGraph, steps = 0): string | null {
   if (steps >= MAX_STEPS) return null;
   const item = note.itemId ? g.items[note.itemId] : undefined;
   if (item && note.itemId) {
-    const shown = item.taskId ?? g.shows[note.itemId];
-    const task = shown && shown !== note.id ? g.notes[shown] : undefined;
-    const fromTask = task ? projectOf(task, g, steps + 1) : null;
+    const task = shownTask(note, g);
+    const fromTask = task ? firmProjectOf(task, g, steps + 1) : null;
     if (fromTask) return fromTask;
     if (item.projectId) return item.projectId;
     const deck = item.deckId ? g.decks[item.deckId] : undefined;
     const parent = deck?.parentItemId ? g.items[deck.parentItemId] : undefined;
     if (parent?.projectId) return parent.projectId;
   }
-  const parent = note.parentId && note.parentId !== note.id ? g.notes[note.parentId] : undefined;
-  return parent ? projectOf(parent, g, steps + 1) : null;
+  const parent = parentTask(note, g);
+  return parent ? firmProjectOf(parent, g, steps + 1) : null;
+}
+
+/** Rule 4: the note's own suggestion, else the one of the task its item shows, else its parent's.
+ *  A task someone set by hand passes on no suggestion. */
+function suggestedOf(note: ProjectNote, g: ProjectGraph, steps: number): string | null {
+  if (steps >= MAX_STEPS) return null;
+  if (note.suggestedProjectId) return note.suggestedProjectId;
+  for (const task of [shownTask(note, g), parentTask(note, g)]) {
+    const s = task && task.projectSetBy == null ? suggestedOf(task, g, steps + 1) : null;
+    if (s) return s;
+  }
+  return null;
+}
+
+/** The to-do the note's agenda item shows: the presented task, or a review slide's to-do. */
+function shownTask(note: ProjectNote, g: ProjectGraph): ProjectNote | undefined {
+  const item = note.itemId ? g.items[note.itemId] : undefined;
+  const shown = item && note.itemId ? (item.taskId ?? g.shows[note.itemId]) : undefined;
+  return shown && shown !== note.id ? g.notes[shown] : undefined;
+}
+
+function parentTask(note: ProjectNote, g: ProjectGraph): ProjectNote | undefined {
+  return note.parentId && note.parentId !== note.id ? g.notes[note.parentId] : undefined;
 }
 
 /** The project filter in the URL: "" for everything, "none" for Unassigned, or a project's id. */
