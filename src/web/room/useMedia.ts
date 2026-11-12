@@ -93,8 +93,10 @@ async function micStream(id: string | null): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({ audio: true });
 }
 
-export function useMedia(opts: { roomId: string; livekit: boolean; enabled: boolean }) {
+export function useMedia(opts: { roomId: string; livekit: boolean; enabled: boolean; startMuted?: boolean }) {
   const { roomId, livekit, enabled } = opts;
+  // Read once, when the call connects: joining muted is a choice about the start, not a setting.
+  const startMuted = useRef(Boolean(opts.startMuted));
   const roomRef = useRef<Room | null>(null);
   const [micOn, setMicOn] = useState(false);
   // The mic itself, for the Mac app's bar to hear. With LiveKit it stays while muted (muting
@@ -205,6 +207,11 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
         setAudioWas(true);
         setAudioAway(null);
         setNeedsAudioUnlock(!room.canPlaybackAudio);
+        // Joined muted: the mic waits for the first Unmute, and its prompt with it.
+        if (startMuted.current) {
+          startMuted.current = false;
+          return;
+        }
         // Connected is one thing; the mic is another, with its own prompt and its own ways to fail.
         micBusy.current = true;
         setMicStarting(true);
@@ -313,7 +320,7 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
   const toggleRef = useRef(toggleMic);
   toggleRef.current = toggleMic;
   useEffect(() => {
-    if (!livekit && enabled) void toggleRef.current();
+    if (!livekit && enabled && !startMuted.current) void toggleRef.current();
   }, [livekit, enabled]);
 
   // ---- which mic ------------------------------------------------------------

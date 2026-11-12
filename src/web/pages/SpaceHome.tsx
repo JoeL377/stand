@@ -25,6 +25,7 @@ import { removeSnap } from "../Snaps.tsx";
 import { AnswerForm, SweepPop, answeredToast } from "../Questions.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
+import { usePhone } from "../phone.ts";
 import { fmtDate, fmtTime } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { brainstormHref } from "./BrainstormPage.tsx";
@@ -44,7 +45,7 @@ type Entry =
   | { kind: "jot"; at: number; jot: Jot }
   | { kind: "meeting"; at: number; meeting: SpaceFeed["meetings"][number] };
 
-export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: () => void }) {
+export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boolean }) => void; reload: () => void }) {
   const { room, reload } = props;
   const colorFor = useColorRegistry(room.id, room.people.map((p) => ({ id: p.name, name: p.name })));
   const { user, caps } = useAuth();
@@ -264,6 +265,23 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
 
   const live = !!room.liveMeetingId;
   const wrapping = live && room.people.length === 0;
+  // A phone asks before it puts you in a call that is already going: who is there, what is on, mic or not.
+  const phone = usePhone();
+  const [prejoin, setPrejoin] = useState(false);
+  const [headMore, setHeadMore] = useState(false);
+  const headMoreBox = useDismiss<HTMLSpanElement>(headMore, () => setHeadMore(false));
+  const onNow = !live
+    ? ""
+    : feed?.review?.status === "live"
+      ? "Product review on now"
+      : feed?.designReview?.live
+        ? "Design review on now"
+        : (feed?.ideaReviews ?? []).some((r) => r.status === "live")
+          ? "Idea review on now"
+          : (feed?.brainstorms ?? []).some((b) => b.status === "live")
+            ? "Brainstorm on now"
+            : "Talking now";
+  const talk = () => (phone && live && !wrapping ? setPrejoin(true) : props.onJoin());
   const members = spaces?.find((s) => s.id === room.id)?.people ?? [];
   const faces = live && room.people.length ? room.people : members.map((name) => ({ name, picture: null }));
 
@@ -351,7 +369,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   return (
   <PersonColors.Provider value={colorFor}>
     <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread, chatMentions: chat.mentions } : s))}>
-      <main className="sh-main">
+      <main className={["sh-main", phone && live && !wrapping && "is-live", tab === "chat" && "on-chat"].filter(Boolean).join(" ")}>
         {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls and only the tabs stay. */}
         <div className="sh-top">
         <header className="sh-head">
@@ -387,17 +405,34 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                 {!docked && <ChatMarks unread={chat.unread} mentions={chat.mentions} />}
               </button>
             )}
+{phone ? (
+              <span className="sh-head-more" ref={headMoreBox}>
+                <button className="sh-invite" aria-label="About this space" aria-haspopup="menu" aria-expanded={headMore} onClick={() => setHeadMore(!headMore)}>
+                  ···
+                </button>
+                {headMore && (
+                  <div className="rp-menu sh-head-menu" role="menu">
+                    {room.purpose && <p className="muted">{room.purpose}</p>}
+                    <button type="button" role="menuitem" onClick={copy}>
+                      <LinkIcon />
+                      {copied ? "Link copied" : "Copy invite link"}
+                    </button>
+                  </div>
+                )}
+              </span>
+            ) : (
             <button className="sh-invite" onClick={copy} title="Copy a link others can join with">
               <LinkIcon />
               {copied ? "Copied" : "Invite"}
             </button>
+            )}
             <StartMenu
               label={wrapping ? "Join" : live ? "Join them" : "Start talking"}
               review={feed?.review ?? null}
               designReview={feed?.designReview ?? null}
               ideaReviews={(feed?.ideaReviews ?? []).filter((r) => r.status !== "done").map((r) => ({ ...r, href: reviewHref(room.id, r.id) }))}
               designHref={designReviewHref(room.id)}
-              onTalk={props.onJoin}
+              onTalk={talk}
               onReview={() => setShowReview(true)}
             />
           </span>
@@ -652,6 +687,48 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
           />
         )}
         </div>
+        {phone && live && !wrapping && tab !== "chat" && !prejoin && (
+          <div className="sh-joinbar">
+            <span className="sh-live">
+              <span className="dot" />
+              {onNow}
+            </span>
+            <span className="sh-faces stack">
+              {room.people.slice(0, 3).map((p, i) => (
+                <Avatar key={i} id={p.name} name={p.name} picture={p.picture} size={24} />
+              ))}
+              {room.people.length > 3 && <span className="sh-faces-more">+{room.people.length - 3}</span>}
+            </span>
+            <button className="primary sh-join" onClick={() => setPrejoin(true)}>
+              Join
+            </button>
+          </div>
+        )}
+        {prejoin && (
+          <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setPrejoin(false)}>
+            <div className="sh-prejoin" role="dialog" aria-modal="true" aria-label="Join the call">
+              <strong>{onNow}</strong>
+              <ul className="sh-prejoin-people">
+                {room.people.map((p, i) => (
+                  <li key={i}>
+                    <Avatar id={p.name} name={p.name} picture={p.picture} size={28} />
+                    {p.name}
+                  </li>
+                ))}
+              </ul>
+              <div className="sh-prejoin-go">
+                <button className="primary" onClick={() => props.onJoin()}>
+                  <MicIcon />
+                  Join
+                </button>
+                <button onClick={() => props.onJoin({ muted: true })}>Join muted</button>
+              </div>
+              <button className="link muted" onClick={() => setPrejoin(false)}>
+                Not now
+              </button>
+            </div>
+          </div>
+        )}
       </main>
       {docked && (
         <aside className="sh-dock" aria-label="Chat">
@@ -1247,14 +1324,14 @@ function TasksTab(props: {
             }}
           />
         ) : (
-          <button type="button" className="rp-pill" onClick={() => setAdding(true)}>
+          <button type="button" className="rp-pill desk-only" onClick={() => setAdding(true)}>
             + Project
           </button>
         )}
         {!props.mine && !props.projectFilter && sweep && (
           <button
             type="button"
-            className="rp-pill"
+            className="rp-pill desk-only"
             onClick={() => setSweeping(sweep)}
             title={`Stand thinks ${sweep.proposals.length === 1 ? "1 open question is" : `${sweep.proposals.length} open questions are`} settled or no longer ${sweep.proposals.length === 1 ? "matters" : "matter"}. Nothing closes until you confirm.`}
           >

@@ -1,11 +1,12 @@
 // The views beside the call's board: the topic card, the map of what the talk came up with, its
 // words, or a design session's diagram. Each person picks theirs; nothing else in the call changes.
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts";
 import { brainstormHref } from "../pages/BrainstormPage.tsx";
 import { BrainMap } from "./BrainMap.tsx";
 import { BrainWords } from "./BrainWords.tsx";
+import { BrainOutline } from "./BrainOutline.tsx";
 import { DesignBoard } from "./DesignBoard.tsx";
 
 export type ViewTab = "card" | "map" | "words" | "diagram";
@@ -36,7 +37,10 @@ export function ViewPane(props: {
   onDrawDiagram?: () => void;
   onOpen?: () => void;
   onStop?: () => void;
+  /** On a phone the map opens as a list, with the picture a tap away. */
+  phone?: boolean;
 }) {
+  const [picture, setPicture] = useState(false);
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
   const map = live && !live.design ? live : null;
   const diagram = live?.design ? live : null;
@@ -59,6 +63,16 @@ export function ViewPane(props: {
               </button>
             ))}
           </span>
+          {props.phone && view === "map" && map && (
+            <span className="bp-views view-as" role="group" aria-label="Show the map as">
+              <button type="button" className={`rp-pill${picture ? "" : " on"}`} aria-pressed={!picture} onClick={() => setPicture(false)}>
+                List
+              </button>
+              <button type="button" className={`rp-pill${picture ? " on" : ""}`} aria-pressed={picture} onClick={() => setPicture(true)}>
+                Picture
+              </button>
+            </span>
+          )}
           {props.onStop && view === "map" && map && (
             <button type="button" className="link muted view-stop" onClick={stop("map", "the map is kept on its page")} title="The map is kept on its page. The call goes on.">
               Stop drawing
@@ -83,7 +97,7 @@ export function ViewPane(props: {
       )}
       {view === "map" ? (
         map ? (
-          <BrainMap brainstorm={map} onRemove={props.onRemove} />
+          props.phone && !picture ? <BrainOutline brainstorm={map} /> : <BrainMap brainstorm={map} onRemove={props.onRemove} />
         ) : (
           <div className="view-empty">
             {props.topic ? (

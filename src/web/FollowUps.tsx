@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { CopyForAgent } from "./CopyForAgent.tsx";
+import { usePhoneViewer } from "./phone.ts";
 import type { Deck, Item, Note } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { fmtDate, keyOf } from "./util.ts";
@@ -50,6 +51,8 @@ export function FollowUpList(props: {
   const [busy, setBusy] = useState<string | null>(null);
   const work = useWork(props.notes.map((n) => n.id));
   const [opened, setOpened] = useState<string | null>(null);
+  // On a phone the list is for reading: only your own to-dos can be ticked there.
+  const mine = usePhoneViewer();
   return (
     <ul className={["followups", props.compact && "compact", props.oneLine && "one-line"].filter(Boolean).join(" ")}>
       {props.notes.map((orig) => {
@@ -65,12 +68,12 @@ export function FollowUpList(props: {
         return (
           <li key={n.id} className={[done && "done", dropped && "dropped", props.openId === n.id && "opened", props.rowClass?.(n)].filter(Boolean).join(" ") || undefined}>
             <button
-              className="check"
+              className={mine && n.owner?.split(" ")[0] !== mine ? "check read" : "check"}
               role="checkbox"
               aria-checked={done}
               aria-label={done ? `Reopen: ${n.text}` : `Mark done: ${n.text}`}
               title={done ? `${dropped ? "Dropped" : "Done"}${n.doneBy ? ` by ${n.doneBy}` : ""}. Click to reopen.` : "Mark done"}
-              disabled={busy === n.id}
+              disabled={busy === n.id || Boolean(mine && n.owner?.split(" ")[0] !== mine)}
               onClick={async () => {
                 setBusy(n.id);
                 try {

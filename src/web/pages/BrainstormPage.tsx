@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { usePhone } from "../phone.ts";
 import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
@@ -27,8 +28,11 @@ export function BrainstormPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const [settingUp, setSettingUp] = useState(false);
-  const ideas = params.get("view") === "ideas";
-  const words = params.get("view") === "words";
+  // A phone opens on the list of ideas: the map fits the whole picture into the screen's width.
+  const phone = usePhone();
+  const view = params.get("view") ?? (phone ? "ideas" : "map");
+  const ideas = view === "ideas";
+  const words = view === "words";
   useEffect(() => {
     setData(null);
     setFailed(false);
@@ -67,7 +71,7 @@ export function BrainstormPage() {
         </span>
         {!b.design && (
           <span className="bp-views" role="group" aria-label="View">
-            <button type="button" className={`rp-pill${ideas || words ? "" : " on"}`} aria-pressed={!ideas && !words} onClick={() => setParams({}, { replace: true })}>
+            <button type="button" className={`rp-pill${ideas || words ? "" : " on"}`} aria-pressed={!ideas && !words} onClick={() => setParams(phone ? { view: "map" } : {}, { replace: true })}>
               Map
             </button>
             <button type="button" className={`rp-pill${words ? " on" : ""}`} aria-pressed={words} onClick={() => setParams({ view: "words" }, { replace: true })}>

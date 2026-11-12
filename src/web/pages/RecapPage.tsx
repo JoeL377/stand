@@ -16,10 +16,12 @@ import { MentionScope, useSpacePeople } from "../Mentions.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.tsx";
 import { Markdown } from "../Synthesis.tsx";
+import { usePhone } from "../phone.ts";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
 import { costLines, fmtCost, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
 export function RecapPage() {
+  const phone = usePhone();
   const { meetingId = "" } = useParams();
   const [data, setData] = useState<MeetingRecap | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -170,7 +172,8 @@ export function RecapPage() {
       </nav>
       <header className="doc-head">
         <h1>
-          {data.roomName} · {fmtDate(data.startedAt)}
+          <span className="rc-space">{data.roomName} · </span>
+          {fmtDate(data.startedAt)}
         </h1>
         <p className="muted rc-meta">
           {fmtTime(data.startedAt)}
@@ -312,12 +315,22 @@ export function RecapPage() {
         </section>
       )}
       {carried.length > 0 && (
+        phone ? (
+          // On a phone this meeting's own outcomes come first; what it inherited opens on a tap.
+          <details className="doc-section rc-section rc-carry-fold">
+            <summary className="rc-h carry">
+              <CarryIcon /> Still open from earlier meetings <span className="count">{carried.length}</span>
+            </summary>
+            <FollowUpList notes={carried} onToggle={saveFollowUp(data.roomId)} source={source} showDate />
+          </details>
+        ) : (
         <section className="doc-section rc-section">
           <h2 className="rc-h carry">
             <CarryIcon /> Still open from earlier meetings <span className="count">{carried.length}</span>
           </h2>
           <FollowUpList notes={carried} onToggle={saveFollowUp(data.roomId)} source={source} showDate />
         </section>
+        )
       )}
 
       {groups.length > 0 && (
