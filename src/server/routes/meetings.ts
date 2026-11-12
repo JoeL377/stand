@@ -6,6 +6,7 @@ import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from
 import { designReviewOfMeeting } from "../designReviews.ts";
 import { ideaReviewOfMeeting } from "../ideaReview.ts";
 import { reviewOfMeeting } from "../reviews.ts";
+import { suggestedNext } from "../nextSteps.ts";
 import { meetingTimeline } from "../timeline.ts";
 import type { Services } from "../services.ts";
 import { notFound, route } from "./http.ts";
@@ -33,6 +34,7 @@ export function meetingRoutes(app: Express, ctx: Services) {
         ideaReview: ideaReviewOfMeeting(db, m.id),
         designReview: designReviewOfMeeting(db, m.id),
         brainstorm: brainstormOfMeeting(db, m.id),
+        next: suggestedNext(db.meetingNext(m.id)),
         timeline: meetingTimeline(db, m.id),
       };
       res.json(body);

@@ -7,6 +7,7 @@ import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
   User,
+  NextStep,
   BrainCaught,
   AgentCard,
   AgentDraft,
@@ -42,9 +43,10 @@ import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
 import { applyMerges, mergePrompt, planMerge, stickyMerges, type TopicMerge } from "./topicMerge.ts";
 import { newId } from "./ids.ts";
+import { NEXT_QUIET_MS, NEXT_SHOWN_MS, SOUNDS_QUIET_MS, SOUNDS_WINDOW_MS, heardIntent, isReviewKind, soundsLike, type Said } from "./nextSteps.ts";
 import { finishIdeaReview } from "./ideaReview.ts";
-import { finishReview, isReviewDeck, refileReview, setOutcome } from "./reviews.ts";
-import { DesignReviewError, authorMay, finishDesignReview, setDesignOutcome, startDesignReview, whenBriefed, writeBackReview } from "./designReviews.ts";
+import { finishReview, isReviewDeck, refileReview, reviewView, setOutcome } from "./reviews.ts";
+import { DesignReviewError, authorMay, designReviewSummary, finishDesignReview, setDesignOutcome, startDesignReview, whenBriefed, writeBackReview } from "./designReviews.ts";
 import type { PlanBriefs } from "./planBrief.ts";
 import { linkSnaps, saveSnapFile, snapFile } from "./snaps.ts";
 import { addUpNext } from "./upNext.ts";
@@ -236,6 +238,15 @@ export class RoomSession implements SpeechSink {
   private pilotTimer: ReturnType<typeof setTimeout> | null = null;
   /** The brainstorm running in this space, if one is (brainstorm.ts): its map, one pass at a time. */
   private brain: { id: string; threadId: string | null; map: MapKeeper | DiagramKeeper } | null = null;
+  /** The next steps people asked for out loud in this call (nextSteps.ts); the one offered is on a card. */
+  private nextSteps: NextStep[] = [];
+  private nextTimer: NodeJS.Timeout | null = null;
+  private nextHeard: { segmentId: string; upTo: number } | null = null;
+  /** When each kind was last waved off: Stand stays quiet about it for a while. */
+  private nextWaved = new Map<string, number>();
+  /** The last few minutes of talk, and when Stand last guessed each kind from it. */
+  private nextRecent: Said[] = [];
+  private nextGuessed = new Map<string, number>();
   /** Opening, parking and resuming a topic's map, one at a time. */
   private viewTurn: Promise<void> = Promise.resolve();
   /** The passes that keep the list, the map and the board up to date while people talk (passRunner.ts). */
@@ -296,6 +307,8 @@ export class RoomSession implements SpeechSink {
       if (this.hostId) this.hostLeft();
       // Nobody is here yet; it ends as usual if nobody comes back.
       this.emptyTimer = setTimeout(() => void this.end(), EMPTY_ROOM_GRACE_MS);
+      // A card that was up when the server stopped went unanswered.
+      this.nextSteps = db.meetingNext(resume.id).map((n) => (n.state === "offered" ? { ...n, state: "missed" as const } : n));
     } else {
       const m = db.startMeeting(room.id);
       this.meetingId = m.id;
@@ -370,6 +383,53 @@ export class RoomSession implements SpeechSink {
     const next = this.viewTurn.then(work).catch((e) => console.error(`[view] ${this.meetingId}: ${(e as Error).message}`));
     this.viewTurn = next;
     return next;
+  }
+
+  private offered() {
+    return this.nextSteps.find((n) => n.state === "offered") ?? null;
+  }
+
+  private settleNext(n: NextStep, state: NextStep["state"]) {
+    n.state = state;
+    if (this.nextTimer) clearTimeout(this.nextTimer);
+    this.nextTimer = null;
+    this.db.saveMeetingNext(this.meetingId, this.nextSteps);
+    this.broadcastState();
+  }
+
+  /** Someone said they want a map, a diagram or a review: offer it to everyone, once. Said or typed,
+   *  both are the call's talk. Nothing starts until a person takes the card. */
+  private checkNext(seg: Segment, added = seg.text) {
+    if (this.ended || this.demoRunning || this.inReview()) return;
+    this.nextRecent = [...this.nextRecent.filter((l) => seg.ts - l.ts <= SOUNDS_WINDOW_MS), { speaker: seg.speakerName, text: added, ts: seg.ts }];
+    // One thought arrives in fragments joined into one line: read its tail, past what was already heard in it.
+    const from = Math.max(this.nextHeard?.segmentId === seg.id ? this.nextHeard.upTo : 0, seg.text.length - 320);
+    const asked = heardIntent(seg.text.slice(from));
+    if (asked) this.nextHeard = { segmentId: seg.id, upTo: seg.text.length };
+    // Nobody asked: what the last few minutes sound like, said at most once in a while for each kind.
+    const sounds = asked || this.offered() ? null : soundsLike(this.nextRecent, seg.ts);
+    const guessed = !!sounds && seg.ts - (this.nextGuessed.get(sounds) ?? 0) >= SOUNDS_QUIET_MS;
+    const heard = asked ?? (guessed ? { kind: sounds!, topic: null } : null);
+    if (!heard) return;
+    // That kind is already drawing.
+    const open = this.brain ? (this.brain.map instanceof DiagramKeeper ? "diagram" : "map") : null;
+    if (open === heard.kind) return;
+    const waved = this.nextWaved.get(heard.kind);
+    if (waved && seg.ts - waved < NEXT_QUIET_MS) return;
+    const before = this.offered();
+    if (before) {
+      // A card of that kind is up already; one Stand guessed gives way to a person asking.
+      if (before.kind === heard.kind && !(before.guessed && asked)) return;
+      before.state = "missed";
+    }
+    const ready = heard.kind === "product-review" ? (reviewView(this.db, this.roomId)?.slides.length ?? 0) : heard.kind === "design-review" ? (designReviewSummary(this.db, this.roomId)?.specs ?? 0) : 0;
+    const step: NextStep = { id: newId(8), kind: heard.kind, topic: heard.topic ?? "", by: seg.speakerName, ts: seg.ts, segmentId: seg.id, state: "offered", ...(isReviewKind(heard.kind) ? { ready } : {}), ...(asked ? {} : { guessed: true }) };
+    if (!asked) this.nextGuessed.set(heard.kind, seg.ts);
+    this.nextSteps.push(step);
+    if (this.nextTimer) clearTimeout(this.nextTimer);
+    this.nextTimer = setTimeout(() => step.state === "offered" && this.settleNext(step, "missed"), NEXT_SHOWN_MS);
+    this.db.saveMeetingNext(this.meetingId, this.nextSteps);
+    this.broadcastState();
   }
 
   /** "Draw the map of this topic": the map of the board's thread, new or as it was left. Whatever
@@ -700,6 +760,7 @@ export class RoomSession implements SpeechSink {
       notesFailing: [...this.notesFailing],
       notesTrouble: this.notesFailing.size ? this.notesWhy : null,
       suggestion: this.suggestion,
+      next: this.ended ? null : this.offered(),
       items: this.items(),
       decks: this.db.listDecks(this.roomId),
       followUps: this.carried(true),
@@ -1235,6 +1296,19 @@ export class RoomSession implements SpeechSink {
         if (this.brain?.map instanceof MapKeeper && this.brain.map.remove(msg.id)) this.saveBrainstorm();
         break;
       }
+      // Anyone answers Stand's card. The view or the review itself starts the usual way; this settles the card.
+      case "next.take": {
+        const n = this.nextSteps.find((x) => x.id === msg.id && x.state === "offered");
+        if (n && !this.ended) this.settleNext(n, isReviewKind(n.kind) ? (msg.started ? "started" : "noted") : "opened");
+        break;
+      }
+      case "next.wave": {
+        const n = this.nextSteps.find((x) => x.id === msg.id && x.state === "offered");
+        if (!n) break;
+        this.nextWaved.set(n.kind, Date.now());
+        this.settleNext(n, "waved");
+        break;
+      }
       // Anyone in the call can stop the map or the diagram; it is kept.
       case "view.stop":
         if (!this.ended) void this.stopView();
@@ -1663,6 +1737,7 @@ export class RoomSession implements SpeechSink {
         this.scheduleMap();
         // Only the words just added count, so a long turn isn't scored twice.
         this.checkDrift({ ...seg, text: t });
+        this.checkNext(seg, t);
         return;
       }
     }
@@ -1718,6 +1793,7 @@ export class RoomSession implements SpeechSink {
     this.scheduleMap();
     this.checkDrift(segment);
     this.checkConxtTerms(text, ts);
+    this.checkNext(segment);
     return segment;
   }
 
@@ -2360,6 +2436,7 @@ export class RoomSession implements SpeechSink {
     this.endingSince = Date.now();
     if (this.emptyTimer) clearTimeout(this.emptyTimer);
     if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
+    if (this.nextTimer) clearTimeout(this.nextTimer);
     if (this.pilotTimer) clearTimeout(this.pilotTimer);
     for (const t of this.noteTimers.values()) clearTimeout(t);
     for (const passes of [this.boardPasses, this.listPasses, this.mapPasses]) passes.stop();

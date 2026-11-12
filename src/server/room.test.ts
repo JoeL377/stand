@@ -1693,3 +1693,52 @@ test("opening a topic's map while a diagram draws saves the diagram's draft spec
   assert.equal(db.brainstormLive(room.id)?.prompt, "Pricing");
   await session.end();
 });
+
+test("a next step said out loud goes on one card: nothing starts by itself, anyone answers it, and a review that was asked for reaches the recap", async () => {
+  const { suggestedNext } = await import("./nextSteps.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  await join(session, { id: "u1", name: "Joe" });
+  const huy = await join(session, { id: "u2", name: "Huy" });
+  session.addSpeech("u1", "Joe", "We did a brainstorm yesterday and it went fine", Date.now());
+  assert.equal(session.state().next, null, "talk about one that happened offers nothing");
+  session.addSpeech("u1", "Joe", "Hold up, let's start a brainstorm on the Discord integration", Date.now());
+  const card = session.state().next!;
+  assert.deepEqual([card.kind, card.topic, card.by, card.state], ["map", "The Discord integration", "Joe", "offered"]);
+  assert.equal(db.brainstormLive(room.id), null, "nothing is drawn by itself");
+  // Someone who isn't the host answers it; the card is settled for everyone.
+  await say(huy, { type: "next.take", id: card.id, started: true });
+  assert.equal(session.state().next, null);
+  // A review nobody can start now: taking it keeps it for the recap.
+  session.addSpeech("u2", "Huy", "I think we need a design review on the projects migration", Date.now());
+  const review = session.state().next!;
+  assert.deepEqual([review.kind, review.topic, review.ready], ["design-review", "The projects migration", 0]);
+  await say(huy, { type: "next.take", id: review.id });
+  // Waved off: gone, and that kind stays quiet for a while.
+  session.addSpeech("u1", "Joe", "let's do a product review on the phone views", Date.now());
+  await say(huy, { type: "next.wave", id: session.state().next!.id });
+  session.addSpeech("u1", "Joe", "seriously, we should do a product review", Date.now());
+  assert.equal(session.state().next, null);
+  await session.end();
+  assert.deepEqual(suggestedNext(db.meetingNext(session.meetingId)).map((n) => [n.kind, n.topic, n.state]), [["design-review", "The projects migration", "noted"]]);
+});
+
+test("Stand offers a map by itself when two people trade ideas, says it guessed, and doesn't repeat itself", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  await join(session, { id: "u1", name: "Joe" });
+  const huy = await join(session, { id: "u2", name: "Huy" });
+  session.addSpeech("u1", "Joe", "What if the first three seats are free?", Date.now());
+  session.addSpeech("u2", "Huy", "Or we could price per meeting hour.", Date.now());
+  assert.equal(session.state().next, null, "two ideas are not a brainstorm yet");
+  session.addSpeech("u1", "Joe", "Another idea, maybe we charge for the agent only.", Date.now());
+  const card = session.state().next!;
+  assert.deepEqual([card.kind, card.topic, card.guessed, card.state], ["map", "", true, "offered"]);
+  assert.equal(db.brainstormLive(room.id), null, "nothing is drawn by itself");
+  await say(huy, { type: "next.wave", id: card.id });
+  session.addSpeech("u2", "Huy", "What if it is free for open source, or maybe we do a trial?", Date.now());
+  assert.equal(session.state().next, null, "it guessed once and stays quiet");
+  await session.end();
+});
