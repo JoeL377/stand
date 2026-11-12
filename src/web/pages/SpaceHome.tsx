@@ -1003,17 +1003,24 @@ function TasksTab(props: {
   const [sweeping, setSweeping] = useState<QuestionSweep | null>(null);
   const { sweep } = props;
   const asked = props.open.filter((n) => n.kind === "question").length;
-  // Which project sections someone folded, kept in this browser.
-  const foldKey = `stand.projectFold.${props.roomId}`;
-  const [folded, setFolded] = useState<Set<string>>(() => {
+  // Which project sections someone folded, kept in this browser. A phone works the other way round:
+  // every project starts as one row, and what is kept is the ones someone opened.
+  const phone = usePhone();
+  const foldKey = phone ? `stand.projectOpen.phone.${props.roomId}` : `stand.projectFold.${props.roomId}`;
+  const readFold = () => {
     try {
       return new Set(JSON.parse(localStorage.getItem(foldKey) ?? "[]") as string[]);
     } catch {
-      return new Set();
+      return new Set<string>();
     }
-  });
+  };
+  const [marked, setMarked] = useState<Set<string>>(readFold);
+  useEffect(() => setMarked(readFold()), [foldKey]);
+  // Asking for one project, or only your own to-dos, is already a short list: nothing starts shut there.
+  const narrowed = phone && Boolean(props.projectFilter || props.mine);
+  const folded = { has: (id: string) => !narrowed && marked.has(id) !== phone };
   const toggleFold = (id: string) =>
-    setFolded((prev) => {
+    setMarked((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -1106,7 +1113,6 @@ function TasksTab(props: {
   /** The to-do a task is a part of, when the space still has it. */
   const partOf = (n: TaskNote) => (n.parentId && n.parentId !== n.id ? byId.get(n.parentId) : undefined);
   // On a phone a to-do's parts stay folded under it until its parts pill is tapped.
-  const phone = usePhone();
   const [partsOpen, setPartsOpen] = useState<Set<string>>(() => new Set());
   const toggleParts = (id: string) =>
     setPartsOpen((open) => {
