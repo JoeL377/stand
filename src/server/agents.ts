@@ -184,11 +184,12 @@ export function agentApi(deps: AgentDeps) {
     ready: work?.ready ? { by: work.ready.by, since: new Date(work.ready.since).toISOString(), pr: work.ready.pr ?? undefined } : undefined,
   });
 
-  /** The project a note is in, when the note came through grouped (it has project worked out). */
+  /** The project a note is in, when the note came through grouped (it has project worked out).
+   *  suggested: Stand suggested it and nobody confirmed it. */
   const projectInfo = (n: Note) => {
     if (n.project === undefined) return undefined;
     const name = n.project ? db.projectName(n.project) : null;
-    return n.project && name ? { ref: refOf("project", n.project), name } : "unassigned";
+    return n.project && name ? { ref: refOf("project", n.project), name, ...(n.projectSuggested ? { suggested: true } : {}) } : "unassigned";
   };
   /** Notes of one space with the project each is in (shared/projects.ts). */
   const grouped = <T extends Note>(roomId: string, notes: T[]): T[] => db.withProjects(roomId, notes);

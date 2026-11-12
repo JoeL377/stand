@@ -23,7 +23,7 @@ Before starting on a to-do, call start_work with its ref: one call marks it as y
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Both list mentions_you: tasks where someone tagged your person with @Name in a comment and waits on them. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. When your person asks for a review of that plan, or it has a question the team must decide, request_design_review puts it on the space's next design review with your questions; don't ask for one otherwise. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
-A project is a named group of a space's to-dos, open questions and decisions: a feature or a workstream. list_spaces lists each space's projects. When one fits a new to-do, give it with create_action (project); move a to-do with update_action. When your person asks for a new project -> create_project. What's in one -> get with its ref, or list_actions with project. list_spaces lists projects in the team's order, most important first; when your person asks to change it -> order_projects.
+A project is a named group of a space's to-dos, open questions and decisions: a feature or a workstream. list_spaces lists each space's projects. When one fits a new to-do, give it with create_action (project); move a to-do with update_action. When your person asks for a new project -> create_project. What's in one -> get with its ref, or list_actions with project. list_spaces lists projects in the team's order, most important first; when your person asks to change it -> order_projects. A project with suggested: true is Stand's suggestion; if it is right, confirm it with update_action (project).
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
 When your person wants to design something with the team in a call -> start_design_session, with the context they should have to hand.
@@ -90,12 +90,12 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "List a space's to-dos",
       description:
-        "Every to-do in one Stand space, whoever owns it, newest meeting first. Each has its ref, owner, status, project, item, the decision behind it, and the meeting date. A to-do an agent is on has status doing and working: who, since when and what it said last; one waiting to ship has ready. Check before you pick one up. Filter by status, owner and project.",
+        "Every to-do in one Stand space, whoever owns it, newest meeting first. Each has its ref, owner, status, project, item, the decision behind it, and the meeting date. A project with suggested: true is Stand's suggestion, and nobody confirmed it yet. A to-do an agent is on has status doing and working: who, since when and what it said last; one waiting to ship has ready. Check before you pick one up. Filter by status, owner and project.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         status: z.enum(["open", "done", "all"]).optional().describe("Default open"),
         owner: z.string().optional().describe('Only this person\'s (a name, or first name), or "unassigned"'),
-        project: z.string().optional().describe('Only the to-dos in this project: its ref (stand:project/<id>) or name, or "unassigned" for those in none'),
+        project: z.string().optional().describe('Only the to-dos in this project: its ref (stand:project/<id>) or name, or "unassigned" for those in none. It includes the ones Stand suggested for it'),
       },
       annotations: READ,
     },
@@ -227,7 +227,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     project: z
       .string()
       .optional()
-      .describe('The project it belongs to: its ref (stand:project/<id>) or the name of one the space has (list_spaces lists them), or "unassigned". Left out, it follows its agenda item'),
+      .describe('The project it belongs to: its ref (stand:project/<id>) or the name of one the space has (list_spaces lists them), or "unassigned". Left out, it follows its agenda item. To confirm a project Stand suggested (suggested: true), give that project'),
   };
 
   server.registerTool(

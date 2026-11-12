@@ -141,7 +141,13 @@ export function notesStore(db: DatabaseSync, tx: Tx) {
         n.state ?? null, n.doneWhen ?? null, n.parentId ?? null, n.closedBy ?? null, n.dropReason ?? null,
         n.saidDone ? JSON.stringify(n.saidDone) : null, n.checkedAt ?? null,
       );
-      db.prepare("UPDATE notes SET project_id = ?, project_set_by = ? WHERE id = ?").run(n.projectSetBy ? (n.projectId ?? null) : null, n.projectSetBy ?? null, n.id);
+      db.prepare("UPDATE notes SET project_id = ?, project_set_by = ?, suggested_project_id = ?, project_judged_at = ? WHERE id = ?").run(
+        n.projectSetBy ? (n.projectId ?? null) : null,
+        n.projectSetBy ?? null,
+        n.suggestedProjectId ?? null,
+        n.projectJudgedAt ?? null,
+        n.id,
+      );
       db.prepare("UPDATE notes SET done_actor_json = ?, added_actor_json = ? WHERE id = ?").run(
         n.doneAt && n.doneActor ? JSON.stringify(n.doneActor) : null,
         n.addedActor ? JSON.stringify(n.addedActor) : null,

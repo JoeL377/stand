@@ -4,7 +4,8 @@
 //   2. from its agenda item: the project of the to-do the item shows, else the item's link, else the
 //      link of the agenda item its deck is presented under;
 //   3. from its parent task;
-//   4. else Unassigned.
+//   4. suggested by Stand, until someone confirms or changes it;
+//   5. else Unassigned.
 // The server and the browser share this file.
 
 export const PROJECT_NAME_MAX = 80;
@@ -45,6 +46,8 @@ export interface ProjectNote {
   projectId?: string | null;
   /** Who set the project by hand; null or missing: it follows the rules. */
   projectSetBy?: string | null;
+  /** The project Stand suggests (rule 4). Nobody confirmed it. */
+  suggestedProjectId?: string | null;
 }
 
 /** How far the rules follow other tasks before they stop, so a loop can't run forever. */
@@ -53,10 +56,10 @@ const MAX_STEPS = 5;
 /** The note's project: rule 1, else the rules after it. */
 export function projectOf(note: ProjectNote, g: ProjectGraph, steps = 0): string | null {
   if (note.projectSetBy != null) return note.projectId ?? null;
-  return ruledProjectOf(note, g, steps);
+  return ruledProjectOf(note, g, steps) ?? note.suggestedProjectId ?? null;
 }
 
-/** What rules 2 to 4 give, leaving out what was set by hand. */
+/** What rules 2 and 3 give, leaving out what was set by hand and what Stand suggests. */
 export function ruledProjectOf(note: ProjectNote, g: ProjectGraph, steps = 0): string | null {
   if (steps >= MAX_STEPS) return null;
   const item = note.itemId ? g.items[note.itemId] : undefined;

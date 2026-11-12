@@ -17,6 +17,7 @@ export function ProjectPicker({ note, roomId, projects, onSaved }: { note: Note;
   const current = projects.find((p) => p.id === note.project) ?? null;
   const ruled = projects.find((p) => p.id === note.ruledProject) ?? null;
   const byHand = note.projectSetBy != null;
+  const suggested = note.projectSuggested ? current : null;
   const active = projects.filter((p) => !p.archived);
   const typed = normalizeProjectName(value);
   const shown = typed ? active.filter((p) => projectKey(p.name).includes(projectKey(typed))) : active;
@@ -57,17 +58,17 @@ export function ProjectPicker({ note, roomId, projects, onSaved }: { note: Note;
     <span className="project-picker" ref={ref}>
       <button
         type="button"
-        className={`rc-pill project-pill${current ? "" : " unset"}`}
-        aria-label={`Change project: ${current?.name ?? "Unassigned"}`}
+        className={`rc-pill project-pill${current ? "" : " unset"}${suggested ? " suggested" : ""}`}
+        aria-label={suggested ? `Suggested project: ${suggested.name}. Confirm or change` : `Change project: ${current?.name ?? "Unassigned"}`}
         aria-expanded={open}
-        title="Change project"
+        title={suggested ? `Suggested project: ${suggested.name}. Confirm or change` : "Change project"}
         onClick={() => {
           setValue("");
           setError("");
           setOpen(!open);
         }}
       >
-        {current?.name ?? "+ Project"}
+        {suggested ? `${suggested.name}?` : (current?.name ?? "+ Project")}
       </button>
       {open && (
         <span
@@ -85,6 +86,14 @@ export function ProjectPicker({ note, roomId, projects, onSaved }: { note: Note;
             }
           }}
         >
+          {suggested && (
+            <span className="project-suggest">
+              <span>Stand suggests {suggested.name}</span>
+              <button type="button" disabled={saving} onClick={() => void save(suggested.id)}>
+                Confirm
+              </button>
+            </span>
+          )}
           <label htmlFor={inputId}>Project</label>
           <input
             id={inputId}
@@ -101,8 +110,8 @@ export function ProjectPicker({ note, roomId, projects, onSaved }: { note: Note;
                 key={p.id}
                 type="button"
                 role="option"
-                aria-selected={p.id === note.project}
-                className={p.id === note.project ? "on" : undefined}
+                aria-selected={p.id === note.project && !suggested}
+                className={p.id === note.project && !suggested ? "on" : undefined}
                 disabled={saving}
                 onClick={() => void save(p.id)}
               >

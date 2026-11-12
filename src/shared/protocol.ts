@@ -206,6 +206,12 @@ export interface Note {
   project?: string | null;
   /** What the rules give without the hand-set project: what "Follow the agenda" goes back to. */
   ruledProject?: string | null;
+  /** The project Stand suggests (shared/projects.ts rule 4). Nobody confirmed it. */
+  suggestedProjectId?: string | null;
+  /** When Stand last read it to suggest a project. Kept so a restored note isn't read again. */
+  projectJudgedAt?: number | null;
+  /** True when project is only Stand's suggestion: the rules before it give nothing. */
+  projectSuggested?: boolean;
   id: string;
   meetingId: string;
   itemId: string | null;

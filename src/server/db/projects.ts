@@ -38,6 +38,11 @@ export function projectsStore(db: DatabaseSync) {
   const row = (id: string) => db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as Row | undefined;
   const byKey = (roomId: string, name: string) =>
     (db.prepare("SELECT * FROM projects WHERE room_id = ?").all(roomId) as Row[]).find((r) => projectKey(r.name as string) === projectKey(name));
+  // The projects changed, so a note Stand found none for is worth reading again.
+  const rejudge = (roomId: string) =>
+    db
+      .prepare("UPDATE notes SET project_judged_at = NULL WHERE suggested_project_id IS NULL AND project_judged_at IS NOT NULL AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)")
+      .run(roomId);
 
   const store = {
     /** What the rules read for a space: every item (archived ones too, so a task keeps its project after
@@ -57,7 +62,7 @@ export function projectsStore(db: DatabaseSync) {
         g.shows[r.item_id as string] ??= r.note_id as string;
       for (const r of db
         .prepare(
-          `SELECT n.id, n.item_id, n.parent_id, n.project_id, n.project_set_by FROM notes n JOIN meetings m ON m.id = n.meeting_id
+          `SELECT n.id, n.item_id, n.parent_id, n.project_id, n.project_set_by, n.suggested_project_id FROM notes n JOIN meetings m ON m.id = n.meeting_id
            WHERE m.room_id = ? AND n.kind IN ${GROUPED}`,
         )
         .all(roomId) as Row[])
@@ -67,17 +72,22 @@ export function projectsStore(db: DatabaseSync) {
           parentId: (r.parent_id as string) ?? null,
           projectId: (r.project_id as string) ?? null,
           projectSetBy: (r.project_set_by as string) ?? null,
+          suggestedProjectId: (r.suggested_project_id as string) ?? null,
         };
       return g;
     },
 
-    /** The notes with the project each is in (project) and what the rules alone give (ruledProject). */
+    /** The notes with the project each is in (project), what the rules alone give (ruledProject), and
+     *  projectSuggested when the project is only Stand's suggestion. */
     withProjects<T extends Note>(roomId: string, notes: T[], graph?: ProjectGraph): T[] {
       if (!notes.length) return notes;
       const g = graph ?? store.projectGraph(roomId);
-      return notes.map((n) =>
-        n.kind === "context" || n.kind === "summary" ? n : { ...n, project: projectOf(n, g), ruledProject: ruledProjectOf(n, g) },
-      );
+      return notes.map((n) => {
+        if (n.kind === "context" || n.kind === "summary") return n;
+        const ruledProject = ruledProjectOf(n, g);
+        const suggested = n.projectSetBy == null && !ruledProject && !!n.suggestedProjectId;
+        return { ...n, project: projectOf(n, g), ruledProject, ...(suggested ? { projectSuggested: true } : {}) };
+      });
     },
 
     /** A space's projects in order, archived ones too, each with its open to-dos. A project archived
@@ -164,6 +174,7 @@ export function projectsStore(db: DatabaseSync) {
         );
       }
       if (input.fromItemId) db.prepare("UPDATE items SET project_id = ? WHERE id = ?").run(id, input.fromItemId);
+      rejudge(roomId);
       return store.getProject(roomId, id)!;
     },
 
@@ -194,8 +205,11 @@ export function projectsStore(db: DatabaseSync) {
           const open = store.getProject(roomId, id)?.openTodos ?? 0;
           if (open > 0) throw new ProjectError(`This project has ${open} open ${open === 1 ? "to-do" : "to-dos"}. Close or move ${open === 1 ? "it" : "them"} first.`);
           db.prepare("UPDATE projects SET archived_at = COALESCE(archived_at, ?) WHERE id = ?").run(Date.now(), id);
+          // A suggestion would bring it back once its to-do opens again (listProjects).
+          db.prepare("UPDATE notes SET suggested_project_id = NULL WHERE suggested_project_id = ?").run(id);
         } else db.prepare("UPDATE projects SET archived_at = NULL WHERE id = ?").run(id);
       }
+      if (change.name !== undefined || change.goal !== undefined || (change.archived !== undefined && !change.archived && r.archived_at != null)) rejudge(roomId);
       return store.getProject(roomId, id);
     },
 
@@ -225,6 +239,7 @@ export function projectsStore(db: DatabaseSync) {
       db.exec("BEGIN");
       try {
         db.prepare("UPDATE notes SET project_id = NULL, project_set_by = NULL WHERE project_id = ?").run(id);
+        db.prepare("UPDATE notes SET suggested_project_id = NULL WHERE suggested_project_id = ?").run(id);
         db.prepare("UPDATE items SET project_id = NULL WHERE project_id = ? AND room_id = ?").run(id, roomId);
         db.prepare("DELETE FROM projects WHERE id = ?").run(id);
         db.exec("COMMIT");
@@ -254,6 +269,32 @@ export function projectsStore(db: DatabaseSync) {
       if (!res.changes) return null;
       if (choice.projectId) db.prepare("UPDATE projects SET archived_at = NULL WHERE id = ?").run(choice.projectId);
       return toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row);
+    },
+
+    /** Stand's suggestion for a to-do's, open question's or decision's project (rule 4), or null to
+     *  take it off. It never changes what was set by hand. */
+    suggestNoteProject(roomId: string, noteId: string, projectId: string | null): Note | null {
+      if (projectId) {
+        const p = row(projectId);
+        if (!p || p.room_id !== roomId) throw new ProjectError("That project isn't in this space.");
+        if (p.archived_at != null) throw new ProjectError("That project is archived.");
+      }
+      const res = db
+        .prepare(`UPDATE notes SET suggested_project_id = ? WHERE id = ? AND kind IN ${GROUPED} AND meeting_id IN (SELECT id FROM meetings WHERE room_id = ?)`)
+        .run(projectId, noteId, roomId);
+      return res.changes ? toNote(db.prepare("SELECT * FROM notes WHERE id = ?").get(noteId) as Row) : null;
+    },
+
+    /** Moves a carried to-do or question onto an agenda item, like moveNote. When the new item gives it
+     *  no project and nobody set one by hand, the project it had stays as Stand's suggestion. */
+    moveNoteKeepingProject(roomId: string, noteId: string, itemId: string | null) {
+      const g = store.projectGraph(roomId);
+      const n = g.notes[noteId];
+      const before = n ? projectOf(n, g) : null;
+      db.prepare("UPDATE notes SET item_id = ? WHERE id = ?").run(itemId, noteId);
+      if (!n || !before || n.projectSetBy != null) return;
+      n.itemId = itemId;
+      if (!ruledProjectOf(n, g)) db.prepare("UPDATE notes SET suggested_project_id = ? WHERE id = ?").run(before, noteId);
     },
 
     /** Links an agenda item to a project, or takes the link off (null). */

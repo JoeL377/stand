@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { activeFirst, matchesProject, projectActivity, projectOf } from "../shared/projects.ts";
+import { addUpNext } from "./upNext.ts";
 
 const setup = () => {
   const db = openDb(":memory:");
@@ -179,6 +180,203 @@ test("a project set by hand survives redrafts, rewording and delete/restore, Una
     assert.ok(db.getNote(notes[1].id), "Unassigned by hand counts as acted on");
   } finally {
     db.raw.close();
+  }
+});
+
+/** The note as the page would get it. */
+const read = (db: ReturnType<typeof openDb>, roomId: string, id: string) => db.withProjects(roomId, [db.getNote(id)!])[0];
+
+test("Stand's suggestion is the last rule: by hand, the agenda item and the parent all come first", () => {
+  const { db, room, items, m } = setup();
+  try {
+    const a = db.createProject(room.id, { name: "A" }, "Sam");
+    const b = db.createProject(room.id, { name: "B" }, "Sam");
+    const c = db.createProject(room.id, { name: "C" }, "Sam");
+    const [parent] = db.syncNotes(m.id, null, [{ kind: "action", text: "Parent", owner: null }]);
+    const [todo] = db.syncNotes(m.id, items[0].id, [{ kind: "action", text: "Child", owner: null }]);
+    assert.ok(db.suggestNoteProject(room.id, todo.id, a.id));
+    let n = read(db, room.id, todo.id);
+    assert.deepEqual([n.project, n.ruledProject, n.projectSuggested, n.suggestedProjectId], [a.id, null, true, a.id], "rule 4 when nothing else applies");
+    db.setNoteProject(room.id, parent.id, { projectId: b.id, by: "Sam" });
+    db.raw.prepare("UPDATE notes SET parent_id = ? WHERE id = ?").run(parent.id, todo.id);
+    n = read(db, room.id, todo.id);
+    assert.deepEqual([n.project, n.ruledProject, n.projectSuggested], [b.id, b.id, undefined], "the parent beats the suggestion");
+    db.setItemProject(room.id, items[0].id, c.id);
+    n = read(db, room.id, todo.id);
+    assert.deepEqual([n.project, n.ruledProject, n.projectSuggested], [c.id, c.id, undefined], "the agenda item beats the parent");
+    db.setNoteProject(room.id, todo.id, { projectId: null, by: "Sam" });
+    n = read(db, room.id, todo.id);
+    assert.deepEqual([n.project, n.projectSuggested], [null, undefined], "by hand beats them all, Unassigned too");
+    assert.equal(db.getNote(todo.id)?.suggestedProjectId, a.id, "a suggestion never changes what was set by hand, nor the reverse");
+  } finally {
+    db.raw.close();
+  }
+});
+
+test("a suggestion is confirmed or rejected by hand; following the agenda keeps it", () => {
+  const { db, room, m } = setup();
+  try {
+    const a = db.createProject(room.id, { name: "A" }, "Sam");
+    const b = db.createProject(room.id, { name: "B" }, "Sam");
+    const [x, y] = db.syncNotes(m.id, null, [
+      { kind: "action", text: "X", owner: null },
+      { kind: "question", text: "Y?", owner: null },
+    ]);
+    db.suggestNoteProject(room.id, x.id, a.id);
+    db.suggestNoteProject(room.id, y.id, a.id);
+    db.setNoteProject(room.id, x.id, { projectId: a.id, by: "Sam" });
+    assert.deepEqual([read(db, room.id, x.id).project, read(db, room.id, x.id).projectSuggested], [a.id, undefined], "confirmed");
+    db.setNoteProject(room.id, y.id, { projectId: null, by: "Sam" });
+    assert.deepEqual([read(db, room.id, y.id).project, read(db, room.id, y.id).projectSuggested], [null, undefined], "rejected: Unassigned by hand");
+    db.setNoteProject(room.id, y.id, { auto: true });
+    assert.deepEqual([read(db, room.id, y.id).project, read(db, room.id, y.id).projectSuggested], [a.id, true], "back to the rules: the suggestion stays");
+    db.suggestNoteProject(room.id, y.id, null);
+    assert.equal(read(db, room.id, y.id).project, null, "taken off");
+    assert.throws(() => db.suggestNoteProject(room.id, x.id, db.createProject(db.createRoom("Other").id, { name: "O" }, "Sam").id), /isn't in this space/);
+    const context = db.addNote(m.id, null, { kind: "context", text: "True", owner: null }, null);
+    assert.equal(db.suggestNoteProject(room.id, context.id, b.id), null, "context lines have no project");
+    db.updateProject(room.id, b.id, { archived: true });
+    assert.throws(() => db.suggestNoteProject(room.id, y.id, b.id), /archived/);
+  } finally {
+    db.raw.close();
+  }
+});
+
+test("deleting or archiving a project takes its suggestions off, so an archived one doesn't come back", () => {
+  const { db, room, m } = setup();
+  try {
+    const a = db.createProject(room.id, { name: "A" }, "Sam");
+    const b = db.createProject(room.id, { name: "B" }, "Sam");
+    const [x, y] = db.syncNotes(m.id, null, [
+      { kind: "action", text: "X", owner: null },
+      { kind: "action", text: "Y", owner: null },
+    ]);
+    db.endMeeting(m.id, null);
+    db.suggestNoteProject(room.id, x.id, a.id);
+    db.suggestNoteProject(room.id, y.id, b.id);
+    assert.equal(db.getProject(room.id, a.id)?.openTodos, 1, "a suggested to-do counts as open in it");
+    assert.equal(db.deleteProject(room.id, a.id), true);
+    assert.equal(db.getNote(x.id)?.suggestedProjectId, undefined);
+    assert.equal(read(db, room.id, x.id).project, null);
+    db.setActionDone(room.id, y.id, "Sam");
+    assert.equal(db.updateProject(room.id, b.id, { archived: true })?.archived, true);
+    assert.equal(db.getNote(y.id)?.suggestedProjectId, undefined);
+    db.setActionDone(room.id, y.id, null);
+    assert.equal(db.getProject(room.id, b.id)?.archived, true, "the to-do opens again, and the project stays archived");
+    assert.equal(read(db, room.id, y.id).project, null);
+  } finally {
+    db.raw.close();
+  }
+});
+
+test("a suggestion and when Stand judged it survive a redraft and delete/restore, and alone don't keep a note", () => {
+  const { db, room, m } = setup();
+  try {
+    const a = db.createProject(room.id, { name: "A" }, "Sam");
+    const notes = db.syncNotes(m.id, null, [
+      { kind: "action", text: "Check prices", owner: "Sam" },
+      { kind: "question", text: "Monthly?", owner: null },
+    ]);
+    db.suggestNoteProject(room.id, notes[0].id, a.id);
+    db.raw.prepare("UPDATE notes SET project_judged_at = 5 WHERE id IN (?, ?)").run(notes[0].id, notes[1].id);
+    const redrafted = db.syncNotes(m.id, null, notes.map((n) => ({ ...n, text: `${n.text}!` })));
+    assert.deepEqual(redrafted.map((n) => [n.suggestedProjectId, n.projectJudgedAt]), [[a.id, 5], [undefined, 5]]);
+    const removed = db.removeNote(notes[0].id)!;
+    db.restoreNote(removed);
+    assert.deepEqual([db.getNote(notes[0].id)?.suggestedProjectId, db.getNote(notes[0].id)?.projectJudgedAt], [a.id, 5]);
+    assert.equal(db.noteActedOn(notes[0].id), false, "Stand wrote it, no person did");
+    db.syncNotes(m.id, null, []);
+    assert.equal(db.getNote(notes[0].id), null, "a run that leaves it out deletes it");
+  } finally {
+    db.raw.close();
+  }
+});
+
+test("a new, renamed, re-aimed or returned project has Stand read the notes it found none for again", () => {
+  const { db, room, m } = setup();
+  try {
+    const a = db.createProject(room.id, { name: "A" }, "Sam");
+    const [x, y] = db.syncNotes(m.id, null, [
+      { kind: "action", text: "X", owner: null },
+      { kind: "action", text: "Y", owner: null },
+    ]);
+    db.suggestNoteProject(room.id, x.id, a.id);
+    const judge = () => db.raw.prepare("UPDATE notes SET project_judged_at = 5 WHERE id IN (?, ?)").run(x.id, y.id);
+    const judged = () => [x, y].map((n) => db.getNote(n.id)?.projectJudgedAt ?? null);
+    const other = db.createRoom("Other");
+    const [z] = db.syncNotes(db.startMeeting(other.id).id, null, [{ kind: "action", text: "Z", owner: null }]);
+    db.raw.prepare("UPDATE notes SET project_judged_at = 5 WHERE id = ?").run(z.id);
+    judge();
+    const b = db.createProject(room.id, { name: "B" }, "Sam");
+    assert.deepEqual(judged(), [5, null], "only the note with no suggestion");
+    assert.equal(db.getNote(z.id)?.projectJudgedAt, 5, "only in this space");
+    for (const change of [{ name: "Bee" }, { goal: "Buzz" }, { archived: false }] as const) {
+      db.updateProject(room.id, b.id, { archived: true });
+      judge();
+      db.updateProject(room.id, b.id, change);
+      assert.deepEqual(judged(), [5, null], JSON.stringify(change));
+    }
+    db.updateProject(room.id, b.id, { archived: false });
+    judge();
+    db.updateProject(room.id, b.id, { position: 0 });
+    assert.deepEqual(judged(), [5, 5], "a new place in the list changes nothing");
+  } finally {
+    db.raw.close();
+  }
+});
+
+test("a to-do carried to the agenda keeps the project it had, as a suggestion", () => {
+  const { db, room, m } = setup();
+  try {
+    const p = db.createProject(room.id, { name: "Checkout" }, "Sam");
+    const q = db.createProject(room.id, { name: "Other" }, "Sam");
+    const [feature, byHand, none] = db.syncNotes(m.id, null, [
+      { kind: "action", text: "Build checkout", owner: "Sam" },
+      { kind: "action", text: "Set by hand", owner: null },
+      { kind: "action", text: "No project", owner: null },
+    ]);
+    db.setNoteProject(room.id, feature.id, { projectId: p.id, by: "Sam" });
+    db.setNoteProject(room.id, byHand.id, { projectId: q.id, by: "Sam" });
+    // A product review slide that shows the feature's to-do.
+    const review = db.createReview(room.id);
+    const deck = db.createDeck(room.id, "Review", 1);
+    db.addItems(room.id, [{ source: "slide", externalId: null, title: "Checkout", url: null, description: null, deckId: deck.id, slideNo: 1 }]);
+    const slideItem = db.listItems(room.id).find((i) => i.deckId === deck.id)!;
+    const slide = db.addReviewSlide(review.id, { title: "Checkout", body: "", noteId: feature.id, owner: null, addedBy: null, pr: null });
+    db.updateReviewSlide(slide.id, { itemId: slideItem.id });
+    const [caught, other] = db.syncNotes(m.id, slideItem.id, [
+      { kind: "action", text: "Fix the coupon field", owner: null },
+      { kind: "action", text: "Retry the payment", owner: null },
+    ]);
+    assert.equal(shown(db, room.id, caught.id), p.id, "caught on the slide, it is in the feature's project");
+    const itemId = addUpNext(db, room.id, { key: `note:${caught.id}`, merged: [`note:${other.id}`, `note:${byHand.id}`, `note:${none.id}`] }, m);
+    assert.ok(itemId);
+    const n = read(db, room.id, caught.id);
+    assert.deepEqual([n.itemId, n.project, n.projectSuggested], [itemId, p.id, true], "on its new line, the project stays as a suggestion");
+    assert.deepEqual([read(db, room.id, other.id).project, read(db, room.id, other.id).projectSuggested], [p.id, true], "one folded into it too");
+    const kept = db.getNote(byHand.id)!;
+    assert.deepEqual([kept.projectId, kept.projectSetBy, kept.suggestedProjectId], [q.id, "Sam", undefined], "set by hand: unchanged");
+    assert.equal(db.getNote(none.id)?.suggestedProjectId, undefined, "no project before: no suggestion");
+  } finally {
+    db.raw.close();
+  }
+});
+
+test("the suggestion columns are added to an older database", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stand-projects-"));
+  const file = path.join(dir, "stand.db");
+  let db = openDb(file);
+  db.raw.exec("ALTER TABLE notes DROP COLUMN suggested_project_id; ALTER TABLE notes DROP COLUMN project_judged_at;");
+  db.raw.close();
+  db = openDb(file);
+  try {
+    const cols = (db.raw.prepare("PRAGMA table_info(notes)").all() as Array<{ name: string }>).map((c) => c.name);
+    assert.ok(cols.includes("suggested_project_id") && cols.includes("project_judged_at"));
+    db.raw.close();
+    db = openDb(file);
+  } finally {
+    db.raw.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

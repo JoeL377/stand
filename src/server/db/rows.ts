@@ -211,6 +211,8 @@ export const toJot = (r: Row): Jot => ({
 
 export const toNote = (r: Row): Note => ({
   ...(r.project_set_by != null ? { projectId: (r.project_id as string) ?? null, projectSetBy: r.project_set_by as string } : {}),
+  ...(r.suggested_project_id != null ? { suggestedProjectId: r.suggested_project_id as string } : {}),
+  ...(r.project_judged_at != null ? { projectJudgedAt: r.project_judged_at as number } : {}),
   id: r.id as string,
   meetingId: r.meeting_id as string,
   itemId: (r.item_id as string) ?? null,

@@ -1244,3 +1244,21 @@ test("list_spaces keeps the team's order and says where the work is: in_progress
   assert.ok(Date.parse(after[1].latest_activity!) >= action.ts, "a report on a to-do moves latest_activity");
   assert.equal(db.listProjects(room.id)[0].id, quiet.id);
 });
+
+test("agents see Stand's suggested project as suggested, find it under the project, and confirm it", () => {
+  const { api, db, joe, room } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const ref = (api.createProject(agent, { space: room.id, name: "Billing" }, "x").created as { ref: string }).ref;
+  const todo = api.createAction(agent, { space: room.id, text: "Send the invoices" }, "x").created as { ref: string };
+  db.suggestNoteProject(room.id, parseRef(todo.ref)!.id, parseRef(ref)!.id);
+
+  const listed = api.listActions(agent, { space: room.id, project: ref }, "x");
+  assert.deepEqual(listed.actions.map((a) => [a.ref, a.project]), [[todo.ref, { ref, name: "Billing", suggested: true }]], "the filter includes a suggested to-do");
+  assert.deepEqual((api.get(agent, todo.ref, "x") as { project: unknown }).project, { ref, name: "Billing", suggested: true });
+
+  const confirmed = api.updateAction(agent, { ref: todo.ref, project: ref }, "x");
+  assert.deepEqual(confirmed.updated.project, { ref, name: "Billing" }, "set by hand now: no suggested");
+  assert.ok(db.getNote(parseRef(todo.ref)!.id)?.projectSetBy, "confirmed by hand");
+  assert.deepEqual((api.get(agent, todo.ref, "x") as { project: unknown }).project, { ref, name: "Billing" });
+});

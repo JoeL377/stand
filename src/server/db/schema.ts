@@ -525,6 +525,8 @@ export function migrate(db: DatabaseSync) {
   if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
   if (!noteCols.includes("project_id")) topicsToProjects(db);
   db.exec("CREATE INDEX IF NOT EXISTS notes_project ON notes(project_id);");
+  // Stand's suggested project (rule 4), and when it last read the note for one. NULL: not read.
+  if (!noteCols.includes("suggested_project_id")) db.exec("ALTER TABLE notes ADD COLUMN suggested_project_id TEXT; ALTER TABLE notes ADD COLUMN project_judged_at INTEGER;");
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
   // Who did it, as fields (shared/actors.ts). Older rows read theirs from done_by and edited_by.
