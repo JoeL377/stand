@@ -11,7 +11,7 @@ import { activeFirst, matchesProject, projectActivity, type Project } from "../.
 import { ProjectPicker } from "../ProjectPicker.tsx";
 import { OwnerPicker } from "../OwnerPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
-import { stateOf } from "../../shared/tasks.ts";
+import { partsTally, stateOf, withParts } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
 import { api, type RoomInfo } from "../api.ts";
@@ -554,6 +554,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               sweep={feed?.questionSweep ?? null}
               open={[...todos, ...questions].filter(matching)}
               closed={[...done, ...closedQuestions].filter(matching)}
+              all={[...todos, ...questions, ...done, ...closedQuestions]}
               mentions={feed?.mentions ?? []}
               projectPicker={projectPicker}
               projects={projects}
@@ -905,6 +906,8 @@ function TasksTab(props: {
   sweep: QuestionSweep | null;
   open: TaskNote[];
   closed: TaskNote[];
+  /** Every task of the space, whatever the filters: where a part finds its parent, and a parent its parts. */
+  all: TaskNote[];
   /** Comments that tag you and wait on you, newest first. */
   mentions: TaskMention[];
   onArchive: (n: Note) => void;
@@ -1021,6 +1024,10 @@ function TasksTab(props: {
   const done = closed.filter((n) => stateOf(n) !== "dropped");
   const dropped = closed.filter((n) => stateOf(n) === "dropped");
   const nameOf = (id: string | null | undefined) => props.projects.find((p) => p.id === id)?.name ?? null;
+  const byId = new Map(props.all.map((n) => [n.id, n]));
+  const parts = partsTally(props.all);
+  /** The to-do a task is a part of, when the space still has it. */
+  const partOf = (n: TaskNote) => (n.parentId && n.parentId !== n.id ? byId.get(n.parentId) : undefined);
 
   const move = (n: Note, state: "done" | "dropped" | "open") =>
     api.setTask(props.roomId, n.id, { state }).then(
@@ -1050,13 +1057,15 @@ function TasksTab(props: {
     );
   // `section` is the project the rows sit under ("" for Unassigned); undefined outside a project section.
   // A row under its own project doesn't repeat the project's name: it shows, with the date, on hover.
-  const list = (notes: TaskNote[], closed = false, section?: string) => (
+  // `under` is the rows that sit below their parent. A part anywhere else names its parent instead.
+  const list = (notes: TaskNote[], closed = false, section?: string, under?: Set<string>) => (
     <FollowUpList
       oneLine
       notes={notes}
       openId={props.openId}
       onOpen={(n) => props.onOpen(n.id)}
       onToggle={(n, d) => move(n, d ? "done" : "open")}
+      rowClass={(n) => (under?.has(n.id) ? "part" : undefined)}
       below={(n) =>
         !closed &&
         answering === n.id && (
@@ -1075,6 +1084,12 @@ function TasksTab(props: {
       after={(n: TaskNote) => (
         <>
           {!closed && tagged.has(n.id) && <MentionPill mentions={tagged.get(n.id)!} />}
+          {parts.has(n.id) && <PartsPill {...parts.get(n.id)!} />}
+          {!under?.has(n.id) && partOf(n) && (
+            <button type="button" className="task-part-of" title={`Part of: ${partOf(n)!.text}`} onClick={() => props.onOpen(partOf(n)!.id)}>
+              Part of: {partOf(n)!.text}
+            </button>
+          )}
           {!quietProject(n, section) && props.projectPicker(n)}
           {n.kind === "question" &&
             (closed ? (
@@ -1152,13 +1167,22 @@ function TasksTab(props: {
     return owners.map((o) => ({ key: o, notes: groups.get(o)! }));
   };
   /** A section's rows, still grouped by who has them; the row's own face says who, so a small gap
-   *  stands in for a heading per person. */
-  const byOwner = (notes: TaskNote[], section: string) =>
-    ownerGroups(notes).map((g) => (
+   *  stands in for a heading per person. A to-do's parts stay under it, in its owner's group. */
+  const byOwner = (notes: TaskNote[], section: string) => {
+    const families = withParts(notes);
+    const partsOf = new Map(families.map((f) => [f.note.id, f.parts]));
+    const under = new Set(families.flatMap((f) => f.parts.map((p) => p.id)));
+    return ownerGroups(families.map((f) => f.note)).map((g) => (
       <div key={g.key || "nobody"} className="sh-task-group by-owner">
-        {list(g.notes, false, section)}
+        {list(
+          g.notes.flatMap((n) => [n, ...(partsOf.get(n.id) ?? [])]),
+          false,
+          section,
+          under,
+        )}
       </div>
     ));
+  };
   /** Who has what in a section, as faces with counts on its header line. */
   const ownerTally = (notes: TaskNote[]) => (
     <span className="sh-project-owners">
@@ -1552,6 +1576,16 @@ function MentionPill({ mentions }: { mentions: TaskMention[] }) {
           {mentions.length > 1 && ` · ${mentions.length} comments`}
         </span>
       </span>
+    </span>
+  );
+}
+
+/** "1/3 parts" after a to-do's text: how many of its parts are done. */
+function PartsPill({ done, total }: { done: number; total: number }) {
+  const label = `${done} of ${total} ${total === 1 ? "part" : "parts"} done`;
+  return (
+    <span className="rc-pill task-parts" title={label} aria-label={label}>
+      {done}/{total} {total === 1 ? "part" : "parts"}
     </span>
   );
 }

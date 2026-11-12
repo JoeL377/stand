@@ -361,7 +361,12 @@ api.postUpdate(samsAgent, { ref: ref(latest.note("Update the terms link")), stat
 api.postUpdate({ user: maya, token: db.createToken(maya.id, "Cursor", "write").info }, { ref: ref(summaryBar), status: "needs_decision", text: "The bar hides the Apple Pay button on small phones. Keep the button or the total?" });
 
 // Added by hand, and being done by a person.
-api.createAction(samsAgent, { space: room.id, text: "Draft the Dec 1 launch checklist", itemId: guest.id, status: "doing", summary: "Starting from last quarter's checklist." });
+const checklist = api.createAction(samsAgent, { space: room.id, text: "Draft the Dec 1 launch checklist", itemId: guest.id, status: "doing", summary: "Starting from last quarter's checklist." }).created;
+
+// To-dos with parts. The worker's: one done, one its owner's, one someone else's. The checklist's:
+// one under it, and one that waits on Sam, so it shows under For you and names its parent there.
+for (const part of [key, browserPath, earlier.note("Write the retry runbook")]) db.setNoteParent(room.id, part.id, worker.id);
+for (const part of [latest.note("Write the guest checkout launch note"), latest.note("Update the terms link")]) db.setNoteParent(room.id, part.id, checklist.ref.split("/")[1]);
 
 // A replacement Stand only suspects, for a person to confirm.
 const flagDecision = earlier.note("Keep guest checkout behind a flag");
