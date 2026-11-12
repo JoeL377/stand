@@ -3645,12 +3645,5 @@ a .mention { color: inherit; }
   .sh-tab .chat-marks .count { display: inline-block; }
 }
 
-/* A review row on the Meetings tab: its name gives way first, the count and the Next mark never shrink. */
+/* A review row on the Meetings tab: its name gives way first, the count never shrinks. */
 .sh-what.sh-count { flex: none; }
-.rp-pill.sh-next { flex: none; height: 20px; padding: 0 8px; font-size: 11px; cursor: inherit; }
-@media (max-width: 760px) {
-  /* The pill above already says the kind: the row is the name and how it ended. */
-  .sh-rows.by-kind .sh-who, .sh-rows.by-kind .sh-count { display: none; }
-  .sh-rows.by-kind .sh-row-text { flex-wrap: wrap; row-gap: 2px; }
-  .sh-rows.by-kind .sh-who + .sh-what { flex: 1 1 100%; color: var(--text); }
-}
