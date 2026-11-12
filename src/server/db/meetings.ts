@@ -2,7 +2,6 @@
 import type { StageEvent, StageView } from "../../shared/timeline.ts";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentCard, Board, ChapterRecap, MeetingCost, Segment, SpaceCost } from "../../shared/protocol.ts";
-import { enqueueConxtMeeting } from "../conxt.ts";
 import { newId } from "../ids.ts";
 import type { ListItem } from "../liveList.ts";
 import { costOf, type UsageRow } from "../usage.ts";
@@ -31,18 +30,13 @@ export function meetingsStore(db: DatabaseSync) {
       return { id, startedAt };
     },
     endMeeting(id: string, summary: string | null, synthesis: string | null = null, at = Date.now(), chapters: ChapterRecap[] = []) {
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ?, chapters_json = ? WHERE id = ?").run(
-          at,
-          summary,
-          synthesis,
-          chapters.length ? JSON.stringify(chapters) : null,
-          id,
-        );
-        enqueueConxtMeeting(db, id);
-        db.exec("COMMIT");
-      } catch (err) { db.exec("ROLLBACK"); throw err; }
+      db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ?, chapters_json = ? WHERE id = ?").run(
+        at,
+        summary,
+        synthesis,
+        chapters.length ? JSON.stringify(chapters) : null,
+        id,
+      );
     },
     /** Someone pressed End meeting; the recap is being written. A restart before it's done finishes the job instead of resuming. */
     meetingEnding(id: string) {

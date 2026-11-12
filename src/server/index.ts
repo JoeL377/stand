@@ -5,7 +5,6 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { type WebSocket, WebSocketServer } from "ws";
 import { authRoutes, requireUser, userFromRequest } from "./auth.ts";
 import { capabilities, config } from "./config.ts";
-import { conxtRoutes } from "./conxt.ts";
 import { oauthRoutes } from "./oauth.ts";
 import { startServices } from "./services.ts";
 import { brainstormRoutes } from "./routes/brainstorms.ts";
@@ -52,7 +51,6 @@ taskRoutes(app, services);
 githubRoutes(app, services);
 sourceRoutes(app, services);
 projectRoutes(app, services);
-app.use("/api/rooms/:id/conxt", conxtRoutes(db, services.conxtDestinations));
 snapRoutes(app, services);
 jotRoutes(app, services);
 tokenRoutes(app, services);

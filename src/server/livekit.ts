@@ -242,7 +242,7 @@ class LiveKitInferenceRecognizer implements Recognizer {
       sampleRate: SAMPLE_RATE,
       apiKey: config.livekit.apiKey,
       apiSecret: config.livekit.apiSecret,
-      // The Conxt glossary's words, through LiveKit's own Deepgram (up to 100 terms):
+      // The room's key terms (product and people names), through LiveKit's own Deepgram (up to 100 terms):
       // no separate Deepgram account needed.
       ...(keyterms.length ? { modelOptions: { keyterm: keyterms.slice(0, 100) } as never } : {}),
     });
@@ -308,7 +308,7 @@ class DeepgramRecognizer implements Recognizer {
       endpointing: "300",
       utterance_end_ms: "1000",
     });
-    // The Conxt glossary's words (product and people names), so Nova-3 hears them right.
+    // The room's key terms (product and people names), so Nova-3 hears them right.
     for (const term of keyterms) params.append("keyterm", term);
     this.ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, {
       headers: { Authorization: `Token ${config.deepgramKey}` },

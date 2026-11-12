@@ -1,8 +1,6 @@
 // One live meeting in a room: who is here, which item is in focus, and the
 // agent's pinning of speech and chat to that item.
 
-import { roomVocabulary, vocabularyLine } from "./conxtGlossary.ts";
-import { confirmRoomOpenItem, liveCards, refreshRoomOpenItems, roomOpenItems, saysTerm, shareRoomOpenItem } from "./conxtOpenItems.ts";
 import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
@@ -60,8 +58,6 @@ const COST_EVERY_MS = 5_000;
 const DRAFT_EVERY_MS = 150;
 /** A dismissed item isn't suggested again for this long. */
 const DISMISS_QUIET_MS = 90_000;
-/** A word Conxt says was used two ways stays raised this long after it is said. */
-const CONXT_SAID_MS = 10 * 60_000;
 /** Minimum gap between screen reads, to bound vision cost. */
 const FRAME_MIN_INTERVAL_MS = 4_000;
 /** The agent keeps a frame next to a note only if it saw it this recently. */
@@ -184,11 +180,6 @@ export class RoomSession implements SpeechSink {
   private handled = new Set<string>();
   /** Names of everyone who's been in this meeting, so "X is reconnecting" can name a host who dropped. */
   private names = new Map<string, string>();
-  /** Signed-in emails by participant, lowercased: the person ids Conxt knows. */
-  private emails = new Map<string, string>();
-  /** Conxt divergences whose word was said, and when last. */
-  private conxtSaid = new Map<string, number>();
-  private conxtConfirming = new Set<string>();
   /** Deleted notes and dismissed suggestions, kept a minute for Undo. */
   private removedNotes = new Map<string, Note>();
   private dismissedKeys = new Map<string, string[]>();
@@ -710,7 +701,6 @@ export class RoomSession implements SpeechSink {
       ...this.upNext(),
       capabilities: capabilities(),
       ending: this.ended,
-      conxt: this.conxtLive(),
     };
   }
 
@@ -722,16 +712,6 @@ export class RoomSession implements SpeechSink {
       .roomFollowUps(this.roomId)
       .filter((f) => f.meetingId !== this.meetingId && (f.doneAt === null || (withNews && f.doneAt >= Math.min(since, this.meetingStartedAt))))
       .sort((a, b) => a.ts - b.ts);
-  }
-
-  /** What the connected Conxt project would raise with the people here now. */
-  private conxtLive() {
-    const items = roomOpenItems(this.roomId);
-    if (!items.length || this.ended) return [];
-    const here = [...this.participants.values()].map((p) => ({ participantId: p.id, name: p.name, email: this.emails.get(p.id) ?? null }));
-    const since = Date.now() - CONXT_SAID_MS;
-    const said = new Set([...this.conxtSaid].filter(([, at]) => at >= since).map(([id]) => id));
-    return liveCards(items, here, said);
   }
 
   private snaps() {
@@ -934,7 +914,6 @@ export class RoomSession implements SpeechSink {
       }
       const isNew = !existing;
       this.names.set(id, name);
-      if (user.email) this.emails.set(id, user.email.toLowerCase());
       // The host coming back keeps the seat; nobody takes it while it's held for them.
       const seatFree = !this.hostId || (!this.participants.has(this.hostId) && !this.hostAwayTimer);
       if (id === this.hostId || seatFree || (isNew && id === this.createdBy && !this.creatorHandedOver)) this.setHost(id);
@@ -1375,44 +1354,6 @@ export class RoomSession implements SpeechSink {
         for (const id of new Set(added)) this.sendItemNotes(id);
         break;
       }
-      case "conxt.confirm": {
-        // Only someone the decision waits on, signed in and in the meeting, confirms it.
-        const email = this.emails.get(conn.participantId);
-        const card = this.conxtLive().find((c) => c.id === msg.itemId && c.kind === "confirmation");
-        if (!email || !card?.here.some((p) => p.participantId === conn.participantId)) {
-          return this.send(ws, { type: "error", message: "Couldn't confirm: this decision doesn't wait on you." });
-        }
-        if (this.conxtConfirming.has(card.id)) return;
-        this.conxtConfirming.add(card.id);
-        try {
-          const r = await confirmRoomOpenItem(this.roomId, card.id, email);
-          if (!r.ok) this.send(ws, { type: "error", message: `Couldn't confirm: ${r.why}.` });
-          await refreshRoomOpenItems(this.roomId);
-        } finally {
-          this.conxtConfirming.delete(card.id);
-        }
-        this.broadcastState();
-        break;
-      }
-      case "conxt.share": {
-        // Only the person whose explore work it is shares it, as with confirming.
-        const email = this.emails.get(conn.participantId);
-        const card = this.conxtLive().find((c) => c.id === msg.itemId && c.kind === "exploring");
-        if (!email || !card?.here.some((p) => p.participantId === conn.participantId)) {
-          return this.send(ws, { type: "error", message: "Couldn't share: that explore work isn't yours." });
-        }
-        if (this.conxtConfirming.has(card.id)) return;
-        this.conxtConfirming.add(card.id);
-        try {
-          const r = await shareRoomOpenItem(this.roomId, card.id, email);
-          if (!r.ok) this.send(ws, { type: "error", message: `Couldn't share: ${r.why}.` });
-          await refreshRoomOpenItems(this.roomId);
-        } finally {
-          this.conxtConfirming.delete(card.id);
-        }
-        this.broadcastState();
-        break;
-      }
       case "upnext.dismiss": {
         if (!isHost) return;
         const { suggestions, parked } = this.upNext().upNext;
@@ -1717,17 +1658,7 @@ export class RoomSession implements SpeechSink {
     this.scheduleList();
     this.scheduleMap();
     this.checkDrift(segment);
-    this.checkConxtTerms(text, ts);
     return segment;
-  }
-
-  /** A word Conxt says people use two ways was just said: raise it, once per stretch. */
-  private checkConxtTerms(text: string, ts: number) {
-    const ids = saysTerm(roomOpenItems(this.roomId), text);
-    if (!ids.length) return;
-    const fresh = ids.some((id) => (this.conxtSaid.get(id) ?? -Infinity) < ts - CONXT_SAID_MS);
-    for (const id of ids) this.conxtSaid.set(id, ts);
-    if (fresh) this.broadcastState();
   }
 
   /** When the talk on the item in focus keeps naming a different agenda item, nudge the host
@@ -2128,9 +2059,7 @@ export class RoomSession implements SpeechSink {
           .meetingSnaps(this.meetingId)
           .filter((p) => p.itemId === itemId && p.caption)
           .map((p) => ({ at: p.ts, by: p.source === "agent" ? "Stand agent" : p.takenBy, caption: p.caption! }));
-        // The team's own instructions, then the Conxt vocabulary for words said in this stretch only.
-        const vocabulary = vocabularyLine(roomVocabulary(this.roomId).terms, window.map((s) => s.text).join("\n"));
-        const instructions = [this.db.getRoom(this.roomId)?.synthesisInstructions, vocabulary].filter(Boolean).join("\n\n") || undefined;
+        const instructions = this.db.getRoom(this.roomId)?.synthesisInstructions || undefined;
         // Nothing said since every topic settled: the notes stand as they are.
         notes =
           !window.length && settled.length
