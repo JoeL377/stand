@@ -3927,3 +3927,8 @@ a .mention { color: inherit; }
   /* Someone's shared screen takes the phone's full width. */
   .is-phone .screen:has(video) { margin-inline: -8px; border-radius: 0; box-shadow: none; }
 }
+/* A to-do's parts on a phone: folded until its parts pill is tapped. */
+.followups li.part.folded { display: none; }
+.task-parts.fold { min-height: 0; border: 0; box-shadow: none; cursor: pointer; font: inherit; font-size: 12px; }
+.task-parts.fold::after { content: "▾"; margin-left: 5px; font-size: 10px; }
+.task-parts.fold.open::after { content: "▴"; }
