@@ -10,4 +10,5 @@ One file per user-facing feature: how a person reaches it, how `drive.cjs` drive
 | Agent MCP | [agent-mcp.md](agent-mcp.md) | `mcp` | yes |
 | Chat | [chat.md](chat.md) | `chat.cjs` (its own script) | yes, without capture (not built yet) |
 | Design review | [design-review.md](design-review.md) | `design-review.cjs` (its own script) | yes, without the AI brief (needs a key) |
+| Projects | [projects.md](projects.md) | `projects.cjs` (its own script) | yes, with the scripted demo |
 | Bar notes and snaps | [bar-notes-and-snaps.md](bar-notes-and-snaps.md) | none | no, needs the Mac app |

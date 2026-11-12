@@ -3543,3 +3543,4 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
   .xp-menu .xp-hint { display: none; }
   .xp-menu .xp-idea { max-width: 55vw; }
 }
+.agenda .item-tools .add-menu.row-menu { left: auto; right: 0; width: max-content; min-width: 170px; max-width: 260px; }
