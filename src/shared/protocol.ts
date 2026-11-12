@@ -1020,24 +1020,6 @@ export interface RoomState {
   capabilities: Capabilities;
   /** The host pressed End meeting and the recap is being written. */
   ending?: boolean;
-  /** From the connected Conxt project: what to raise while these people are here. */
-  conxt?: ConxtLive[];
-}
-
-/** A Conxt item on the live panel. A confirmation shows while someone it waits on
- *  is in the meeting, and only they can confirm it; a divergence shows once its
- *  word is said again. */
-export interface ConxtLive {
-  /** exploring: someone here has agent work held in Conxt, theirs to share.
-   *  came_back: their explore work came back with things to review. */
-  kind: "confirmation" | "divergence" | "exploring" | "came_back";
-  id: string;
-  title: string;
-  why: string;
-  /** For a confirmation, the people it waits on who are here now; for explore
-   *  work, its person, when they are here. */
-  here: Array<{ participantId: string; name: string }>;
-  term: string | null;
 }
 
 /** What a client asks of the room. Messages that change something carry a
@@ -1059,10 +1041,6 @@ export type ClientMessage = (
   | { type: "upnext.dismiss"; key: string }
   /** Host: Undo for a dismissed suggestion or a deleted note, within a minute. */
   | { type: "upnext.undismiss"; key: string }
-  /** The signed-in person confirms a Conxt decision that waits on them. */
-  | { type: "conxt.confirm"; itemId: string }
-  /** The signed-in person shares their explore work in Conxt with the team. */
-  | { type: "conxt.share"; itemId: string }
   | { type: "note.restore"; noteId: string }
   | { type: "suggestion.dismiss" }
   /** Anyone on the call: make the move the board is waiting to confirm, now. `title`: the one they saw. */
@@ -1227,6 +1205,10 @@ export type ServerMessage =
   /** Who pilots ✦ Stand, and who's asking to (server/pilot.ts), after every change. */
   | { type: "pilot"; pilot: PilotView }
   | { type: "meeting.ended"; meetingId: string }
+  /** Stand is restarting for an update: the call carries on once it's back, and the audio never stops. */
+  | { type: "restarting" }
+  /** Something to tell this person that isn't an error, such as someone taking over their screen share. */
+  | { type: "notice"; message: string }
   /** The server has a message the client sent with this cid. */
   | { type: "ack"; cid: string }
   | { type: "pong" }
@@ -1258,6 +1240,8 @@ export interface MeetingRecap {
   roomName: string;
   startedAt: number;
   endedAt: number | null;
+  /** The call has ended and its recap is still being written: the page fills in when it's saved. */
+  writingUp?: boolean;
   summary: string | null;
   /** The space's synthesis instructions applied to this meeting, as Markdown; null when it had none. */
   synthesis: string | null;

@@ -30,7 +30,8 @@ export function ReviewStage(props: {
   notes: Note[];
   /** The notes for this slide are being written right now. */
   busy: boolean;
-  canSteer: boolean;
+  /** Anyone in the call flips a review's slides; this is false only on pages outside a call. */
+  canFlip: boolean;
   disabled: boolean;
   /** The picture the host has up, and choosing another. */
   shot: number;
@@ -42,7 +43,7 @@ export function ReviewStage(props: {
   onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
   className?: string;
 }) {
-  const { item, deck, index, count, canSteer, disabled } = props;
+  const { item, deck, index, count, canFlip, disabled } = props;
   const review = item.slide?.review;
   // An idea review's slide is an idea from a brainstorm, and ends in its own words.
   const idea = review?.idea ?? null;
@@ -198,7 +199,7 @@ export function ReviewStage(props: {
         )}
       </div>
       <div className="slide-bar rv-bar">
-        {canSteer && (
+        {canFlip && (
           <button className="ghost" onClick={() => props.onFlip(-1)} disabled={disabled || index <= 0} aria-label="Previous slide">
             ←
           </button>
@@ -233,7 +234,7 @@ export function ReviewStage(props: {
             );
           })}
         </div>
-        {canSteer && (
+        {canFlip && (
           <button className="ghost" onClick={() => props.onFlip(1)} disabled={disabled || index < 0 || index >= count - 1} aria-label="Next slide">
             →
           </button>

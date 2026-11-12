@@ -309,6 +309,13 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", "```mermaid", 
       await rae.getByRole("menuitem", { name: "End for everyone" }).click({ timeout: 1500 }).catch(() => {});
       await rae.locator("footer.controls").waitFor({ state: "detached", timeout: 180_000 });
       await rae.waitForLoadState("networkidle");
+      // Everyone lands on the recap at once; what the review writes back comes with the recap.
+      await rae.waitForURL(/\/meetings\/[a-z0-9]+/, { timeout: 30_000 });
+      const meetingId = rae.url().match(/\/meetings\/([a-z0-9]+)/)[1];
+      for (let i = 0; i < 180; i++) {
+        if ((await rae.request.get(`${base}/api/meetings/${meetingId}`).then((r) => r.json())).endedAt) break;
+        await rae.waitForTimeout(1000);
+      }
     });
     const state = await vera.request.get(`${base}/api/tasks/${taskId}/design-review`).then((r) => r.json());
     check("after the meeting the review is over, and the plan knows its verdict", state.queued === false && state.last?.verdict === "changes" && state.last?.changed === false, state);

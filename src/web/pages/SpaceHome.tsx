@@ -11,7 +11,7 @@ import { activeFirst, matchesProject, projectActivity, type Project } from "../.
 import { ProjectPicker } from "../ProjectPicker.tsx";
 import { OwnerPicker } from "../OwnerPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
-import { stateOf } from "../../shared/tasks.ts";
+import { partsTally, stateOf, withParts } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
 import { api, type RoomInfo } from "../api.ts";
@@ -554,6 +554,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               sweep={feed?.questionSweep ?? null}
               open={[...todos, ...questions].filter(matching)}
               closed={[...done, ...closedQuestions].filter(matching)}
+              all={[...todos, ...questions, ...done, ...closedQuestions]}
               mentions={feed?.mentions ?? []}
               projectPicker={projectPicker}
               projects={projects}
@@ -905,6 +906,8 @@ function TasksTab(props: {
   sweep: QuestionSweep | null;
   open: TaskNote[];
   closed: TaskNote[];
+  /** Every task of the space, whatever the filters: where a part finds its parent, and a parent its parts. */
+  all: TaskNote[];
   /** Comments that tag you and wait on you, newest first. */
   mentions: TaskMention[];
   onArchive: (n: Note) => void;
@@ -1021,6 +1024,10 @@ function TasksTab(props: {
   const done = closed.filter((n) => stateOf(n) !== "dropped");
   const dropped = closed.filter((n) => stateOf(n) === "dropped");
   const nameOf = (id: string | null | undefined) => props.projects.find((p) => p.id === id)?.name ?? null;
+  const byId = new Map(props.all.map((n) => [n.id, n]));
+  const parts = partsTally(props.all);
+  /** The to-do a task is a part of, when the space still has it. */
+  const partOf = (n: TaskNote) => (n.parentId && n.parentId !== n.id ? byId.get(n.parentId) : undefined);
 
   const move = (n: Note, state: "done" | "dropped" | "open") =>
     api.setTask(props.roomId, n.id, { state }).then(
@@ -1048,13 +1055,17 @@ function TasksTab(props: {
         ?
       </span>
     );
-  const list = (notes: TaskNote[], closed = false) => (
+  // `section` is the project the rows sit under ("" for Unassigned); undefined outside a project section.
+  // A row under its own project doesn't repeat the project's name: it shows, with the date, on hover.
+  // `under` is the rows that sit below their parent. A part anywhere else names its parent instead.
+  const list = (notes: TaskNote[], closed = false, section?: string, under?: Set<string>) => (
     <FollowUpList
       oneLine
       notes={notes}
       openId={props.openId}
       onOpen={(n) => props.onOpen(n.id)}
       onToggle={(n, d) => move(n, d ? "done" : "open")}
+      rowClass={(n) => (under?.has(n.id) ? "part" : undefined)}
       below={(n) =>
         !closed &&
         answering === n.id && (
@@ -1073,7 +1084,13 @@ function TasksTab(props: {
       after={(n: TaskNote) => (
         <>
           {!closed && tagged.has(n.id) && <MentionPill mentions={tagged.get(n.id)!} />}
-          {props.projectPicker(n)}
+          {parts.has(n.id) && <PartsPill {...parts.get(n.id)!} />}
+          {!under?.has(n.id) && partOf(n) && (
+            <button type="button" className="task-part-of" title={`Part of: ${partOf(n)!.text}`} onClick={() => props.onOpen(partOf(n)!.id)}>
+              Part of: {partOf(n)!.text}
+            </button>
+          )}
+          {!quietProject(n, section) && props.projectPicker(n)}
           {n.kind === "question" &&
             (closed ? (
               !n.answeredBy && <span className="task-verb">Answer</span>
@@ -1101,11 +1118,20 @@ function TasksTab(props: {
               </span>
             </span>
           )}
-          {n.from && <span className="task-from"><FromChip from={n.from} /></span>}
         </>
       )}
       tail={(n: TaskNote) => (
         <>
+          {(quietProject(n, section) || n.from) && (
+            <span className="row-quiet">
+              {quietProject(n, section) && props.projectPicker(n)}
+              {n.from && (
+                <span className="task-from">
+                  <FromChip from={n.from} />
+                </span>
+              )}
+            </span>
+          )}
           {!closed && (
             <button className="sh-archive sh-drop" aria-label="Drop: no longer wanted" title="Drop: no longer wanted" onClick={() => void move(n, "dropped")}>
               <CloseIcon />
@@ -1124,8 +1150,13 @@ function TasksTab(props: {
     />
   );
 
+  /** The project pill moves off the row (to its hover line) when the row sits under that same project,
+   *  or has none yet. A project Stand only suggests stays, since it asks to be confirmed. */
+  const quietProject = (n: TaskNote, section: string | undefined) =>
+    !n.projectSuggested && (!n.project || (section !== undefined && (n.project === section || (section === "" && !projects.some((p) => p.id === n.project)))));
+
   /** Open tasks by who has them: you first, then the others by how many they have, then nobody. */
-  const byOwner = (notes: TaskNote[]) => {
+  const ownerGroups = (notes: TaskNote[]) => {
     const groups = new Map<string, TaskNote[]>();
     for (const n of notes) {
       const k = n.owner ? firstName(n.owner) : "";
@@ -1133,15 +1164,45 @@ function TasksTab(props: {
     }
     const rank = (k: string) => (k === me ? 0 : k === "" ? 2 : 1);
     const owners = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || groups.get(b)!.length - groups.get(a)!.length || a.localeCompare(b));
-    return owners.map((o) => (
-      <div key={o || "nobody"} className="sh-task-group by-owner">
-        <p className="sh-group">
-          {o === me ? "You" : o || "No owner"} · {groups.get(o)!.length}
-        </p>
-        {list(groups.get(o)!)}
+    return owners.map((o) => ({ key: o, notes: groups.get(o)! }));
+  };
+  /** A section's rows, still grouped by who has them; the row's own face says who, so a small gap
+   *  stands in for a heading per person. A to-do's parts stay under it, in its owner's group. */
+  const byOwner = (notes: TaskNote[], section: string) => {
+    const families = withParts(notes);
+    const partsOf = new Map(families.map((f) => [f.note.id, f.parts]));
+    const under = new Set(families.flatMap((f) => f.parts.map((p) => p.id)));
+    return ownerGroups(families.map((f) => f.note)).map((g) => (
+      <div key={g.key || "nobody"} className="sh-task-group by-owner">
+        {list(
+          g.notes.flatMap((n) => [n, ...(partsOf.get(n.id) ?? [])]),
+          false,
+          section,
+          under,
+        )}
       </div>
     ));
   };
+  /** Who has what in a section, as faces with counts on its header line. */
+  const ownerTally = (notes: TaskNote[]) => (
+    <span className="sh-project-owners">
+      {ownerGroups(notes).map((g) => {
+        const label = `${g.key === me ? "You" : g.key || "No owner"} · ${g.notes.length}`;
+        return (
+          <span key={g.key || "nobody"} className="sh-owner-tally" title={label} aria-label={label}>
+            {g.key ? (
+              <Face name={g.notes[0].owner!} color={colorFor(g.notes[0].owner!)} size={16} title={label} />
+            ) : (
+              <span className="rc-face none" style={{ width: 16, height: 16, fontSize: 9 }} aria-hidden>
+                ?
+              </span>
+            )}
+            {g.notes.length}
+          </span>
+        );
+      })}
+    </span>
+  );
 
   const fold = (label: string, n: number, open: boolean, toggle: () => void, icon: React.ReactNode) =>
     n > 0 && (
@@ -1218,20 +1279,20 @@ function TasksTab(props: {
           {props.mine ? "Nothing open is yours." : filterName ? `No open tasks in ${filterName}.` : "Nothing open. New tasks come from meetings and what people save here."}
         </p>
       )}
-      {mentioned.length > 0 && (
-        <div className="sh-task-group">
-          <p className="sh-group mentioned" title="Someone tagged you in a comment. Reply on the task or dismiss it there.">
-            Mentions you · {mentioned.length}
+      {mentioned.length + waiting.length > 0 && (
+        <div className="sh-task-group for-you">
+          <p
+            className="sh-group waiting"
+            title={[
+              mentioned.length > 0 && `${mentioned.length} where someone tagged you in a comment (the @ pill): reply on the task or dismiss it there`,
+              waiting.length > 0 && `${waiting.length} ready to ship: a PR or other work is in and needs someone with a say to look`,
+            ]
+              .filter(Boolean)
+              .join("\n")}
+          >
+            For you · {mentioned.length + waiting.length}
           </p>
-          {list(mentioned)}
-        </div>
-      )}
-      {waiting.length > 0 && (
-        <div className="sh-task-group">
-          <p className="sh-group waiting" title="A PR or other work is in and needs someone with a say to look">
-            Waiting on you · {waiting.length}
-          </p>
-          {list(waiting)}
+          {list([...mentioned, ...waiting])}
         </div>
       )}
       {sections.map((p, i) => {
@@ -1268,6 +1329,7 @@ function TasksTab(props: {
             <ProjectHead
               project={p}
               count={notes.length}
+              owners={notes.length > 0 && ownerTally(notes)}
               inProgress={activity.get(p.id)?.inProgress ?? 0}
               folded={isFolded}
               onFold={() => toggleFold(p.id)}
@@ -1284,7 +1346,7 @@ function TasksTab(props: {
                   : undefined
               }
             />
-            {!isFolded && (notes.length ? byOwner(notes) : <p className="sh-card-empty small">Nothing open in this project.</p>)}
+            {!isFolded && (notes.length ? byOwner(notes, p.id) : <p className="sh-card-empty small">Nothing open in this project.</p>)}
           </section>
         );
       })}
@@ -1296,8 +1358,9 @@ function TasksTab(props: {
               <span className="sh-project-name">{props.projects.length ? "Unassigned" : "All tasks"}</span>
               <span className="count">{unassigned.length}</span>
             </button>
+            {ownerTally(unassigned)}
           </div>
-          {!folded.has("") && byOwner(unassigned)}
+          {!folded.has("") && byOwner(unassigned, "")}
         </section>
       )}
       {done.length > 0 && (
@@ -1321,6 +1384,8 @@ function TasksTab(props: {
 function ProjectHead(props: {
   project: Project;
   count: number;
+  /** Who has its open to-dos, as faces with counts. */
+  owners?: React.ReactNode;
   /** Open to-dos in it that someone is on now. */
   inProgress: number;
   folded: boolean;
@@ -1376,14 +1441,14 @@ function ProjectHead(props: {
           <GripIcon />
         </span>
       )}
-      <button type="button" className="sh-project-fold" aria-expanded={!props.folded} onClick={props.onFold}>
+      <button type="button" className="sh-project-fold" aria-expanded={!props.folded} onClick={props.onFold} title={p.goal ?? undefined}>
         <ChevronIcon />
         <span className="sh-project-name">{p.name}</span>
         <span className="count">{props.count}</span>
         {props.inProgress > 0 && <span className="sh-project-live">{props.inProgress} in progress</span>}
         {p.archived && <span className="muted small">Archived</span>}
       </button>
-      {p.goal && <span className="sh-project-goal">{p.goal}</span>}
+      {props.owners}
       <span className="sh-project-menu" ref={ref}>
         <button type="button" className="sh-project-more" aria-label={`${p.name}: more`} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
           ⋯
@@ -1511,6 +1576,16 @@ function MentionPill({ mentions }: { mentions: TaskMention[] }) {
           {mentions.length > 1 && ` · ${mentions.length} comments`}
         </span>
       </span>
+    </span>
+  );
+}
+
+/** "1/3 parts" after a to-do's text: how many of its parts are done. */
+function PartsPill({ done, total }: { done: number; total: number }) {
+  const label = `${done} of ${total} ${total === 1 ? "part" : "parts"} done`;
+  return (
+    <span className="rc-pill task-parts" title={label} aria-label={label}>
+      {done}/{total} {total === 1 ? "part" : "parts"}
     </span>
   );
 }

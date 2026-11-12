@@ -1,8 +1,6 @@
 // One live meeting in a room: who is here, which item is in focus, and the
 // agent's pinning of speech and chat to that item.
 
-import { roomVocabulary, vocabularyLine } from "./conxtGlossary.ts";
-import { confirmRoomOpenItem, liveCards, refreshRoomOpenItems, roomOpenItems, saysTerm, shareRoomOpenItem } from "./conxtOpenItems.ts";
 import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
@@ -26,7 +24,7 @@ import type {
 } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
 import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, type ListItem, ListKeeper } from "./liveList.ts";
-import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, catchUp, finishBrainstorm, othersOfMeeting, parkBrainstorm, promptOf, resumeBrainstorm, toBrainstormView } from "./brainstorm.ts";
+import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, catchUp, finishBrainstorm, othersOfMeeting, promptOf, resumeBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { DiagramKeeper, sessionBackground, saveDraftSpec } from "./designSession.ts";
 import { PilotSeat } from "./pilot.ts";
 import { sourceDigest, repoTools } from "./sources.ts";
@@ -62,12 +60,12 @@ const COST_EVERY_MS = 5_000;
 const DRAFT_EVERY_MS = 150;
 /** A dismissed item isn't suggested again for this long. */
 const DISMISS_QUIET_MS = 90_000;
-/** A word Conxt says was used two ways stays raised this long after it is said. */
-const CONXT_SAID_MS = 10 * 60_000;
 /** Minimum gap between screen reads, to bound vision cost. */
 const FRAME_MIN_INTERVAL_MS = 4_000;
 /** The agent keeps a frame next to a note only if it saw it this recently. */
 const FRAME_BACKS_MS = 180_000;
+/** A diagram opened during a call also reads this much of the talk just before it. */
+const DIAGRAM_LOOK_BACK_MS = 90_000;
 /** The recap sees at most this many snaps, and this many bytes of them, so the request stays within the API's limits. */
 const RECAP_MAX_SNAPS = 20;
 /** A chapter this long gets moments in the recap, read from its remarks. */
@@ -186,11 +184,6 @@ export class RoomSession implements SpeechSink {
   private handled = new Set<string>();
   /** Names of everyone who's been in this meeting, so "X is reconnecting" can name a host who dropped. */
   private names = new Map<string, string>();
-  /** Signed-in emails by participant, lowercased: the person ids Conxt knows. */
-  private emails = new Map<string, string>();
-  /** Conxt divergences whose word was said, and when last. */
-  private conxtSaid = new Map<string, number>();
-  private conxtConfirming = new Set<string>();
   /** Deleted notes and dismissed suggestions, kept a minute for Undo. */
   private removedNotes = new Map<string, Note>();
   private dismissedKeys = new Map<string, string[]>();
@@ -275,6 +268,10 @@ export class RoomSession implements SpeechSink {
   ended = false;
   /** When End meeting started the write-up. */
   endingSince = 0;
+  /** Everyone has been let go: the recap is written in the background and the space can start a new call. */
+  released = false;
+  /** Called once when everyone is let go, before the recap is written. */
+  onRelease?: (s: RoomSession) => void;
 
   constructor(
     private db: DB,
@@ -348,14 +345,19 @@ export class RoomSession implements SpeechSink {
     };
     if (b.kind === "design") {
       // A design session: the same passes, drawing a diagram of boxes and arrows (designSession.ts).
+      // One opened in this call also reads what was said just before, which is often why it was opened.
       const model = this.agent.designDiagram ? { designDiagram: this.agent.designDiagram.bind(this.agent) } : { designDiagram: async () => null };
-      this.brain = { id: b.id, threadId: null, map: new DiagramKeeper(model, b.prompt, since, b.diagram, sessionBackground(b), inScope) };
+      const from = b.startedAt >= this.meetingStartedAt ? Math.max(this.meetingStartedAt, b.startedAt - DIAGRAM_LOOK_BACK_MS) - 1 : since;
+      this.brain = { id: b.id, threadId: null, map: new DiagramKeeper(model, b.prompt, from, b.diagram, sessionBackground(b), inScope) };
       return;
     }
     const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };
     const thread = b.threadId;
     if (!thread) return void (this.brain = { id: b.id, threadId: null, map: new MapKeeper(model, b.prompt, since, b.nodes, inScope) });
-    // A topic's map reads every line of its thread in this call, those said before it was opened too.
+    // A topic's map reads every line of its thread in this call, those said before it was opened too,
+    // and from then on the whole call: when the board moves to another topic, that topic becomes a
+    // direction of the same map instead of a map of its own.
+    const openedAt = Math.max(b.startedAt, this.meetingStartedAt);
     const onThread = (s: Segment) => {
       const board = this.board?.board();
       const t = board?.threads.find((x) => x.id === thread);
@@ -363,7 +365,12 @@ export class RoomSession implements SpeechSink {
       const open = board!.currentId === thread;
       return t.spans.some(([from, to], i) => s.ts >= from && (s.ts <= to || (open && i === t.spans.length - 1)));
     };
-    this.brain = { id: b.id, threadId: thread, map: new MapKeeper(model, b.prompt, this.meetingStartedAt - 1, b.nodes, (s) => inScope(s) && onThread(s)) };
+    const keeper = new MapKeeper(model, b.prompt, this.meetingStartedAt - 1, b.nodes, (s) => inScope(s) && (s.ts >= openedAt || onThread(s)));
+    keeper.topicNow = () => {
+      const board = this.board?.board();
+      return board?.threads.find((t) => t.id === board.currentId)?.title ?? null;
+    };
+    this.brain = { id: b.id, threadId: thread, map: keeper };
   }
 
   /** The stretches of the meeting a board thread was on screen. */
@@ -451,19 +458,12 @@ export class RoomSession implements SpeechSink {
     });
   }
 
-  /** The board moved: the map of the topic it left parks, and the map of the topic it came back to
-   *  goes on, unless someone stopped it or something else is drawing. */
+  /** The board moved. A map that is drawing keeps drawing: the new topic becomes a direction on it
+   *  (joe, 12 Nov: one map with several clusters, not a new map per topic). With nothing drawing,
+   *  the map of the topic the board came back to goes on, if one was parked and nobody stopped it. */
   private syncView() {
     return this.inTurn(async () => {
       const current = this.board?.board().currentId ?? null;
-      const brain = this.brain;
-      if (brain?.threadId && brain.threadId !== current) {
-        await this.lastLook();
-        if (this.ended || this.brain !== brain) return;
-        parkBrainstorm(this.db, brain.id, this.meetingId, this.threadSpans(brain.threadId));
-        this.brain = null;
-        this.broadcastBrainstorm();
-      }
       if (this.ended || this.brain || !current || this.db.brainstormLive(this.roomId)) return;
       const parked = this.db.brainstormOfThread(this.meetingId, current);
       if (!parked || parked.status !== "done" || parked.endedAt !== null) return;
@@ -771,7 +771,6 @@ export class RoomSession implements SpeechSink {
       ...this.upNext(),
       capabilities: capabilities(),
       ending: this.ended,
-      conxt: this.conxtLive(),
     };
   }
 
@@ -783,16 +782,6 @@ export class RoomSession implements SpeechSink {
       .roomFollowUps(this.roomId)
       .filter((f) => f.meetingId !== this.meetingId && (f.doneAt === null || (withNews && f.doneAt >= Math.min(since, this.meetingStartedAt))))
       .sort((a, b) => a.ts - b.ts);
-  }
-
-  /** What the connected Conxt project would raise with the people here now. */
-  private conxtLive() {
-    const items = roomOpenItems(this.roomId);
-    if (!items.length || this.ended) return [];
-    const here = [...this.participants.values()].map((p) => ({ participantId: p.id, name: p.name, email: this.emails.get(p.id) ?? null }));
-    const since = Date.now() - CONXT_SAID_MS;
-    const said = new Set([...this.conxtSaid].filter(([, at]) => at >= since).map(([id]) => id));
-    return liveCards(items, here, said);
   }
 
   private snaps() {
@@ -979,7 +968,8 @@ export class RoomSession implements SpeechSink {
       const user = this.pendingUser.get(ws);
       if (!user || this.conns.get(ws)) return;
       // The meeting this client was in ended while it was away: show it the recap, not a new meeting.
-      if (msg.meetingId && msg.meetingId !== this.meetingId && this.db.getMeeting(msg.meetingId)?.endedAt) {
+      const was = msg.meetingId && msg.meetingId !== this.meetingId ? this.db.getMeeting(msg.meetingId) : null;
+      if (msg.meetingId && (was?.endedAt || was?.endRequestedAt)) {
         this.send(ws, { type: "meeting.ended", meetingId: msg.meetingId });
         ws.close();
         return;
@@ -995,7 +985,6 @@ export class RoomSession implements SpeechSink {
       }
       const isNew = !existing;
       this.names.set(id, name);
-      if (user.email) this.emails.set(id, user.email.toLowerCase());
       // The host coming back keeps the seat; nobody takes it while it's held for them.
       const seatFree = !this.hostId || (!this.participants.has(this.hostId) && !this.hostAwayTimer);
       if (id === this.hostId || seatFree || (isNew && id === this.createdBy && !this.creatorHandedOver)) this.setHost(id);
@@ -1040,9 +1029,10 @@ export class RoomSession implements SpeechSink {
     const isHost = this.isHost(conn.participantId);
 
     switch (msg.type) {
-      // Only the host moves the meeting between items.
+      // Only the host moves the meeting between items. Anyone in the call flips a review's slides,
+      // within the review: a product, idea or design review's deck.
       case "focus":
-        if (!isHost || this.ended) return;
+        if (this.ended || !(isHost || this.flipsReview(msg.itemId))) return;
         this.pinnedBy = null;
         this.setFocus(msg.itemId, conn.name, "manual");
         break;
@@ -1105,10 +1095,15 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "sharing": {
-        // One screen at a time: two people pressing Share together, the second is told.
+        // One screen at a time, and the newest share takes over (their page asked first). The person
+        // taken over is told; their browser stops its share when it sees someone else's counted
+        // instead. A review they were running carries on.
         const other = msg.on && [...this.participants.values()].find((p) => p.isSharing && p.id !== conn.participantId);
-        // Their browser stops the share it started when it sees someone else's counted instead.
-        if (other) return this.send(ws, { type: "error", message: `${other.name} is already sharing, so yours was stopped. Ask them to stop first.` });
+        if (other && me) {
+          other.isSharing = false;
+          for (const [w, c] of this.conns) if (c?.participantId === other.id) this.send(w, { type: "notice", message: `${conn.name} is sharing now, so your share stopped.` });
+          if (other.id === this.hostId) this.suggestion = null;
+        }
         // A share that ends takes the screen nudge with it; one Stand never counted doesn't.
         const wasSharing = Boolean(me?.isSharing);
         if (me) me.isSharing = msg.on;
@@ -1449,44 +1444,6 @@ export class RoomSession implements SpeechSink {
         for (const id of new Set(added)) this.sendItemNotes(id);
         break;
       }
-      case "conxt.confirm": {
-        // Only someone the decision waits on, signed in and in the meeting, confirms it.
-        const email = this.emails.get(conn.participantId);
-        const card = this.conxtLive().find((c) => c.id === msg.itemId && c.kind === "confirmation");
-        if (!email || !card?.here.some((p) => p.participantId === conn.participantId)) {
-          return this.send(ws, { type: "error", message: "Couldn't confirm: this decision doesn't wait on you." });
-        }
-        if (this.conxtConfirming.has(card.id)) return;
-        this.conxtConfirming.add(card.id);
-        try {
-          const r = await confirmRoomOpenItem(this.roomId, card.id, email);
-          if (!r.ok) this.send(ws, { type: "error", message: `Couldn't confirm: ${r.why}.` });
-          await refreshRoomOpenItems(this.roomId);
-        } finally {
-          this.conxtConfirming.delete(card.id);
-        }
-        this.broadcastState();
-        break;
-      }
-      case "conxt.share": {
-        // Only the person whose explore work it is shares it, as with confirming.
-        const email = this.emails.get(conn.participantId);
-        const card = this.conxtLive().find((c) => c.id === msg.itemId && c.kind === "exploring");
-        if (!email || !card?.here.some((p) => p.participantId === conn.participantId)) {
-          return this.send(ws, { type: "error", message: "Couldn't share: that explore work isn't yours." });
-        }
-        if (this.conxtConfirming.has(card.id)) return;
-        this.conxtConfirming.add(card.id);
-        try {
-          const r = await shareRoomOpenItem(this.roomId, card.id, email);
-          if (!r.ok) this.send(ws, { type: "error", message: `Couldn't share: ${r.why}.` });
-          await refreshRoomOpenItems(this.roomId);
-        } finally {
-          this.conxtConfirming.delete(card.id);
-        }
-        this.broadcastState();
-        break;
-      }
       case "upnext.dismiss": {
         if (!isHost) return;
         const { suggestions, parked } = this.upNext().upNext;
@@ -1536,6 +1493,14 @@ export class RoomSession implements SpeechSink {
     const host = this.hostId ? this.names.get(this.hostId) : null;
     this.send(ws, { type: "error", message: `Couldn't ${what}: only the host can change notes${host ? `, and ${host} is hosting now` : ""}.` });
     if (itemId !== undefined) this.send(ws, this.itemNotes(itemId));
+  }
+
+  /** The board is on a review's slide and this goes to another slide of the same review. */
+  private flipsReview(itemId: string | null) {
+    const items = this.items();
+    const from = items.find((i) => i.id === this.focusItemId);
+    const to = items.find((i) => i.id === itemId);
+    return !!from?.deckId && from.deckId === to?.deckId && isReviewDeck(from) && isReviewDeck(to);
   }
 
   /** Whether this signed-in person is driving the meeting right now. */
@@ -1792,18 +1757,8 @@ export class RoomSession implements SpeechSink {
     this.scheduleList();
     this.scheduleMap();
     this.checkDrift(segment);
-    this.checkConxtTerms(text, ts);
     this.checkNext(segment);
     return segment;
-  }
-
-  /** A word Conxt says people use two ways was just said: raise it, once per stretch. */
-  private checkConxtTerms(text: string, ts: number) {
-    const ids = saysTerm(roomOpenItems(this.roomId), text);
-    if (!ids.length) return;
-    const fresh = ids.some((id) => (this.conxtSaid.get(id) ?? -Infinity) < ts - CONXT_SAID_MS);
-    for (const id of ids) this.conxtSaid.set(id, ts);
-    if (fresh) this.broadcastState();
   }
 
   /** When the talk on the item in focus keeps naming a different agenda item, nudge the host
@@ -2204,9 +2159,7 @@ export class RoomSession implements SpeechSink {
           .meetingSnaps(this.meetingId)
           .filter((p) => p.itemId === itemId && p.caption)
           .map((p) => ({ at: p.ts, by: p.source === "agent" ? "Stand agent" : p.takenBy, caption: p.caption! }));
-        // The team's own instructions, then the Conxt vocabulary for words said in this stretch only.
-        const vocabulary = vocabularyLine(roomVocabulary(this.roomId).terms, window.map((s) => s.text).join("\n"));
-        const instructions = [this.db.getRoom(this.roomId)?.synthesisInstructions, vocabulary].filter(Boolean).join("\n\n") || undefined;
+        const instructions = this.db.getRoom(this.roomId)?.synthesisInstructions || undefined;
         // Nothing said since every topic settled: the notes stand as they are.
         notes =
           !window.length && settled.length
@@ -2443,7 +2396,7 @@ export class RoomSession implements SpeechSink {
     this.noteTimers.clear();
     if (this.mergeTimer) clearTimeout(this.mergeTimer);
     this.mergeTimer = null;
-    // Everyone sees "Writing notes…"; a restart before it's done finishes the recap instead of resuming.
+    // A restart before the recap is saved finishes it instead of resuming the call.
     // Each step below stands alone: one that fails is logged, and the meeting still ends and frees the room.
     const step = (what: string, fn: () => unknown) => {
       try {
@@ -2460,6 +2413,9 @@ export class RoomSession implements SpeechSink {
     step("finishing the idea review", () => finishIdeaReview(this.db, this.roomId, this.meetingId));
     step("finishing the design review", () => finishDesignReview(this.db, this.roomId, this.meetingId));
     step("archiving task items", () => this.db.archiveTaskItems(this.roomId));
+    // Nobody waits for the write-up: everyone goes to the recap page, which fills in when it's done,
+    // and the space is free for a new call. A restart before it's done still finishes it (services.ts).
+    this.release();
     // So is a brainstorm: one last look at the talk no pass has read, then its map is the record.
     if (this.brain) {
       await this.mapPasses.idle();
@@ -2562,10 +2518,23 @@ export class RoomSession implements SpeechSink {
       const synthesis = await synthesizing;
       step("saving the recap", () => this.db.endMeeting(this.meetingId, summary || null, synthesis, endedAt, chapterNotes));
       this.polisher?.schedule(this.roomId, 0);
-      this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
-      for (const ws of this.conns.keys()) ws.close();
+      this.release();
       this.onClosed(this);
     }
+  }
+
+  /** The server is stopping for an update: everyone's page says so, and reconnects to this meeting once it's back. */
+  restarting() {
+    this.broadcast({ type: "restarting" });
+  }
+
+  /** Sends everyone to the recap and lets the space go. Once. */
+  private release() {
+    if (this.released) return;
+    this.released = true;
+    this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
+    for (const ws of this.conns.keys()) ws.close();
+    this.onRelease?.(this);
   }
 
   /** Everything the recap looks at: each item's notes and topics, and the snaps

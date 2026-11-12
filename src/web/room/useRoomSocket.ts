@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "../Toasts.tsx";
 import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, Discussion, ListNote, MeetingCost, Note, PilotView, RoomState, Segment, ServerMessage } from "../../shared/protocol.ts";
 
 export interface Interim {
@@ -9,7 +10,7 @@ export interface Interim {
 
 /** Why the room can't be reached, once a few reconnects have failed. "blocked": Stand
  *  answers, but the live connection never opens (a firewall or VPN, usually). */
-export type Trouble = "signed-out" | "gone" | "unreachable" | "blocked";
+export type Trouble = "signed-out" | "gone" | "unreachable" | "blocked" | "updating";
 
 /** Changes that have to reach the room. Each goes with an id and stays in the
  *  outbox until the server acks it; after a dropped connection it's sent again. */
@@ -259,6 +260,13 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
           case "error":
             setError(msg.message);
             break;
+          case "notice":
+            toast({ text: msg.message });
+            break;
+          case "restarting":
+            // A deploy: the socket is about to drop, and comes back by itself once the new server is up.
+            setTrouble("updating");
+            break;
         }
       };
       ws.onclose = () => lost(ws);
@@ -285,7 +293,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
       }
       // Back while we were asking: nothing to report.
       if (wsRef.current?.readyState === WebSocket.OPEN) return;
-      setTrouble(found);
+      // Still updating: it says so until Stand is back, unless the space went or the sign-in did.
+      setTrouble((t) => (t === "updating" && found !== "gone" && found !== "signed-out" ? t : found));
       // A space that's gone won't come back. Signed out keeps trying, so signing in in another tab is enough.
       if (found === "gone") clearTimeout(retry);
     };

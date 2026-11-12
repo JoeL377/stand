@@ -8,11 +8,6 @@ import { buildBrief } from "./brief.ts";
 import { Chat } from "./chat.ts";
 import { ChatCapture } from "./chatCapture.ts";
 import { capabilities, config } from "./config.ts";
-import { ConxtDelivery, parseDestinations } from "./conxt.ts";
-import { configureAppDefault } from "./conxtDefault.ts";
-import { ConxtGlossary, refreshRoomVocabulary, roomVocabulary, setConxtGlossary } from "./conxtGlossary.ts";
-import { ConxtLiveDelivery } from "./conxtLive.ts";
-import { ConxtOpenItems, refreshRoomOpenItems, setConxtOpenItems } from "./conxtOpenItems.ts";
 import { type DB, type OpenMeeting, openDb } from "./db.ts";
 import { specChanged } from "./designReviews.ts";
 import { DoneDecks } from "./doneDeck.ts";
@@ -42,10 +37,8 @@ const WAIT_FOR_RECAP_MS = 3 * 60_000;
 export type Services = ReturnType<typeof startServices>;
 
 export function startServices() {
-  const conxtDestinations = parseDestinations(process.env.CONXT_DESTINATIONS);
   const db = openDb(path.join(config.dataDir, "standup.db"));
   setUsageSink((row) => db.addUsage(row));
-  configureAppDefault(db.raw, conxtDestinations, process.env.CONXT_DEFAULT_DESTINATION, process.env.CONXT_DEFAULT_OPERATOR_EMAIL);
   // Calls made outside a meeting are kept under their task name in llm_usage (usage.ts).
   const agent = labeled(createAgent());
   const planBriefs = new PlanBriefs(db, agent);
@@ -76,14 +69,15 @@ export function startServices() {
   /** The space's meeting, started or picked up as someone arrives. Null when there's no such space. */
   function session(roomId: string): RoomSession | null {
     const existing = sessions.get(roomId);
-    if (existing && (!existing.ended || Date.now() - existing.endingSince < WAIT_FOR_RECAP_MS)) return existing;
+    if (existing && !existing.released && (!existing.ended || Date.now() - existing.endingSince < WAIT_FOR_RECAP_MS)) return existing;
     const room = db.getRoom(roomId);
     if (!room) return null;
     // The server may have stopped mid-meeting (every deploy does): carry on with it.
     let resume: OpenMeeting | null = null;
     for (const m of db.openMeetings(roomId)) {
-      if (m.id === existing?.meetingId) continue; // still being written up
-      if (!resume && !finishing.has(m.id) && recent(m)) resume = m;
+      if (m.id === existing?.meetingId || writingUp.has(m.id)) continue; // still being written up
+      // One someone ended is written up, never resumed: its people have already gone to the recap.
+      if (!resume && !finishing.has(m.id) && !m.endRequestedAt && recent(m)) resume = m;
       else finishOpenMeeting(m);
     }
     const s = new RoomSession(
@@ -91,6 +85,7 @@ export function startServices() {
       agent,
       room,
       (closed) => {
+        writingUp.delete(closed.meetingId);
         if (sessions.get(roomId) === closed) sessions.delete(roomId);
         // The recap is saved: what the meeting caught can be filed, and read against the open questions.
         projectSuggester.schedule(roomId, 0);
@@ -101,24 +96,25 @@ export function startServices() {
       resume,
       planBriefs,
     );
+    // Ended: its recap is written in the background, and the next person to arrive starts a new call.
+    s.onRelease = (released) => {
+      writingUp.add(released.meetingId);
+      if (sessions.get(roomId) === released) sessions.delete(roomId);
+    };
     sessions.set(roomId, s);
-    // Warm the Conxt vocabulary before anyone speaks; the meeting never waits on it.
-    refreshRoomVocabulary(roomId);
-    // Conxt's open items too; once they arrive, the people here see what waits on them.
-    void refreshRoomOpenItems(roomId).then((items) => items.length && s.upNextChanged());
     if (resume) console.log(`[room] ${roomId}: picked up meeting ${resume.id} after a restart`);
-    // It was being written up when the server stopped: finish that, with everyone watching.
-    if (resume?.endRequestedAt) void s.end();
     return s;
   }
 
   /** What speech-to-text listens for in a room: the space's name, "Stand" and the first names of its
-   *  members, which it otherwise mishears ("Duke" for Huy, "Stan" for Stand), then Conxt's word list. */
+   *  members, which it otherwise mishears ("Duke" for Huy, "Stan" for Stand). */
   function keytermsFor(roomId: string, spaceName: string): string[] {
     const names = db.memberNames(roomId).map((n) => n.trim().split(/\s+/)[0]).filter((n) => n.length > 1);
-    return [...new Set([spaceName.trim(), "Stand", ...names, ...roomVocabulary(roomId).keyterms].filter(Boolean))].slice(0, 100);
+    return [...new Set([spaceName.trim(), "Stand", ...names].filter(Boolean))].slice(0, 100);
   }
 
+  /** Meetings whose people have gone to the recap while it is written. */
+  const writingUp = new Set<string>();
   /** Meetings being written up after the fact, one at a time. */
   const finishing = new Set<string>();
   let finishQueue = Promise.resolve();
@@ -284,11 +280,6 @@ export function startServices() {
   chat.start();
   capture?.start();
 
-  new ConxtDelivery(db, conxtDestinations).start();
-  setConxtGlossary(new ConxtGlossary(db.raw, conxtDestinations));
-  setConxtOpenItems(new ConxtOpenItems(db.raw, conxtDestinations));
-  new ConxtLiveDelivery(db, conxtDestinations).start();
-
   return {
     db: db as DB,
     agent,
@@ -307,7 +298,6 @@ export function startServices() {
     agents,
     uploadLinks,
     specTouched,
-    conxtDestinations,
     meetingGroups,
     afterItemsChange,
     parentFor,

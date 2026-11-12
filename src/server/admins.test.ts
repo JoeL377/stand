@@ -3,7 +3,6 @@ import { test } from "node:test";
 import http from "node:http";
 import express from "express";
 import { requireUser } from "./auth.ts";
-import { conxtRoutes } from "./conxt.ts";
 import { openDb } from "./db.ts";
 import { sourceRoutes } from "./routes/sources.ts";
 import { spaceRoutes } from "./routes/spaces.ts";
@@ -45,14 +44,13 @@ test("space admins: the creator always manages, an admin does once made one, and
   assert.equal(db.managesSpace(db.createRoom("Old space"), sam.id), true);
 });
 
-test("space admins over HTTP: admins rename the space, manage its repos and Conxt, and choose the admins", async () => {
+test("space admins over HTTP: admins rename the space, manage its repos, and choose the admins", async () => {
   const { db, joe, ann, sam, outsider, room } = setup();
   const app = express();
   app.use(express.json());
   app.use(requireUser(db));
   spaceRoutes(app, { db, sessions: new Map() } as unknown as Services);
   sourceRoutes(app, { db, githubApp: null, sources: { list: () => [], unlink: () => false } } as unknown as Services);
-  app.use("/api/rooms/:id/conxt", conxtRoutes(db, []));
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -80,8 +78,6 @@ test("space admins over HTTP: admins rename the space, manage its repos and Conx
     assert.equal((await asAnn("PATCH", "", { name: "Ann's space" })).status, 403);
     assert.equal((await asAnn("GET", "/sources")).body.canManage, false);
     assert.equal((await asAnn("DELETE", "/sources/JoeL377/stand")).status, 403);
-    assert.equal((await asAnn("GET", "/conxt")).body.canManage, false);
-    assert.equal((await asAnn("DELETE", "/conxt")).status, 403);
 
     // The creator makes Ann an admin.
     assert.equal((await asJoe("PUT", `/members/${outsider.id}`, { admin: true })).status, 404);
@@ -94,8 +90,6 @@ test("space admins over HTTP: admins rename the space, manage its repos and Conx
     assert.equal((await asAnn("PATCH", "", { name: "Checkout v3" })).body.name, "Checkout v3");
     assert.equal((await asAnn("GET", "/sources")).body.canManage, true);
     assert.equal((await asAnn("DELETE", "/sources/JoeL377/stand")).status, 404, "allowed, but no such repo is linked");
-    assert.equal((await asAnn("GET", "/conxt")).body.canManage, true);
-    assert.equal((await asAnn("DELETE", "/conxt")).status, 200);
 
     // An admin makes more admins, but the creator stays one.
     assert.equal((await asAnn("PUT", `/members/${sam.id}`, { admin: true })).status, 200);

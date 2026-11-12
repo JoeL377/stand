@@ -203,3 +203,10 @@ test("general kinds: a design that isn't software reads and writes back the same
   assert.deepEqual(back.boxes.map((b) => [b.label, b.kind]), d.boxes.map((b) => [b.label, b.kind]));
   assert.deepEqual(back.arrows.map((a) => [a.from, a.to, a.label]), d.arrows.map((a) => [a.from, a.to, a.label]));
 });
+
+test("a kind the model makes up doesn't lose the box: it is read as a thing", async () => {
+  const answer: DiagramAnswer = { ...none, boxes: [{ label: "Chat intake", detail: "Where all the text comes in.", kind: "Process", group: null, by: "Janesh", line: 1 }, { label: "Discord", detail: "Feeds the chat.", kind: " Service ", group: null, by: "Janesh", line: 1 }] };
+  const k = new DiagramKeeper({ designDiagram: async () => answer }, UNTITLED, T0);
+  assert.equal(await k.run([seg(1, "Janesh", "The chat is the intake for all the text, and Discord feeds it")], ["Janesh"], [], T0, T0 + 5000), true);
+  assert.deepEqual(k.all().boxes.map((b) => [b.label, b.kind ?? "thing"]), [["Chat intake", "thing"], ["Discord", "service"]]);
+});

@@ -13,7 +13,7 @@ import type { BoardAnswer } from "./board.ts";
 import { changeReview } from "./planReview.ts";
 import { outlineToSlides } from "../shared/outline.ts";
 import { config } from "./config.ts";
-import { ConxtOpenItems, refreshRoomOpenItems, setConxtOpenItems } from "./conxtOpenItems.ts";
+import { addSlide, startReview } from "./reviews.ts";
 
 function setup() {
   const db = openDb(":memory:");
@@ -745,6 +745,57 @@ test("End meeting shows everyone it's ending, and the meeting ends even when the
   assert.ok(db.getMeeting(meetingId)?.endedAt);
 });
 
+test("ending lets everyone go to the recap at once; the recap is written after, and a new call can start meanwhile", async () => {
+  const { db, session } = setup();
+  const room = db.getRoom(session.roomId)!;
+  await session.end();
+  const agent = new HeuristicAgent();
+  let writeRecap!: () => void;
+  const recapped = new Promise<void>((r) => (writeRecap = r));
+  const slow = agent.recapMeeting.bind(agent);
+  agent.recapMeeting = async (input) => {
+    await recapped;
+    return slow(input);
+  };
+  const s = new RoomSession(db, agent, room, () => {});
+  let released = false;
+  s.onRelease = () => (released = true);
+  const ws = await join(s, { id: "u1", name: "Joe" });
+  s.addSpeech("u1", "Joe", "Something worth a note", Date.now());
+  const ending = s.end();
+  for (let i = 0; i < 20 && !released; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(released, "the space is let go before the recap is written");
+  assert.ok(ws.got.some((m) => m.type === "meeting.ended" && m.meetingId === s.meetingId));
+  assert.equal(db.getMeeting(s.meetingId)?.endedAt, null);
+  assert.ok(db.getMeeting(s.meetingId)?.endRequestedAt);
+  // Someone who comes back with the old meeting is sent to its recap, not into the new call.
+  const next = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  const late = await join(next, { id: "u1", name: "Joe" }, { type: "hello", meetingId: s.meetingId });
+  assert.deepEqual(late.got, [{ type: "meeting.ended", meetingId: s.meetingId }]);
+  writeRecap();
+  await ending;
+  assert.ok(db.getMeeting(s.meetingId)?.endedAt);
+  await next.end();
+});
+
+test("anyone in the call flips a review's slides, but only the host moves to an item outside it", async () => {
+  const { db, session, items } = setup();
+  addSlide(db, session.roomId, { title: "Mic picker", summary: "", addedBy: "x" });
+  addSlide(db, session.roomId, { title: "Dark mode", summary: "", addedBy: "x" });
+  const host = await join(session, { id: "u1", name: "Joe" });
+  const guest = await join(session, { id: "u2", name: "Huy" });
+  const started = startReview(db, session.roomId);
+  session.itemsChanged();
+  await say(host, { type: "focus", itemId: started.firstItemId });
+  const slides = db.listItems(session.roomId).filter((i) => i.deckId === started.deckId);
+  assert.equal(slides.length, 2);
+  await say(guest, { type: "focus", itemId: slides[1].id });
+  assert.equal(session.state().focusItemId, slides[1].id);
+  await say(guest, { type: "focus", itemId: items[0].id });
+  assert.equal(session.state().focusItemId, slides[1].id, "an item outside the review stays the host's");
+  await session.end();
+});
+
 test("a note change from someone who isn't the host says why, and puts their screen back", async () => {
   const { db, session, meetingId } = setup();
   await join(session, { id: "u1", name: "Joe" });
@@ -855,17 +906,18 @@ test("the room keeps what the main view showed each time it changed", async () =
   await session.end();
 });
 
-test("only one person shares at a time; the second is told who is", async () => {
+test("one person shares at a time: a second share takes over, and the first sharer is told", async () => {
   const { session } = setup();
   const joe = await join(session, { id: "u1", name: "Joe" });
   const ann = await join(session, { id: "u2", name: "Ann" });
   await say(joe, { type: "sharing", on: true });
   await say(ann, { type: "sharing", on: true });
-  const err = ann.got.find((m) => m.type === "error");
-  assert.match(err?.type === "error" ? err.message : "", /Joe is already sharing/);
+  const told = joe.got.find((m) => m.type === "notice");
+  assert.match(told?.type === "notice" ? told.message : "", /Ann is sharing now/);
+  assert.ok(!ann.got.some((m) => m.type === "error"));
   assert.deepEqual(
     session.state().participants.filter((p) => p.isSharing).map((p) => p.id),
-    ["u1"],
+    ["u2"],
   );
   await session.end();
 });
@@ -999,68 +1051,6 @@ test("a line a notes run leaves out stays in its topic, and a topic left out who
     db.meetingDiscussions(session.meetingId).map((d) => d.topic),
     ["Pricing for teams", "Lunch"],
   );
-});
-
-test("a Conxt decision waiting on someone shows while they're here, and only they can confirm it", async () => {
-  const { db, session } = setup();
-  const owner = db.upsertUser({ googleSub: null, email: "huy@example.com", name: "Huy", picture: null });
-  const d = { key: "p", label: "P", token: "t", submissionUrl: "https://conxt.test/api/v1/integrations/i1/sources" };
-  db.raw.prepare("INSERT INTO conxt_connections VALUES ('k',?,?,?,?,?,?,1)").run(session.roomId, d.key, d.submissionUrl, d.label, owner.id, Date.now());
-  const item = { kind: "confirmation", id: "c1", title: "Build Stand and Conxt together.", why: "Decided while Joe was away",
-    needs: [{ id: "joe@example.com", name: "Joe" }], path: null, at: null, content_hash: "b".repeat(64) };
-  const posted: string[] = [];
-  let waiting = true;
-  setConxtOpenItems(new ConxtOpenItems(db.raw, [d], (async (_url: string, init?: RequestInit) => {
-    if (init?.method === "POST") { posted.push(init.body as string); waiting = false; return { ok: true, json: async () => ({}) }; }
-    return { ok: true, json: async () => ({ items: waiting ? [item] : [] }) };
-  }) as unknown as typeof fetch));
-  try {
-    await refreshRoomOpenItems(session.roomId);
-    const huy = await join(session, { id: owner.id, name: "Huy", email: "huy@example.com" } as User);
-    assert.deepEqual(session.state().conxt, []);
-    const joe = await join(session, { id: "u-joe", name: "Joe", email: "Joe@example.com" } as User);
-    assert.deepEqual(session.state().conxt?.map((c) => c.here), [[{ participantId: "u-joe", name: "Joe" }]]);
-    await say(huy, { type: "conxt.confirm", itemId: "c1" });
-    assert.equal(posted.length, 0);
-    assert.ok(huy.got.some((m) => m.type === "error"));
-    await say(joe, { type: "conxt.confirm", itemId: "c1" });
-    await new Promise((r) => setTimeout(r, 10));
-    assert.deepEqual(posted.map((b) => JSON.parse(b)), [{ person: "joe@example.com", content_hash: "b".repeat(64) }]);
-    assert.deepEqual(session.state().conxt, []);
-  } finally {
-    setConxtOpenItems(null);
-  }
-});
-
-test("only the person exploring can share their explore work from the meeting", async () => {
-  const { db, session } = setup();
-  const owner = db.upsertUser({ googleSub: null, email: "huy@example.com", name: "Huy", picture: null });
-  const d = { key: "p", label: "P", token: "t", submissionUrl: "https://conxt.test/api/v1/integrations/i1/sources" };
-  db.raw.prepare("INSERT INTO conxt_connections VALUES ('k',?,?,?,?,?,?,1)").run(session.roomId, d.key, d.submissionUrl, d.label, owner.id, Date.now());
-  const item = { kind: "exploring", id: "s-joe", title: "Joe is exploring feat/retries: 2 items held", why: "Held",
-    needs: [{ id: "joe@example.com", name: "Joe" }], path: null, at: null, branch: "feat/retries" };
-  const posted: string[] = [];
-  let holding = true;
-  setConxtOpenItems(new ConxtOpenItems(db.raw, [d], (async (url: string, init?: RequestInit) => {
-    if (init?.method === "POST") { posted.push(`${url} ${init.body}`); holding = false; return { ok: true, json: async () => ({}) }; }
-    return { ok: true, json: async () => ({ items: holding ? [item] : [] }) };
-  }) as unknown as typeof fetch));
-  try {
-    await refreshRoomOpenItems(session.roomId);
-    const huy = await join(session, { id: owner.id, name: "Huy", email: "huy@example.com" } as User);
-    const joe = await join(session, { id: "u-joe", name: "Joe", email: "joe@example.com" } as User);
-    assert.deepEqual(session.state().conxt?.map((c) => c.kind), ["exploring"]);
-    await say(huy, { type: "conxt.share", itemId: "s-joe" });
-    assert.equal(posted.length, 0);
-    assert.ok(huy.got.some((m) => m.type === "error"));
-    await say(joe, { type: "conxt.share", itemId: "s-joe" });
-    await new Promise((r) => setTimeout(r, 10));
-    assert.equal(posted.length, 1);
-    assert.match(posted[0], /open-items\/s-joe\/share \{"person":"joe@example.com"\}$/);
-    assert.deepEqual(session.state().conxt, []);
-  } finally {
-    setConxtOpenItems(null);
-  }
 });
 
 test("the board's running list: lines come in, anyone ticks a to-do (and its live note), only the host takes one off", async () => {
@@ -1630,8 +1620,8 @@ test("the map of a topic is drawn from every line of that topic, those said befo
   await session.end();
 });
 
-test("a topic's map parks when the board moves off it, goes on when the talk comes back, and stays stopped once stopped", async () => {
-  const { db, room, session, joe, inner, talk, move, fresh, back, say, boardAsked } = await onTopics();
+test("a topic's map keeps drawing when the board moves: the new topic is a direction on the same map, and a stopped map stays stopped", async () => {
+  const { db, room, session, joe, inner, talk, move, fresh, back, say, boardAsked, mapAsked } = await onTopics();
   talk(0, "we could charge per seat", "or a free tier for small teams");
   await move(fresh("Pricing"));
   talk(60_000, "onboarding could start with a welcome video", "or a sample space");
@@ -1641,39 +1631,34 @@ test("a topic's map parks when the board moves off it, goes on when the talk com
   const id = db.brainstormLive(room.id)!.id;
   await inner.mapPasses.run();
   assert.deepEqual(db.getBrainstorm(id)!.nodes.map((n) => n.label), ["Idea 1"]);
+  assert.doesNotMatch(mapAsked.at(-1)!, /now on another topic/);
 
   // The board is told while the topic's map draws on it.
   talk(120_000, "the video should be short", "and skippable");
   await move(back("t1", "Pricing"));
   assert.match(boardAsked.at(-1)!, /The group is brainstorming "Onboarding". Ideas for it belong to this thread\./);
-  const parked = db.getBrainstorm(id)!;
-  assert.deepEqual([parked.status, parked.endedAt], ["done", null]);
-  assert.ok(parked.spans?.length);
-  assert.equal(db.brainstormLive(room.id), null, "no map starts by itself on the new topic");
+  // The board moved on, and the map didn't: it is still the one drawing, and nothing else started.
+  assert.equal(db.brainstormLive(room.id)?.id, id, "the map goes on across topics");
   const sent = joe.got.flatMap((m) => (m.type === "brainstorm" ? [m] : [])).at(-1)!;
-  assert.equal(sent.brainstorm, null);
-  assert.deepEqual(sent.others.map((b) => [b.id, b.threadId]), [[id, "t2"]]);
+  assert.equal(sent.brainstorm?.id, id);
+  assert.equal(db.brainstormsOfMeeting(session.meetingId).length, 1, "no second map");
 
-  talk(180_000, "pricing again: per seat is simpler", "yes per seat");
-  await move(back("t2", "Onboarding"));
-  assert.doesNotMatch(boardAsked.at(-1)!, /is brainstorming/);
-  const resumed = db.brainstormLive(room.id)!;
-  assert.deepEqual([resumed.id, resumed.nodes.map((n) => n.label)], [id, ["Idea 1"]]);
+  // What is said on the new topic reaches the same map, which is told the talk moved.
+  await new Promise((r) => setTimeout(r, 5));
+  session.addSpeech("u1", "Joe", "pricing again: per seat is simpler", Date.now());
+  session.addSpeech("u2", "Huy", "yes per seat", Date.now());
+  await inner.mapPasses.run();
+  assert.match(mapAsked.at(-1)!, /The talk is now on another topic: Pricing/);
+  assert.match(mapAsked.at(-1)!, /per seat is simpler/);
 
   await say({ type: "view.stop" });
   assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
-  talk(240_000, "back to pricing", "per seat it is");
-  await move(back("t1", "Pricing"));
-  talk(300_000, "onboarding once more", "the sample space");
+  talk(200_000, "onboarding once more", "the sample space");
   await move(back("t2", "Onboarding"));
   assert.equal(db.brainstormLive(room.id), null, "a stopped map doesn't go on by itself");
   await say({ type: "view.open" });
   assert.equal(db.brainstormLive(room.id)?.id, id, "opening it again goes on with the same map");
 
-  // Parked when the call ends: it is done with the call.
-  talk(360_000, "pricing to close", "done");
-  await move(back("t1", "Pricing"));
-  assert.equal(db.getBrainstorm(id)!.endedAt, null);
   await session.end();
   assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
 });

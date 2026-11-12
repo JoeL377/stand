@@ -10,7 +10,7 @@ import { ViewPane, type ViewTab } from "./Views.tsx";
 import { runningExperience } from "./Experiences.tsx";
 import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
 import { api } from "../api.ts";
-import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, ConxtLive, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { initials, keyOf } from "../util.ts";
@@ -123,7 +123,9 @@ export function Stage(props: {
   };
   const flipRef = useRef(flip);
   flipRef.current = flip;
-  const presenting = canSteer && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
+  // A review's slides are anyone's to flip; other decks are the host's.
+  const reviewDeck = focusItem?.slide?.layout === "review" || focusItem?.slide?.layout === "design";
+  const presenting = (canSteer || reviewDeck) && Boolean(focusItem?.deckId) && !localScreen && !remoteScreen;
   useEffect(() => {
     if (!presenting) return;
     const onKey = (e: KeyboardEvent) => {
@@ -545,7 +547,6 @@ export function Stage(props: {
             </button>
           </div>
         )}
-        {!props.ending && <ConxtNudges cards={state.conxt ?? []} me={props.participantId} offline={props.offline} send={send} />}
         {/* A share or a deck has the middle: the topic stays in view as one line over it. */}
         {middleTaken && !boardOpen && !openSnap && !((reviewUp || design) && !showingScreen && !sharer && !shownTask) && (
           <BoardStrip board={props.board} focusItemId={state.focusItemId} onOpen={() => pickTab("board")} />
@@ -597,7 +598,7 @@ export function Stage(props: {
               count={deckSlides.length}
               notes={props.notes}
               busy={props.notesBusy.includes(focusItem.id)}
-              canSteer={canSteer}
+              canFlip
               disabled={Boolean(props.offline || props.ending)}
               shot={myShot}
               onShot={setMyShot}
@@ -621,14 +622,8 @@ export function Stage(props: {
               disabled={Boolean(props.offline || props.ending)}
               specOpen={specOpen}
               onSpec={setMySpec}
-              onFlip={(delta) => {
-                if (canSteer) return flip(delta);
-                // The author moves within their own spec.
-                const mine = deckSlides.filter((s) => s.slide?.design?.taskId === design.taskId);
-                const next = mine[mine.findIndex((s) => s.id === focusItem.id) + delta];
-                if (next) send({ type: "design.go", itemId: next.id });
-              }}
-              onGo={(itemId) => send(canSteer ? { type: "focus", itemId } : { type: "design.go", itemId })}
+              onFlip={flip}
+              onGo={(itemId) => send({ type: "focus", itemId })}
               onOutcome={(outcome) => send({ type: "design.outcome", itemId: focusItem.id, outcome })}
               onRemove={canSteer ? removeNote : undefined}
               onAdd={canSteer ? (kind, text) => send({ type: "note.add", itemId: focusItem.id, kind, text }) : undefined}
@@ -787,69 +782,3 @@ function RemoteVideo({ screen, label }: { screen: RemoteScreen; label: string })
   );
 }
 
-/** What the connected Conxt project raises while these people are here: a decision
- *  waiting on someone in the room, which only they can confirm, and a word people
- *  use two ways that was just said again. Hiding one is yours alone. */
-function ConxtNudges(props: { cards: ConxtLive[]; me: string; offline?: boolean; send: (m: ClientMessage) => boolean }) {
-  const [hidden, setHidden] = useState<string[]>([]);
-  const [confirming, setConfirming] = useState<string | null>(null);
-  useEffect(() => {
-    if (!confirming) return;
-    const t = setTimeout(() => setConfirming(null), 8000);
-    return () => clearTimeout(t);
-  }, [confirming]);
-  // An explore session can be held and come back at once, so the id alone is not a key.
-  const cardKey = (c: ConxtLive) => `${c.kind}:${c.id}`;
-  const cards = props.cards.filter((c) => !hidden.includes(cardKey(c)));
-  if (!cards.length) return null;
-  return (
-    <>
-      {cards.map((c) => {
-        const mine = c.here.some((p) => p.participantId === props.me);
-        const who = mine ? "you" : c.here.map((p) => p.name).join(" and ");
-        const lead =
-          c.kind === "confirmation"
-            ? `Conxt: waiting on ${who} · `
-            : c.kind === "divergence"
-              ? `Conxt: “${c.term}” is used two ways · `
-              : c.kind === "exploring"
-                ? "Conxt: explore work · "
-                : "Conxt: came back · ";
-        return (
-          <div key={cardKey(c)} className="nudge conxt" role="status" title={c.why}>
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>
-            <span className="nudge-text">
-              {lead}
-              <strong>{c.title}</strong>
-            </span>
-            {c.kind === "exploring" && mine && (
-              <button
-                className="link"
-                disabled={props.offline || confirming === cardKey(c)}
-                title={props.offline ? "You can share once Stand reconnects" : "Send what your agent explored to the team's review in Conxt"}
-                onClick={() => props.send({ type: "conxt.share", itemId: c.id }) && setConfirming(cardKey(c))}
-              >
-                {confirming === cardKey(c) ? "Sharing…" : "Share now"}
-              </button>
-            )}
-            {c.kind === "confirmation" && mine && (
-              <button
-                className="link"
-                disabled={props.offline || confirming === cardKey(c)}
-                title={props.offline ? "You can confirm once Stand reconnects" : "Agree to this decision in Conxt, as yourself"}
-                onClick={() => props.send({ type: "conxt.confirm", itemId: c.id }) && setConfirming(cardKey(c))}
-              >
-                {confirming === cardKey(c) ? "Confirming…" : "Confirm"}
-              </button>
-            )}
-            <button className="link muted" onClick={() => setHidden((h) => [...h, cardKey(c)])} aria-label="Hide">
-              ✕
-            </button>
-          </div>
-        );
-      })}
-    </>
-  );
-}

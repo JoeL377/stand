@@ -269,35 +269,6 @@ test("a chat session is not a meeting: not in the list of meetings, the feed, la
   assert.match(upNext.suggestions.find((s) => s.noteId === todo.id)!.reason, /^To-do from last meeting/);
 });
 
-test("a chat session is not sent to Conxt, in a database from before chat too", () => {
-  const file = path.join(tmp, "conxt.db");
-  const first = setup(file);
-  first.db.raw
-    .prepare("INSERT INTO conxt_connections VALUES ('c1', ?, 'product', 'https://conxt.test/api/v1/integrations/x/sources', 'Team', ?, ?, 1)")
-    .run(first.room.id, first.joe.id, T0);
-  first.db.raw.close();
-  // As the last version left it: every new meetings row joined the space's connection.
-  const old = new DatabaseSync(file);
-  old.exec(`DROP TRIGGER conxt_meeting_started;
-    CREATE TRIGGER conxt_meeting_started AFTER INSERT ON meetings BEGIN
-      INSERT INTO conxt_meetings(meeting_id,connection_id) SELECT NEW.id,id FROM conxt_connections WHERE room_id=NEW.room_id AND enabled=1;
-    END;`);
-  old.close();
-
-  const db = openDb(file);
-  const chat = new Chat(db);
-  const channel = db.spaceChannel(first.room.id, first.joe.id);
-  const m = chat.accept(channel.id, [{ type: "message", author: { userId: first.joe.id }, text: "Between us", ts: T0 }]).messages[0];
-  chat.accept(channel.id, [{ type: "edit", id: m.id, by: { userId: first.joe.id }, text: "Between the two of us", ts: T0 + 1 }]);
-  const count = (table: string) => (db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
-  assert.deepEqual([count("conxt_meetings"), count("conxt_live_deliveries"), count("conxt_live_events")], [0, 0, 0]);
-  // A meeting in the same space still is.
-  const meeting = db.startMeeting(first.room.id);
-  db.addSegment({ meetingId: meeting.id, itemId: null, speakerId: first.joe.id, speakerName: "Joe Liang", kind: "speech", text: "Hello", ts: T0 });
-  assert.deepEqual([count("conxt_meetings"), count("conxt_live_deliveries"), count("conxt_live_events")], [1, 1, 1]);
-  db.raw.close();
-});
-
 test("a database from before chat gets its tables and the session's channel on the next start", () => {
   const file = path.join(tmp, "old.db");
   const first = openDb(file);

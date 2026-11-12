@@ -5,7 +5,6 @@
 
 import type { ItemUpdate, Note, UpNext, UpNextSuggestion } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
-import { type ConxtOpenItem, linkAgendaLine, roomOpenItems } from "./conxtOpenItems.ts";
 
 export interface UpNextInput {
   now: number;
@@ -32,8 +31,6 @@ export interface UpNextInput {
     caption: string | null;
     screenText: string | null;
   }>;
-  /** What the connected Conxt project says needs people; empty when not connected. */
-  conxt?: ConxtOpenItem[];
 }
 
 /** What a capture is about, in a line: what they typed, else what the agent saw, else the first line of its text. */
@@ -259,27 +256,6 @@ export function computeUpNext(input: UpNextInput): { upNext: UpNext; carried: Re
     }
   }
 
-  // Conxt's open items: decisions waiting on someone, conflicts, words used two ways and
-  // open questions. They need people, so they rank with what is blocked.
-  for (const c of input.conxt ?? []) {
-    const at = Date.parse(c.at ?? "") || input.now;
-    const owner = c.needs.length ? c.needs.map((n) => n.name).join(", ") : null;
-    drafts.set(`conxt:${c.id}`, {
-      key: `conxt:${c.id}`,
-      kind: c.kind === "question" ? "question" : "needs_people",
-      title: c.title.length > 140 ? `${c.title.slice(0, 139)}…` : c.title,
-      reason: `${c.why} · from Conxt`,
-      noteId: null,
-      itemId: null,
-      owner,
-      carried: 0,
-      merged: [],
-      lastActivity: at,
-      parked: false,
-      order: at,
-    });
-  }
-
   const kept = [...drafts.values()].filter((d) => {
     const at = dismissed.get(d.key);
     // Dismissed stays dismissed until something new happens on it.
@@ -372,15 +348,6 @@ function addOne(db: DB, roomId: string, key: string, meeting: { id: string }): s
   if (kind === "space") return carrySpace(db, roomId, id, meeting);
   if (kind === "snap") return addCapture(db, roomId, id);
   if (kind === "jot") return addJot(db, roomId, id);
-  if (kind === "conxt") {
-    const c = roomOpenItems(roomId).find((i) => i.id === id);
-    if (!c) return null;
-    const title = c.title.length > 140 ? `${c.title.slice(0, 139)}…` : c.title;
-    const created = newAgendaLine(db, roomId, title, `From Conxt: ${c.why}`);
-    // What is said under this line goes back to Conxt as discussing the item.
-    if (created) linkAgendaLine(db.raw, roomId, created, c);
-    return created;
-  }
   if (kind !== "note") return null;
   const note = db.getNote(id);
   if (!note || note.roomId !== roomId) return null;

@@ -2,7 +2,6 @@
 import type { StageEvent, StageView } from "../../shared/timeline.ts";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentCard, Board, ChapterRecap, MeetingCost, NextStep, Segment, SpaceCost } from "../../shared/protocol.ts";
-import { enqueueConxtMeeting } from "../conxt.ts";
 import { newId } from "../ids.ts";
 import type { ListItem } from "../liveList.ts";
 import { costOf, type UsageRow } from "../usage.ts";
@@ -31,18 +30,13 @@ export function meetingsStore(db: DatabaseSync) {
       return { id, startedAt };
     },
     endMeeting(id: string, summary: string | null, synthesis: string | null = null, at = Date.now(), chapters: ChapterRecap[] = []) {
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ?, chapters_json = ? WHERE id = ?").run(
-          at,
-          summary,
-          synthesis,
-          chapters.length ? JSON.stringify(chapters) : null,
-          id,
-        );
-        enqueueConxtMeeting(db, id);
-        db.exec("COMMIT");
-      } catch (err) { db.exec("ROLLBACK"); throw err; }
+      db.prepare("UPDATE meetings SET ended_at = ?, summary = ?, synthesis = ?, chapters_json = ? WHERE id = ?").run(
+        at,
+        summary,
+        synthesis,
+        chapters.length ? JSON.stringify(chapters) : null,
+        id,
+      );
     },
     /** Someone pressed End meeting; the recap is being written. A restart before it's done finishes the job instead of resuming. */
     meetingEnding(id: string) {
@@ -91,6 +85,8 @@ export function meetingsStore(db: DatabaseSync) {
         roomId: r.room_id as string,
         startedAt: r.started_at as number,
         endedAt: (r.ended_at as number) ?? null,
+        /** Someone ended it; until endedAt is set the recap is still being written. */
+        endRequestedAt: (r.end_requested_at as number) ?? null,
         summary: (r.summary as string) ?? null,
         /** What the space's synthesis instructions asked for, as Markdown; null without instructions. */
         synthesis: (r.synthesis as string) ?? null,

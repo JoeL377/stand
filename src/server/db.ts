@@ -2,7 +2,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { initConxt } from "./conxt.ts";
 import { initGithub } from "./github.ts";
 import { initSources } from "./sources.ts";
 import { migrate } from "./db/schema.ts";
@@ -34,7 +33,6 @@ export function openDb(file?: string) {
   const db = new DatabaseSync(file ?? ":memory:");
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   migrate(db);
-  initConxt(db);
   initGithub(db);
   initSources(db);
 

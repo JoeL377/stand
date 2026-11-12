@@ -62,7 +62,7 @@ The strategy doc's rule is why person, space and links go in now: every write ca
 | --- | --- |
 | Are the primitives context, decisions and tasks? | Yes |
 | Do they link to each other? | Yes, through `links` |
-| Do tasks have children? | One level, through `parent_id`. A spec is a task with children. The design review write-back, agents (`parent`) and the task drawer set it |
+| Do tasks have children? | One level, through `parent_id`. A spec is a task with children. The design review write-back, agents (`parent`) and the task drawer set it. The Tasks tab shows a task's parts under it, with a count of the done ones on the parent |
 | Do we support epics? | Yes, as projects: one level above tasks, one per task, no nesting (decided Nov 11 and 12) |
 | Tight or loose? | Loose: a task needs only text. Owner and done-when are asked for, not required |
 | How does the review queue work now it's multiplayer? | It's not a primitive (Oct 20). It's everything heard but not kept, plus open decide tasks. Anyone in the space can act on it, and nothing waits on it |

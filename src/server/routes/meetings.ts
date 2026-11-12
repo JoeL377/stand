@@ -25,6 +25,7 @@ export function meetingRoutes(app: Express, ctx: Services) {
         roomName: room.name,
         startedAt: m.startedAt,
         endedAt: m.endedAt,
+        writingUp: !m.endedAt && !!m.endRequestedAt,
         summary: m.summary,
         synthesis: m.synthesis,
         items: meetingGroups(m),

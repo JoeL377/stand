@@ -2,7 +2,7 @@
 
 What people in a space write to each other between meetings: a thread with a box at its foot. From 1200px wide it is the dock, a column at the right of the space page beside every tab. On a narrower screen it is the Chat tab. A message shows on everyone's open page at once, with no reload. Your own messages can be changed and deleted. The tab counts what you have not read, and the space's name in the sidebar goes bold.
 
-Under it, a space has a channel, a message is a chat segment, and a stretch of talk is a session: a `meetings` row of kind `chat` that closes after an hour of quiet. A session is not a meeting: the Meetings tab, the feed and Conxt leave it out.
+Under it, a space has a channel, a message is a chat segment, and a stretch of talk is a session: a `meetings` row of kind `chat` that closes after an hour of quiet. A session is not a meeting: the Meetings tab and the feed leave it out.
 
 ## Sub-features
 - Dock: from 1200px there is no Chat tab. The **Chat** button in the page head (`aria-pressed`) and Command + J (Ctrl + J) open and close the dock; opening puts the cursor in the box. The button carries the unread marks while the dock is closed. Open or closed is kept in `localStorage` as `stand.chatDock` for all spaces, open by default. A saved Chat tab shows Tasks with the dock open. **Open chat** on a mention toast opens the dock. From 1360px the task drawer opens to the left of the dock (`[data-chat-dock]` on `<html>`); below that it covers the dock.

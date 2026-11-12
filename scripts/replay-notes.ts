@@ -7,8 +7,7 @@
 // next run, as it would on a call. Time between runs is skipped, so a 100-minute meeting replays
 // in about the time its notes runs take.
 //
-// Runs on a fresh database of its own and never starts the Conxt delivery, so nothing leaves the
-// machine except the model calls.
+// Runs on a fresh database of its own, so nothing leaves the machine except the model calls.
 //
 //   node --import tsx scripts/replay-notes.ts meeting.json --out replay/current
 //   node --import tsx scripts/replay-notes.ts meeting.json --agent stand-in --gold gold-topics.json
