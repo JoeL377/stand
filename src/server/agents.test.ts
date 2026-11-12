@@ -1228,3 +1228,19 @@ test("agents set the order of a space's projects by ref or name, and list_spaces
   assert.throws(() => api.orderProjects({ user: joe, token: { ...token, scope: "read" as const } }, { space: room.id, projects: [a.id] }), /read only/);
   assert.deepEqual(db.listProjects(room.id).map((p) => p.name), ["Gamma", "Alpha", "Beta"], "a refused order changes nothing");
 });
+
+test("list_spaces keeps the team's order and says where the work is: in_progress and latest_activity", () => {
+  const { api, db, joe, room, action } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const [quiet, busy] = ["Quiet", "Busy"].map((name) => db.createProject(room.id, { name }, "Joe"));
+  db.setNoteProject(room.id, action.id, { projectId: busy.id, by: "Joe" });
+  const before = api.listSpaces(agent)[0].projects!;
+  assert.deepEqual(before.map((p) => [p.name, p.in_progress, p.latest_activity]), [["Quiet", undefined, undefined], ["Busy", undefined, new Date(action.ts).toISOString()]]);
+
+  api.startWork(agent, { ref: `stand:action/${action.id}`, note: "On it" });
+  const after = api.listSpaces(agent)[0].projects!;
+  assert.deepEqual(after.map((p) => [p.name, p.in_progress]), [["Quiet", undefined], ["Busy", 1]], "the order is still the team's");
+  assert.ok(Date.parse(after[1].latest_activity!) >= action.ts, "a report on a to-do moves latest_activity");
+  assert.equal(db.listProjects(room.id)[0].id, quiet.id);
+});

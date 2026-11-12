@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { openDb } from "./db.ts";
-import { matchesProject, projectOf } from "../shared/projects.ts";
+import { activeFirst, matchesProject, projectActivity, projectOf } from "../shared/projects.ts";
 
 const setup = () => {
   const db = openDb(":memory:");
@@ -224,4 +224,34 @@ test("the topic labels become projects once, in the spelling used most", () => {
     db.raw.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("Active first: projects with work in progress, then the newest to-dos, then the team's order", () => {
+  const team = ["quiet", "old", "busy", "new", "empty"].map((id) => ({ id }));
+  const activity = projectActivity([
+    { project: "old", ts: 100, inProgress: false },
+    { project: "busy", ts: 50, inProgress: true },
+    { project: "busy", ts: 60, inProgress: false },
+    { project: "new", ts: 300, inProgress: false },
+    { project: "quiet", ts: 100, inProgress: false },
+    { project: null, ts: 900, inProgress: true },
+  ]);
+  assert.deepEqual(activity.get("busy"), { inProgress: 1, latest: 60 });
+  assert.equal(activity.has("empty"), false, "a project with nothing open has no activity");
+  const names = (list: Array<{ id: string }>) => list.map((p) => p.id);
+  assert.deepEqual(names(activeFirst(team, activity)), ["busy", "new", "quiet", "old", "empty"], "a tie keeps the team's order");
+  assert.deepEqual(names(team), ["quiet", "old", "busy", "new", "empty"], "the team's order is not changed");
+  // A report on a to-do counts as much as a new one.
+  const reported = projectActivity([
+    { project: "old", ts: 100, inProgress: false, reportedAt: 500 },
+    { project: "new", ts: 300, inProgress: false },
+  ]);
+  assert.deepEqual(names(activeFirst(team, reported)).slice(0, 2), ["old", "new"]);
+  // Two projects in progress: the one with the newest to-do first.
+  const both = projectActivity([
+    { project: "old", ts: 100, inProgress: true },
+    { project: "new", ts: 300, inProgress: true },
+    { project: "quiet", ts: 900, inProgress: false },
+  ]);
+  assert.deepEqual(names(activeFirst(team, both)).slice(0, 3), ["new", "old", "quiet"]);
 });

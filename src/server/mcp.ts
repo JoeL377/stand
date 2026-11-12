@@ -136,7 +136,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "List my Stand spaces",
       description:
-        "The spaces this person is in, with their purpose, open to-do counts, their projects in the team's order, most important first (ref, name, goal, open to-dos), their items (ids for get_item_context), latest meeting id, and live: the meeting running now with who's in it, or null. Check live before merging to Stand's own repo: a merge redeploys Stand and cuts a call. It only covers this person's spaces.",
+        "The spaces this person is in, with their purpose, open to-do counts, their projects in the team's order, most important first (ref, name, goal, open to-dos, in_progress: the open to-dos someone is on now, and latest_activity: when its newest open to-do was added or last reported on), their items (ids for get_item_context), latest meeting id, and live: the meeting running now with who's in it, or null. Check live before merging to Stand's own repo: a merge redeploys Stand and cuts a call. It only covers this person's spaces.",
       inputSchema: {},
       annotations: READ,
     },

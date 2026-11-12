@@ -7,7 +7,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
-import { matchesProject, type Project } from "../../shared/projects.ts";
+import { activeFirst, matchesProject, projectActivity, type Project } from "../../shared/projects.ts";
 import { ProjectPicker } from "../ProjectPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
 import { stateOf } from "../../shared/tasks.ts";
@@ -860,6 +860,21 @@ function TasksTab(props: {
   const mentioned = open.filter((n) => tagged.has(n.id)).sort((a, b) => tagged.get(b.id)![0].ts - tagged.get(a.id)![0].ts);
   const waiting = open.filter((n) => work[n.id]?.ready && !tagged.has(n.id));
   const rest = open.filter((x) => !work[x.id]?.ready && !tagged.has(x.id));
+  // How the sections are ordered, kept in this browser: by what is going on, or the team's order.
+  const sortKey = `stand.projectSort.${props.roomId}`;
+  const [sort, setSort] = useState<"active" | "team">(() => {
+    try {
+      return localStorage.getItem(sortKey) === "team" ? "team" : "active";
+    } catch {
+      return "active";
+    }
+  });
+  const pickSort = (value: "active" | "team") => {
+    setSort(value);
+    try {
+      localStorage.setItem(sortKey, value);
+    } catch {}
+  };
   // The space's one order of projects, most important first. A move shows at once and saves behind it.
   const [order, setOrder] = useState<string[] | null>(null);
   useEffect(() => setOrder(null), [props.projects]);
@@ -889,10 +904,18 @@ function TasksTab(props: {
     const k = n.project && projects.some((p) => p.id === n.project) ? n.project : "";
     inProject.set(k, [...(inProject.get(k) ?? []), n]);
   }
-  const sections = projects.filter(
+  const inView = projects.filter(
     (p) => (props.projectFilter ? p.id === props.projectFilter : !p.archived || inProject.has(p.id)) && (!props.mine || inProject.has(p.id)),
   );
-  const canOrder = !props.projectFilter && sections.length > 1;
+  // Active first: projects with work in progress, then where the newest to-dos are. Team order: the list's own.
+  const activity = projectActivity(
+    open
+      .filter((n) => n.kind === "action")
+      .map((n) => ({ project: n.project, ts: n.ts, inProgress: stateOf(n, work[n.id]) === "doing", reportedAt: work[n.id]?.log[0]?.ts })),
+  );
+  const sections = sort === "active" ? activeFirst(inView, activity) : inView;
+  const canSort = !props.projectFilter && sections.length > 1;
+  const canOrder = canSort && sort === "team";
   /** Up or down past the next project in view. */
   const nudge = (id: string, dir: -1 | 1) => {
     const next = sections[sections.findIndex((p) => p.id === id) + dir];
@@ -1037,6 +1060,14 @@ function TasksTab(props: {
             + Project
           </button>
         )}
+        {canSort && (
+          <label className="sh-project-sort" title={sort === "active" ? "Projects with work in progress first, then the ones with the newest to-dos" : "The team's order, most important first. Drag a project to change it."}>
+            <select aria-label="Project order" value={sort} onChange={(e) => pickSort(e.target.value === "team" ? "team" : "active")}>
+              <option value="active">Active first</option>
+              <option value="team">Team order</option>
+            </select>
+          </label>
+        )}
       </div>
       {!open.length && !sections.length && (
         <p className="sh-card-empty">
@@ -1093,6 +1124,7 @@ function TasksTab(props: {
             <ProjectHead
               project={p}
               count={notes.length}
+              inProgress={activity.get(p.id)?.inProgress ?? 0}
               folded={isFolded}
               onFold={() => toggleFold(p.id)}
               roomId={props.roomId}
@@ -1145,11 +1177,13 @@ function TasksTab(props: {
 function ProjectHead(props: {
   project: Project;
   count: number;
+  /** Open to-dos in it that someone is on now. */
+  inProgress: number;
   folded: boolean;
   onFold: () => void;
   roomId: string;
   reload: () => void;
-  /** Left out when the order can't change here: one project in view, or a filter on. */
+  /** Left out when the order can't change here: one project in view, a filter on, or Active first. */
   order?: { onUp?: () => void; onDown?: () => void; onDragStart: () => void; onDragEnd: () => void };
 }) {
   const { project: p, order } = props;
@@ -1202,6 +1236,7 @@ function ProjectHead(props: {
         <ChevronIcon />
         <span className="sh-project-name">{p.name}</span>
         <span className="count">{props.count}</span>
+        {props.inProgress > 0 && <span className="sh-project-live">{props.inProgress} in progress</span>}
         {p.archived && <span className="muted small">Archived</span>}
       </button>
       {p.goal && <span className="sh-project-goal">{p.goal}</span>}
