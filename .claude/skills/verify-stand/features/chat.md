@@ -10,13 +10,18 @@ Under it, a space has a channel, a message is a chat segment, and a stretch of t
 - Change and delete: the tools show on your own message when the pointer is on it. A deleted message keeps its place and says "Message deleted".
 - Unread: a count on the Chat tab and `unread` on the space in `/api/spaces`. Looking at the tab reads everything shown. A "New" line marks where you had read to.
 - Earlier messages: the thread opens on its newest 100, and **Show earlier messages** loads the page before.
+- Capture: Stand reads the chat as it reads a meeting's talk (`src/server/chatCapture.ts`). After a pause it adds to-dos, open questions and decisions to the space, and each shows in the thread as a green line ("Added to Todo!", "Added to Decided!", "Added to Open questions!") after the message it came from. A to-do or question line opens the task. The × on a line removes it for everyone, and Stand doesn't add it again from that stretch. When a stretch closes, it is read once more and ends with "What this was about": a summary and its topics. `CHAT_CAPTURE=off` stops all of it.
 - Agents: `get_chat` on the MCP gives where a space's chat stands, or one stretch with its messages. `whats_new` lists the stretches under `chats`, and `get_meeting_brief` takes a stretch's id.
 
 ## Driving it with Playwright
 `scripts/chat.cjs <run>` is its own journey with two browser contexts (Vera and Bo). Handles: tab `Chat`; the box is `getByRole("combobox", { name: "Write to the space" })`; the thread is `.chat-thread`, a message `.chat-msg`; buttons `Change your message`, `Delete your message`, `Save`, `Show earlier messages`. It also reads the chat over `/mcp` with a token (`get_chat`, `whats_new`, `get_meeting_brief`, `list_spaces`). Proof is in what the other person's page shows without a reload, and in what it reads afterwards: `/api/rooms/<id>/chat` (the kept messages and their one session), and `/api/rooms/<id>` and its feed (no meeting).
 
+`scripts/chat-capture.cjs <run>` proves capture, with the same two people. Launch with short waits, or the journey waits a minute for a run and an hour for the close: `CHAT_CAPTURE_QUIET_MS=1500 CHAT_QUIET_MS=30000 $S/launch.sh`. Handles: a caught line is `.chat-caught` (button `Remove this decision` / `Remove this to-do` / `Remove this open question`), the end of a closed stretch is `.chat-recap`. It checks the other person's thread without a reload, the Tasks and Decisions tabs, the task drawer ("From the chat on"), `/api/rooms/<id>/chat` (`caught`), and `get_chat`, `list_actions` and `whats_new` over `/mcp`.
+
 ## Gotchas
 - Delete asks with the browser's `confirm()`; accept dialogs, as the journey does.
 - The first 401 in the console is the app asking who you are before sign-in. The journey leaves it out of its console check.
-- What Stand catches from chat (to-dos, decisions, open questions) is not built yet, so nothing here proves it.
-- A session closes after an hour of quiet; a journey can't wait for that. The unit tests in `src/server/chat.test.ts` cover the session rules with their own clock.
+- Without a model key the notes come from patterns: "We decided…" is a decision, "I will…" a to-do. `chat-capture.cjs` writes those. What a real model catches from real talk needs the key, and a replay to judge it.
+- Removing a caught line asks with the browser's `confirm()`.
+- Where a caught line sits: after the last message written when Stand caught it, until the stretch closes and the run then finds the message it came from (only a real model gives that).
+- A session closes after an hour of quiet; `CHAT_QUIET_MS` shortens that for a run. The unit tests in `src/server/chat.test.ts` and `src/server/chatCapture.test.ts` cover the session and capture rules with their own clock.

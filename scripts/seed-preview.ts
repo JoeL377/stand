@@ -371,7 +371,7 @@ api.addContext(samsAgent, { space: room.id, text: "Launch freeze starts Nov 28" 
 db.addJot({ id: "previewjot1", roomId: room.id, itemId: guest.id, text: "Support asked if guest orders can be looked up by email. Worth checking before the 20th.", byId: maya.id, by: maya.name, ts: now - 6 * 3_600_000 });
 db.addJot({ id: "previewjot2", roomId: room.id, itemId: null, text: "Legal is fine with the new receipt wording.", byId: leo.id, by: leo.name, ts: now - DAY });
 
-// Chat between meetings: a talk from yesterday that Sam has read, and one from this morning he hasn't.
+// Chat between meetings: a talk from yesterday that Sam has read, and one going on now that he hasn't.
 const chat = new Chat(db);
 const channel = db.spaceChannel(room.id, sam.id);
 const says = (who: User, text: string, ts: number) => chat.accept(channel.id, [{ type: "message", author: { userId: who.id }, text, ts }]).messages[0];
@@ -379,12 +379,29 @@ const yesterday = now - 26 * 3_600_000;
 says(priya, "The retry worker passed the load test. 3 retries over 24 hours, no double charges.", yesterday);
 says(sam, "Nice. Did the idempotency key hold up when Stripe timed out?", yesterday + 2 * MIN);
 says(priya, "Yes. Same key, one charge. The numbers are in https://acme.test/load-test/retries", yesterday + 3 * MIN);
-says(leo, "Then I can remove the browser retry path this week.", yesterday + 9 * MIN);
+const removal = says(leo, "Then I can remove the browser retry path this week.", yesterday + 9 * MIN);
 const seen = says(sam, "Go ahead. Let's keep the old path behind the flag until Friday in case we need it.", yesterday + 11 * MIN);
 db.markChannelRead(channel.id, sam.id, seen.seq);
-says(maya, "Support wants to know if guest orders show up in the order lookup. Does anyone know?", now - 95 * MIN);
-says(leo, "They do, by email. I'll write it up for the help page.", now - 90 * MIN);
-says(maya, "Thanks!\nOne more thing: the receipt wording changed, so the screenshot in the help page is out of date.", now - 88 * MIN);
+says(maya, "Support wants to know if guest orders show up in the order lookup. Does anyone know?", now - 35 * MIN);
+const helpPage = says(leo, "They do, by email. I'll write it up for the help page.", now - 30 * MIN);
+says(maya, "Thanks!\nOne more thing: the receipt wording changed, so the screenshot in the help page is out of date.", now - 28 * MIN);
+// What Stand caught from them (chatCapture.ts): yesterday's talk has closed, so its lines have the
+// message they came from and it has a summary; the one going on now is still open.
+const quoteOf = (m: typeof seen) => ({ segmentId: m.id, ts: m.ts, speaker: m.author, text: m.text });
+const [retryTopic] = db.replaceDiscussions(seen.sessionId, null, [
+  { topic: "Retry worker load test", positions: [], outcome: "decided", segmentIds: db.sessionMessages(seen.sessionId).map((m) => m.id), continuesId: null },
+]);
+db.syncNotes(seen.sessionId, null, [
+  { kind: "action", text: "Remove the browser retry path", owner: leo.name, discussionId: retryTopic.id, ts: removal.ts, quote: quoteOf(removal) },
+  { kind: "decision", text: "Keep the old retry path behind the flag until Friday", owner: null, discussionId: retryTopic.id, ts: seen.ts, quote: quoteOf(seen) },
+]);
+db.setChatSummary(seen.sessionId, "The retry worker passed the load test with no double charges. Leo removes the browser retry path this week, and the old path stays behind the flag until Friday.");
+const [lookupTopic] = db.replaceDiscussions(helpPage.sessionId, null, [
+  { topic: "Guest orders in the order lookup", positions: [], outcome: "action", segmentIds: db.sessionMessages(helpPage.sessionId).map((m) => m.id), continuesId: null },
+]);
+db.syncNotes(helpPage.sessionId, null, [{ kind: "action", text: "Write up the guest order lookup for the help page", owner: leo.name, discussionId: lookupTopic.id, ts: helpPage.ts + 1000 }]);
+// All of it is read: the preview starts with nothing for capture to do.
+db.setCapturedUpTo(channel.id, db.channelMessages(channel.id).at(-1)!.seq);
 
 // startMeeting always says now, so the dates go back afterwards.
 const raw = new DatabaseSync(file);
