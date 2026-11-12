@@ -39,6 +39,8 @@ export interface ChatMessage {
   replyTo: string | null;
   editedAt: number | null;
   deletedAt: number | null;
+  /** The key its author's page sent it with, so that page knows it as the one it showed before it was saved. */
+  key: string | null;
 }
 
 /** What the chat tells whoever listens (the space's event stream). */

@@ -4,7 +4,7 @@ import type { Channel, ChatMessage, ChatSession } from "../../shared/chat.ts";
 import { newId } from "../ids.ts";
 import type { Row } from "./rows.ts";
 
-const MESSAGE_SELECT = `SELECT c.seq, c.channel_id, c.reply_to, c.edited_at, c.deleted_at,
+const MESSAGE_SELECT = `SELECT c.seq, c.channel_id, c.external_id, c.reply_to, c.edited_at, c.deleted_at,
   s.id, s.meeting_id, s.speaker_id, s.speaker_name, s.text, s.ts
   FROM chat_messages c JOIN segments s ON s.id = c.segment_id`;
 
@@ -29,6 +29,13 @@ const toSession = (r: Row): ChatSession => ({
   messages: r.n as number,
 });
 
+/** The key its author's page sent it with: Stand's own chat keeps it as "<author id>:<key>". */
+const sendKey = (r: Row) => {
+  const ext = r.external_id as string | null;
+  const own = `${r.speaker_id as string}:`;
+  return ext?.startsWith(own) ? ext.slice(own.length) : null;
+};
+
 const toMessage = (r: Row): ChatMessage => ({
   seq: r.seq as number,
   id: r.id as string,
@@ -41,6 +48,7 @@ const toMessage = (r: Row): ChatMessage => ({
   replyTo: (r.reply_to as string) ?? null,
   editedAt: (r.edited_at as number) ?? null,
   deletedAt: (r.deleted_at as number) ?? null,
+  key: sendKey(r),
 });
 
 export function chatStore(db: DatabaseSync) {
