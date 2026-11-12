@@ -89,7 +89,7 @@ export function DesignStage(props: {
           <span className="ds-spec" dir="auto" title={design.spec}>
             {design.spec}
           </span>
-          {design.owner && <span className="muted small">{design.owner}</span>}
+          {design.owner && <span className="muted small ds-owner">{design.owner}</span>}
           <span className="rp-grow" />
           <button type="button" className="small" onClick={() => props.onSpec(true)} title={props.canSteer ? "Open the spec at this part, for everyone" : "Open the spec at this part"}>
             Full spec
@@ -240,7 +240,7 @@ export function DesignStage(props: {
               </p>
             ) : (
               !caught.length && (
-                <p className="muted small">What the team says here is filed under this {design.role === "verdict" ? "spec" : asked ? "question" : "slide"}.</p>
+                <p className="muted small ds-help">What the team says here is filed under this {design.role === "verdict" ? "spec" : asked ? "question" : "slide"}.</p>
               )
             )}
             {props.onAdd && !disabled && <AddLine onAdd={props.onAdd} />}
@@ -250,7 +250,7 @@ export function DesignStage(props: {
           <div className="ds-spec-pane" role="dialog" aria-label="Full spec">
             <header>
               <strong dir="auto">{design.spec}</strong>
-              <span className="muted small">Select a passage and comment to add a question to the call</span>
+              <span className="muted small ds-help">Select a passage and comment to add a question to the call</span>
               <span className="rp-grow" />
               <button type="button" className="small" onClick={() => props.onSpec(false)}>
                 Back to the slide
