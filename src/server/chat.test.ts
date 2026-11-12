@@ -185,7 +185,8 @@ test("someone an outside source names can write, edit and delete, with no Stand 
   const own = db.spaceChannel(room.id, joe.id);
   assert.notEqual(own.id, "d1");
   assert.notEqual(chat.accept(own.id, [{ type: "message", author: { userId: joe.id }, text: "Thanks Sam", ts: T0 + 2 }]).messages[0].sessionId, m.sessionId);
-  assert.deepEqual(db.roomChannels(room.id).map((c) => c.source), ["stand", "discord"]);
+  // Sorted, since the order is by when each was made and the space's own chat is made at the real time.
+  assert.deepEqual(db.roomChannels(room.id).map((c) => c.source).sort(), ["discord", "stand"]);
 });
 
 test("messages page by their order, newest page first", () => {
