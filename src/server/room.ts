@@ -2125,6 +2125,23 @@ export class RoomSession implements SpeechSink {
   demoAccept() {
     this.acceptSuggestion("Demo host");
   }
+  /** The demo's stand-in for Ask Stand: the question shows as being worked on, then demoAnswer
+   *  writes its answer, so the card and its line in the transcript can be seen without a model. */
+  demoAsk(speakerId: string, speakerName: string, question: string): string {
+    this.agentCards ??= new AgentKeeper();
+    const card = this.agentCards.ask(speakerName, speakerId, question);
+    this.agentChanged();
+    return card.id;
+  }
+  demoAnswer(cardId: string, answer: string) {
+    this.agentCards?.finishAnswer(cardId, { fields: { note: answer, sources: [], todo: null, fromSpace: [] }, follows: null, model: null, costUsd: null });
+    this.agentChanged();
+  }
+  /** The demo's stand-in for someone's agent reporting over the MCP while the call runs. */
+  demoReport(userId: string, userName: string, client: string, text: string) {
+    this.db.addUpdate({ roomId: this.roomId, itemId: this.focusItemId, noteId: null, noteText: null, userId, userName, client, status: "progress", text, links: [] });
+    this.updatesChanged();
+  }
   get isEnded() {
     return this.ended;
   }
