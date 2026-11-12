@@ -1761,3 +1761,43 @@ test("Stand offers a map by itself when two people trade ideas, says it guessed,
   assert.equal(session.state().next, null, "it guessed once and stays quiet");
   await session.end();
 });
+
+test("during a review Stand answers an ask and never guesses; a map asked for on a slide is of that slide and reads its talk", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  let read = "";
+  const agent = Object.assign(new HeuristicAgent(), {
+    async brainstormMap(_context: string, talk: string) {
+      read = talk;
+      return { add: [], extend: [], caught: [] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  addSlide(db, room.id, { title: "Mic picker", summary: "", addedBy: "x" });
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const huy = await join(session, { id: "u2", name: "Huy" });
+  const started = startReview(db, room.id);
+  session.itemsChanged();
+  await say(joe, { type: "focus", itemId: started.firstItemId });
+  // Ideas traded on a slide: outside a review this is a guessed card.
+  session.addSpeech("u1", "Joe", "What if the picker remembers the last mic?", Date.now());
+  session.addSpeech("u2", "Huy", "Or we could show a level meter.", Date.now());
+  session.addSpeech("u1", "Joe", "Another idea, maybe we test the mic first.", Date.now());
+  assert.equal(session.state().next, null, "no unprompted card on a slide");
+  // Someone asks, naming nothing: the card is of the slide.
+  session.addSpeech("u2", "Huy", "Hold on, let's brainstorm", Date.now());
+  const card = session.state().next!;
+  assert.deepEqual([card.kind, card.topic, card.guessed], ["map", "Mic picker", undefined]);
+  // Taking it starts the map the usual way (the room's route does this); it reads what is said on the slide.
+  startBrainstorm(db, room.id, card.topic, "Huy");
+  session.brainstormChanged();
+  await say(huy, { type: "next.take", id: card.id, started: true });
+  session.addSpeech("u1", "Joe", "We could pick the mic from the menu bar", Date.now());
+  await (session as unknown as { mapPasses: { run(): Promise<void> } }).mapPasses.run();
+  assert.match(read, /menu bar/, "the map reads the review's talk");
+  // Another review asked for while this one runs can't start now: it is only kept for the recap.
+  session.addSpeech("u1", "Joe", "we need a design review on the audio pipeline", Date.now());
+  assert.equal(session.state().next!.ready, 0);
+  await session.end();
+});
