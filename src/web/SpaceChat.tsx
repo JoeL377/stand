@@ -2,10 +2,11 @@
 // kept up to date by the space's event stream; sending, editing and deleting are plain requests.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ChatEvent, ChatMessage, ChatThread } from "../shared/chat.ts";
+import type { CaughtLine, ChatCaught, ChatEvent, ChatMessage, ChatThread } from "../shared/chat.ts";
 import { mentionedIn } from "../shared/mentions.ts";
 import { api } from "./api.ts";
-import { EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
+import { mergeCaught, placeCaught } from "./chatCaught.ts";
+import { CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
 import { Linkified } from "./Linkified.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
 import { usePersonColors } from "./PersonColors.tsx";
@@ -33,6 +34,8 @@ export interface SpaceChatState {
   loadOlder: () => Promise<void>;
   markRead: () => void;
   apply: (m: ChatMessage) => void;
+  /** A line Stand caught that isn't one: it goes for everyone. */
+  removeCaught: (line: CaughtLine) => Promise<void>;
   reload: () => void;
 }
 
@@ -76,7 +79,12 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
           if (!t) return fresh;
           const ids = new Set(fresh.messages.map((m) => m.id));
           const oldest = fresh.messages[0]?.seq ?? Infinity;
-          return { ...fresh, messages: [...t.messages.filter((m) => !ids.has(m.id) && m.seq < oldest), ...fresh.messages], readUpTo: Math.max(t.readUpTo, fresh.readUpTo) };
+          return {
+            ...fresh,
+            messages: [...t.messages.filter((m) => !ids.has(m.id) && m.seq < oldest), ...fresh.messages],
+            caught: mergeCaught(t.caught, fresh.caught),
+            readUpTo: Math.max(t.readUpTo, fresh.readUpTo),
+          };
         });
       },
       (e: Error) => setError(e.message),
@@ -91,12 +99,26 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
     let dropped = false;
     stream.onmessage = (ev) => {
       const e = JSON.parse(ev.data) as ChatEvent;
-      if (e.type !== "message") return;
-      const h = heard.current;
-      // Only a message seen for the first time: an edit that adds you doesn't call out again.
-      if (!h.known.has(e.message.id) && h.mentionsMe(e.message)) h.onMention?.(e.message);
-      h.known.add(e.message.id);
-      apply(e.message);
+      if (e.type === "message") {
+        const h = heard.current;
+        // Only a message seen for the first time: an edit that adds you doesn't call out again.
+        if (!h.known.has(e.message.id) && h.mentionsMe(e.message)) h.onMention?.(e.message);
+        h.known.add(e.message.id);
+        apply(e.message);
+      }
+      // A session opened or closed: what ends a closed one shows once it has.
+      else if (e.type === "session")
+        setThread((t) =>
+          t && t.channel.id === e.channelId
+            ? { ...t, channel: { ...t.channel, openSessionId: e.open ? e.sessionId : t.channel.openSessionId === e.sessionId ? null : t.channel.openSessionId } }
+            : t,
+        );
+      // Stand caught something, or someone removed a line: that session is read again.
+      else if (e.type === "notes")
+        api.chatCaught(e.sessionId).then(
+          (c) => setThread((t) => (t && t.channel.id === e.channelId ? { ...t, caught: mergeCaught(t.caught, [c]) } : t)),
+          () => {},
+        );
     };
     // The browser connects again by itself. What was sent meanwhile is read then.
     stream.onerror = () => {
@@ -114,8 +136,13 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
     if (!thread || !first) return;
     const older = await api.chatMessages(thread.channel.id, { before: first.seq });
     setHasOlder(older.messages.length >= PAGE);
-    setThread((t) => t && { ...t, messages: [...older.messages.filter((m) => !t.messages.some((x) => x.id === m.id)), ...t.messages] });
+    setThread((t) => t && { ...t, messages: [...older.messages.filter((m) => !t.messages.some((x) => x.id === m.id)), ...t.messages], caught: mergeCaught(older.caught, t.caught) });
   }, [thread]);
+
+  const removeCaught = useCallback(async (line: CaughtLine) => {
+    await api.removeCaught(line.id);
+    setThread((t) => t && { ...t, caught: t.caught.map((c) => ({ ...c, lines: c.lines.filter((l) => l.id !== line.id) })) });
+  }, []);
 
   const last = thread?.messages.at(-1)?.seq ?? 0;
   const channelId = thread?.channel.id;
@@ -129,7 +156,7 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   for (const m of thread?.messages ?? []) heard.current.known.add(m.id);
   const fresh = thread ? thread.messages.filter((m) => m.seq > thread.readUpTo && m.authorId !== me && !m.deletedAt) : [];
   const mentions = fresh.filter(mentionsMe).length;
-  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, reload };
+  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload };
 }
 
 const dayLabel = (ts: number) => {
@@ -143,7 +170,7 @@ const dayLabel = (ts: number) => {
 
 const newKey = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
-export function SpaceChat(props: { roomId: string; me: { id: string; name: string }; chat: SpaceChatState }) {
+export function SpaceChat(props: { roomId: string; me: { id: string; name: string }; chat: SpaceChatState; onOpenTask?: (id: string) => void }) {
   const { roomId, me, chat } = props;
   const { thread } = chat;
   const scroller = useRef<HTMLDivElement>(null);
@@ -192,17 +219,27 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
   };
 
   const rows = useMemo(() => {
-    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean }> = [];
+    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null }> = [];
+    const placed = placeCaught(thread?.messages ?? [], thread?.caught ?? [], thread?.channel.openSessionId ?? null);
     let marked = false;
     for (const m of thread?.messages ?? []) {
       const prev = out.at(-1)?.m;
       const day = !prev || dayLabel(prev.ts) !== dayLabel(m.ts) ? dayLabel(m.ts) : null;
       const fresh = !marked && newFrom !== null && newFrom > 0 && m.seq > newFrom && m.authorId !== me.id;
       if (fresh) marked = true;
-      out.push({ m, day, fresh, head: !!day || fresh || !prev || prev.authorId !== m.authorId || m.ts - prev.ts > BLOCK_MS });
+      // What Stand put under the last message breaks the block: the next one starts under its name again.
+      const broken = !!prev && (placed.lines.has(prev.id) || placed.recaps.has(prev.id));
+      out.push({
+        m,
+        day,
+        fresh,
+        head: !!day || fresh || broken || !prev || prev.authorId !== m.authorId || m.ts - prev.ts > BLOCK_MS,
+        caught: placed.lines.get(m.id) ?? [],
+        recap: placed.recaps.get(m.id) ?? null,
+      });
     }
     return out;
-  }, [thread?.messages, newFrom, me.id]);
+  }, [thread?.messages, thread?.caught, thread?.channel.openSessionId, newFrom, me.id]);
 
   // The newest message stays in view, unless you scrolled up to read older ones. The thread scrolls
   // on a wide screen and the page on a phone, so both are kept.
@@ -273,7 +310,7 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
             Nothing here yet. Write to the people in this space between meetings: what you send stays here for them to read.
           </p>
         )}
-        {rows.map(({ m, day, head, fresh }) => (
+        {rows.map(({ m, day, head, fresh, caught, recap }) => (
           <MessageRow
             key={m.id}
             m={m}
@@ -281,6 +318,10 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
             head={head}
             fresh={fresh}
             mentionsMe={chat.mentionsMe(m)}
+            caught={caught}
+            recap={recap}
+            onOpenTask={props.onOpenTask}
+            onRemoveCaught={chat.removeCaught}
             mine={m.authorId === me.id}
             editing={editing === m.id}
             onEdit={(on) => setEditing(on ? m.id : null)}
@@ -312,6 +353,10 @@ function MessageRow(props: {
   head: boolean;
   fresh: boolean;
   mentionsMe: boolean;
+  caught: CaughtLine[];
+  recap: ChatCaught | null;
+  onOpenTask?: (id: string) => void;
+  onRemoveCaught: (line: CaughtLine) => Promise<void>;
   mine: boolean;
   editing: boolean;
   onEdit: (on: boolean) => void;
@@ -421,7 +466,79 @@ function MessageRow(props: {
           </span>
         )}
       </div>
+      {props.caught.map((line) => (
+        <CaughtRow key={line.id} line={line} onOpen={props.onOpenTask} onRemove={props.onRemoveCaught} />
+      ))}
+      {props.recap && <SessionRecap caught={props.recap} />}
     </>
+  );
+}
+
+/** The meeting transcript's words for the same thing (room/SidePanel.tsx CaptureRow). */
+const CAUGHT_LABEL: Record<CaughtLine["kind"], string> = { action: "Added to Todo!", decision: "Added to Decided!", question: "Added to Open questions!" };
+const CAUGHT_NAME: Record<CaughtLine["kind"], string> = { action: "to-do", decision: "decision", question: "open question" };
+
+/** A to-do, open question or decision Stand caught, under the message it came from. */
+function CaughtRow(props: { line: CaughtLine; onOpen?: (id: string) => void; onRemove: (line: CaughtLine) => Promise<void> }) {
+  const { line } = props;
+  const [removing, setRemoving] = useState(false);
+  // A to-do or a question opens as a task. A decision has no page of its own.
+  const opens = line.kind !== "decision" && props.onOpen;
+  const remove = () => {
+    if (!confirm(`Remove this ${CAUGHT_NAME[line.kind]}? Stand won't add it again from this stretch of chat.`)) return;
+    setRemoving(true);
+    props.onRemove(line).catch((err) => {
+      setRemoving(false);
+      errorToast("Couldn't remove it")(err);
+    });
+  };
+  const text = (
+    <>
+      <Linkified text={line.text} />
+      {line.owner && <span className="chat-caught-owner"> · {line.owner}</span>}
+    </>
+  );
+  return (
+    <div className={`chat-caught ${line.kind}${line.closed ? " closed" : ""}`} role="note" data-caught={line.id}>
+      <span className="agent-mark" aria-hidden>
+        ✦
+      </span>
+      <div className="chat-caught-body">
+        <strong className="chat-caught-label">{CAUGHT_LABEL[line.kind]}</strong>
+        {opens ? (
+          <button type="button" className="link chat-caught-text" onClick={() => props.onOpen!(line.id)}>
+            {text}
+          </button>
+        ) : (
+          <span className="chat-caught-text">{text}</span>
+        )}
+      </div>
+      <button type="button" className="icon-btn chat-caught-remove" disabled={removing} aria-label={`Remove this ${CAUGHT_NAME[line.kind]}`} title="Not one: remove it" onClick={remove}>
+        <CloseIcon size={12} />
+      </button>
+    </div>
+  );
+}
+
+/** What a stretch of chat was about, after its last message, once it has closed. */
+function SessionRecap({ caught }: { caught: ChatCaught }) {
+  return (
+    <div className="chat-recap" role="note">
+      <div className="chat-recap-head">
+        <span className="agent-mark" aria-hidden>
+          ✦
+        </span>
+        <strong>What this was about</strong>
+      </div>
+      {caught.summary && <p className="chat-recap-summary">{caught.summary}</p>}
+      {caught.topics.length > 0 && (
+        <ul className="chat-recap-topics">
+          {caught.topics.map((t) => (
+            <li key={t.id}>{t.topic}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

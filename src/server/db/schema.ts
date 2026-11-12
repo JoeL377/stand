@@ -408,6 +408,9 @@ CREATE TABLE IF NOT EXISTS channels (
   name TEXT NOT NULL,
   -- The session messages go to now. A session's ended_at is always set, so this is what says it is open.
   open_session_id TEXT,
+  -- The seq of the newest message a capture run has read (chatCapture.ts). It moves back when a
+  -- message is changed, and when a session closes, so the session is read once more.
+  captured_up_to INTEGER NOT NULL DEFAULT 0,
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
@@ -462,6 +465,9 @@ export function migrate(db: DatabaseSync) {
   // "chat": a session of a chat channel (chat.ts), which is the channel in channel_id.
   if (!meetingCols.includes("channel_id")) db.exec("ALTER TABLE meetings ADD COLUMN channel_id TEXT");
   db.exec("CREATE INDEX IF NOT EXISTS meetings_channel ON meetings(channel_id, started_at) WHERE channel_id IS NOT NULL;");
+  // How far capture has read a channel (chatCapture.ts).
+  if (!(db.prepare("PRAGMA table_info(channels)").all() as Row[]).some((c) => c.name === "captured_up_to"))
+    db.exec("ALTER TABLE channels ADD COLUMN captured_up_to INTEGER NOT NULL DEFAULT 0");
   // A design session (designSession.ts) is a brainstorm whose board is a diagram of boxes and arrows.
   const brainCols = (db.prepare("PRAGMA table_info(brainstorms)").all() as Row[]).map((c) => c.name);
   if (!brainCols.includes("kind"))

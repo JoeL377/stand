@@ -2,17 +2,18 @@
 // have read, and the space's event stream that tells open pages what changed.
 import type { Express, Request } from "express";
 import type { ChatMessage, ChatThread } from "../../shared/chat.ts";
+import { caughtIn } from "../chatCapture.ts";
 import type { Services } from "../services.ts";
 import { type Params, memberRoom, notFound, route } from "./http.ts";
 
 export function chatRoutes(app: Express, ctx: Services) {
   const { db, chat, spaceEvents } = ctx;
 
-  /** A page of messages with the sessions they are in. */
-  const page = (messages: ChatMessage[]) => ({
-    messages,
-    sessions: [...new Set(messages.map((m) => m.sessionId))].map((id) => db.chatSession(id)!),
-  });
+  /** A page of messages with the sessions they are in, and what Stand caught from each. */
+  const page = (messages: ChatMessage[]) => {
+    const ids = [...new Set(messages.map((m) => m.sessionId))];
+    return { messages, sessions: ids.map((id) => db.chatSession(id)!), caught: ids.flatMap((id) => caughtIn(db, id) ?? []) };
+  };
   /** The channel in :id when the signed-in person is in its space. */
   const memberChannel = (req: Request<Params>) => {
     const c = db.getChannel(req.params.id);
@@ -89,6 +90,32 @@ export function chatRoutes(app: Express, ctx: Services) {
     });
   app.patch("/api/chat/messages/:id", change(false));
   app.delete("/api/chat/messages/:id", change(true));
+
+  // What Stand caught from one session, read again when the stream says it changed.
+  app.get(
+    "/api/chat/sessions/:id/caught",
+    route((req, res) => {
+      const session = db.chatSession(req.params.id);
+      if (!session || !db.isMember(session.roomId, req.user!.id)) return notFound(res);
+      res.json(caughtIn(db, session.id) ?? { sessionId: session.id, summary: null, topics: [], lines: [] });
+    }),
+  );
+
+  // A line Stand caught from chat that isn't one: it goes, and isn't written again for that session.
+  // Chat has no host and no end, so anyone in the space can, as a meeting's host can during the call.
+  app.delete(
+    "/api/chat/caught/:id",
+    route((req, res) => {
+      const note = db.getNote(req.params.id);
+      const session = note && db.chatSession(note.meetingId);
+      if (!note || !session || !db.isMember(session.roomId, req.user!.id) || note.kind === "summary" || note.kind === "context") return notFound(res);
+      // A to-do or question someone took up is theirs to close. A decision has nowhere else to go from.
+      if (note.kind !== "decision" && db.noteActedOn(note.id)) return res.status(409).json({ error: "Someone is working with this one. Drop it on the Tasks tab instead." });
+      db.removeNote(note.id);
+      spaceEvents.send(session.roomId, { type: "notes", channelId: session.channelId, sessionId: session.id });
+      res.json({ removed: note.id });
+    }),
+  );
 
   // {upTo: seq}: you have read the channel up to that message.
   app.post(

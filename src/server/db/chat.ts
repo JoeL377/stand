@@ -68,9 +68,74 @@ export function chatStore(db: DatabaseSync) {
       db.prepare("UPDATE channels SET open_session_id = ? WHERE id = ?").run(id, channel.id);
       return { id, channelId: channel.id, roomId: channel.roomId, startedAt: at, endedAt: at, messages: 0 };
     },
-    /** The channel's messages start a new session from now on. */
+    /** The channel's messages start a new session from now on. Capture goes back one message in the
+     *  session that closes, so it is read once more, whole (chatCapture.ts). */
     closeChatSession(channelId: string) {
-      db.prepare("UPDATE channels SET open_session_id = NULL WHERE id = ?").run(channelId);
+      db.prepare(
+        `UPDATE channels SET open_session_id = NULL, captured_up_to = MIN(captured_up_to, COALESCE(
+           (SELECT MAX(c.seq) - 1 FROM chat_messages c JOIN segments s ON s.id = c.segment_id WHERE s.meeting_id = channels.open_session_id), captured_up_to))
+         WHERE id = ?`,
+      ).run(channelId);
+    },
+    /** The seq of the newest message a capture run has read in a channel. */
+    capturedUpTo(channelId: string): number {
+      return ((db.prepare("SELECT captured_up_to FROM channels WHERE id = ?").get(channelId) as Row | undefined)?.captured_up_to as number) ?? 0;
+    },
+    setCapturedUpTo(channelId: string, seq: number) {
+      db.prepare("UPDATE channels SET captured_up_to = ? WHERE id = ?").run(seq, channelId);
+    },
+    /** A message capture had read was changed: it reads from before that message again. */
+    rewindCapture(channelId: string, beforeSeq: number) {
+      db.prepare("UPDATE channels SET captured_up_to = MIN(captured_up_to, ?) WHERE id = ?").run(beforeSeq - 1, channelId);
+    },
+    /** The oldest session of a channel with a message capture has not read, and that session's newest message. */
+    uncapturedSession(channelId: string): { session: ChatSession; newest: number } | null {
+      const r = db
+        .prepare(
+          `SELECT s.meeting_id FROM chat_messages c JOIN segments s ON s.id = c.segment_id
+           WHERE c.channel_id = ?1 AND c.seq > (SELECT captured_up_to FROM channels WHERE id = ?1) ORDER BY c.seq LIMIT 1`,
+        )
+        .get(channelId) as Row | undefined;
+      const session = r && this.chatSession(r.meeting_id as string);
+      if (!session) return null;
+      const newest = db.prepare("SELECT MAX(c.seq) AS n FROM chat_messages c JOIN segments s ON s.id = c.segment_id WHERE s.meeting_id = ?").get(session.id) as Row;
+      return { session, newest: newest.n as number };
+    },
+    /** The channels with a message capture has not read. */
+    uncapturedChannels(): string[] {
+      return (
+        db.prepare("SELECT ch.id FROM channels ch WHERE EXISTS (SELECT 1 FROM chat_messages c WHERE c.channel_id = ch.id AND c.seq > ch.captured_up_to) ORDER BY ch.created_at, ch.rowid").all() as Row[]
+      ).map((r) => r.id as string);
+    },
+    /** The topics of a channel's other sessions, newest session first, so a new one can link back. */
+    channelTopics(channelId: string, exceptSessionId: string, limit = 15): Array<{ id: string; topic: string; meetingStartedAt: number }> {
+      return (
+        db
+          .prepare(
+            `SELECT d.id, d.topic, m.started_at FROM discussions d JOIN meetings m ON m.id = d.meeting_id
+             WHERE m.channel_id = ? AND m.id != ? ORDER BY m.started_at DESC, d.position LIMIT ?`,
+          )
+          .all(channelId, exceptSessionId, limit) as Row[]
+      ).map((r) => ({ id: r.id as string, topic: r.topic as string, meetingStartedAt: r.started_at as number }));
+    },
+    /** What a session was about, in a few sentences, once it has closed. */
+    setChatSummary(sessionId: string, summary: string) {
+      db.prepare("UPDATE meetings SET summary = ? WHERE id = ? AND kind = 'chat'").run(summary, sessionId);
+    },
+    /** A deleted message is quoted nowhere: what was caught from it stays, without its words. */
+    dropQuotesOf(messageId: string) {
+      db.prepare("UPDATE notes SET quote_json = NULL WHERE quote_json IS NOT NULL AND json_extract(quote_json, '$.segmentId') = ?").run(messageId);
+      const rows = db
+        .prepare("SELECT d.id, d.positions_json FROM discussions d JOIN segments s ON s.meeting_id = d.meeting_id WHERE s.id = ? AND d.positions_json LIKE ?")
+        .all(messageId, `%${messageId}%`) as Row[];
+      for (const r of rows) {
+        const positions = (JSON.parse(r.positions_json as string) as Array<{ quote?: { segmentId: string } }>).map((p) => {
+          if (p.quote?.segmentId !== messageId) return p;
+          const { quote: _gone, ...rest } = p;
+          return rest;
+        });
+        db.prepare("UPDATE discussions SET positions_json = ? WHERE id = ?").run(JSON.stringify(positions), r.id as string);
+      }
     },
     chatSession(id: string): ChatSession | null {
       const r = db.prepare(`${SESSION_SELECT} WHERE m.id = ? AND m.kind = 'chat'`).get(id) as Row | undefined;

@@ -18,21 +18,23 @@ export function brainstormRoutes(app: Express, ctx: Services) {
         // notes or a diagram, or from the plan of the to-do its draft spec will be saved on.
         const asked = req.body?.design as { seed?: unknown; taskId?: unknown } | undefined;
         let design: Parameters<typeof startBrainstorm>[5];
+        let prompt = String(req.body?.prompt ?? "");
         if (asked) {
-          const prompt = String(req.body?.prompt ?? "").trim();
-          if (!prompt) throw new BrainstormError("Say what you're designing, in a sentence.");
           const task = typeof asked.taskId === "string" && asked.taskId ? db.getNote(asked.taskId) : null;
           if (asked.taskId && (!task || task.roomId !== room.id || task.kind !== "action")) throw new BrainstormError("That to-do isn't in this space.");
           const pasted = String(asked.seed ?? "").trim().slice(0, SEED_MAX);
           const plan = !pasted && task ? (db.notePlan(task.id)?.text ?? "") : "";
           const seed = pasted || plan;
+          // No topic given: the to-do's, or the heading the notes open with. Otherwise it starts
+          // untitled and the talk names it.
+          prompt = String(req.body?.prompt ?? "").trim() || task?.text || /^\s*#{1,3}\s+(.+)$/m.exec(pasted)?.[1]?.trim() || "";
           let diagram = parseSeed(pasted ? (isDiagramText(pasted) ? pasted : "") : mermaidIn(plan));
           // Prose, or a plan with no diagram in it: the model finds the design. Without it the session starts blank.
-          if (seed && !diagram.boxes.length && agent.designSeed) diagram = seedFromAnswer(await agent.designSeed(prompt, seed).catch(() => null));
+          if (seed && !diagram.boxes.length && agent.designSeed) diagram = seedFromAnswer(await agent.designSeed(prompt || "not named yet", seed).catch(() => null));
           if (pasted && !diagram.boxes.length) diagram = parseSeed(pasted);
           design = { diagram, seed: seed || null, taskId: task?.id ?? null };
         }
-        const b = startBrainstorm(db, room.id, String(req.body?.prompt ?? ""), req.user!.name, Date.now(), design);
+        const b = startBrainstorm(db, room.id, prompt, req.user!.name, Date.now(), design);
         const s = sessions.get(room.id);
         if (s) {
           s.itemsChanged();

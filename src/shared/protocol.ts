@@ -280,12 +280,34 @@ export interface BrainNode {
   removed?: boolean;
 }
 
+/** What a design session is called until it has a topic: one started blank is named from the talk. */
+export const UNTITLED_DESIGN = "Untitled design";
+
+/** What sort of thing a box is: it decides the box's shape and mark on the board. */
+/** The first seven fit a design of anything (a process, a plan, an offer, an event); screen, store and
+ *  service are for when the design is of software. */
+export const DESIGN_KINDS = ["thing", "person", "step", "decision", "goal", "problem", "document", "screen", "store", "service"] as const;
+export type DesignKind = (typeof DESIGN_KINDS)[number];
+
+/** Boxes that belong together on a design session's diagram, drawn inside one frame with a caption. */
+export interface DesignGroup {
+  /** g2. */
+  id: string;
+  label: string;
+  /** One line on what the group holds. */
+  detail: string | null;
+}
+
 /** A box on a design session's diagram (server/designSession.ts): one of the things being designed. */
 export interface DesignBox {
   /** b3. */
   id: string;
   label: string;
   detail: string | null;
+  /** Left out for a plain thing. */
+  kind?: DesignKind;
+  /** The group it sits in (g2), if any. */
+  group?: string | null;
   /** First name of who raised it; null for one the session started with. */
   by: string | null;
   ts: number;
@@ -327,6 +349,8 @@ export interface DesignContext {
 export interface DesignDiagram {
   boxes: DesignBox[];
   arrows: DesignArrow[];
+  /** The groups boxes sit in. As sent, only the ones with a box on the diagram. */
+  groups?: DesignGroup[];
 }
 
 /** A brainstorm: one sentence in the middle and the map the talk drew around it. */
@@ -619,8 +643,8 @@ export interface TaskLink {
 export interface TaskDetail {
   note: Note;
   roomId: string;
-  /** The meeting it came out of; null for one someone added by hand. */
-  meeting: { id: string; startedAt: number } | null;
+  /** The meeting it came out of, or the stretch of chat (chat: true); null for one someone added by hand. */
+  meeting: { id: string; startedAt: number; chat?: boolean } | null;
   /** Agents' work on it, with the latest plan or spec even when nothing's been reported. */
   work: ActionWork;
   waitsOn: TaskLink[];
@@ -736,6 +760,8 @@ export interface NoteFrom {
   } | null;
   /** Not from a meeting: someone added it by hand (an agent, through the MCP), and who. startedAt is when. */
   addedBy?: string;
+  /** Not from a meeting: Stand caught it in the space's chat. meetingId is that stretch of chat. */
+  chat?: boolean;
 }
 
 /** One thing the agent proposes for the agenda, with why. Nothing joins the
