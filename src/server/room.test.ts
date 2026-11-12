@@ -744,6 +744,39 @@ test("End meeting shows everyone it's ending, and the meeting ends even when the
   assert.ok(db.getMeeting(meetingId)?.endedAt);
 });
 
+test("ending lets everyone go to the recap at once; the recap is written after, and a new call can start meanwhile", async () => {
+  const { db, session } = setup();
+  const room = db.getRoom(session.roomId)!;
+  await session.end();
+  const agent = new HeuristicAgent();
+  let writeRecap!: () => void;
+  const recapped = new Promise<void>((r) => (writeRecap = r));
+  const slow = agent.recapMeeting.bind(agent);
+  agent.recapMeeting = async (input) => {
+    await recapped;
+    return slow(input);
+  };
+  const s = new RoomSession(db, agent, room, () => {});
+  let released = false;
+  s.onRelease = () => (released = true);
+  const ws = await join(s, { id: "u1", name: "Joe" });
+  s.addSpeech("u1", "Joe", "Something worth a note", Date.now());
+  const ending = s.end();
+  for (let i = 0; i < 20 && !released; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(released, "the space is let go before the recap is written");
+  assert.ok(ws.got.some((m) => m.type === "meeting.ended" && m.meetingId === s.meetingId));
+  assert.equal(db.getMeeting(s.meetingId)?.endedAt, null);
+  assert.ok(db.getMeeting(s.meetingId)?.endRequestedAt);
+  // Someone who comes back with the old meeting is sent to its recap, not into the new call.
+  const next = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  const late = await join(next, { id: "u1", name: "Joe" }, { type: "hello", meetingId: s.meetingId });
+  assert.deepEqual(late.got, [{ type: "meeting.ended", meetingId: s.meetingId }]);
+  writeRecap();
+  await ending;
+  assert.ok(db.getMeeting(s.meetingId)?.endedAt);
+  await next.end();
+});
+
 test("a note change from someone who isn't the host says why, and puts their screen back", async () => {
   const { db, session, meetingId } = setup();
   await join(session, { id: "u1", name: "Joe" });

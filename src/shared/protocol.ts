@@ -1236,6 +1236,8 @@ export interface MeetingRecap {
   roomName: string;
   startedAt: number;
   endedAt: number | null;
+  /** The call has ended and its recap is still being written: the page fills in when it's saved. */
+  writingUp?: boolean;
   summary: string | null;
   /** The space's synthesis instructions applied to this meeting, as Markdown; null when it had none. */
   synthesis: string | null;

@@ -69,14 +69,15 @@ export function startServices() {
   /** The space's meeting, started or picked up as someone arrives. Null when there's no such space. */
   function session(roomId: string): RoomSession | null {
     const existing = sessions.get(roomId);
-    if (existing && (!existing.ended || Date.now() - existing.endingSince < WAIT_FOR_RECAP_MS)) return existing;
+    if (existing && !existing.released && (!existing.ended || Date.now() - existing.endingSince < WAIT_FOR_RECAP_MS)) return existing;
     const room = db.getRoom(roomId);
     if (!room) return null;
     // The server may have stopped mid-meeting (every deploy does): carry on with it.
     let resume: OpenMeeting | null = null;
     for (const m of db.openMeetings(roomId)) {
-      if (m.id === existing?.meetingId) continue; // still being written up
-      if (!resume && !finishing.has(m.id) && recent(m)) resume = m;
+      if (m.id === existing?.meetingId || writingUp.has(m.id)) continue; // still being written up
+      // One someone ended is written up, never resumed: its people have already gone to the recap.
+      if (!resume && !finishing.has(m.id) && !m.endRequestedAt && recent(m)) resume = m;
       else finishOpenMeeting(m);
     }
     const s = new RoomSession(
@@ -84,6 +85,7 @@ export function startServices() {
       agent,
       room,
       (closed) => {
+        writingUp.delete(closed.meetingId);
         if (sessions.get(roomId) === closed) sessions.delete(roomId);
         // The recap is saved: what the meeting caught can be filed, and read against the open questions.
         projectSuggester.schedule(roomId, 0);
@@ -94,10 +96,13 @@ export function startServices() {
       resume,
       planBriefs,
     );
+    // Ended: its recap is written in the background, and the next person to arrive starts a new call.
+    s.onRelease = (released) => {
+      writingUp.add(released.meetingId);
+      if (sessions.get(roomId) === released) sessions.delete(roomId);
+    };
     sessions.set(roomId, s);
     if (resume) console.log(`[room] ${roomId}: picked up meeting ${resume.id} after a restart`);
-    // It was being written up when the server stopped: finish that, with everyone watching.
-    if (resume?.endRequestedAt) void s.end();
     return s;
   }
 
@@ -108,6 +113,8 @@ export function startServices() {
     return [...new Set([spaceName.trim(), "Stand", ...names].filter(Boolean))].slice(0, 100);
   }
 
+  /** Meetings whose people have gone to the recap while it is written. */
+  const writingUp = new Set<string>();
   /** Meetings being written up after the fact, one at a time. */
   const finishing = new Set<string>();
   let finishQueue = Promise.resolve();

@@ -85,6 +85,8 @@ export function meetingsStore(db: DatabaseSync) {
         roomId: r.room_id as string,
         startedAt: r.started_at as number,
         endedAt: (r.ended_at as number) ?? null,
+        /** Someone ended it; until endedAt is set the recap is still being written. */
+        endRequestedAt: (r.end_requested_at as number) ?? null,
         summary: (r.summary as string) ?? null,
         /** What the space's synthesis instructions asked for, as Markdown; null without instructions. */
         synthesis: (r.synthesis as string) ?? null,
