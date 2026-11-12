@@ -11,4 +11,5 @@ One file per user-facing feature: how a person reaches it, how `drive.cjs` drive
 | Chat | [chat.md](chat.md) | `chat.cjs`, `chat-capture.cjs` and `mentions.cjs` (their own scripts) | yes; capture with pattern notes, not with a real model |
 | Design review | [design-review.md](design-review.md) | `design-review.cjs` (its own script) | yes, without the AI brief (needs a key) |
 | Projects | [projects.md](projects.md) | `projects.cjs` (its own script) | yes, with the scripted demo |
+| Task owners | [task-owners.md](task-owners.md) | `task-owner.cjs` (its own script) | yes |
 | Bar notes and snaps | [bar-notes-and-snaps.md](bar-notes-and-snaps.md) | none | no, needs the Mac app |
