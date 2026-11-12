@@ -3751,3 +3751,7 @@ a .mention { color: inherit; }
 
 /* A review row on the Meetings tab: its name gives way first, the count never shrinks. */
 .sh-what.sh-count { flex: none; }
+/* Stand's card for a next step someone asked for out loud, and the reviews it kept for the recap. */
+.next-card .nudge-text strong { font-weight: 600; }
+.rc-asked { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-asked .agent-mark { font-size: 12px; color: var(--accent-text); }

@@ -876,6 +876,27 @@ export interface Participant {
   muted?: boolean;
 }
 
+/** What the meeting agent can offer to do next (server/nextSteps.ts). */
+export type NextKind = "map" | "diagram" | "design-review" | "product-review";
+/** One next step heard in the call: someone said they want a map, a diagram or a review. */
+export interface NextStep {
+  id: string;
+  kind: NextKind;
+  /** What the speaker said it is on; "" when they named nothing (a map is then of the board's topic). */
+  topic: string;
+  /** Who said it, and the line they said it in. */
+  by: string;
+  ts: number;
+  segmentId: string;
+  /** offered: its card is up. opened: its view was drawn. started: the review started in this call.
+   *  noted: kept for the recap. waved: someone said no. missed: the card went away unanswered. */
+  state: "offered" | "opened" | "started" | "noted" | "waved" | "missed";
+  /** A review: how many slides or specs are waiting, so it could start now. */
+  ready?: number;
+  /** Nobody asked: Stand offers it because the talk sounds like one (a map or a diagram only). */
+  guessed?: boolean;
+}
+
 export interface Suggestion {
   itemId: string;
   /** Why the agent thinks so, e.g. "ENG-142 is visible in the window title". */
@@ -973,6 +994,8 @@ export interface RoomState {
   /** While down: Stand is about to start it again by itself. */
   transcriptionRestarting?: boolean;
   suggestion: Suggestion | null;
+  /** The next step the meeting agent is offering everyone right now, if one. */
+  next?: NextStep | null;
   items: Item[];
   decks: Deck[];
   /** Action items from earlier meetings that are still open, oldest first, plus any closed since
@@ -1064,6 +1087,9 @@ export type ClientMessage = (
   | { type: "note.remove"; noteId: string }
   /** Take a circle off the brainstorm's map (anyone in the call: Stand got it wrong). */
   | { type: "brainstorm.remove"; id: string }
+  /** Anyone: the next step on the card was taken (`started`: the view or the review began), or waved off. */
+  | { type: "next.take"; id: string; started?: boolean }
+  | { type: "next.wave"; id: string }
   /** Stop drawing the map or diagram running in the call; it is kept (anyone in the call). */
   | { type: "view.stop" }
   /** Draw the map of the board's topic now, or continue it (anyone in the call). */
@@ -1226,6 +1252,8 @@ export interface MeetingRecap {
   designReview?: DesignReviewRan | null;
   /** The brainstorm that ran in it, if one did. */
   brainstorm?: BrainstormSummary | null;
+  /** Reviews people asked for in the call that didn't happen there (server/nextSteps.ts). */
+  next?: NextStep[];
   /** Everything in the meeting in order: speech, chat, captures, Ask Stand, focus changes, agents' reports. */
   timeline?: TimelineEntry[];
 }
