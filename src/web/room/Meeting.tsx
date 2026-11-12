@@ -19,6 +19,7 @@ import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { MOD, meetingShortcuts } from "../shortcuts.ts";
 import { ExperienceControl, runningExperience } from "./Experiences.tsx";
+import { mayTakeOver } from "./presenter.ts";
 import { PilotRequest, type PilotActs, seatOf, usePilotNotices } from "./Pilot.tsx";
 
 export function Meeting(props: {
@@ -601,7 +602,9 @@ export function Meeting(props: {
               className="control share"
               onClick={() => {
                 // Taking over: asked first, and what they were presenting carries on.
-                if (otherSharer && !confirm(`${otherSharer.name} is sharing. Share your screen instead? Theirs stops, and the call carries on.`)) return;
+                if (state?.presenter && state.presenter.id !== participantId) {
+                  if (!mayTakeOver(state, participantId)) return;
+                } else if (otherSharer && !confirm(`${otherSharer.name} is sharing. Share your screen instead? Theirs stops, and the call carries on.`)) return;
                 void media.startShare();
               }}
               disabled={media.sharePicking}
@@ -623,7 +626,7 @@ export function Meeting(props: {
           )}
           {/* Anyone in the call can start a review and finish it. */}
           {state && (
-            <ExperienceControl roomId={roomId} running={runningExperience(state.items)} disabled={writingUp || !room.connected} />
+            <ExperienceControl roomId={roomId} running={runningExperience(state.items)} disabled={writingUp || !room.connected} mayStart={() => mayTakeOver(state, participantId)} />
           )}
           {canSteer && (!caps.livekit || !caps.llm) ? (
             <button className="control" onClick={() => send({ type: "demo.play" })} title="Plays a scripted 4-person standup into this space">

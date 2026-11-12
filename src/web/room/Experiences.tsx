@@ -17,7 +17,7 @@ export function runningExperience(items: Item[]): string | null {
   return null;
 }
 
-export function ExperienceControl(props: { roomId: string; running: string | null; disabled?: boolean }) {
+export function ExperienceControl(props: { roomId: string; running: string | null; disabled?: boolean; /** Someone else presents: ask first. */ mayStart?: () => boolean }) {
   const { roomId, running } = props;
   const [open, setOpen] = useState(false);
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
@@ -30,6 +30,7 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
 
   const run = (what: string, start: () => Promise<unknown>) => async () => {
     setOpen(false);
+    if (props.mayStart && !props.mayStart()) return;
     setBusy(true);
     try {
       await start();
