@@ -368,7 +368,7 @@ export interface BrainstormView {
   /** The topic or question it started from. */
   prompt: string;
   status: "live" | "done";
-  /** The agenda item its talk is filed under while it runs. */
+  /** Only on a brainstorm from before maps were views: the agenda item its talk was filed under. */
   itemId: string | null;
   meetingId: string | null;
   startedBy: string | null;
@@ -1035,6 +1035,8 @@ export type ClientMessage = (
   | { type: "note.remove"; noteId: string }
   /** Take a circle off the brainstorm's map (anyone in the call: Stand got it wrong). */
   | { type: "brainstorm.remove"; id: string }
+  /** Stop drawing the map or diagram running in the call; it is kept (anyone in the call). */
+  | { type: "view.stop" }
   /** Keep or drop something on a design session's diagram, by its id (anyone in the call). Drop also takes a kept one off. */
   | { type: "design.keep"; id: string }
   | { type: "design.drop"; id: string }

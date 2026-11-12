@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { BrainCaught, Segment } from "../shared/protocol.ts";
 import { type MapAnswer, MapKeeper, brainstormOfMeeting, brainstormPage, brainstormsOf, finishBrainstorm, starIdea, startBrainstorm } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
+import { migrate } from "./db/schema.ts";
 
 const T0 = 1_000_000;
 const seg = (n: number, who: string, text: string): Segment => ({ id: `s${n}`, meetingId: "m", itemId: null, speakerId: who, speakerName: who, kind: "speech", text, ts: T0 + n * 1000 });
@@ -94,7 +95,20 @@ test("a circle someone took off stays off, and a model that can't answer changes
   assert.equal(again.unreadSince(talk), talk[1].ts);
 });
 
-test("a brainstorm leads the agenda while it runs, and keeps its page after the call", () => {
+test("a line out of the map's scope is never read, and never waits as unread", async () => {
+  const model = scripted([{ add: [{ under: "root", label: "Onboarding", detail: "Ways to get a new team going.", by: "Huy", line: 1 }] }]);
+  const slide = (n: number, who: string, text: string): Segment => ({ ...seg(n, who, text), itemId: "slide" });
+  const map = new MapKeeper(model, "Week one", T0, null, (s) => s.itemId !== "slide");
+  const talk = [slide(1, "Joe", "on this slide the button is blue"), seg(2, "Huy", "onboarding could start from a sample space")];
+  assert.equal(map.unreadSince(talk), talk[1].ts);
+  assert.equal(await map.run(talk, [], [], T0, T0 + 5000), true);
+  assert.doesNotMatch(model.asked[0], /button is blue/);
+  assert.match(model.asked[0], /NEW \[1\] \[0:02\] Huy: onboarding/);
+  talk.push(slide(3, "Joe", "next slide"));
+  assert.equal(map.unreadSince(talk), null);
+});
+
+test("a brainstorm adds nothing to the agenda, and keeps its page after the call", () => {
   const db = openDb(":memory:");
   const room = db.createRoom("Conxt 1.0", null, "");
   const other = db.createRoom("Elsewhere", null, "");
@@ -102,12 +116,13 @@ test("a brainstorm leads the agenda while it runs, and keeps its page after the 
   assert.throws(() => startBrainstorm(db, room.id, "   ", "Joe Liang"), /topic or a question/);
   const b = startBrainstorm(db, room.id, "  How should a  review start? ", "Joe Liang", T0);
   assert.equal(b.prompt, "How should a review start?");
-  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["How should a review start?", "Roadmap"]);
+  assert.equal(b.itemId, null);
+  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
   // The same sentence again is the same brainstorm; another one takes its place.
   assert.equal(startBrainstorm(db, room.id, "How should a review start?", "Huy Ngo").id, b.id);
   const next = startBrainstorm(db, room.id, "Pricing", "Huy Ngo", T0 + 10);
   assert.notEqual(next.id, b.id);
-  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Pricing", "Roadmap"]);
+  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
   assert.deepEqual(brainstormsOf(db, room.id).map((x) => [x.prompt, x.status]), [["Pricing", "live"], ["How should a review start?", "done"]]);
 
   db.saveBrainstormMap(next.id, [
@@ -132,4 +147,19 @@ test("a brainstorm leads the agenda while it runs, and keeps its page after the 
   assert.deepEqual(brainstormPage(db, room.id, next.id)!.starred, ["i1"]);
   assert.equal(starIdea(db, room.id, next.id, "i1", false)!.starred, undefined);
   assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, directions: 1, ideas: 1 });
+});
+
+test("a brainstorm running from before maps were views lets go of its agenda item", () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Conxt 1.0", null, "");
+  const [item, kept] = db.addItems(room.id, [
+    { source: "agenda", externalId: null, title: "Pricing", url: null, description: null },
+    { source: "agenda", externalId: null, title: "Roadmap", url: null, description: null },
+  ]);
+  const old = db.createBrainstorm({ roomId: room.id, prompt: "Pricing", itemId: item.id, startedBy: "Joe", startedAt: T0 });
+  migrate(db.raw);
+  migrate(db.raw);
+  assert.equal(db.getBrainstorm(old.id)!.itemId, null);
+  assert.equal(db.getBrainstorm(old.id)!.status, "live");
+  assert.deepEqual(db.listItems(room.id).map((i) => i.id), [kept.id]);
 });

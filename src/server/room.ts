@@ -235,7 +235,7 @@ export class RoomSession implements SpeechSink {
   private pilot = new PilotSeat();
   private pilotTimer: ReturnType<typeof setTimeout> | null = null;
   /** The brainstorm running in this space, if one is (brainstorm.ts): its map, one pass at a time. */
-  private brain: { id: string; itemId: string | null; map: MapKeeper | DiagramKeeper } | null = null;
+  private brain: { id: string; map: MapKeeper | DiagramKeeper } | null = null;
   /** The passes that keep the list, the map and the board up to date while people talk (passRunner.ts). */
   private listPasses = new PassRunner(() => this.listPass(), { label: "list", about: () => this.meetingId, settled: () => this.scheduleList() });
   private mapPasses = new PassRunner(() => this.mapPass(), { label: "brainstorm", about: () => this.meetingId, settled: () => this.scheduleMap() });
@@ -321,16 +321,22 @@ export class RoomSession implements SpeechSink {
       if (this.brain.map instanceof DiagramKeeper) this.brain.map.background(sessionBackground(b));
       return;
     }
-    // Only talk from this call, after the brainstorm began, belongs on its map.
+    // Only talk from this call, after the brainstorm began, belongs on its map; never what was said on a review slide.
     const since = Math.max(b.startedAt, this.meetingStartedAt) - 1;
+    const review = new Map<string, boolean>();
+    const inScope = (s: Segment) => {
+      if (!s.itemId) return true;
+      if (!review.has(s.itemId)) review.set(s.itemId, isReviewDeck(this.db.getItem(s.itemId)));
+      return !review.get(s.itemId);
+    };
     if (b.kind === "design") {
       // A design session: the same passes, drawing a diagram of boxes and arrows (designSession.ts).
       const model = this.agent.designDiagram ? { designDiagram: this.agent.designDiagram.bind(this.agent) } : { designDiagram: async () => null };
-      this.brain = { id: b.id, itemId: b.itemId, map: new DiagramKeeper(model, b.prompt, since, b.diagram, sessionBackground(b)) };
+      this.brain = { id: b.id, map: new DiagramKeeper(model, b.prompt, since, b.diagram, sessionBackground(b), inScope) };
       return;
     }
     const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };
-    this.brain = { id: b.id, itemId: b.itemId, map: new MapKeeper(model, b.prompt, since, b.nodes) };
+    this.brain = { id: b.id, map: new MapKeeper(model, b.prompt, since, b.nodes, inScope) };
   }
 
   /** A brainstorm was started (or replaced) from outside the call's own messages. */
@@ -339,8 +345,8 @@ export class RoomSession implements SpeechSink {
     return this.hostId === userId;
   }
 
-  /** Someone in the call started a review, a brainstorm or a design session: they steer the board
-   *  while it runs, so the host seat is theirs until it is finished, and then goes back. */
+  /** Someone in the call started a review: they steer the board while it runs, so the host seat is
+   *  theirs until it is finished, and then goes back. */
   startedBy(userId: string) {
     if (this.ended || !this.participants.has(userId) || userId === this.hostId) return;
     // Lent once: a second experience started by someone else still gives the seat back to the first host.
@@ -350,7 +356,7 @@ export class RoomSession implements SpeechSink {
     this.broadcastState();
   }
 
-  /** The experience is over: the seat goes back to whoever lent it, when they are still here and
+  /** The review is over: the seat goes back to whoever lent it, when they are still here and
    *  nobody moved it on by hand in the meantime. */
   private returnSeat() {
     const to = this.lentFrom;
@@ -361,41 +367,46 @@ export class RoomSession implements SpeechSink {
     this.broadcastState();
   }
 
-  /** "Finish this": the review, brainstorm or design session running in this call is over, and the
-   *  call goes on as plain talk. Each keeps what it would have kept at the end of the call; what the
-   *  meeting files afterwards (reviews.ts refileReview, designReviews.ts writeBackReview) still runs then. */
-  async finishExperience(): Promise<Array<"review" | "design-review" | "brainstorm" | "design-session">> {
+  /** "Finish this": the review running in this call is over, and the call goes on as plain talk.
+   *  Each keeps what it would have kept at the end of the call; what the meeting files afterwards
+   *  (reviews.ts refileReview, designReviews.ts writeBackReview) still runs then. */
+  async finishExperience(): Promise<Array<"review" | "design-review">> {
     if (this.ended) return [];
-    const done: Array<"review" | "design-review" | "brainstorm" | "design-session"> = [];
+    const done: Array<"review" | "design-review"> = [];
     if (finishReview(this.db, this.roomId, this.meetingId)) done.push("review");
     if (finishIdeaReview(this.db, this.roomId, this.meetingId)) done.push("review");
     if (finishDesignReview(this.db, this.roomId, this.meetingId)) done.push("design-review");
-    if (this.brain) {
-      // One last look at the talk no pass has read, then its map is the record.
-      await this.mapPasses.idle();
-      let wait: NodeJS.Timeout | undefined;
-      await Promise.race([this.mapPasses.run(), new Promise((r) => (wait = setTimeout(r, 15_000)))]);
-      clearTimeout(wait);
-      if (this.ended) return done;
-      const row = finishBrainstorm(this.db, this.roomId, this.meetingId);
-      if (row?.kind === "design") {
-        try {
-          saveDraftSpec(this.db, row, this.brainCaught());
-        } catch (e) {
-          console.error(`[design session] ${this.meetingId}: ${(e as Error).message}`);
-        }
-      }
-      if (row) done.push(row.kind === "design" ? "design-session" : "brainstorm");
-      this.brain = null;
-      this.broadcastBrainstorm();
-    }
     if (done.length) {
-      // Its slides or its sentence left the agenda: the call is back on General.
+      // Its slides left the agenda: the call is back on General.
       this.itemsChanged();
       this.followUpsChanged();
       this.returnSeat();
+      this.scheduleMap();
     }
     return done;
+  }
+
+  /** "Stop drawing": the map or diagram running in this call stops, and is kept as it is. The call
+   *  goes on as it was. True when one was stopped. */
+  async stopView(): Promise<boolean> {
+    if (this.ended || !this.brain) return false;
+    // One last look at the talk no pass has read, then its map is the record.
+    await this.mapPasses.idle();
+    let wait: NodeJS.Timeout | undefined;
+    await Promise.race([this.mapPasses.run(), new Promise((r) => (wait = setTimeout(r, 15_000)))]);
+    clearTimeout(wait);
+    if (this.ended || !this.brain) return false;
+    const row = finishBrainstorm(this.db, this.roomId, this.meetingId);
+    if (row?.kind === "design") {
+      try {
+        saveDraftSpec(this.db, row, this.brainCaught());
+      } catch (e) {
+        console.error(`[design session] ${this.meetingId}: ${(e as Error).message}`);
+      }
+    }
+    this.brain = null;
+    this.broadcastBrainstorm();
+    return !!row;
   }
 
   brainstormChanged() {
@@ -440,7 +451,7 @@ export class RoomSession implements SpeechSink {
    *  the oldest line no pass has read. */
   private scheduleMap() {
     const brain = this.brain;
-    if (this.ended || !brain) return;
+    if (this.ended || !brain || this.inReview()) return;
     const since = brain.map.unreadSince(this.db.meetingSegments(this.meetingId));
     if (since !== null) this.mapPasses.schedule(Math.min(MAP_DEBOUNCE_MS, since + MAP_MAX_WAIT_MS - Date.now()));
   }
@@ -1145,6 +1156,10 @@ export class RoomSession implements SpeechSink {
         if (this.brain?.map instanceof MapKeeper && this.brain.map.remove(msg.id)) this.saveBrainstorm();
         break;
       }
+      // Anyone in the call can stop the map or the diagram; it is kept.
+      case "view.stop":
+        if (!this.ended) void this.stopView();
+        break;
       case "note.remove": {
         if (this.list?.has(msg.noteId)) {
           if (!isHost) return this.refuse(ws, "take that line off", undefined);
@@ -1690,11 +1705,6 @@ export class RoomSession implements SpeechSink {
     return isReviewDeck(this.focusItemId ? this.db.getItem(this.focusItemId) : null);
   }
 
-  /** The brainstorm's sentence is in focus: its map has the middle screen, so the topic card sits out. */
-  private inBrainstorm() {
-    return !!this.brain?.itemId && this.focusItemId === this.brain.itemId;
-  }
-
   /** The next list pass: LIST_DEBOUNCE_MS after the latest talk, never more than LIST_MAX_WAIT_MS after
    *  the oldest line no pass has read. Talk during a pass gets the next one. */
   private scheduleList() {
@@ -1920,7 +1930,7 @@ export class RoomSession implements SpeechSink {
 
   /** The next board pass: BOARD_EVERY_MS after the last one, or soon after an agenda move. */
   private scheduleBoard(agendaMoved = false) {
-    if (this.ended || !this.board || this.inReview() || this.inBrainstorm()) return;
+    if (this.ended || !this.board || this.inReview()) return;
     this.boardPasses.schedule(agendaMoved ? BOARD_AFTER_FOCUS_MS : Math.max(BOARD_FIRST_MS, this.boardRanAt + BOARD_EVERY_MS - Date.now()));
   }
 

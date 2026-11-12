@@ -85,7 +85,7 @@ export interface AgentDeps {
   /** A plan changed (a comment, a new version): a design review running on it lays its slides out again. */
   specTouched?: (note: Note & { roomId: string }) => void;
   /** A brainstorm or design session was started or changed from outside a call: a call running in that space picks it up. */
-  brainstormTouched?: (roomId: string, focusItemId: string | null, by: string) => void;
+  brainstormTouched?: (roomId: string) => void;
 }
 
 type Work = Pick<ActionWork, "working" | "ready">;
@@ -1594,7 +1594,7 @@ export function agentApi(deps: AgentDeps) {
     },
 
     /** A brainstorm's map as an outline: the sentence, its directions, the ideas under each and what was caught on them. */
-    /** Sets up a design session with its background, so it's on the board when the team starts talking.
+    /** Sets up a design session with its background, so it's in the call when the team starts talking.
      *  Called again with the same topic while it waits or runs, it adds to that session's context. */
     startDesignSession(
       caller: Caller,
@@ -1611,7 +1611,7 @@ export function agentApi(deps: AgentDeps) {
       const topic = args.topic.replace(/\s+/g, " ").trim();
       const running = db.brainstormLive(room.id);
       const same = running?.kind === "design" && running.prompt.toLowerCase() === topic.toLowerCase() ? running : null;
-      // Starting a new one ends whatever is running, which would pull the board from under a call.
+      // Starting a new one ends whatever is running, which would pull it from under a call.
       if (running && !same && deps.liveMeeting?.(room.id)) throw new AgentError(`A ${running.kind === "design" ? "design session" : "brainstorm"} is running in a call in ${room.name} right now ("${running.prompt}"). Wait for the call to end, or use the same topic to add context to it.`);
       try {
         const now = Date.now();
@@ -1630,7 +1630,7 @@ export function agentApi(deps: AgentDeps) {
         }
         if (context.length > CONTEXT_MAX) throw new AgentError(`A design session holds up to ${CONTEXT_MAX} pieces of context. Put related notes in one piece.`);
         if (given.length) db.saveBrainstormContext(b.id, context);
-        deps.brainstormTouched?.(room.id, same ? null : b.itemId, caller.user.name);
+        deps.brainstormTouched?.(room.id);
         const live = deps.liveMeeting?.(room.id);
         const d = shownDiagram(db.getBrainstorm(b.id)?.diagram ?? diagram);
         return {
@@ -1645,8 +1645,8 @@ export function agentApi(deps: AgentDeps) {
           },
           space: room.name,
           shows_on: live
-            ? "It's on the board of the call running now. People open the context from the Context button on the board."
-            : `It waits for the team: when someone starts talking in ${room.name}, it's on the board, with the context behind a Context button. The link shows it before then.`,
+            ? "It's in the Diagram tab of the call running now. People open the context from the Context button on the diagram."
+            : `It waits for the team: when someone starts talking in ${room.name}, it's in the Diagram tab, with the context behind a Context button. The link shows it before then.`,
           how: "Call again with the same topic to add or replace context. When the call ends the diagram is saved as a draft spec on a to-do; get_brainstorm reads it.",
         };
       } catch (err) {
