@@ -2867,6 +2867,13 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .seg.tl-focus { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 6px; }
 .seg.tl-focus:first-child { margin-top: 0; border-top: 0; padding-top: 3px; }
 .tl-show { display: block; margin-top: 6px; }
+/* Who did it: the person's name in their color, their agent beside it, or Stand. */
+.tl-actor { white-space: nowrap; }
+.tl-actor .agent-mark { color: var(--accent); }
+.tl-actor-person { font-weight: 600; }
+.tl-actor-via { font-weight: 400; color: var(--muted); }
+.board-move-text .tl-actor-person { font-weight: 500; }
+.tl-answer > .capture-owner { margin-top: 0; }
 /* What was on screen when it was said: a quiet line under the row, a link to the slide or the still. */
 .tl-shown { display: block; width: fit-content; max-width: 100%; margin-top: 6px; font-size: 11px; color: var(--muted); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 a.tl-shown:hover { color: var(--text); text-decoration: underline; }

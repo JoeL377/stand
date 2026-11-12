@@ -253,6 +253,8 @@ const reviewNotes: Array<[Note, number]> = [
   [db.addNote(reviewCall.id, slideItems[2].id, { kind: "action", text: "Test the email in Outlook", owner: leo.name }, null), 14],
   [db.addNote(reviewCall.id, null, { kind: "decision", text: "Reviews run every other Thursday", owner: null }, null), 16],
   [db.addNote(reviewCall.id, null, { kind: "action", text: "Invite support to the next review", owner: sam.name }, null), 17],
+  // One a person typed in by hand during the call, so the record shows who made it.
+  [db.addNote(reviewCall.id, slideItems[1].id, { kind: "action", text: "Check saved cards against the Apple Pay flow", owner: leo.name }, maya.name), 11],
 ];
 // A line whose words point at the screen, said while Priya was sharing hers.
 db.addSegment({ meetingId: reviewCall.id, itemId: slideItems[0].id, speakerId: priya.id, speakerName: priya.name, kind: "speech", text: "As you can see here, the order summary scrolls off the top on a long cart.", ts: reviewStarted + 4 * MIN + 55_000 });
