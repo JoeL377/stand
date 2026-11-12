@@ -19,6 +19,7 @@ import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { MOD, meetingShortcuts } from "../shortcuts.ts";
 import { ExperienceControl, runningExperience } from "./Experiences.tsx";
+import { nextAsk } from "./NextCard.tsx";
 import { PilotRequest, type PilotActs, seatOf, usePilotNotices } from "./Pilot.tsx";
 
 export function Meeting(props: {
@@ -483,6 +484,25 @@ export function Meeting(props: {
               {v === "agenda" ? "Agenda" : v === "board" ? "Board" : "Chat"}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Stand's card lives on the board. On a phone's other tabs one line says it is up, so nobody misses
+          what the rest of the call is deciding on. */}
+      {phone && phoneView !== "board" && state.next && !state.ending && (
+        <div className="phone-next" role="status">
+          <span className="agent-mark" aria-hidden>
+            ✦
+          </span>
+          <button type="button" className="phone-next-what" onClick={() => setPhoneView("board")}>
+            {nextAsk(state.next)}
+          </button>
+          <button type="button" className="link" onClick={() => setPhoneView("board")}>
+            Show
+          </button>
+          <button type="button" className="link muted" onClick={() => send({ type: "next.wave", id: state.next!.id })} aria-label="No thanks">
+            ✕
+          </button>
         </div>
       )}
 

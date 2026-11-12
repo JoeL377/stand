@@ -230,7 +230,7 @@ export class RoomSession implements SpeechSink {
   private pilot = new PilotSeat();
   private pilotTimer: ReturnType<typeof setTimeout> | null = null;
   /** The brainstorm running in this space, if one is (brainstorm.ts): its map, one pass at a time. */
-  private brain: { id: string; threadId: string | null; map: MapKeeper | DiagramKeeper } | null = null;
+  private brain: { id: string; threadId: string | null; map: MapKeeper | DiagramKeeper; reviewToo?: boolean } | null = null;
   /** The next steps people asked for out loud in this call (nextSteps.ts); the one offered is on a card. */
   private nextSteps: NextStep[] = [];
   private nextTimer: NodeJS.Timeout | null = null;
@@ -338,8 +338,11 @@ export class RoomSession implements SpeechSink {
     // Only talk from this call, after the brainstorm began, belongs on its map; never what was said on a review slide.
     const since = Math.max(b.startedAt, this.meetingStartedAt) - 1;
     const review = new Map<string, boolean>();
+    // The exception: one somebody asked for while a review slide was up is of that talk, so it reads it
+    // and keeps drawing while the review runs.
+    const reviewToo = b.startedAt >= this.meetingStartedAt && isReviewDeck(this.db.getItem(this.focusAt(b.startedAt) ?? ""));
     const inScope = (s: Segment) => {
-      if (!s.itemId) return true;
+      if (!s.itemId || reviewToo) return true;
       if (!review.has(s.itemId)) review.set(s.itemId, isReviewDeck(this.db.getItem(s.itemId)));
       return !review.get(s.itemId);
     };
@@ -348,12 +351,12 @@ export class RoomSession implements SpeechSink {
       // One opened in this call also reads what was said just before, which is often why it was opened.
       const model = this.agent.designDiagram ? { designDiagram: this.agent.designDiagram.bind(this.agent) } : { designDiagram: async () => null };
       const from = b.startedAt >= this.meetingStartedAt ? Math.max(this.meetingStartedAt, b.startedAt - DIAGRAM_LOOK_BACK_MS) - 1 : since;
-      this.brain = { id: b.id, threadId: null, map: new DiagramKeeper(model, b.prompt, from, b.diagram, sessionBackground(b), inScope) };
+      this.brain = { id: b.id, threadId: null, map: new DiagramKeeper(model, b.prompt, from, b.diagram, sessionBackground(b), inScope), reviewToo };
       return;
     }
     const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };
     const thread = b.threadId;
-    if (!thread) return void (this.brain = { id: b.id, threadId: null, map: new MapKeeper(model, b.prompt, since, b.nodes, inScope) });
+    if (!thread) return void (this.brain = { id: b.id, threadId: null, map: new MapKeeper(model, b.prompt, since, b.nodes, inScope), reviewToo });
     // A topic's map reads every line of its thread in this call, those said before it was opened too,
     // and from then on the whole call: when the board moves to another topic, that topic becomes a
     // direction of the same map instead of a map of its own.
@@ -407,14 +410,16 @@ export class RoomSession implements SpeechSink {
   /** Someone said they want a map, a diagram or a review: offer it to everyone, once. Said or typed,
    *  both are the call's talk. Nothing starts until a person takes the card. */
   private checkNext(seg: Segment, added = seg.text) {
-    if (this.ended || this.demoRunning || this.inReview()) return;
-    this.nextRecent = [...this.nextRecent.filter((l) => seg.ts - l.ts <= SOUNDS_WINDOW_MS), { speaker: seg.speakerName, text: added, ts: seg.ts }];
+    if (this.ended || this.demoRunning) return;
+    // During a review Stand only answers an ask: it never guesses there, so nothing interrupts a slide unasked.
+    const reviewing = this.inReview();
+    if (!reviewing) this.nextRecent = [...this.nextRecent.filter((l) => seg.ts - l.ts <= SOUNDS_WINDOW_MS), { speaker: seg.speakerName, text: added, ts: seg.ts }];
     // One thought arrives in fragments joined into one line: read its tail, past what was already heard in it.
     const from = Math.max(this.nextHeard?.segmentId === seg.id ? this.nextHeard.upTo : 0, seg.text.length - 320);
     const asked = heardIntent(seg.text.slice(from));
     if (asked) this.nextHeard = { segmentId: seg.id, upTo: seg.text.length };
     // Nobody asked: what the last few minutes sound like, said at most once in a while for each kind.
-    const sounds = asked || this.offered() ? null : soundsLike(this.nextRecent, seg.ts);
+    const sounds = asked || reviewing || this.offered() ? null : soundsLike(this.nextRecent, seg.ts);
     const guessed = !!sounds && seg.ts - (this.nextGuessed.get(sounds) ?? 0) >= SOUNDS_QUIET_MS;
     const heard = asked ?? (guessed ? { kind: sounds!, topic: null } : null);
     if (!heard) return;
@@ -429,8 +434,11 @@ export class RoomSession implements SpeechSink {
       if (before.kind === heard.kind && !(before.guessed && asked)) return;
       before.state = "missed";
     }
-    const ready = heard.kind === "product-review" ? (reviewView(this.db, this.roomId)?.slides.length ?? 0) : heard.kind === "design-review" ? (designReviewSummary(this.db, this.roomId)?.specs ?? 0) : 0;
-    const step: NextStep = { id: newId(8), kind: heard.kind, topic: heard.topic ?? "", by: seg.speakerName, ts: seg.ts, segmentId: seg.id, state: "offered", ...(isReviewKind(heard.kind) ? { ready } : {}), ...(asked ? {} : { guessed: true }) };
+    // Asked for on a review slide with nothing named: it is of what the slide is about. Another review
+    // can't start while this one runs, so that one is only kept for the recap.
+    const slide = reviewing && !isReviewKind(heard.kind) && !heard.topic ? (this.db.getItem(this.focusItemId ?? "")?.title ?? null) : null;
+    const ready = reviewing ? 0 : heard.kind === "product-review" ? (reviewView(this.db, this.roomId)?.slides.length ?? 0) : heard.kind === "design-review" ? (designReviewSummary(this.db, this.roomId)?.specs ?? 0) : 0;
+    const step: NextStep = { id: newId(8), kind: heard.kind, topic: heard.topic ?? slide ?? "", by: seg.speakerName, ts: seg.ts, segmentId: seg.id, state: "offered", ...(isReviewKind(heard.kind) ? { ready } : {}), ...(asked ? {} : { guessed: true }) };
     if (!asked) this.nextGuessed.set(heard.kind, seg.ts);
     this.nextSteps.push(step);
     if (this.nextTimer) clearTimeout(this.nextTimer);
@@ -582,7 +590,7 @@ export class RoomSession implements SpeechSink {
    *  the oldest line no pass has read. */
   private scheduleMap() {
     const brain = this.brain;
-    if (this.ended || !brain || this.inReview()) return;
+    if (this.ended || !brain || (this.inReview() && !brain.reviewToo)) return;
     const since = brain.map.unreadSince(this.db.meetingSegments(this.meetingId));
     if (since !== null) this.mapPasses.schedule(Math.min(MAP_DEBOUNCE_MS, since + MAP_MAX_WAIT_MS - Date.now()));
   }
