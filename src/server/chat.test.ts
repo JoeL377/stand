@@ -106,7 +106,7 @@ test("an hour of quiet closes a session, and the next message starts another", (
   assert.equal(db.chatSession(first.sessionId)!.endedAt, second.ts);
 
   assert.deepEqual(
-    events.map((e) => (e.type === "session" ? `${e.open ? "open" : "close"} ${e.sessionId}` : `message ${e.message.id}`)),
+    events.map((e) => (e.type === "session" ? `${e.open ? "open" : "close"} ${e.sessionId}` : e.type === "message" ? `message ${e.message.id}` : e.type)),
     [
       `open ${first.sessionId}`, `message ${first.id}`, `message ${second.id}`, `close ${first.sessionId}`,
       `open ${third.sessionId}`, `message ${third.id}`,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
 import express from "express";
-import type { ChatEvent, ChatMessage, ChatThread } from "../shared/chat.ts";
+import type { ChatCaught, ChatEvent, ChatMessage, ChatThread } from "../shared/chat.ts";
 import { requireUser } from "./auth.ts";
 import { Chat } from "./chat.ts";
 import { openDb } from "./db.ts";
@@ -135,6 +135,57 @@ test("a page with the space's stream open hears each message, edit and delete as
     s.close();
     for (let i = 0; i < 50 && spaceEvents.watching(room.id); i++) await new Promise((r) => setTimeout(r, 10));
     assert.equal(spaceEvents.watching(room.id), 0);
+  } finally {
+    s.close();
+    await close();
+  }
+});
+
+test("what Stand caught from chat comes with the thread; anyone in the space removes a line that isn't one, and it doesn't come back", async () => {
+  const { db, joe, huy, eve, room, as, stream, close } = await setup();
+  const [j, h, e] = [as(joe), as(huy), as(eve)];
+  const s = await stream(huy);
+  try {
+    const sent = (await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "I will send the invoice. We ship on Friday." })).body;
+    await s.next();
+    await s.next();
+    // Nothing caught yet: the thread says so by leaving the session out.
+    assert.deepEqual((await h<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.caught, []);
+    assert.deepEqual((await h<ChatCaught>("GET", `/api/chat/sessions/${sent.sessionId}/caught`)).body, { sessionId: sent.sessionId, summary: null, topics: [], lines: [] });
+
+    // As a capture run leaves it.
+    const [todo, started, decision] = db.syncNotes(sent.sessionId, null, [
+      { kind: "action", text: "Send the invoice", owner: "Joe Liang" },
+      { kind: "action", text: "Book the venue", owner: "Huy Ngo" },
+      { kind: "decision", text: "Ship on Friday", owner: null },
+    ]);
+    db.setTaskState(room.id, started.id, { state: "doing", by: "Huy Ngo" });
+    const thread = (await h<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body;
+    assert.deepEqual(thread.caught.map((c) => [c.sessionId, c.lines.map((l) => `${l.kind}: ${l.text}`)]), [[sent.sessionId, ["action: Send the invoice", "action: Book the venue", "decision: Ship on Friday"]]]);
+    assert.deepEqual((await h<{ caught: ChatCaught[] }>("GET", `/api/channels/${sent.channelId}/messages`)).body.caught, thread.caught);
+
+    // Only people in the space read or remove what was caught, and only what came from chat.
+    assert.equal((await e("GET", `/api/chat/sessions/${sent.sessionId}/caught`)).status, 404);
+    assert.equal((await e("DELETE", `/api/chat/caught/${decision.id}`)).status, 404);
+    const meeting = db.startMeeting(room.id);
+    const [spoken] = db.syncNotes(meeting.id, null, [{ kind: "decision", text: "Use Stripe", owner: null }]);
+    db.endMeeting(meeting.id, null);
+    assert.equal((await h("DELETE", `/api/chat/caught/${spoken.id}`)).status, 404);
+    assert.equal((await h("GET", `/api/chat/sessions/${meeting.id}/caught`)).status, 404);
+
+    // Huy removes Joe's decision: gone for everyone, the open page is told, and a later run can't write it again.
+    assert.deepEqual((await h("DELETE", `/api/chat/caught/${decision.id}`)).body, { removed: decision.id });
+    assert.deepEqual(await s.next(), { type: "notes", channelId: sent.channelId, sessionId: sent.sessionId });
+    assert.deepEqual(db.spaceNotes(room.id, "decision").map((n) => n.text), ["Use Stripe"]);
+    assert.deepEqual(db.dismissedNotes(sent.sessionId, null), [{ kind: "decision", text: "Ship on Friday" }]);
+    assert.equal((await h("DELETE", `/api/chat/caught/${decision.id}`)).status, 404);
+
+    // A to-do someone took up is closed on the Tasks tab, not deleted from under them.
+    const refused = await j<{ error: string }>("DELETE", `/api/chat/caught/${started.id}`);
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /Tasks tab/);
+    assert.equal((await j("DELETE", `/api/chat/caught/${todo.id}`)).status, 200);
+    assert.deepEqual(db.meetingNotes(sent.sessionId).map((n) => n.text), ["Book the venue"]);
   } finally {
     s.close();
     await close();

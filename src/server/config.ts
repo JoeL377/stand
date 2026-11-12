@@ -41,6 +41,14 @@ export const config = {
    *  Claude pass (upNextPolish.ts). */
   doneSince: env("DONE_SINCE") === "on",
   suggestedAgenda: env("SUGGESTED_AGENDA") === "on",
+  /** CHAT_QUIET_MS: the quiet that closes a session of chat (an hour), for a run that proves the close. */
+  chatQuietMs: Number(env("CHAT_QUIET_MS") ?? 0) || null,
+  /** Chat capture (chatCapture.ts): to-dos, open questions, decisions and topics from a space's
+   *  chat, as from a meeting. CHAT_CAPTURE=off stops it. The waits are for tests and replays:
+   *  CHAT_CAPTURE_QUIET_MS (how long a channel is quiet before a run) and CHAT_CAPTURE_MAX_WAIT_MS. */
+  chatCapture: env("CHAT_CAPTURE") !== "off",
+  chatCaptureQuietMs: Number(env("CHAT_CAPTURE_QUIET_MS") ?? 0) || null,
+  chatCaptureMaxWaitMs: Number(env("CHAT_CAPTURE_MAX_WAIT_MS") ?? 0) || null,
   /** Small, frequent calls: captions for snaps and Mac bar captures, filing a bar note under an
    *  item, and matching a shared screen to the agenda. Haiku is about 40x cheaper than Opus. */
   quickModel: env("QUICK_MODEL") ?? "claude-haiku-5-5",
