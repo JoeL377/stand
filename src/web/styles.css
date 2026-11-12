@@ -2849,7 +2849,7 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 @media (max-width: 600px) { .topic-pop { position: fixed; left: 50%; right: auto; top: 30%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); } }
 
 /* Captured meeting items, inline with the spoken transcript. */
-.seg.capture-event { margin: 8px 0; padding: 10px 12px; border-left: 3px solid var(--ok); border-radius: 6px; background: color-mix(in srgb, var(--ok) 9%, var(--panel)); }
+.seg.capture-event { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--ok) 9%, var(--panel)); }
 .capture-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--ok-text); }
 .capture-head strong { flex: 1; }
 .capture-head .seg-time { flex: none; }
@@ -2960,8 +2960,7 @@ a.review-card-pic { color: var(--muted); }
 .dr-edit textarea { width: 100%; font: inherit; font-size: 14px; line-height: 1.45; resize: vertical; }
 .dr-row { display: flex; align-items: center; gap: 8px; }
 .dr-points { display: flex; flex-direction: column; gap: 6px; }
-.dr-point { border-left: 3px solid var(--accent); padding: 6px 10px; border-radius: 0 8px 8px 0; background: var(--panel-2); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 13.5px; }
-.dr-point.off { border-left-color: var(--line); }
+.dr-point { padding: 8px 12px; border-radius: 8px; background: var(--panel-2); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 13.5px; }
 .dr-point.off > p, .dr-point.off > blockquote { opacity: 0.6; }
 .dr-point blockquote { margin: 0; color: var(--muted); font-size: 12.5px; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .dr-point p { margin: 0; }
@@ -2985,7 +2984,7 @@ a.review-card-pic { color: var(--muted); }
 .ds-summary { font-size: clamp(15px, 1.5vw, 19px); line-height: 1.45; margin: 0; }
 .ds-sections { margin: 0; padding-left: 22px; font-size: 15px; line-height: 1.6; columns: 2; column-gap: 32px; }
 .ds-lines { margin: 0; padding-left: 22px; font-size: clamp(16px, 1.7vw, 22px); line-height: 1.45; display: flex; flex-direction: column; gap: 8px; }
-.ds-passage { margin: 0; padding: 10px 14px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--panel-2); font-size: 14px; max-height: 45%; overflow-y: auto; }
+.ds-passage { margin: 0; padding: 10px 14px; border-radius: 8px; background: var(--panel-2); font-size: 14px; max-height: 45%; overflow-y: auto; }
 .ds-passage > div > :first-child { margin-top: 0; }
 .ds-passage > div > :last-child { margin-bottom: 0; }
 .ds-thread { display: flex; flex-direction: column; gap: 6px; }
