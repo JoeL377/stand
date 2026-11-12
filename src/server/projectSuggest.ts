@@ -13,6 +13,7 @@ import { isClosed, stateOf } from "../shared/tasks.ts";
 import { config } from "./config.ts";
 import { type DB, ProjectError } from "./db.ts";
 import type { Agent, ProjectSuggestInput } from "./llm.ts";
+import { forSpace } from "./usage.ts";
 
 /** A to-do added or changed between meetings: wait for the rest of the batch. */
 export const SUGGEST_AFTER_CHANGE_MS = 10 * 60_000;
@@ -66,7 +67,7 @@ export async function suggestProjects(db: DB, agent: Agent, roomId: string): Pro
   const read = projectSuggestInput(db, roomId);
   if (!read) return { asked: 0, suggested: 0 };
   const started = Date.now();
-  const answers = await agent.suggestProjects(read.input);
+  const answers = await forSpace(agent, roomId).suggestProjects(read.input);
   if (!answers) return { asked: read.noteOf.size, suggested: 0 };
   const judged: string[] = [];
   let suggested = 0;

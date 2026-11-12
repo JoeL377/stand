@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { HeuristicAgent, type SweepInput, type SweepRow } from "./llm.ts";
 import { sweepQuestions } from "./questionSweep.ts";
+import { recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
 const tick = () => new Promise((r) => setTimeout(r, 3));
 
@@ -78,4 +79,17 @@ test("a sweep without a model, or one that fails, says so", async () => {
   assert.equal(await sweepQuestions(db, new HeuristicAgent(), room.id), null);
   const failing = Object.assign(new HeuristicAgent(), { sweepQuestions: async () => null });
   assert.equal(await sweepQuestions(db, failing, room.id), null);
+});
+
+test("a sweep's Claude call is kept with its space and no meeting", async () => {
+  const { db, room } = await space();
+  const rows: UsageRow[] = [];
+  setUsageSink((r) => rows.push(r));
+  try {
+    const agent = Object.assign(new HeuristicAgent(), { sweepQuestions: async (): Promise<SweepRow[]> => (recordUsage("claude-sonnet-5-5", { input_tokens: 1, output_tokens: 1 }), []) });
+    await sweepQuestions(db, agent, room.id);
+  } finally {
+    setUsageSink(null);
+  }
+  assert.deepEqual(rows.map((r) => [r.meetingId, r.roomId, r.task]), [[null, room.id, "sweepQuestions"]]);
 });

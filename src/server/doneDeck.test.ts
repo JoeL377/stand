@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { openDb } from "./db.ts";
 import { DoneDecks, doneBasis, doneInput, donePrompt, plainSlides, slidesFrom } from "./doneDeck.ts";
 import { HeuristicAgent, type DoneDeckDraft } from "./llm.ts";
+import { recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
 const tick = () => new Promise((r) => setTimeout(r, 3));
 
@@ -165,4 +166,24 @@ test("without a model the pages are the closed tasks as they are, and a new meet
   await decks.run(room.id);
   assert.deepEqual(db.getDoneDeck(room.id)!.slides, []);
   decks.stop();
+});
+
+test("the pages' Claude call is kept with its space, between meetings", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Stand", null, "");
+  const { notes } = await meeting(db, room.id, ["Joe", "Andy"], [["Fix the black board", "Joe"]]);
+  db.setActionDone(room.id, notes[0].id, "Joe");
+  const rows: UsageRow[] = [];
+  setUsageSink((r) => rows.push(r));
+  try {
+    const agent = Object.assign(new HeuristicAgent(), {
+      doneDeck: async (): Promise<DoneDeckDraft | null> => (recordUsage("claude-sonnet-5-5", { input_tokens: 1, output_tokens: 1 }), null),
+    });
+    const decks = new DoneDecks(db, agent, () => false, () => {});
+    await decks.run(room.id);
+    decks.stop();
+  } finally {
+    setUsageSink(null);
+  }
+  assert.deepEqual(rows.map((r) => [r.meetingId, r.roomId, r.task]), [[null, room.id, "doneDeck"]]);
 });

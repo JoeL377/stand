@@ -3,6 +3,7 @@ import type { Express } from "express";
 import { BrainstormError, brainstormPage, brainstormsOf, promptOf, starIdea, startBrainstorm, toBrainstormView } from "../brainstorm.ts";
 import { isDiagramText, mermaidIn, parseSeed, SEED_MAX, seedFromAnswer } from "../designSession.ts";
 import type { Services } from "../services.ts";
+import { forSpace } from "../usage.ts";
 import { memberRoom, notFound, route } from "./http.ts";
 
 export function brainstormRoutes(app: Express, ctx: Services) {
@@ -30,7 +31,7 @@ export function brainstormRoutes(app: Express, ctx: Services) {
           prompt = String(req.body?.prompt ?? "").trim() || task?.text || /^\s*#{1,3}\s+(.+)$/m.exec(pasted)?.[1]?.trim() || "";
           let diagram = parseSeed(pasted ? (isDiagramText(pasted) ? pasted : "") : mermaidIn(plan));
           // Prose, or a plan with no diagram in it: the model finds the design. Without it the session starts blank.
-          if (seed && !diagram.boxes.length && agent.designSeed) diagram = seedFromAnswer(await agent.designSeed(prompt || "not named yet", seed).catch(() => null));
+          if (seed && !diagram.boxes.length && agent.designSeed) diagram = seedFromAnswer(await forSpace(agent, room.id).designSeed!(prompt || "not named yet", seed).catch(() => null));
           if (pasted && !diagram.boxes.length) diagram = parseSeed(pasted);
           design = { diagram, seed: seed || null, taskId: task?.id ?? null };
         }

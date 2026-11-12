@@ -11,6 +11,7 @@ import type { Agent, AgendaDraftRow } from "./llm.ts";
 import { settleSpace } from "./spaceSettle.ts";
 import { applyPolish, computeUpNext, polishBasis } from "./upNext.ts";
 import { refreshRoomOpenItems, roomOpenItems } from "./conxtOpenItems.ts";
+import { forSpace } from "./usage.ts";
 
 // Off unless SUGGESTED_AGENDA=on (config.ts): no suggestions in calls, on the space page, the recap or
 // the MCP, and no Claude pass to tidy them. The decision check that runs alongside it (settleSpace)
@@ -96,7 +97,7 @@ export class UpNextPolisher {
     this.changed(roomId);
     try {
       const started = Date.now();
-      const out = await this.agent.polishAgenda(room, rows);
+      const out = await forSpace(this.agent, roomId).polishAgenda(room, rows);
       if (!out) return;
       const basis = new Map(suggestions.map((s) => [s.key, polishBasis(s)]));
       this.db.savePolish(roomId, { at: Date.now(), rows: out.map((r) => ({ ...r, basis: basis.get(r.key)! })) });

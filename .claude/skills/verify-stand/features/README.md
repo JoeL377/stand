@@ -13,4 +13,5 @@ One file per user-facing feature: how a person reaches it, how `drive.cjs` drive
 | Projects | [projects.md](projects.md) | `projects.cjs` (its own script) | yes, with the scripted demo |
 | Task owners | [task-owners.md](task-owners.md) | `task-owner.cjs` (its own script) | yes |
 | Open questions: answer, drop, sweep | [questions.md](questions.md) | `questions.cjs` (its own script, on the preview's sample data) | yes, without the sweep's model pass (needs a key) |
+| What Stand spent | [cost.md](cost.md) | `cost.cjs` (its own script) | yes, with usage rows the script writes (no model calls here) |
 | Bar notes and snaps | [bar-notes-and-snaps.md](bar-notes-and-snaps.md) | none | no, needs the Mac app |

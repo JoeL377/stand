@@ -25,6 +25,7 @@ import type {
   QuestionClosed,
   SourcesStatus,
   Snap,
+  SpaceCost,
   SpaceFeed,
   SpaceMembers,
   SpaceSummary,
@@ -137,6 +138,8 @@ export const api = {
     call<{ id: string; name: string; purpose: string; synthesisInstructions: string }>("PATCH", `/api/rooms/${id}`, patch),
   members: (roomId: string) => call<SpaceMembers>("GET", `/api/rooms/${roomId}/members`),
   setAdmin: (roomId: string, userId: string, admin: boolean) => call<SpaceMembers>("PUT", `/api/rooms/${roomId}/members/${userId}`, { admin }),
+  /** What Stand spent for the space over the last `days` days, by day in this browser's time. */
+  spaceCost: (roomId: string, days: number) => call<SpaceCost>("GET", `/api/rooms/${roomId}/cost?days=${days}&tz=${-new Date().getTimezoneOffset()}`),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),

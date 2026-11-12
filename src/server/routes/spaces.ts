@@ -13,6 +13,21 @@ import { upNextView } from "../upNextPolish.ts";
 import type { Services } from "../services.ts";
 import { memberRoom, notFound, route } from "./http.ts";
 
+const DAY_MS = 86_400_000;
+const whole = (v: unknown, min: number, max: number, fallback: number) => {
+  const n = Math.trunc(Number(v));
+  return v === undefined || v === "" || !Number.isFinite(n) ? fallback : Math.min(max, Math.max(min, n));
+};
+
+/** The cost page's range: whole days in the viewer's time (`tz`: minutes east of UTC), the oldest
+ *  `days - 1` days back, up to now. One past now, so a range asked for at midnight still has today. */
+export function costRange(days: unknown, tz: unknown, now: number) {
+  const dayOffsetMin = whole(tz, -840, 840, 0);
+  const offset = dayOffsetMin * 60_000;
+  const today = Math.floor((now + offset) / DAY_MS) * DAY_MS - offset;
+  return { since: today - (whole(days, 1, 90, 30) - 1) * DAY_MS, until: now + 1, dayOffsetMin };
+}
+
 export function spaceRoutes(app: Express, ctx: Services) {
   const { db, sessions, live, polisher, afterItemsChange } = ctx;
   // The spaces you're in. Spaces are invite only: opening one from its link
@@ -104,6 +119,17 @@ export function spaceRoutes(app: Express, ctx: Services) {
       if (req.params.userId === room.createdBy) return void res.status(400).json({ error: "The person who created the space always manages it" });
       if (!db.setAdmin(room.id, req.params.userId, req.body.admin)) return notFound(res, "That person isn't in this space");
       res.json(spaceMembers(room, req.user!.id));
+    }),
+  );
+
+  // What Stand's Claude calls for the space cost over the last `days` days (usage.ts). Only its admins see it.
+  app.get(
+    "/api/rooms/:id/cost",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      if (!db.managesSpace(room, req.user!.id)) return void res.status(403).json({ error: "Only an admin of this space can see what it spent" });
+      res.json(db.spaceCost(room.id, costRange(req.query.days, req.query.tz, Date.now())));
     }),
   );
 

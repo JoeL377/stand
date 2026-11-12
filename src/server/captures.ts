@@ -11,6 +11,7 @@ import { ideaReviewsOf } from "./ideaReview.ts";
 import { reviewView, reviewsDone } from "./reviews.ts";
 import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
+import { forSpace } from "./usage.ts";
 import { newId } from "./ids.ts";
 import { archivedRows } from "./archive.ts";
 import { withFrom } from "./noteFrom.ts";
@@ -115,7 +116,7 @@ async function fileJot(db: DB, agent: Agent, id: string): Promise<boolean> {
     const room = jot && db.getRoom(jot.roomId);
     if (!jot || !room) return false;
     const items = db.listItems(room.id).filter((i) => !i.deckId);
-    const itemId = await agent.pickItem(room, items, jot.text);
+    const itemId = await forSpace(agent, room.id).pickItem(room, items, jot.text);
     // Someone may have deleted it, or picked an item, while the agent was reading.
     const now = db.getJot(id);
     if (!itemId || !now || now.itemId) return false;
@@ -137,7 +138,7 @@ async function describe(db: DB, agent: Agent, id: string, buf: Buffer, ext: stri
     const mediaType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
     // Pinned to a note, what the note says is what was written about it.
     const said = snap.line ?? (snap.jotId ? (db.getJot(snap.jotId)?.text ?? null) : null);
-    const out = await agent.describeCapture({ data: buf.toString("base64"), mediaType }, room, items, said);
+    const out = await forSpace(agent, room.id).describeCapture({ data: buf.toString("base64"), mediaType }, room, items, said);
     // Someone may have deleted it, or picked an item, while the agent was looking.
     const now = db.getSnap(id);
     if (!out || !now) return false;

@@ -1804,6 +1804,25 @@ a.sh-pill:hover { text-decoration: none; }
 .members-panel h3 { margin: 0 0 8px; }
 .members-row { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding: 10px 0; }
 .members-row button { margin-left: auto; }
+/* What Stand spent (CostPanel.tsx): the total, a line per pass, a bar per day. Between meetings is the paler part. */
+.cost-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.cost-head { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; }
+.cost-head h3 { margin: 0; }
+.sp-manage-row .cost-range { margin-left: auto; display: flex; }
+.cost-range select { height: 24px; padding: 0 22px 0 10px; border: 1px solid var(--line); border-radius: 999px; background-color: var(--panel); color: var(--muted); font: inherit; font-size: 12px; }
+.cost-total { margin: 12px 0 4px; font-size: 15px; }
+.cost-group { border-top: 1px solid var(--line); padding: 8px 0; }
+.cost-group > p { margin: 0 0 4px; }
+.cost-line { display: grid; grid-template-columns: minmax(0, 1fr) auto 72px; gap: 12px; padding: 3px 0; font-size: 13px; }
+.cost-line > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cost-line > span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.cost-group-head { font-weight: 600; }
+.cost-days { display: flex; align-items: flex-end; gap: 2px; height: 64px; margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+.cost-day { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
+.cost-bar { display: flex; flex-direction: column; width: 100%; border-radius: 2px 2px 0 0; overflow: hidden; background: var(--accent); }
+.cost-bar.none { height: 1px; border-radius: 0; background: var(--line); }
+.cost-bar-between { flex: none; background: color-mix(in srgb, var(--accent) 40%, var(--panel)); }
+.cost-days-ends { display: flex; justify-content: space-between; margin-top: 4px; }
 
 /* ---- Topic board: the middle screen while nobody shares ---- */
 .screen > .topic-board, .board-tab > .topic-board, .view-pane > .topic-board { position: relative; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg); color: var(--text); text-align: left; }
