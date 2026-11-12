@@ -192,3 +192,14 @@ test("a session started without a topic is named by the first pass that hears on
   assert.equal(k.prompt, "Review flow");
   assert.match(contexts[2], /What the team is designing: Review flow/);
 });
+
+test("general kinds: a design that isn't software reads and writes back the same", () => {
+  const d = parseSeed(["Faster onboarding (goal): New customers live in a week", "Slow handoffs (problem): Sales to success takes days", "Kickoff call (step): The first call with the customer", "Welcome pack (document): What we send on day one", "Kickoff call -> Welcome pack: sends", "Welcome pack -> Faster onboarding: serves", "Slow handoffs -> Kickoff call: delays"].join("\n"), T0);
+  // A box named before any group stays loose when an arrow under a group points at it.
+  const loose = parseSeed("Goal: where it ends\n## Flow\nOne: first\nTwo: second\nTwo -> Goal: serves\n## Other\nThree: x\nFour: y");
+  assert.equal(loose.boxes[0].group, undefined);
+  assert.deepEqual(d.boxes.map((b) => [b.label, b.kind]), [["Faster onboarding", "goal"], ["Slow handoffs", "problem"], ["Kickoff call", "step"], ["Welcome pack", "document"]]);
+  const back = parseSeed(diagramMermaid(d), T0);
+  assert.deepEqual(back.boxes.map((b) => [b.label, b.kind]), d.boxes.map((b) => [b.label, b.kind]));
+  assert.deepEqual(back.arrows.map((a) => [a.from, a.to, a.label]), d.arrows.map((a) => [a.from, a.to, a.label]));
+});

@@ -3352,6 +3352,9 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .design-box.kind-store { --kind: #3fb28f; border-bottom-width: 5px; border-radius: 10px 10px 14px 14px; }
 .design-box.kind-service { --kind: #a07ee8; border-radius: 3px; }
 .design-box.kind-step { --kind: #6f9fb8; border-left-width: 5px; }
+.design-box.kind-goal { --kind: #4f9f58; border-style: double; border-width: 4px; border-radius: 12px; }
+.design-box.kind-problem { --kind: #c2599a; border-radius: 3px 16px 3px 16px; }
+.design-box.kind-document { --kind: #8a8f98; border-radius: 2px 14px 2px 2px; }
 .design-box.kind-decision { --kind: #e07a6a; border-radius: 16px 3px 16px 3px; }
 .react-flow__node:hover .design-box { border-color: color-mix(in srgb, var(--kind) 60%, var(--text)); }
 .design-box.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }

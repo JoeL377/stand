@@ -284,7 +284,9 @@ export interface BrainNode {
 export const UNTITLED_DESIGN = "Untitled design";
 
 /** What sort of thing a box is: it decides the box's shape and mark on the board. */
-export const DESIGN_KINDS = ["thing", "person", "screen", "store", "service", "step", "decision"] as const;
+/** The first seven fit a design of anything (a process, a plan, an offer, an event); screen, store and
+ *  service are for when the design is of software. */
+export const DESIGN_KINDS = ["thing", "person", "step", "decision", "goal", "problem", "document", "screen", "store", "service"] as const;
 export type DesignKind = (typeof DESIGN_KINDS)[number];
 
 /** Boxes that belong together on a design session's diagram, drawn inside one frame with a caption. */

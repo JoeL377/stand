@@ -12,7 +12,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import { AppWindow, CircleArrowRight, Database, Server, Split, User } from "lucide-react";
+import { AppWindow, CircleArrowRight, Database, FileText, Server, Split, Target, TriangleAlert, User } from "lucide-react";
 import type { BrainstormView, DesignArrow, DesignBox, DesignGroup, DesignKind } from "../../shared/protocol.ts";
 import { CaughtMarks, Face, KINDS, clock } from "./BrainMap.tsx";
 import { Markdown } from "../Markdown.tsx";
@@ -22,6 +22,9 @@ import { NOTES_SHOWN, fitView, layoutDiagram, type Laid } from "./designLayout.t
 const SORT: Record<DesignKind, { label: string; Icon: typeof User | null }> = {
   thing: { label: "Part", Icon: null },
   person: { label: "Person", Icon: User },
+  goal: { label: "Goal", Icon: Target },
+  problem: { label: "Problem", Icon: TriangleAlert },
+  document: { label: "Document", Icon: FileText },
   screen: { label: "Screen", Icon: AppWindow },
   store: { label: "Data", Icon: Database },
   service: { label: "Service", Icon: Server },

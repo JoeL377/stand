@@ -33,7 +33,9 @@ export const DiagramAnswerSchema = z.object({
         detail: z.string().describe("One sentence saying what it is or what it is for, in the speaker's terms"),
         kind: z
           .enum(DESIGN_KINDS)
-          .describe("What sort of thing it is. person: a role or someone who uses it. screen: something people look at or click. store: where data is kept, a record or a table. service: a system, an agent, an API or a tool that does work. step: a stage in a flow or something that happens. decision: a choice or a branch point. thing: none of these"),
+          .describe(
+            "What sort of thing it is. For a design of anything: person (a person, a role, a team, a customer), step (a stage in a flow or something that happens), decision (a choice or a branch point), goal (an outcome the design is for), problem (a pain, a risk or a constraint it has to deal with), document (something written or made: a doc, a message, a deliverable), thing (none of these). Only when the design is of software: screen (something people look at or click), store (where data is kept, a record or a table), service (a system, an agent, an API or a tool that does work)",
+          ),
         group: z.string().nullable().describe("The group it belongs in, by name: one from Groups so far when it fits, or a new name of at most 3 words. null when it stands alone"),
         by: z.string().nullable().describe("First name of who raised it; null if unclear"),
         line: z.number().int().describe("The NEW line it comes from"),
@@ -74,7 +76,7 @@ export const DiagramAnswerSchema = z.object({
 });
 export type DiagramAnswer = z.infer<typeof DiagramAnswerSchema>;
 
-export const DIAGRAM_SYSTEM = `You keep the diagram on the middle screen of a live design session. The team is designing something by talking it through, and the diagram is their design so far: each box is one thing in the design (an object, a record, a screen, a service, a step), and each arrow says in a few words how one box relates to another. Everyone looks at it while they talk, so it has to be right and it has to stay calm.
+export const DIAGRAM_SYSTEM = `You keep the diagram on the middle screen of a live design session. The team is designing something by talking it through, and the diagram is their design so far. It can be a design of anything: a product or a system, but as often a process, a plan, a pitch, a pricing model, an event, how a team works. Take the subject as it comes and never bend it toward software. Each box is one thing in the design (for a process: a step, a role, a decision, a goal, a document; for software also a screen, a record, a service), and each arrow says in a few words how one box relates to another. Everyone looks at it while they talk, so it has to be right and it has to stay calm.
 
 What you add shows as a suggestion, dashed, until someone in the room keeps it. So suggest only what the team has actually said, and suggest little: an answer with nothing in it is the usual one.
 
@@ -82,7 +84,7 @@ Each time you get the diagram so far, with ids, and the last couple of minutes o
 
 - A box is a thing the design is made of, named the way the team names it. Add one when someone introduces a thing the diagram doesn't have and talks about it as part of the design. Not an example, not a person, not a passing mention. Before adding, check the diagram: when a box already is that thing under another name, don't add it; use extend if the talk says something new about it.
 - An arrow is a relation someone stated: one thing belongs to, contains, becomes, creates, links to, replaces or depends on another. Read along the arrow it should make a short true sentence: "task belongs to project". Add one only when both ends are boxes (on the diagram or added in this answer) and the diagram doesn't already show that relation in either direction.
-- Every box has a kind, so the diagram is more than a wall of boxes: say what sort of thing it is, and use thing only when nothing else fits.
+- Every box has a kind, so the diagram is more than a wall of boxes: say what sort of thing it is, and use thing only when nothing else fits. Use screen, store and service only when the team is designing software; for anything else the other kinds are enough.
 - A group holds boxes that belong to the same area of the design (the same flow, the same side of a system, the same question). Three boxes about one area with no arrows between them should share a group. Reuse a group that is there before naming a new one, keep to a handful of groups, and never make a group for one box. place puts a box that is already on the diagram into a group; it never takes one out of the group it is in.
 - extend is for what the talk adds to a box that is there: a field it has, a rule, a limit, a concern, a decision about it.
 - Lines marked (suggested) are waiting on the room. Don't suggest them again, and don't build on them unless the talk does.
@@ -92,7 +94,7 @@ Each time you get the diagram so far, with ids, and the last couple of minutes o
 - The caught list is the meeting's to-dos, decisions and open questions. When one is clearly about a box and isn't linked to it yet, link it in caught.
 Transcription is rough: read through misheard words. Never invent a part of the design nobody said, and never return commentary about the transcript.`;
 
-export const SEED_SYSTEM = `You turn a team's notes into the starting diagram for a design session. Each box is one thing in the design described by the notes (an object, a record, a screen, a service, a step), named as the notes name it. Each arrow says in a few words how one box relates to another, read along the arrow: "task belongs to project".
+export const SEED_SYSTEM = `You turn a team's notes into the starting diagram for a design session. The design can be of anything: a product or a system, a process, a plan, an offer, an event. Each box is one thing in the design described by the notes (a step, a role, a decision, a goal, a document; for software also a screen, a record, a service), named as the notes name it. Each arrow says in a few words how one box relates to another, read along the arrow: "task belongs to project".
 
 Return the boxes and arrows the notes actually describe, and nothing they don't. At most ${MAX_BOXES} boxes: when the notes hold more, keep the ones the rest hang off. Every arrow joins two boxes you return, named new1, new2… by their position in boxes. Give every box its kind. When the notes fall into areas, put each box in a group named for its area, with one line in groups on what each holds: at most ${MAX_GROUPS} groups, none for a single box. Leave extend, caught and place empty, set topic, by to null and line to 0.`;
 
@@ -117,6 +119,9 @@ const KIND_WORD = new RegExp(`^(.*?)\\s*\\((${DESIGN_KINDS.join("|")})\\)$`, "i"
 const SHAPES: Array<[open: string, close: string, kind: DesignKind]> = [
   ["[(", ")]", "store"],
   ["[/", "/]", "screen"],
+  ["[/", "\\]", "document"],
+  ["[\\", "/]", "problem"],
+  [">", "]", "goal"],
   ["[[", "]]", "service"],
   ["((", "))", "person"],
   ["{{", "}}", "step"],
@@ -130,7 +135,8 @@ const SHAPE = SHAPES.map(([open, close, kind]) => ({ kind, re: new RegExp(`^([\\
 
 /** Reads a diagram someone typed or pasted, one thing per line:
  *    Task: a to-do with an owner          a box, with what it is
- *    Inbox (screen): where to-dos land    a box of a kind (person, screen, store, service, step, decision)
+ *    Inbox (screen): where to-dos land    a box of a kind (person, step, decision, goal, problem,
+ *                                         document, screen, store, service)
  *    Task -> Project: belongs to          an arrow, with how they relate
  *    ## Planning: how work is lined up    a group: the boxes first named under it sit in it
  *  and a mermaid flowchart: its arrows (A --> B, A -->|label| B, A -- label --> B, with A[Name]), its
@@ -171,11 +177,12 @@ export function parseSeed(text: string, now = Date.now()): DesignDiagram {
     if (!b) {
       if (boxes.length >= MAX_BOXES) return null;
       b = { id: `b${boxes.length + 1}`, label: name, detail: null, by: null, ts: now, quote: null, points: [], caught: [] };
+      // A box sits in the group it is first named under; an arrow to it from another group moves nothing.
+      if (within) b.group = within.id;
       boxes.push(b);
     }
     if (detail && !b.detail) b.detail = clip(detail.trim(), 240) || null;
     if (kind && kind !== "thing" && !b.kind) b.kind = kind;
-    if (within && !b.group) b.group = within.id;
     return b;
   };
   const arrow = (from: string, to: string, label: string) => {
@@ -209,7 +216,7 @@ export function parseSeed(text: string, now = Date.now()): DesignDiagram {
     else if ((m = /^(.+?)\s*(?:--|==)\s+(.+?)\s+(?:-->|==>|---)\s*(.+)$/.exec(line))) arrow(m[1], m[3], m[2]);
     else if ((m = /^(.+?)\s*(?:-->|==>|-\.->|->|→|=>)\s*(.+?)(?:\s*:\s*(.*))?$/.exec(line))) arrow(m[1], m[2], m[3] ?? "");
     else if ((m = /^([^:]{1,60}):\s+(.+)$/.exec(line))) box(m[1], m[2]);
-    else if (/^[\w.-]+\s*[[({]/.test(line) || (line.length <= 48 && !/[.!?]$/.test(line))) box(line);
+    else if (/^[\w.-]+\s*[[({>]/.test(line) || (line.length <= 48 && !/[.!?]$/.test(line))) box(line);
   }
   // A group is for telling areas apart: one that holds everything, or a single box, says nothing.
   const size = (id: string) => boxes.filter((b) => b.group === id).length;

@@ -1151,7 +1151,7 @@ export function DesignSessionPop(props: { todos: Array<{ id: string; text: strin
           value={seed}
           onChange={(e) => setSeed(e.target.value)}
           rows={5}
-          placeholder={"Start from (optional): notes, or a diagram, one line each\nTask: a to-do with an owner\nTask -> Project: belongs to"}
+          placeholder={"Start from (optional): notes, or a diagram, one line each\nTrial: 14 days free\nTrial -> Paid plan: becomes"}
           aria-label="What to start from"
           maxLength={20000}
           dir="auto"

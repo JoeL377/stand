@@ -15,7 +15,7 @@ const lines = (text: string, perLine: number, max: number) => Math.min(max, Math
  *  is the notes under it. `text`: descriptions and notes are showing. */
 export function boxSize(b: DesignBox, text: boolean): { w: number; h: number; body: number } {
   // A screen's top bar and a data store's base take room of their own.
-  let body = (b.kind === "screen" || b.kind === "store" ? 25 : 21) + lines(b.label, b.kind && b.kind !== "thing" ? 17 : 21, 3) * 19;
+  let body = (b.kind === "screen" || b.kind === "store" || b.kind === "goal" ? 26 : 21) + lines(b.label, b.kind && b.kind !== "thing" ? 17 : 21, 3) * 19;
   if (text && b.detail) body += 3 + lines(b.detail, 29, 2) * 16;
   if (b.caught.length || (!text && b.points.length)) body += 22;
   if (b.suggested) body += 28;
