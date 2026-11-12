@@ -1,7 +1,8 @@
-// A space's projects (shared/projects.ts): making, changing and deleting them, and what is in each.
-// Anyone in the space can do all of it, as with the topic label before.
+// A space's projects (shared/projects.ts): making, changing and deleting them, and what is in each,
+// and the to-do a task is a part of, whose project it follows. Anyone in the space can do all of it,
+// as with the topic label before.
 import type { Express, Response } from "express";
-import { ProjectError } from "../db.ts";
+import { ParentError, ProjectError } from "../db.ts";
 import type { Services } from "../services.ts";
 import { memberRoom, notFound, route } from "./http.ts";
 
@@ -12,7 +13,7 @@ export function projectRoutes(app: Express, ctx: Services) {
     try {
       fn();
     } catch (err) {
-      if (err instanceof ProjectError) return void res.status(400).json({ error: err.message });
+      if (err instanceof ProjectError || err instanceof ParentError) return void res.status(400).json({ error: err.message });
       throw err;
     }
   };
@@ -82,6 +83,23 @@ export function projectRoutes(app: Express, ctx: Services) {
         return void res.status(400).json({ error: "Give projectId (a project's id, or null for Unassigned) or auto: true." });
       attempt(res, () => {
         const note = db.setNoteProject(room.id, req.params.noteId, body.auto === true ? { auto: true } : { projectId: body.projectId, by: req.user!.name });
+        if (!note) return notFound(res);
+        changed(room.id);
+        res.json(db.withProjects(room.id, [note])[0]);
+      });
+    }),
+  );
+
+  // The to-do a to-do or open question is a part of: { parentId: id } sets it, { parentId: null } takes it off.
+  app.patch(
+    "/api/rooms/:id/notes/:noteId/parent",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      const parentId = req.body?.parentId;
+      if (parentId !== null && typeof parentId !== "string") return void res.status(400).json({ error: "Give parentId: a to-do's id, or null." });
+      attempt(res, () => {
+        const note = db.setNoteParent(room.id, req.params.noteId, parentId);
         if (!note) return notFound(res);
         changed(room.id);
         res.json(db.withProjects(room.id, [note])[0]);

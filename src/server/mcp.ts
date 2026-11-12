@@ -22,7 +22,7 @@ Before starting on a to-do, call start_work with its ref: one call marks it as y
 
 "What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Both list mentions_you: tasks where someone tagged your person with @Name in a comment and waits on them. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
 If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. When your person asks for a review of that plan, or it has a question the team must decide, request_design_review puts it on the space's next design review with your questions; don't ask for one otherwise. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
-A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action.
+A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action. When you split a to-do into smaller to-dos, give each one parent, so they show as its parts and follow its project.
 A project is a named group of a space's to-dos, open questions and decisions: a feature or a workstream. list_spaces lists each space's projects. When one fits a new to-do, give it with create_action (project); move a to-do with update_action. When your person asks for a new project -> create_project. What's in one -> get with its ref, or list_actions with project. list_spaces lists projects in the team's order, most important first; when your person asks to change it -> order_projects. A project with suggested: true is Stand's suggestion; if it is right, confirm it with update_action (project).
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
@@ -61,7 +61,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Get one Stand to-do, decision, question, topic, note or project",
       description:
-        "Returns one thing from Stand by its reference (stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id>, stand:note/<id>, stand:project/<id>, or a Stand /ref/ link) with just enough context to act on it: its text, owner and status, the space and item it belongs to, the topic it came from with each person's position, related decisions and open questions on that item, short quotes, earlier updates, on_screen (what the main view of the meeting showed when it was said: a slide, a spec, or a shared screen with its image), and snaps of the screen that go with it (fetch image_url with this same token). A note is one saved from the Stand bar, with the snaps pinned to it. A project comes with its goal, counts, open to-dos, decisions, open questions and linked agenda items.",
+        "Returns one thing from Stand by its reference (stand:action/<id>, stand:decision/<id>, stand:question/<id>, stand:topic/<id>, stand:note/<id>, stand:project/<id>, or a Stand /ref/ link) with just enough context to act on it: its text, owner and status, the space and item it belongs to, the to-do it is a part of (parent) and its parts, the topic it came from with each person's position, related decisions and open questions on that item, short quotes, earlier updates, on_screen (what the main view of the meeting showed when it was said: a slide, a spec, or a shared screen with its image), and snaps of the screen that go with it (fetch image_url with this same token). A note is one saved from the Stand bar, with the snaps pinned to it. A project comes with its goal, counts, open to-dos, decisions, open questions and linked agenda items.",
       inputSchema: { ref: z.string().describe("A Stand reference like stand:action/k3m9xq2p or stand:note/j8f2kq1z, or a Stand link to one") },
       annotations: READ,
     },
@@ -228,6 +228,10 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       .string()
       .optional()
       .describe('The project it belongs to: its ref (stand:project/<id>) or the name of one the space has (list_spaces lists them), or "unassigned". Left out, it follows its agenda item. To confirm a project Stand suggested (suggested: true), give that project'),
+    parent: z
+      .string()
+      .optional()
+      .describe('The to-do this one is a part of: its ref (stand:action/<id>), or "none" to take it off. One level only: the parent can\'t be a part of another to-do, and a to-do with parts can\'t have a parent. With no project of its own, it follows its parent\'s'),
   };
 
   server.registerTool(
@@ -471,8 +475,8 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       },
       annotations: WRITE,
     },
-    ({ space, text, item_id, owner, status, summary, reason, links, project, model }) =>
-      run(() => api.createAction(as(model), { space, text, itemId: item_id, owner, status, summary, reason, links, project }, baseUrl)),
+    ({ space, text, item_id, owner, status, summary, reason, links, project, parent, model }) =>
+      run(() => api.createAction(as(model), { space, text, itemId: item_id, owner, status, summary, reason, links, project, parent }, baseUrl)),
   );
 
   server.registerTool(
@@ -489,8 +493,8 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       },
       annotations: WRITE,
     },
-    ({ ref, text, owner, status, summary, reason, links, project, model }) =>
-      run(() => api.updateAction(as(model), { ref, text, owner, status, summary, reason, links, project }, baseUrl)),
+    ({ ref, text, owner, status, summary, reason, links, project, parent, model }) =>
+      run(() => api.updateAction(as(model), { ref, text, owner, status, summary, reason, links, project, parent }, baseUrl)),
   );
 
   server.registerTool(

@@ -24,6 +24,7 @@ import { updatesStore } from "./db/updates.ts";
 import { usersStore } from "./db/users.ts";
 
 export { ProjectError } from "./db/projects.ts";
+export { ParentError } from "./db/notes.ts";
 export type { DraftDiscussion, IdeaSlideSaved, OpenMeeting, ReviewKind, ReviewRow, ReviewSlideRow } from "./db/rows.ts";
 
 export type DB = ReturnType<typeof openDb>;

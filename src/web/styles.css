@@ -2852,6 +2852,8 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .project-pill.suggested { border: 1px dashed var(--muted); }
 .project-suggest { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .project-suggest button { flex: none; padding: 4px 9px; }
+/* The drawer's "Part of": the same popup as the project picker, under the section. */
+.td-parent { display: block; margin: 6px 0 0; }
 .project-pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 9px; width: min(280px, 72vw); padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 8px 32px #0002; font-size: 13px; font-weight: 400; white-space: normal; }
 .project-pop label { font-weight: 600; }
 .project-pop input { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: inherit; font: inherit; }

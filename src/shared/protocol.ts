@@ -667,6 +667,12 @@ export interface TaskDetail {
   waitsOn: TaskLink[];
   /** To-dos that wait on this one. */
   blocking: TaskLink[];
+  /** The to-do it is a part of, if any. */
+  parent: TaskLink | null;
+  /** A to-do's parts: the to-dos and open questions whose parent it is. */
+  parts: TaskLink[];
+  /** The space's open to-dos it can be made a part of, newest first. Empty when it has parts. */
+  parentChoices: TaskLink[];
   /** The people in its space, whom a comment can tag with @Name. */
   people: Array<{ id: string; name: string }>;
   /** Comments on it that tag you and wait on you, newest first. */

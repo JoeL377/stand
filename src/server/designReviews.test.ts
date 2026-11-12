@@ -440,9 +440,15 @@ test("what the review decides goes back: onto each point's thread, the spec's to
     { kind: "decision", text: "Mobile clients get a banner", owner: null },
     { kind: "action", text: "Change the plan to two weeks", owner: "Sam" },
   ]);
-  db.syncNotes(m.id, steps.id, [{ kind: "action", text: "Write the flag removal checklist", owner: null }]);
+  const [checklist] = db.syncNotes(m.id, steps.id, [{ kind: "action", text: "Write the flag removal checklist", owner: null }]);
   const general = db.syncNotes(m.id, null, [{ kind: "action", text: "Book the offsite", owner: null }]);
+  // Someone made the checklist a part of another to-do already.
+  const release = task("Plan the release", null, null);
+  db.setNoteParent(room.id, checklist.id, release.id);
   assert.deepEqual(writeBackReview(db, m.id), { specs: 1, links: 2 });
+  // The to-dos from its slides are parts of the spec's to-do, unless they were a part of another one.
+  const parentOf = (text: string) => db.meetingNotes(m.id).find((n) => n.text === text)?.parentId ?? null;
+  assert.deepEqual([parentOf("Change the plan to two weeks"), parentOf("Write the flag removal checklist"), parentOf("Book the offsite")], [capture.id, release.id, null]);
 
   // Stand's line on the thread is rewritten in place with everything caught.
   t = thread("Is a week enough?");

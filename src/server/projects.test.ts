@@ -418,6 +418,51 @@ test("a to-do carried to the agenda keeps the project it had, as a suggestion", 
   }
 });
 
+test("a task gets a parent, one level deep, and keeps it through a redraft and delete/restore", () => {
+  const { db, room, items, m } = setup();
+  try {
+    const p = db.createProject(room.id, { name: "Spec" }, "Sam");
+    const [spec, step, other, decision] = db.syncNotes(m.id, null, [
+      { kind: "action", text: "Write the spec", owner: "Sam" },
+      { kind: "action", text: "Do step one", owner: null },
+      { kind: "action", text: "Other work", owner: null },
+      { kind: "decision", text: "Ship it", owner: null },
+    ]);
+    const [question] = db.syncNotes(m.id, items[0].id, [{ kind: "question", text: "Which step first?", owner: null }]);
+    const elsewhere = db.syncNotes(db.startMeeting(db.createRoom("Other").id).id, null, [{ kind: "action", text: "Theirs", owner: null }])[0];
+    db.setNoteProject(room.id, spec.id, { projectId: p.id, by: "Sam" });
+
+    assert.equal(db.setNoteParent(room.id, step.id, spec.id)?.parentId, spec.id);
+    assert.equal(shown(db, room.id, step.id), p.id, "a part follows its parent's project");
+    assert.equal(db.setNoteParent(room.id, question.id, spec.id)?.parentId, spec.id, "an open question can be a part too");
+    assert.deepEqual(db.noteParts(spec.id).map((n) => n.id), [step.id, question.id]);
+
+    assert.throws(() => db.setNoteParent(room.id, decision.id, spec.id), /Only a to-do or an open question can be a part of a to-do/);
+    assert.throws(() => db.setNoteParent(room.id, other.id, other.id), /can't be a part of itself/);
+    assert.throws(() => db.setNoteParent(room.id, other.id, question.id), /The parent must be a to-do in this space/);
+    assert.throws(() => db.setNoteParent(room.id, other.id, elsewhere.id), /The parent must be a to-do in this space/);
+    assert.throws(() => db.setNoteParent(room.id, other.id, step.id), /is a part of another to-do, and tasks have one level/);
+    assert.throws(() => db.setNoteParent(room.id, spec.id, other.id), /has parts of its own/);
+    assert.equal(db.setNoteParent(room.id, elsewhere.id, spec.id), null, "a note of another space");
+    assert.equal(db.getNote(other.id)?.parentId, null, "a refused parent changes nothing");
+
+    assert.equal(db.setNoteParent(room.id, step.id, other.id)?.parentId, other.id, "changed");
+    assert.equal(db.setNoteParent(room.id, step.id, spec.id)?.parentId, spec.id);
+    const redrafted = db.syncNotes(m.id, null, [spec, step, other, decision].map((n) => ({ ...n, text: `${n.text}!` })));
+    assert.equal(redrafted[1].parentId, spec.id, "a redraft keeps it");
+    db.restoreNote(db.removeNote(step.id)!);
+    assert.equal(db.getNote(step.id)?.parentId, spec.id, "a restore keeps it");
+    assert.equal(db.setNoteParent(room.id, question.id, null)?.parentId, null, "taken off");
+
+    // A parent that is gone reads as none: the part can get another one, and can be a parent itself.
+    db.removeNote(spec.id);
+    assert.equal(shown(db, room.id, step.id), null);
+    assert.equal(db.setNoteParent(room.id, other.id, step.id)?.parentId, step.id);
+  } finally {
+    db.raw.close();
+  }
+});
+
 test("the suggestion columns are added to an older database", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stand-projects-"));
   const file = path.join(dir, "stand.db");
