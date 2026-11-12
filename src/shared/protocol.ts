@@ -960,10 +960,20 @@ export interface HostView {
   /** While the item in focus presents a to-do (Item.taskId): the brief or the full spec, as the host chose. */
   taskMode?: "brief" | "spec";
   tab: "main" | "board";
+  /** Which view of the board is up beside the call: the card, the map, its words or the diagram. */
+  pane?: "card" | "map" | "words" | "diagram";
   /** Which picture of the review slide in focus is up, from 0. */
   shot?: number;
   /** A chapter (or the Kickoff, id "kickoff") as it stood at `at`; live: the thread on screen when it was opened. */
   rewind: { id: string; key: string; at: number; live: string | null; page?: number } | null;
+}
+
+export type PresentingWhat = "product review" | "design review" | "idea review" | "map" | "diagram" | "screen";
+
+export interface Presenter {
+  id: string;
+  name: string;
+  what: PresentingWhat;
 }
 
 export interface RoomState {
@@ -1001,8 +1011,12 @@ export interface RoomState {
   /** Action items from earlier meetings that are still open, oldest first, plus any closed since
    *  the meeting before this one ended (so the check-in shows them and they can be reopened). */
   followUps: FollowUp[];
-  /** What the host has on their middle screen, which everyone else follows until they look elsewhere. */
+  /** What the presenter (or, with nobody presenting, the host) has on their middle screen, which everyone
+   *  else follows until they look elsewhere. */
   hostView?: HostView | null;
+  /** Whoever last started what's in the middle of the call: a review, a map, a diagram or their screen.
+   *  Everyone follows them. The host still runs the room (agenda, notes, End for everyone). */
+  presenter?: Presenter | null;
   /** The opening board ("Done since" pages, then the "Since last time" check-in): whether someone moved on
    *  from it, when anyone last answered or turned a page on it, and the page everyone is on. */
   checkIn?: { closed: boolean; answeredAt: number | null; page?: number; closedAt?: number | null; held?: boolean };

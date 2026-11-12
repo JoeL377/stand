@@ -44,6 +44,8 @@ export function brainstormRoutes(app: Express, ctx: Services) {
         if (s) {
           s.itemsChanged();
           s.brainstormChanged();
+          // Whoever starts it in the call presents it: everyone's board goes to it.
+          s.present(req.user!.id, design ? "diagram" : "map");
         }
         res.json({ brainstorm: toBrainstormView(b) });
       } catch (err) {
@@ -63,7 +65,7 @@ export function brainstormRoutes(app: Express, ctx: Services) {
       if (!s) return void res.status(409).json({ error: "No call is running in this space." });
       // Anyone in the call can finish it, as anyone can call a slide's outcome.
       if (!s.has(req.user!.id)) return void res.status(403).json({ error: "Join the call to finish it." });
-      res.json({ finished: await s.finishExperience() });
+      res.json({ finished: await s.finishExperience({ id: req.user!.id, name: req.user!.name }) });
     }),
   );
 

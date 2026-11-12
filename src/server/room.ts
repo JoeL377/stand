@@ -14,6 +14,8 @@ import type {
   DoneDeck,
   Discussion,
   HostView,
+  Presenter,
+  PresentingWhat,
   Item,
   Note,
   Participant,
@@ -141,8 +143,10 @@ export class RoomSession implements SpeechSink {
   private pendingUser = new Map<WebSocket, User>();
   private participants = new Map<string, Participant & { conns: number }>();
   private hostId: string | null = null;
-  /** Who held the host seat before someone started an experience and took it for its length. */
-  private lentFrom: string | null = null;
+  /** See RoomState.presenter. */
+  private presenter: Presenter | null = null;
+  /** Who was presenting before someone's screen share: when the share stops, it goes back to them. */
+  private presenterBeforeShare: Presenter | null = null;
   private focusItemId: string | null = null;
   /** See RoomState.stageSnapId. */
   private stageSnapId: string | null = null;
@@ -478,33 +482,48 @@ export class RoomSession implements SpeechSink {
     return this.hostId === userId;
   }
 
-  /** Someone in the call started a review: they steer the board while it runs, so the host seat is
-   *  theirs until it is finished, and then goes back. */
-  startedBy(userId: string) {
-    if (this.ended || !this.participants.has(userId) || userId === this.hostId) return;
-    // Lent once: a second experience started by someone else still gives the seat back to the first host.
-    this.lentFrom ??= this.hostId;
-    this.setHost(userId);
+  /** Someone in the call started a review, a map, a diagram or a share: they present it, and everyone
+   *  follows what they show. The host seat stays where it is. Everyone else is told. */
+  present(userId: string, what: PresentingWhat, quietFor: string[] = []) {
+    const p = this.participants.get(userId);
+    if (this.ended || !p) return;
+    if (what === "screen") {
+      if (this.presenter?.what !== "screen") this.presenterBeforeShare = this.presenter;
+    } else this.presenterBeforeShare = null;
+    const same = this.presenter?.id === userId && this.presenter.what === what;
+    this.presenter = { id: userId, name: p.name, what };
+    // The new presenter sends their own view; until then everyone is on live.
+    if (!same) {
+      this.hostView = null;
+      this.notifyOthers([userId, ...quietFor], `${first(p.name)} is presenting ${what === "screen" ? "their screen" : `the ${what}`}`);
+    }
     this.suggestion = null;
     this.broadcastState();
   }
 
-  /** The review is over: the seat goes back to whoever lent it, when they are still here and
-   *  nobody moved it on by hand in the meantime. */
-  private returnSeat() {
-    const to = this.lentFrom;
-    this.lentFrom = null;
-    if (!to || to === this.hostId || !this.participants.has(to)) return;
-    this.setHost(to);
-    this.suggestion = null;
+  /** What was being presented ended: nobody presents, or the presenter before a share does again. */
+  private stopPresenting(match: (what: PresentingWhat) => boolean, by: string | null, said: string | null) {
+    const now = this.presenter;
+    if (!now || !match(now.what)) return;
+    const back = now.what === "screen" ? this.presenterBeforeShare : null;
+    this.presenterBeforeShare = null;
+    this.presenter = back && this.participants.has(back.id) ? back : null;
+    this.hostView = null;
+    if (by && said) this.notifyOthers([by], said);
     this.broadcastState();
+  }
+
+  /** A short line for everyone in the call but these people. */
+  private notifyOthers(except: string[], message: string) {
+    for (const [ws, c] of this.conns) if (c && !except.includes(c.participantId)) this.send(ws, { type: "notice", message });
   }
 
   /** "Finish this": the review running in this call is over, and the call goes on as plain talk.
    *  Each keeps what it would have kept at the end of the call; what the meeting files afterwards
    *  (reviews.ts refileReview, designReviews.ts writeBackReview) still runs then. */
-  async finishExperience(): Promise<Array<"review" | "design-review">> {
+  async finishExperience(by?: { id: string; name: string }): Promise<Array<"review" | "design-review">> {
     if (this.ended) return [];
+    const running = this.presenter && REVIEWS.includes(this.presenter.what) ? this.presenter.what : null;
     const done: Array<"review" | "design-review"> = [];
     if (finishReview(this.db, this.roomId, this.meetingId)) done.push("review");
     if (finishIdeaReview(this.db, this.roomId, this.meetingId)) done.push("review");
@@ -513,7 +532,7 @@ export class RoomSession implements SpeechSink {
       // Its slides left the agenda: the call is back on General.
       this.itemsChanged();
       this.followUpsChanged();
-      this.returnSeat();
+      this.stopPresenting((w) => REVIEWS.includes(w), by?.id ?? null, by ? `${first(by.name)} finished the ${running ?? "review"}` : null);
       this.scheduleMap();
     }
     return done;
@@ -650,6 +669,12 @@ export class RoomSession implements SpeechSink {
       if (p && --p.conns <= 0) {
         this.participants.delete(conn.participantId);
         if (this.hostId === conn.participantId) this.hostLeft();
+        // Whoever presented has gone: everyone goes back to following the host. What they started keeps going.
+        if (this.presenter?.id === conn.participantId) {
+          this.presenter = null;
+          this.hostView = null;
+        }
+        if (this.presenterBeforeShare?.id === conn.participantId) this.presenterBeforeShare = null;
         if (this.pilot.left(conn.participantId, Date.now())) this.pilotChanged();
         this.endAsk(conn.participantId);
       }
@@ -666,8 +691,8 @@ export class RoomSession implements SpeechSink {
     this.hostAwayUntil = 0;
     if (id === this.hostId) return;
     this.hostId = id;
-    // The new host sends their own view; until then everyone is on live.
-    this.hostView = null;
+    // The new host sends their own view; until then everyone is on live. A presenter's view stands.
+    if (!this.presenter) this.hostView = null;
     this.db.setMeetingHost(this.meetingId, id);
   }
 
@@ -753,6 +778,7 @@ export class RoomSession implements SpeechSink {
       focusItemId: this.focusItemId,
       pinnedBy: this.pinnedBy,
       hostView: this.hostView,
+      presenter: this.presenter,
       transcriptionDown: this.transcriptionDown,
       transcriptionRestarting: this.transcriptionDown && this.transcriberRestarting,
       hostAway: this.hostAwayTimer && this.hostId && !this.participants.has(this.hostId) ? (this.names.get(this.hostId) ?? "The host") : null,
@@ -1086,8 +1112,6 @@ export class RoomSession implements SpeechSink {
         if ((isHost || !hostHere) && this.participants.has(msg.participantId)) {
           if (conn.participantId === this.createdBy && msg.participantId !== this.createdBy) this.creatorHandedOver = true;
           if (msg.participantId === this.createdBy) this.creatorHandedOver = false;
-          // Handed over by hand: that stands, whatever is running.
-          this.lentFrom = null;
           this.setHost(msg.participantId);
           this.suggestion = null;
           this.broadcastState();
@@ -1101,14 +1125,17 @@ export class RoomSession implements SpeechSink {
         const other = msg.on && [...this.participants.values()].find((p) => p.isSharing && p.id !== conn.participantId);
         if (other && me) {
           other.isSharing = false;
-          for (const [w, c] of this.conns) if (c?.participantId === other.id) this.send(w, { type: "notice", message: `${conn.name} is sharing now, so your share stopped.` });
+          for (const [w, c] of this.conns) if (c?.participantId === other.id) this.send(w, { type: "notice", message: `${first(conn.name)} is sharing now, so your share stopped.` });
           if (other.id === this.hostId) this.suggestion = null;
         }
         // A share that ends takes the screen nudge with it; one Stand never counted doesn't.
         const wasSharing = Boolean(me?.isSharing);
         if (me) me.isSharing = msg.on;
         if (!msg.on && isHost && wasSharing) this.suggestion = null;
-        this.broadcastState();
+        // Sharing is presenting; stopping hands back to whoever presented before it.
+        if (msg.on && me && !wasSharing) this.present(conn.participantId, "screen", other ? [other.id] : []);
+        else if (!msg.on && wasSharing && this.presenter?.id === conn.participantId) this.stopPresenting((w) => w === "screen", null, null);
+        else this.broadcastState();
         break;
       }
       case "recording":
@@ -1169,8 +1196,8 @@ export class RoomSession implements SpeechSink {
         if (capabilities().transcription === "browser") this.interim(conn.participantId, conn.name, msg.text);
         break;
       case "frame":
-        // The agent only follows the host's screen.
-        if (isHost && me?.isSharing && typeof msg.dataUrl === "string" && msg.dataUrl.startsWith("data:image/jpeg;base64,")) {
+        // The agent reads the screen being shared: one at a time, whoever presents it.
+        if (me?.isSharing && typeof msg.dataUrl === "string" && msg.dataUrl.startsWith("data:image/jpeg;base64,")) {
           this.frame = { dataUrl: msg.dataUrl, at: Date.now() };
           this.seen = { dataUrl: msg.dataUrl, at: this.frame.at, itemId: this.focusItemId };
           void this.readScreen();
@@ -1238,7 +1265,8 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "host.view": {
-        if (!isHost || this.ended) return;
+        // The presenter's view is everyone's; with nobody presenting, the host's.
+        if (this.ended || conn.participantId !== (this.presenter?.id ?? this.hostId)) return;
         const v = asHostView(msg.view);
         if (!v || JSON.stringify(v) === JSON.stringify(this.hostView)) return;
         this.hostView = v;
@@ -1306,10 +1334,16 @@ export class RoomSession implements SpeechSink {
       }
       // Anyone in the call can stop the map or the diagram; it is kept.
       case "view.stop":
-        if (!this.ended) void this.stopView();
+        if (!this.ended) {
+          const what = this.brain?.map instanceof DiagramKeeper ? "diagram" : "map";
+          void this.stopView().then((stopped) => stopped && this.stopPresenting((w) => w === "map" || w === "diagram", conn.participantId, `${first(conn.name)} stopped the ${what}`));
+        }
         break;
       case "view.open":
-        if (!this.ended) void this.openView(conn.name);
+        if (!this.ended) {
+          this.present(conn.participantId, "map");
+          void this.openView(conn.name);
+        }
         break;
       case "note.remove": {
         if (this.list?.has(msg.noteId)) {
@@ -2675,10 +2709,14 @@ function asHostView(v: unknown): HostView | null {
   if (o.taskMode !== undefined && o.taskMode !== "brief" && o.taskMode !== "spec") return null;
   const task = o.taskMode ? { taskMode: o.taskMode } : null;
   const shot = Number.isInteger(o.shot) && o.shot! > 0 && o.shot! < 50 ? { shot: o.shot } : null;
+  const pane = o.pane && ["card", "map", "words", "diagram"].includes(o.pane) ? { pane: o.pane } : null;
   const r = o.rewind;
-  if (r === null) return { tab: o.tab, rewind: null, ...task, ...shot };
+  if (r === null) return { tab: o.tab, rewind: null, ...task, ...shot, ...pane };
   const str = (x: unknown, max = 200) => typeof x === "string" && x.length <= max;
   if (!r || !str(r.id) || !str(r.key) || !Number.isFinite(r.at) || !(r.live === null || str(r.live))) return null;
   const page = Number.isInteger(r.page) && r.page! >= 0 && r.page! <= 50 ? r.page : undefined;
-  return { tab: o.tab, ...task, ...shot, rewind: { id: r.id, key: r.key, at: r.at, live: r.live, ...(page !== undefined && { page }) } };
+  return { tab: o.tab, ...task, ...shot, ...pane, rewind: { id: r.id, key: r.key, at: r.at, live: r.live, ...(page !== undefined && { page }) } };
 }
+
+const REVIEWS: PresentingWhat[] = ["product review", "design review", "idea review"];
+const first = (name: string) => name.trim().split(/\s+/)[0] || name;
