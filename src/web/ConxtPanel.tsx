@@ -21,6 +21,13 @@ export function ConxtPanel({ roomId, meetingId }: { roomId: string; meetingId?: 
     catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   }
+  // On a meeting's recap the panel is only worth its room when there is something to report:
+  // a connected room or a delivery for this meeting. Connecting happens in Manage spaces.
+  if (meetingId && !error) {
+    if (!status) return null;
+    const mine = (status.liveDeliveries ?? []).some(d => d.meetingId === meetingId) || status.deliveries.some(d => d.meetingId === meetingId);
+    if (!mine && (status.mode === "off" || !status.connection?.enabled)) return null;
+  }
   return <section className="conxt-panel">
     <h3>Conxt</h3>
     <p className="muted small">Share live transcripts and finalized meeting synthesis with your team’s project. Review and publication happen in Conxt.</p>

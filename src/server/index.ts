@@ -9,6 +9,7 @@ import { conxtRoutes } from "./conxt.ts";
 import { oauthRoutes } from "./oauth.ts";
 import { startServices } from "./services.ts";
 import { brainstormRoutes } from "./routes/brainstorms.ts";
+import { chatRoutes } from "./routes/chat.ts";
 import { deckRoutes } from "./routes/decks.ts";
 import { designReviewRoutes } from "./routes/designReviews.ts";
 import { githubRoutes, githubWebhook } from "./routes/github.ts";
@@ -59,12 +60,14 @@ brainstormRoutes(app, services);
 reviewRoutes(app, services);
 designReviewRoutes(app, services);
 meetingRoutes(app, services);
+chatRoutes(app, services);
 
 // Serve the built web app in production.
 const dist = path.resolve("dist");
 if (config.production && fs.existsSync(dist)) {
   app.use(express.static(dist));
-  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.join(dist, "index.html")));
+  // root: a path given whole is refused when a folder above it starts with a dot (a worktree under ~/.local).
+  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile("index.html", { root: dist }));
 }
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

@@ -106,10 +106,11 @@ export function FollowUpList(props: {
                 </span>
               )}
               {props.below?.(n)}
-              {open && <WorkCard work={w} />}
             </span>
             {props.tail?.(n)}
             <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} />
+            {/* The log takes a line of its own under the row, as wide as the row. */}
+            {open && <WorkCard work={w} />}
           </li>
         );
       })}

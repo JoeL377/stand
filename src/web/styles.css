@@ -1792,6 +1792,10 @@ a.sh-pill:hover { text-decoration: none; }
 .project-row { border-top: 1px solid var(--line); padding: 10px 0; }
 .project-row > span { margin-left: 12px; }
 .project-row .error { margin: 6px 0 0; }
+.members-panel { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.members-panel h3 { margin: 0 0 8px; }
+.members-row { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding: 10px 0; }
+.members-row button { margin-left: auto; }
 
 /* ---- Topic board: the middle screen while nobody shares ---- */
 .screen > .topic-board, .board-tab > .topic-board { position: relative; flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg); color: var(--text); text-align: left; }
@@ -2825,9 +2829,10 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .task-presentation-spec { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
 
 /* Cross-meeting topics stay separate from each outcome's source pill. */
-.sh-topic-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-size: 13px; }
-.sh-topic-filter label { color: var(--muted); }
-.sh-topic-filter select { max-width: min(320px, 65vw); padding: 6px 26px 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: inherit; font: inherit; }
+.sh-topic-filter { flex: 0 1 auto; min-width: 64px; display: flex; align-self: center; margin-left: auto; padding-left: 10px; }
+@media (max-width: 760px) { .sh-topic-filter { padding-left: 2px; } .sh-topic-filter select { width: 100%; padding: 0 18px 0 8px; font-size: 12px; } }
+.sh-topic-filter select { max-width: min(200px, 40vw); height: 26px; padding: 0 22px 0 10px; border: 1px solid var(--line); border-radius: 999px; background-color: var(--panel); color: var(--muted); font: inherit; font-size: 12.5px; text-overflow: ellipsis; }
+.sh-topic-filter.on select { color: var(--text); border-color: var(--text); font-weight: 500; }
 .topic-picker { display: inline-block; position: relative; margin-left: 6px; vertical-align: baseline; }
 .topic-pill { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; cursor: pointer; }
 .topic-pill.unset { opacity: .65; }
@@ -3319,13 +3324,104 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .xp-what { font-style: normal; }
 /* A phone's control row has no room for the kind: "Finish" alone, the board says which. */
 @media (max-width: 760px) { .xp-what { display: none; } }
-/* A card's caught lines sit under their kind, marked as on the pills and the circles. */
-.brain-card h4.brain-caught-h { display: flex; align-items: center; gap: 5px; }
-.brain-caught-h.action svg { color: var(--accent); }
-.brain-caught-h.decision svg { color: var(--ok); }
-.brain-caught-h.question svg { color: var(--warn); }
+/* A card's caught lines stay behind their marks: one mark and a count per kind, lines on hover, focus or tap. */
+.brain-got-row { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.brain-card .brain-got-row h4 { margin: 0 0 0 4px; }
+.brain-got-mark { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.brain-got-mark:hover, .brain-got-mark.on { background: var(--panel-2); }
+.brain-got-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.brain-got-mark.action svg { color: var(--accent); }
+.brain-got-mark.decision svg { color: var(--ok); }
+.brain-got-mark.question svg { color: var(--warn); }
 
-/* The recap's timeline (Timeline.tsx): Ask Stand and agents' reports beside what was caught. */
+/* What's being discussed sits in the call's top bar (Stage.tsx portals it into this slot). */
+.topbar-now { flex: 1; min-width: 0; display: flex; }
+.now.in-bar { flex: 1; min-width: 0; padding: 0 8px; }
+.now.in-bar .task-picker > button { height: 28px; padding: 0 10px; font-size: 12.5px; }
+
+/* ---- The space's chat (SpaceChat.tsx): the thread scrolls, and the box to write in stays at its foot ---- */
+.sh-body.chat { overflow: hidden; padding-bottom: 16px; }
+.sh-panel.chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.space-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 860px; }
+.chat-thread { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 0 4px 6px 0; }
+/* A short thread sits at the foot, next to the box. */
+.chat-thread > :first-child { margin-top: auto; }
+.chat-older { align-self: center; margin-bottom: 8px; font-size: 13px; }
+.chat-empty { margin-bottom: 8px; }
+.chat-day { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; font-size: 12px; color: var(--muted); }
+.chat-day::before, .chat-day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.chat-day.new { margin: 8px 0 2px; color: var(--accent); }
+.chat-day.new::before, .chat-day.new::after { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.chat-msg { position: relative; display: flex; gap: 10px; padding: 1px 8px; border-radius: 8px; }
+.chat-msg.head { margin-top: 8px; padding-top: 4px; }
+.chat-msg:hover, .chat-msg:focus-within { background: var(--hover); }
+.chat-msg-side { flex: none; width: 28px; display: flex; justify-content: center; }
+.chat-msg-time { visibility: hidden; font-size: 10px; line-height: 21px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.chat-msg:hover .chat-msg-time { visibility: visible; }
+.chat-msg-body { flex: 1; min-width: 0; }
+.chat-msg-head { display: flex; align-items: baseline; gap: 8px; }
+.chat-msg-who { font-size: 14px; font-weight: 600; }
+.chat-msg-at { font-size: 11px; color: var(--muted); }
+.chat-msg-text { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-msg-text a { color: var(--accent); }
+.chat-msg-edited { font-size: 11px; color: var(--muted); }
+.chat-msg.deleted .chat-msg-text { color: var(--muted); font-style: italic; }
+.chat-msg-tools { position: absolute; top: -12px; right: 8px; display: none; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+.chat-msg:hover .chat-msg-tools, .chat-msg:focus-within .chat-msg-tools { display: inline-flex; }
+.chat-msg-tools .icon-btn { width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.chat-edit { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 4px; }
+.chat-edit textarea { display: block; width: 100%; min-height: 38px; max-height: 180px; padding: 8px 10px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 8px; resize: none; field-sizing: content; }
+.chat-edit-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; font-size: 13px; }
+.chat-edit-foot button[type="submit"] { height: 28px; padding: 0 12px; font-size: 13px; }
+.chat-compose { flex: none; position: relative; }
+.chat-compose .mention-box textarea { display: block; min-height: 42px; max-height: 180px; padding: 10px 46px 10px 12px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 10px; resize: none; field-sizing: content; }
+.chat-compose .chat-send { right: 8px; bottom: 8px; width: 26px; height: 26px; min-height: 0; }
+.chat-compose .chat-send:disabled { background: var(--line); color: var(--muted); cursor: default; }
+.sp-side-text.unread { font-weight: 600; color: var(--side-strong); }
+@media (hover: none) {
+  .chat-msg-tools { position: static; display: inline-flex; align-self: flex-start; border: 0; background: none; box-shadow: none; }
+}
+/* On a phone the page scrolls, not the thread, and the box to write in stays at the foot of the screen. */
+@media (max-width: 760px) {
+  .sh-main:has(.sh-panel.chat) { padding-bottom: 0; }
+  .sh-panel.chat { flex: none; }
+  .chat-thread { overflow: visible; }
+  .chat-compose { position: sticky; bottom: 0; margin: 0 -16px; padding: 8px 16px 12px; background: var(--bg); }
+  .chat-compose .chat-send { right: 24px; bottom: 20px; }
+}
+
+.sh-topic-mark { display: none; }
+/* A to-do's log sits on its own line under the row: indented under the text on a wide screen,
+   the full row on a phone. A long report is cut to its first lines until "More". */
+.followups li:has(> .fu-log) { flex-wrap: wrap; }
+.followups li > .fu-log { flex: 0 0 calc(100% - 30px); order: 99; min-width: 0; margin: 2px 0 4px 30px; }
+.wl-text.clamp { max-height: 7.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+@media (max-width: 760px) {
+  .followups li > .fu-log { flex-basis: 100%; margin-left: 0; padding: 4px 10px; }
+  .fu-log .wl-entry { padding-left: 16px; }
+  /* Four tabs and the topic pill fit a phone when only the open tab shows its count. */
+  .sh-tab:not(.on) .count { display: none; }
+  .sh-tab { padding: 8px 7px 7px; }
+  .sh-topic-filter { position: relative; flex: none; min-width: 0; width: 30px; height: 26px; margin-left: auto; padding: 0; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+  .sh-topic-filter.on { color: var(--bg); background: var(--text); border-color: var(--text); }
+  .sh-topic-filter .sh-topic-mark { display: block; }
+  .sh-topic-filter select, .sh-topic-filter.on select { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; padding: 0; opacity: 0; font-size: 16px; }
+}
+
+/* Tasks on a phone: a row is its checkbox, its title and what's happening on it. The topic, the date,
+   drop, archive and copy are in the task's own view (TaskDrawer's td-phone-acts), a tap on the title away. */
+.td-phone-acts { display: none; }
+@media (max-width: 760px) {
+  .sh-panel.tasks .followups li > .sh-archive, .sh-panel.tasks .followups li > .cfa { display: none; }
+  .sh-panel.tasks .by-owner .followups li > .rc-face { display: none; }
+  .sh-panel.tasks .followups .topic-picker:has(.unset), .sh-panel.tasks .followups .task-from { display: none; }
+  .sh-panel.tasks .followups .topic-picker { margin-left: 0; }
+  .sh-panel.tasks .followups .topic-pill { padding: 0; margin-left: 6px; border: 0; background: none; box-shadow: none; height: auto; min-height: 0; font-size: 12px; font-weight: 400; color: var(--muted); max-width: 140px; }
+  .td-phone-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 10px; }
+  .td-phone-acts > button { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; }
+}
+
+/* The timeline (Timeline.tsx, and the call's transcript): Ask Stand and agents' reports beside what was caught. */
 .tl-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .seg.capture-ask { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
 .seg.capture-ask .capture-head { color: var(--accent); }

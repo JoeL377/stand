@@ -45,11 +45,12 @@ export function roomsStore(db: DatabaseSync) {
              (SELECT MAX(COALESCE(m.ended_at, m.started_at)) FROM meetings m WHERE m.room_id = r.id) AS met_at,
              (SELECT MAX(last_joined_at) FROM room_members x WHERE x.room_id = r.id) AS joined_at,
              (SELECT MAX(ts) FROM snaps s WHERE s.room_id = r.id AND s.meeting_id IS NULL) AS captured_at,
-             EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?) AS following
+             EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?) AS following,
+             EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ? AND x.role = 'admin') AS admin
            FROM rooms r
            WHERE EXISTS (SELECT 1 FROM room_members x WHERE x.room_id = r.id AND x.user_id = ?)`,
         )
-        .all(userId, userId) as Row[];
+        .all(userId, userId, userId) as Row[];
       const people = db.prepare(
         "SELECT u.name FROM room_members x JOIN users u ON u.id = x.user_id WHERE x.room_id = ? ORDER BY x.last_joined_at DESC",
       );
@@ -65,6 +66,7 @@ export function roomsStore(db: DatabaseSync) {
         createdBy: (r.created_by as string) ?? null,
         activeAt: Math.max((r.created_at as number) ?? 0, (r.met_at as number) ?? 0, (r.joined_at as number) ?? 0, (r.captured_at as number) ?? 0),
         following: Boolean(r.following),
+        admin: Boolean(r.admin),
         people: (people.all(r.id as string) as Row[]).map((p) => p.name as string),
         notes: (notes.all(r.id as string) as Row[]).map((n) => ({
           kind: n.kind as "decision" | "question" | "action",

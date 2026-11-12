@@ -24,6 +24,7 @@ import { Projects, setProjects } from "./projects.ts";
 import { RoomSession } from "./room.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { linkSnaps } from "./snaps.ts";
+import { SpaceEvents } from "./spaceEvents.ts";
 import { POLISH_BATCH_MS, UpNextPolisher, upNextView } from "./upNextPolish.ts";
 import { setUsageSink } from "./usage.ts";
 import { UploadLinks } from "./workLog.ts";
@@ -241,7 +242,8 @@ export function startServices() {
   projects.start();
 
   // Chat between meetings (chat.ts). Sessions left open by the last run close here if they went quiet.
-  const chat = new Chat(db);
+  const spaceEvents = new SpaceEvents();
+  const chat = new Chat(db, (roomId, e) => spaceEvents.send(roomId, e));
   chat.start();
 
   new ConxtDelivery(db, conxtDestinations).start();
@@ -262,6 +264,7 @@ export function startServices() {
     shipWatch,
     projects,
     chat,
+    spaceEvents,
     agents,
     uploadLinks,
     specTouched,

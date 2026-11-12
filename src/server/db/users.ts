@@ -1,7 +1,7 @@
 // People, their sign-in sessions, and who is in which space.
 import type { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
-import type { User } from "../../shared/protocol.ts";
+import type { SpaceMember, User } from "../../shared/protocol.ts";
 import { newId } from "../ids.ts";
 import { type Row, SESSION_TTL_MS, toUser } from "./rows.ts";
 
@@ -76,6 +76,31 @@ export function usersStore(db: DatabaseSync) {
     },
     isMember(roomId: string, userId: string): boolean {
       return Boolean(db.prepare("SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?").get(roomId, userId));
+    },
+    /** Whether this person may change the space: they created it, or they're one of its admins.
+     *  An older space with no creator is managed by anyone in it. */
+    managesSpace(room: { id: string; createdBy: string | null }, userId: string): boolean {
+      if (!room.createdBy || room.createdBy === userId) return true;
+      return Boolean(db.prepare("SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ? AND role = 'admin'").get(room.id, userId));
+    },
+    /** Makes someone in the space an admin, or takes that back. False when they aren't in it. */
+    setAdmin(roomId: string, userId: string, admin: boolean): boolean {
+      return db.prepare("UPDATE room_members SET role = ? WHERE room_id = ? AND user_id = ?").run(admin ? "admin" : null, roomId, userId).changes > 0;
+    },
+    /** The people in a space and who manages it: the creator first, then admins, then by name. */
+    spaceMembers(room: { id: string; createdBy: string | null }, viewerId: string): SpaceMember[] {
+      const order = { creator: 0, admin: 1, member: 2 };
+      return (
+        db.prepare("SELECT u.id, u.name, u.picture, m.role FROM room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ?").all(room.id) as Row[]
+      )
+        .map((r): SpaceMember => ({
+          id: r.id as string,
+          name: r.name as string,
+          picture: (r.picture as string) ?? null,
+          role: r.id === room.createdBy ? "creator" : r.role === "admin" ? "admin" : "member",
+          you: r.id === viewerId,
+        }))
+        .sort((a, b) => order[a.role] - order[b.role] || a.name.localeCompare(b.name));
     },
     /** The people in a space, as an @mention can name them. */
     roomPeople(roomId: string): Array<{ id: string; name: string }> {

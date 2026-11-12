@@ -44,3 +44,16 @@ export interface ChatMessage {
 export type ChatEvent =
   | { type: "message"; message: ChatMessage }
   | { type: "session"; channelId: string; sessionId: string; open: boolean };
+
+/** What the Chat tab opens on. */
+export interface ChatThread {
+  channel: Channel;
+  /** The newest messages, oldest first. */
+  messages: ChatMessage[];
+  /** The sessions those messages are in. */
+  sessions: ChatSession[];
+  /** The seq of the last message you have read. */
+  readUpTo: number;
+  /** The space's people, to tag with @. */
+  people: Array<{ id: string; name: string }>;
+}

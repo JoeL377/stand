@@ -1,5 +1,6 @@
 import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
+import type { ChatMessage, ChatSession, ChatThread } from "../shared/chat.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type {
   BrainstormSummary,
@@ -22,6 +23,7 @@ import type {
   ProjectsStatus,
   Snap,
   SpaceFeed,
+  SpaceMembers,
   SpaceSummary,
   TaskDetail,
   UpNext,
@@ -127,6 +129,8 @@ export const api = {
   spaces: () => call<SpaceSummary[]>("GET", "/api/spaces"),
   updateSpace: (id: string, patch: { name?: string; purpose?: string; synthesisInstructions?: string }) =>
     call<{ id: string; name: string; purpose: string; synthesisInstructions: string }>("PATCH", `/api/rooms/${id}`, patch),
+  members: (roomId: string) => call<SpaceMembers>("GET", `/api/rooms/${roomId}/members`),
+  setAdmin: (roomId: string, userId: string, admin: boolean) => call<SpaceMembers>("PUT", `/api/rooms/${roomId}/members/${userId}`, { admin }),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
@@ -194,5 +198,14 @@ export const api = {
   removeDesignReview: (taskId: string) => call<DesignReviewState>("DELETE", `/api/tasks/${taskId}/design-review`),
   prepareDesignReview: (taskId: string, change: BriefChange) => call<{ spec: DesignSpec | null }>("PATCH", `/api/tasks/${taskId}/design-review`, change),
   task: (id: string) => call<TaskDetail>("GET", `/api/tasks/${id}`),
+  chat: (roomId: string) => call<ChatThread>("GET", `/api/rooms/${roomId}/chat`),
+  /** A page of a channel's messages: those before a seq, or those after one. */
+  chatMessages: (channelId: string, page: { before?: number; after?: number }) =>
+    call<{ messages: ChatMessage[]; sessions: ChatSession[] }>("GET", `/api/channels/${channelId}/messages?${page.after !== undefined ? `after=${page.after}` : `before=${page.before ?? ""}`}`),
+  /** key: sent again with the same one, a message is saved once. */
+  sendChat: (roomId: string, body: { text: string; key: string; replyTo?: string }) => call<ChatMessage>("POST", `/api/rooms/${roomId}/chat/messages`, body),
+  editChat: (id: string, text: string) => call<ChatMessage>("PATCH", `/api/chat/messages/${id}`, { text }),
+  deleteChat: (id: string) => call<ChatMessage>("DELETE", `/api/chat/messages/${id}`),
+  readChat: (channelId: string, upTo: number) => call<{ readUpTo: number }>("POST", `/api/channels/${channelId}/read`, { upTo }),
   token: (roomId: string) => call<{ url: string | null; token: string | null }>("POST", `/api/rooms/${roomId}/token`),
 };

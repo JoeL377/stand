@@ -12,6 +12,7 @@ import { agentApi } from "../src/server/agents.ts";
 import { openDb } from "../src/server/db.ts";
 import { addSlide, finishReview, setOutcome, startReview } from "../src/server/reviews.ts";
 import { finishBrainstorm, startBrainstorm } from "../src/server/brainstorm.ts";
+import { Chat } from "../src/server/chat.ts";
 import type { BrainNode } from "../src/shared/protocol.ts";
 import { upNextView } from "../src/server/upNextPolish.ts";
 import { UploadLinks } from "../src/server/workLog.ts";
@@ -367,6 +368,21 @@ api.addContext(samsAgent, { space: room.id, text: "Launch freeze starts Nov 28" 
 // Notes saved from the bar between meetings.
 db.addJot({ id: "previewjot1", roomId: room.id, itemId: guest.id, text: "Support asked if guest orders can be looked up by email. Worth checking before the 20th.", byId: maya.id, by: maya.name, ts: now - 6 * 3_600_000 });
 db.addJot({ id: "previewjot2", roomId: room.id, itemId: null, text: "Legal is fine with the new receipt wording.", byId: leo.id, by: leo.name, ts: now - DAY });
+
+// Chat between meetings: a talk from yesterday that Sam has read, and one from this morning he hasn't.
+const chat = new Chat(db);
+const channel = db.spaceChannel(room.id, sam.id);
+const says = (who: User, text: string, ts: number) => chat.accept(channel.id, [{ type: "message", author: { userId: who.id }, text, ts }]).messages[0];
+const yesterday = now - 26 * 3_600_000;
+says(priya, "The retry worker passed the load test. 3 retries over 24 hours, no double charges.", yesterday);
+says(sam, "Nice. Did the idempotency key hold up when Stripe timed out?", yesterday + 2 * MIN);
+says(priya, "Yes. Same key, one charge. The numbers are in https://acme.test/load-test/retries", yesterday + 3 * MIN);
+says(leo, "Then I can remove the browser retry path this week.", yesterday + 9 * MIN);
+const seen = says(sam, "Go ahead. Let's keep the old path behind the flag until Friday in case we need it.", yesterday + 11 * MIN);
+db.markChannelRead(channel.id, sam.id, seen.seq);
+says(maya, "Support wants to know if guest orders show up in the order lookup. Does anyone know?", now - 95 * MIN);
+says(leo, "They do, by email. I'll write it up for the help page.", now - 90 * MIN);
+says(maya, "Thanks!\nOne more thing: the receipt wording changed, so the screenshot in the help page is out of date.", now - 88 * MIN);
 
 // startMeeting always says now, so the dates go back afterwards.
 const raw = new DatabaseSync(file);

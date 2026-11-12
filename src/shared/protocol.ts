@@ -689,10 +689,10 @@ export interface LinkableRepo {
 export interface ProjectsStatus {
   /** Whether this server has the Stand GitHub App set up. */
   available: boolean;
-  /** Only the space's creator links and unlinks repos. */
+  /** Only the space's creator and its admins link and unlink repos. */
   canManage: boolean;
   projects: SpaceProject[];
-  /** For the creator: repos they can link. Null when they can't, or GitHub couldn't be asked. */
+  /** For someone who manages the space: repos they can link. Null when they can't, or GitHub couldn't be asked. */
   linkable: LinkableRepo[] | null;
   /** Why linkable is null, when it's GitHub's fault. */
   linkableError: string | null;
@@ -1269,14 +1269,33 @@ export interface SpaceFeed {
   mentions?: TaskMention[];
 }
 
+/** Someone in a space, and whether they manage it. */
+export interface SpaceMember {
+  id: string;
+  name: string;
+  picture: string | null;
+  /** creator: made the space, and always manages it. admin: someone who manages it made them one. */
+  role: "creator" | "admin" | "member";
+  you: boolean;
+}
+
+/** The people in a space, as Manage spaces shows them. */
+export interface SpaceMembers {
+  /** You may make people admins and take that back. */
+  canManage: boolean;
+  members: SpaceMember[];
+}
+
 export interface SpaceSummary {
   id: string;
   name: string;
   purpose: string;
   /** What the space asks the agent to pull out of every meeting, besides the default notes. */
   synthesisInstructions: string;
-  /** You created it, so it shows on Manage spaces. */
+  /** You created it. */
   mine: boolean;
+  /** You created it or you're one of its admins, so it shows on Manage spaces. */
+  canManage: boolean;
   /** You have been in it (room_members). */
   following: boolean;
   /** Latest thing that happened in it: created, a meeting, someone entering. */
@@ -1292,6 +1311,8 @@ export interface SpaceSummary {
   waiting?: number;
   /** Open tasks where a comment tags you and waits on you. */
   mentions?: number;
+  /** Chat messages from other people that you haven't read. */
+  unread?: number;
   /** The latest decision or open question, for the card's last line. */
   last: { kind: "decision" | "question" | "action"; text: string; ts: number } | null;
   /** People who have been in it. */
