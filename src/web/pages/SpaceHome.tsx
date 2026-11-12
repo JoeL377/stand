@@ -1112,7 +1112,7 @@ function TasksTab(props: {
   const parts = partsTally(props.all);
   /** The to-do a task is a part of, when the space still has it. */
   const partOf = (n: TaskNote) => (n.parentId && n.parentId !== n.id ? byId.get(n.parentId) : undefined);
-  // On a phone a to-do's parts stay folded under it until its parts pill is tapped.
+  // A to-do's parts stay folded under it until its parts pill is clicked.
   const [partsOpen, setPartsOpen] = useState<Set<string>>(() => new Set());
   const toggleParts = (id: string) =>
     setPartsOpen((open) => {
@@ -1121,7 +1121,6 @@ function TasksTab(props: {
       return next;
     });
   const partFolded = (n: TaskNote) => {
-    if (!phone) return false;
     const seen = new Set<string>();
     for (let p = partOf(n); p && !seen.has(p.id); p = partOf(p)) {
       if (!partsOpen.has(p.id)) return true;
@@ -1185,7 +1184,7 @@ function TasksTab(props: {
       after={(n: TaskNote) => (
         <>
           {!closed && tagged.has(n.id) && <MentionPill mentions={tagged.get(n.id)!} />}
-          {parts.has(n.id) && <PartsPill {...parts.get(n.id)!} open={phone && under ? partsOpen.has(n.id) : undefined} onToggle={() => toggleParts(n.id)} />}
+          {parts.has(n.id) && <PartsPill {...parts.get(n.id)!} open={under ? partsOpen.has(n.id) : undefined} onToggle={() => toggleParts(n.id)} />}
           {!under?.has(n.id) && partOf(n) && (
             <button type="button" className="task-part-of" title={`Part of: ${partOf(n)!.text}`} onClick={() => props.onOpen(partOf(n)!.id)}>
               Part of: {partOf(n)!.text}
@@ -1684,11 +1683,12 @@ function MentionPill({ mentions }: { mentions: TaskMention[] }) {
 /** "1/3 parts" after a to-do's text: how many of its parts are done. */
 function PartsPill({ done, total, open, onToggle }: { done: number; total: number; open?: boolean; onToggle?: () => void }) {
   const label = `${done} of ${total} ${total === 1 ? "part" : "parts"} done`;
-  // On a phone the pill opens and closes the parts under the to-do.
+  // Under its to-do the pill opens and closes the parts. A phone shows only the count.
   if (open !== undefined)
     return (
       <button type="button" className={open ? "rc-pill task-parts fold open" : "rc-pill task-parts fold"} aria-expanded={open} aria-label={`${label}. ${open ? "Hide" : "Show"} them`} onClick={onToggle}>
         {done}/{total}
+        <span className="wide-only"> {total === 1 ? "part" : "parts"}</span>
       </button>
     );
   return (

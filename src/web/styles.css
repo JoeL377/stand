@@ -3956,3 +3956,17 @@ a .mention { color: inherit; }
   .sh-panel.tasks .sh-project-live, .sh-panel.tasks .sh-project-menu { display: none; }
   .sh-panel.tasks .sh-project:not(.folded) > .followups, .sh-panel.tasks .sh-project:not(.folded) > div { margin-top: 4px; }
 }
+/* The same on a wider screen: one line per task, the whole title when one of its pills is open, and
+   project headers that read as sections and stay in view. Projects start open here. */
+@media (min-width: 821px) {
+  .sh-panel.tasks .followups.one-line .fu-text { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px 8px; min-width: 0; }
+  .sh-panel.tasks .followups.one-line .fu-text > * { flex: none; margin-left: 0; }
+  .sh-panel.tasks .followups.one-line .fu-text > .fu-open { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sh-panel.tasks .followups.one-line .fu-text > .task-part-of { flex: 0 1 auto; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sh-panel.tasks .followups.one-line li:has(.fu-text [aria-expanded="true"]) { align-items: flex-start; }
+  .sh-panel.tasks .followups.one-line li:has(.fu-text [aria-expanded="true"]) .fu-text { flex-wrap: wrap; }
+  .sh-panel.tasks .followups.one-line li:has(.fu-text [aria-expanded="true"]) .fu-open { flex-basis: 100%; white-space: normal; }
+  .sh-panel.tasks .sh-project-head { position: sticky; top: 0; z-index: 4; margin: 0 -8px; padding: 2px 6px 2px 10px; border: 0; border-radius: 8px; background: var(--panel-2); }
+  .sh-panel.tasks .sh-project-fold { font-weight: 650; }
+  .sh-panel.tasks .sh-project:not(.folded) > .followups, .sh-panel.tasks .sh-project:not(.folded) > div { margin-top: 4px; }
+}
