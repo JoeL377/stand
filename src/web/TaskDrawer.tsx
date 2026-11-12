@@ -22,7 +22,7 @@ import { useDismiss } from "./useDismiss.ts";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
 
-export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, acts }: {
+export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange, acts }: {
   /** What a phone's row no longer shows (topic, drop, archive); the drawer shows it on phones only. */
   acts?: (note: Note) => React.ReactNode;
   id: string;
@@ -30,6 +30,8 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, acts }: {
   onClose: () => void;
   /** The comments that tag you here stopped waiting on you: the list moves the task back. */
   onMentionsChange?: () => void;
+  /** It changed in a way the list shows (its parent, so its section): the list reloads. */
+  onListChange?: () => void;
 }) {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
@@ -175,7 +177,14 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, acts }: {
               ) : <p className="muted">No plan yet.</p>}
             </section>
 
-            {!task.parts.length && (task.parent || task.parentChoices.length > 0) && <PartOf task={task} onOpen={onOpen} onSaved={() => void load()} />}
+            {!task.parts.length && (task.parent || task.parentChoices.length > 0) && <PartOf
+                task={task}
+                onOpen={onOpen}
+                onSaved={() => {
+                  void load();
+                  onListChange?.();
+                }}
+              />}
             <Links title="Parts" links={task.parts} onOpen={onOpen} />
             <Links title="Waits on" links={task.waitsOn} onOpen={onOpen} />
             <Links title="Blocking" links={task.blocking} onOpen={onOpen} />

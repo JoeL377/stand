@@ -454,6 +454,15 @@ test("a task gets a parent, one level deep, and keeps it through a redraft and d
     assert.equal(db.getNote(step.id)?.parentId, spec.id, "a restore keeps it");
     assert.equal(db.setNoteParent(room.id, question.id, null)?.parentId, null, "taken off");
 
+    // A to-do with a part is one someone acted on: a run that leaves it out keeps it.
+    const [lead, piece] = db.syncNotes(m.id, items[1].id, [
+      { kind: "action", text: "Lead", owner: null },
+      { kind: "action", text: "Piece", owner: null },
+    ]);
+    db.setNoteParent(room.id, piece.id, lead.id);
+    db.syncNotes(m.id, items[1].id, []);
+    assert.ok(db.getNote(lead.id), "a parent survives the run");
+
     // A parent that is gone reads as none: the part can get another one, and can be a parent itself.
     db.removeNote(spec.id);
     assert.equal(shown(db, room.id, step.id), null);
