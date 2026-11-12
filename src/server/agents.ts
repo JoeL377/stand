@@ -724,6 +724,27 @@ export function agentApi(deps: AgentDeps) {
       }
     },
 
+    /** Sets the order of a space's projects, most important first. Those left out keep their order after. */
+    orderProjects(caller: Caller, args: { space: string; projects: string[] }, baseUrl = "") {
+      requireWrite(caller);
+      const room = findSpace(caller, args.space);
+      if (!args.projects.length) throw new AgentError("Name at least one project, most important first.");
+      const ids = args.projects.map((p) => projectFor(room.id, p));
+      if (ids.includes(null)) throw new AgentError("Unassigned is not a project and has no place in the order. Name only projects.");
+      try {
+        const ordered = db.orderProjects(room.id, ids as string[]).filter((p) => !p.archived);
+        deps.notify(room.id, "followups");
+        return {
+          ordered: ordered.map((p) => projectRow(p, baseUrl)),
+          space: room.name,
+          next: "This is the order the Tasks tab and list_spaces show, most important first.",
+        };
+      } catch (err) {
+        if (err instanceof ProjectError) throw new AgentError(err.message);
+        throw err;
+      }
+    },
+
     /** Where a reference lives, for the web app's /ref/... links. */
     locate(caller: Caller, kind: string, id: string) {
       if (kind === "project") {

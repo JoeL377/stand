@@ -199,6 +199,25 @@ export function projectsStore(db: DatabaseSync) {
       return store.getProject(roomId, id);
     },
 
+    /** Puts these projects first, in this order. The others keep their order after them. */
+    orderProjects(roomId: string, ids: string[]): Project[] {
+      const all = (db.prepare("SELECT id FROM projects WHERE room_id = ? ORDER BY position, created_at").all(roomId) as Row[]).map((x) => x.id as string);
+      const first = [...new Set(ids)];
+      const stranger = first.find((id) => !all.includes(id));
+      if (stranger) throw new ProjectError("That project isn't in this space.");
+      const order = [...first, ...all.filter((id) => !first.includes(id))];
+      const st = db.prepare("UPDATE projects SET position = ? WHERE id = ?");
+      db.exec("BEGIN");
+      try {
+        order.forEach((id, i) => st.run(i, id));
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return store.listProjects(roomId);
+    },
+
     /** Deletes a project. Its tasks and agenda items lose the link, and the tasks follow the rules again. */
     deleteProject(roomId: string, id: string): boolean {
       const r = row(id);

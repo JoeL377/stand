@@ -1213,3 +1213,18 @@ test("agents see projects: they create one, file to-dos in it by ref or name, fi
   assert.throws(() => api.get({ user: stranger, token: null }, ref, "x"), /not in that space/);
   assert.throws(() => api.createProject({ user: joe, token: { ...token, scope: "read" as const } }, { space: room.id, name: "Read only" }), /read only/);
 });
+
+test("agents set the order of a space's projects by ref or name, and list_spaces reads it", () => {
+  const { api, db, joe, room } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const [a, , c] = ["Alpha", "Beta", "Gamma"].map((name) => db.createProject(room.id, { name }, "Joe"));
+  const ordered = api.orderProjects(agent, { space: room.id, projects: [`stand:project/${c.id}`, "alpha"] });
+  assert.deepEqual(ordered.ordered.map((p) => p.name), ["Gamma", "Alpha", "Beta"]);
+  assert.deepEqual(api.listSpaces(agent)[0].projects?.map((p) => p.name), ["Gamma", "Alpha", "Beta"]);
+  assert.throws(() => api.orderProjects(agent, { space: room.id, projects: ["Nope"] }), /No project called "Nope"/);
+  assert.throws(() => api.orderProjects(agent, { space: room.id, projects: ["unassigned"] }), /not a project/);
+  assert.throws(() => api.orderProjects(agent, { space: room.id, projects: [] }), /at least one/);
+  assert.throws(() => api.orderProjects({ user: joe, token: { ...token, scope: "read" as const } }, { space: room.id, projects: [a.id] }), /read only/);
+  assert.deepEqual(db.listProjects(room.id).map((p) => p.name), ["Gamma", "Alpha", "Beta"], "a refused order changes nothing");
+});

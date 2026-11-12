@@ -118,6 +118,26 @@ test("names are unique in a space whatever the case; archive needs no open to-do
   }
 });
 
+test("one order for a space: the projects named go first in that order, the rest keep theirs after", () => {
+  const { db, room } = setup();
+  try {
+    const [a, b, c, d] = ["Alpha", "Beta", "Gamma", "Delta"].map((name) => db.createProject(room.id, { name }, "Sam"));
+    const names = () => db.listProjects(room.id).map((x) => x.name);
+    assert.deepEqual(db.orderProjects(room.id, [c.id, a.id]).map((x) => x.name), ["Gamma", "Alpha", "Beta", "Delta"]);
+    assert.deepEqual(db.listProjects(room.id).map((x) => x.position), [0, 1, 2, 3]);
+    db.orderProjects(room.id, [d.id, d.id]);
+    assert.deepEqual(names(), ["Delta", "Gamma", "Alpha", "Beta"], "a project named twice counts once");
+    db.updateProject(room.id, b.id, { position: 1 });
+    assert.deepEqual(names(), ["Delta", "Beta", "Gamma", "Alpha"], "a move by position, as the drag sends it");
+    const other = db.createProject(db.createRoom("Other").id, { name: "Elsewhere" }, "Sam");
+    assert.throws(() => db.orderProjects(room.id, [a.id, other.id]), /isn't in this space/);
+    assert.deepEqual(names(), ["Delta", "Beta", "Gamma", "Alpha"], "a bad order changes nothing");
+    assert.equal(db.createProject(room.id, { name: "Epsilon" }, "Sam").position, 4, "a new project goes last");
+  } finally {
+    db.raw.close();
+  }
+});
+
 test("deleting a project unlinks its tasks and items, which follow the rules again", () => {
   const { db, room, items, m } = setup();
   try {

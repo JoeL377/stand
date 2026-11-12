@@ -150,6 +150,13 @@ export const ChevronIcon = ({ size = 12 }: { size?: number }) => (
   </Svg>
 );
 
+/** Two columns of dots: a handle to drag something by. */
+export const GripIcon = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" strokeWidth={3} />
+  </Svg>
+);
+
 /** A side panel with an arrow: pointing in to hide the panel, out to show it. right: the panel on the right. */
 export const PanelIcon = ({ size = 16, open, right }: { size?: number; open: boolean; right?: boolean }) => (
   <Svg size={size}>
