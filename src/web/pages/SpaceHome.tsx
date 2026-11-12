@@ -6,9 +6,10 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
-import { matchesTopic, topicKey, topicOf, topicOptions } from "../../shared/topics.ts";
-import { TopicPicker } from "../TopicPicker.tsx";
+import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, QuestionSweep, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
+import { activeFirst, matchesProject, projectActivity, type Project } from "../../shared/projects.ts";
+import { ProjectPicker } from "../ProjectPicker.tsx";
+import { OwnerPicker } from "../OwnerPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
 import { stateOf } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
@@ -17,10 +18,11 @@ import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
-import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, GripIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
+import { AnswerForm, SweepPop, answeredToast } from "../Questions.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { fmtDate, fmtTime } from "../util.ts";
@@ -31,6 +33,7 @@ import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { ShotZoom } from "../room/ReviewStage.tsx";
 import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
+import { MOD } from "../shortcuts.ts";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { TaskDrawer } from "../TaskDrawer.tsx";
 import { SpaceChat, useSpaceChat } from "../SpaceChat.tsx";
@@ -48,11 +51,28 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Someone tags you in chat while you're elsewhere on the page, or on another tab: a toast says so.
-  const tabNow = useRef<TabKey>("tasks");
+  // On a wide screen chat is a column beside every tab (the dock); on a narrower one it is a tab.
+  const wide = useWide();
+  const [dockOpen, setDockOpen] = useState(() => {
+    try {
+      return localStorage.getItem(DOCK_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const showDock = (open: boolean) => {
+    setDockOpen(open);
+    try {
+      localStorage.setItem(DOCK_KEY, open ? "1" : "0");
+    } catch {}
+  };
+  // Each rise puts the cursor in the chat box.
+  const [focusChat, setFocusChat] = useState(0);
+  // Someone tags you in chat while it isn't on screen, or from another tab: a toast says so.
+  const chatShown = useRef(false);
   const openChat = useRef(() => {});
   const chat = useSpaceChat(room.id, user.id, (m) => {
-    if (tabNow.current === "chat" && document.visibilityState === "visible") return;
+    if (chatShown.current && document.visibilityState === "visible") return;
     const said = m.text.length > 120 ? `${m.text.slice(0, 119)}…` : m.text;
     toast({ text: `${firstName(m.author)} mentioned you in chat: “${said}”`, action: { label: "Open chat", run: () => openChat.current() }, ms: 10_000 });
   });
@@ -69,18 +89,20 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const closeTask = useCallback(() => setParams((prev) => {
     const next = new URLSearchParams(prev); next.delete("task"); next.delete("view"); return next;
   }, { replace: true }), [setParams]);
-  const topicFilter = params.get("topic") ?? "";
-  const setTopicFilter = (value: string) => setParams((prev) => {
+  // ?project=<id> or ?project=none for Unassigned. Older ?topic= links show everything.
+  const projectFilter = params.get("project") ?? "";
+  const mine = params.get("mine") === "1";
+  const setParam = (key: string, value: string) => setParams((prev) => {
     const next = new URLSearchParams(prev);
-    if (value) next.set("topic", value); else next.delete("topic");
+    next.delete("topic");
+    if (value) next.set(key, value); else next.delete(key);
     return next;
   });
+  const setProjectFilter = (value: string) => setParam("project", value);
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [showReview, setShowReview] = useState(false);
-  const [showBrain, setShowBrain] = useState(false);
-  const [showSession, setShowSession] = useState(false);
   const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session">("");
-  const [tab, setTab] = useState<TabKey>(() => {
+  const [picked, setTab] = useState<TabKey>(() => {
     if (openTask) return "tasks";
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
@@ -96,8 +118,42 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       localStorage.setItem(`stand.spaceTab.${room.id}`, key);
     } catch {}
   };
-  tabNow.current = tab;
-  openChat.current = () => pickTab("chat");
+  // A wide screen has no Chat tab: one saved from a narrower screen shows Tasks, with the dock open.
+  const tab: TabKey = wide && picked === "chat" ? "tasks" : picked;
+  const docked = wide && dockOpen;
+  chatShown.current = wide ? dockOpen : tab === "chat";
+  const pickedChat = useRef(picked === "chat");
+  useEffect(() => {
+    if (wide && pickedChat.current) showDock(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wide]);
+  pickedChat.current = picked === "chat";
+  const toChat = () => {
+    if (wide) showDock(true);
+    else pickTab("chat");
+    setFocusChat((n) => n + 1);
+  };
+  openChat.current = toChat;
+  // Command + J opens chat with the cursor in its box, and closes the dock again; typing in the box keeps it.
+  const chatKey = useRef(() => {});
+  chatKey.current = () => (docked ? showDock(false) : toChat());
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "j") return;
+      e.preventDefault();
+      chatKey.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // The task drawer opens beside the dock when there is room for both.
+  useEffect(() => {
+    if (!docked) return;
+    document.documentElement.dataset.chatDock = "";
+    return () => {
+      delete document.documentElement.dataset.chatDock;
+    };
+  }, [docked]);
   // The browser tab says how much is new in this space's chat, so it shows from another tab too.
   useEffect(() => {
     const was = document.title;
@@ -238,12 +294,10 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const done = (room.doneFollowUps ?? []).filter((f) => !gone.has(`todo:${f.id}`));
   const closedQuestions = (feed?.closedQuestions ?? []).filter((n) => !gone.has(`question:${n.id}`));
 
-  const allNotes = [...todos, ...questions, ...decisions, ...done, ...closedQuestions];
-  const topics = topicOptions(allNotes, room.items, room.decks);
-  const topic = (n: Note) => topicOf(n, room.items, room.decks);
-  const matching = (n: Note) => matchesTopic(topic(n), topicFilter);
-  const topicPicker = (n: Note) => <TopicPicker note={n} roomId={room.id} topic={topic(n)}
-    inherited={topicOf({ ...n, topic: null }, room.items, room.decks)} options={topics} onSaved={load} />;
+  const projects = room.projects ?? [];
+  const matching = (n: Note) => matchesProject(n.project ?? null, projectFilter);
+  const projectPicker = (n: Note) => <ProjectPicker note={n} roomId={room.id} projects={projects} onSaved={load} />;
+  const filtered = projectProblem(projects, projectFilter);
 
   const reviews = feed?.reviews ?? [];
   const designReviews = feed?.designReviews ?? [];
@@ -269,22 +323,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       props.onJoin();
     } catch (err) {
       errorToast("Couldn't start the review")(err);
-    }
-  };
-  const startBrainstorm = async (prompt: string) => {
-    try {
-      await api.startBrainstorm(room.id, prompt);
-      props.onJoin();
-    } catch (err) {
-      errorToast("Couldn't start the brainstorm")(err);
-    }
-  };
-  const startSession = async (prompt: string, seed: string, taskId: string | null) => {
-    try {
-      await api.startBrainstorm(room.id, prompt, { seed, taskId });
-      props.onJoin();
-    } catch (err) {
-      errorToast("Couldn't start the design session")(err);
     }
   };
   const removeSlide = async (slideId: string) => {
@@ -337,6 +375,18 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                 {faces.length > 4 && <span className="sh-faces-more">+{faces.length - 4}</span>}
               </span>
             )}
+            {wide && (
+              <button
+                className={docked ? "sh-invite sh-chat-toggle on" : "sh-invite sh-chat-toggle"}
+                aria-pressed={docked}
+                onClick={() => (docked ? showDock(false) : toChat())}
+                title={`${docked ? "Hide" : "Show"} chat (${CHAT_SHORTCUT})`}
+              >
+                <ChatIcon size={14} />
+                Chat
+                {!docked && <ChatMarks unread={chat.unread} mentions={chat.mentions} />}
+              </button>
+            )}
             <button className="sh-invite" onClick={copy} title="Copy a link others can join with">
               <LinkIcon />
               {copied ? "Copied" : "Invite"}
@@ -346,19 +396,16 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               review={feed?.review ?? null}
               designReview={feed?.designReview ?? null}
               ideaReviews={(feed?.ideaReviews ?? []).filter((r) => r.status !== "done").map((r) => ({ ...r, href: reviewHref(room.id, r.id) }))}
-              brainstorm={(feed?.brainstorms ?? []).find((b) => b.status === "live") ?? null}
-              onSession={() => setShowSession(true)}
               designHref={designReviewHref(room.id)}
               onTalk={props.onJoin}
               onReview={() => setShowReview(true)}
-              onBrainstorm={() => setShowBrain(true)}
             />
           </span>
         </header>
         <ModeNote caps={caps} />
 
         <div className="sh-tabs" role="tablist" aria-label="The space">
-          {TABS.map((t) => (
+          {TABS.filter((t) => !(wide && t.key === "chat")).map((t) => (
             <button
               key={t.key}
               role="tab"
@@ -375,18 +422,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               )}
             </button>
           ))}
-          {/* One pill at the end of the tab row filters Tasks and Decisions by topic. */}
+          {/* One pill at the end of the tab row filters Tasks and Decisions by project. */}
           {(tab === "tasks" || tab === "decisions") && (
-            <label className={topicFilter ? "sh-topic-filter on" : "sh-topic-filter"} title="Filter by topic">
+            <label className={projectFilter ? "sh-project-filter on" : "sh-project-filter"} title="Filter by project">
               {/* A phone has room for the mark only; the menu opens from it. */}
-              <svg className="sh-topic-mark" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+              <svg className="sh-project-mark" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
                 <path d="M2.5 4h11M4.5 8h7M6.5 12h3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
               </svg>
-              <select aria-label="Filter by topic" value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)}>
-                <option value="">All topics</option>
-                <option value="none">No topic</option>
-                {topics.map((t) => <option key={topicKey(t)} value={`topic:${topicKey(t)}`}>{t}</option>)}
-                {topicFilter.startsWith("topic:") && !topics.some((t) => `topic:${topicKey(t)}` === topicFilter) && <option value={topicFilter}>{topicFilter.slice(6)}</option>}
+              <select aria-label="Filter by project" value={filtered ? "" : projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+                <option value="">All projects</option>
+                {projects.filter((p) => !p.archived || p.id === projectFilter).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <option value="none">Unassigned</option>
               </select>
             </label>
           )}
@@ -398,11 +444,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         {showReview && feed?.review && (
           <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
         )}
-        {showBrain && <BrainstormPop onStart={startBrainstorm} onClose={() => setShowBrain(false)} />}
-        {showSession && <DesignSessionPop todos={todos.filter((t) => !t.doneAt)} onStart={startSession} onClose={() => setShowSession(false)} />}
 
         <section className={`sh-panel ${tab}`} role="tabpanel">
-          {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} />}
+          {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
           {tab === "meetings" && (
             <>
               {error && !feed && (
@@ -437,7 +481,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                   {kind === "review" &&
                     reviews.map((r) => (
                       <KindRow key={r.id} to={reviewHref(room.id, r.id)} name="Product review" at={r.startedAt}>
-                        <span className="sh-what muted">{r.slides} {r.slides === 1 ? "slide" : "slides"}</span>
+                        <span className="sh-what" dir="auto">{reviewName(r.titles ?? [], r.slides)}</span>
+                        <span className="sh-what sh-count muted">{r.slides} {r.slides === 1 ? "slide" : "slides"}</span>
                         <OutcomeCounts outcomes={r.outcomes} />
                       </KindRow>
                     ))}
@@ -504,12 +549,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             <TasksTab
               roomId={room.id}
               me={user.name}
-              deck={topicFilter ? null : deck}
+              people={members}
+              deck={projectFilter ? null : deck}
+              sweep={feed?.questionSweep ?? null}
               open={[...todos, ...questions].filter(matching)}
               closed={[...done, ...closedQuestions].filter(matching)}
               mentions={feed?.mentions ?? []}
-              topicPicker={topicPicker}
-              filtered={!!topicFilter}
+              projectPicker={projectPicker}
+              projects={projects}
+              projectFilter={filtered ? "" : projectFilter}
+              mine={mine}
+              onMine={(on) => setParam("mine", on ? "1" : "")}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
               reload={load}
               openId={openTask}
@@ -521,12 +571,12 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               <PointList
                 kind="decided"
                 notes={decisions.filter(matching)}
-                topicPicker={topicPicker}
-                empty={topicFilter ? "No decisions in this topic." : "No decisions yet."}
+                projectPicker={projectPicker}
+                empty={projectFilter ? "No decisions in this project." : "No decisions yet."}
                 onArchive={(id) => archive(`decision:${id}`)}
                 onReplaced={(id, by, replaced) => void api.confirmReplaced(room.id, id, by, replaced).then(load, errorToast("Couldn't save that"))}
               />
-              {!topicFilter && context.length > 0 && (
+              {!projectFilter && context.length > 0 && (
                 <>
                   <p className="sh-group" title="What's true in this space that nobody had to choose">
                     Context · {context.length}
@@ -541,7 +591,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             </>
           )}
 
-          {tab !== "chat" && (!(tab === "tasks" || tab === "decisions") || !topicFilter) && <ArchivedList
+          {tab !== "chat" && (!(tab === "tasks" || tab === "decisions") || !projectFilter) && <ArchivedList
             rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
             open={showArchived}
             onToggle={() => setShowArchived((v) => !v)}
@@ -567,7 +617,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
             // A phone's rows carry only the title, so what the row's pills and icons do is offered here.
             acts={(n) => (
               <>
-                {topicPicker(n)}
+                {projectPicker(n)}
                 {!n.doneAt && (
                   <button
                     type="button"
@@ -597,13 +647,31 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               load();
               api.spaces().then(setSpaces, () => {});
             }}
+            onListChange={load}
           />
         )}
         </div>
       </main>
+      {docked && (
+        <aside className="sh-dock" aria-label="Chat">
+          <div className="sh-dock-head">
+            <ChatIcon size={14} />
+            <strong>Chat</strong>
+            <button className="icon-btn" aria-label="Close chat" title={`Close chat (${CHAT_SHORTCUT})`} onClick={() => showDock(false)}>
+              <CloseIcon />
+            </button>
+          </div>
+          <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />
+        </aside>
+      )}
     </SpacesShell>
   </PersonColors.Provider>
   );
+}
+
+/** A project filter from a link to a project that is gone: it filters nothing. */
+function projectProblem(projects: Project[], filter: string) {
+  return !!filter && filter !== "none" && !projects.some((p) => p.id === filter);
 }
 
 function dayLabel(ts: number) {
@@ -816,15 +884,25 @@ type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
  * One list for everything still to do in the space: to-dos (Do) and open questions (Answer). Tasks
  * where a comment tags you come first, then work waiting on someone's look (a PR reported ready),
  * then the rest grouped by owner, yours first, then folded Done and Dropped. Anyone can tick a task
- * off, drop it or reopen it, with Undo.
+ * off, drop it or reopen it, with Undo. An open question takes an answer under its line, and the
+ * sweep closes the ones Stand proposed and someone confirms (Questions.tsx).
  */
 function TasksTab(props: {
-  topicPicker: (n: Note) => React.ReactNode;
-  filtered: boolean;
+  projectPicker: (n: Note) => React.ReactNode;
+  projects: Project[];
+  /** "" for all, "none" for Unassigned, or one project's id. */
+  projectFilter: string;
+  /** Only the tasks of the person looking (?mine=1). */
+  mine: boolean;
+  onMine: (on: boolean) => void;
   roomId: string;
   me: string;
+  /** The space's people, by name: who a to-do can be given to. */
+  people: string[];
   /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
   deck: DoneDeck | null;
+  /** The open questions Stand's last sweep proposes to close. */
+  sweep: QuestionSweep | null;
   open: TaskNote[];
   closed: TaskNote[];
   /** Comments that tag you and wait on you, newest first. */
@@ -838,24 +916,111 @@ function TasksTab(props: {
   const [showDeck, setShowDeck] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
-  const work = useWork(props.open.filter((n) => n.kind === "action").map((n) => n.id));
+  const [adding, setAdding] = useState(false);
+  // The open question someone is writing an answer to.
+  const [answering, setAnswering] = useState<string | null>(null);
+  // The sweep someone has open, as it was when they opened it.
+  const [sweeping, setSweeping] = useState<QuestionSweep | null>(null);
+  const { sweep } = props;
+  const asked = props.open.filter((n) => n.kind === "question").length;
+  // Which project sections someone folded, kept in this browser.
+  const foldKey = `stand.projectFold.${props.roomId}`;
+  const [folded, setFolded] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(foldKey) ?? "[]") as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleFold = (id: string) =>
+    setFolded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(foldKey, JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+  const me = firstName(props.me);
+  const isMine = (n: Note) => !!n.owner && firstName(n.owner) === me;
+  const open = props.mine ? props.open.filter(isMine) : props.open;
+  const closed = props.mine ? props.closed.filter(isMine) : props.closed;
+  const work = useWork(open.filter((n) => n.kind === "action").map((n) => n.id));
   // The comments that tag you, per task: newest first, so [0] is the latest.
   const tagged = new Map<string, TaskMention[]>();
   for (const m of props.mentions) tagged.set(m.noteId, [...(tagged.get(m.noteId) ?? []), m]);
-  const mentioned = props.open.filter((n) => tagged.has(n.id)).sort((a, b) => tagged.get(b.id)![0].ts - tagged.get(a.id)![0].ts);
-  const waiting = props.open.filter((n) => work[n.id]?.ready && !tagged.has(n.id));
-  const groups = new Map<string, TaskNote[]>();
-  for (const n of props.open.filter((x) => !work[x.id]?.ready && !tagged.has(x.id))) {
-    const k = n.owner ? firstName(n.owner) : "";
-    groups.set(k, [...(groups.get(k) ?? []), n]);
+  const mentioned = open.filter((n) => tagged.has(n.id)).sort((a, b) => tagged.get(b.id)![0].ts - tagged.get(a.id)![0].ts);
+  const waiting = open.filter((n) => work[n.id]?.ready && !tagged.has(n.id));
+  const rest = open.filter((x) => !work[x.id]?.ready && !tagged.has(x.id));
+  // How the sections are ordered, kept in this browser: by what is going on, or the team's order.
+  const sortKey = `stand.projectSort.${props.roomId}`;
+  const [sort, setSort] = useState<"active" | "team">(() => {
+    try {
+      return localStorage.getItem(sortKey) === "team" ? "team" : "active";
+    } catch {
+      return "active";
+    }
+  });
+  const pickSort = (value: "active" | "team") => {
+    setSort(value);
+    try {
+      localStorage.setItem(sortKey, value);
+    } catch {}
+  };
+  // The space's one order of projects, most important first. A move shows at once and saves behind it.
+  const [order, setOrder] = useState<string[] | null>(null);
+  useEffect(() => setOrder(null), [props.projects]);
+  const projects = order ? order.map((id) => props.projects.find((p) => p.id === id)).filter((p): p is Project => !!p) : props.projects;
+  const moveProject = (id: string, to: number) => {
+    const ids = projects.map((p) => p.id).filter((x) => x !== id);
+    const at = Math.max(0, Math.min(to, ids.length));
+    if (projects[at]?.id === id) return;
+    ids.splice(at, 0, id);
+    setOrder(ids);
+    api.updateProject(props.roomId, id, { position: at }).then(props.reload, (err) => {
+      setOrder(null);
+      errorToast("Couldn't move the project")(err);
+    });
+  };
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
+  const dropOn = (target: string, after: boolean) => {
+    if (!dragging || dragging === target) return;
+    const ids = projects.map((p) => p.id).filter((x) => x !== dragging);
+    moveProject(dragging, ids.indexOf(target) + (after ? 1 : 0));
+  };
+  // One section per project, in the list's order; then Unassigned. A project with nothing open
+  // stays until someone archives it, and an archived one shows only while something open is in it.
+  const inProject = new Map<string, TaskNote[]>();
+  for (const n of rest) {
+    const k = n.project && projects.some((p) => p.id === n.project) ? n.project : "";
+    inProject.set(k, [...(inProject.get(k) ?? []), n]);
   }
-  const me = firstName(props.me);
-  const owners = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || groups.get(b)!.length - groups.get(a)!.length || a.localeCompare(b));
-  function rank(k: string) {
-    return k === me ? 0 : k === "" ? 2 : 1;
-  }
-  const done = props.closed.filter((n) => stateOf(n) !== "dropped");
-  const dropped = props.closed.filter((n) => stateOf(n) === "dropped");
+  const inView = projects.filter(
+    (p) => (props.projectFilter ? p.id === props.projectFilter : !p.archived || inProject.has(p.id)) && (!props.mine || inProject.has(p.id)),
+  );
+  // Active first: projects with work in progress, then where the newest to-dos are. Team order: the list's own.
+  const activity = projectActivity(
+    open
+      .filter((n) => n.kind === "action")
+      .map((n) => ({ project: n.project, ts: n.ts, inProgress: stateOf(n, work[n.id]) === "doing", reportedAt: work[n.id]?.log[0]?.ts })),
+  );
+  const sections = sort === "active" ? activeFirst(inView, activity) : inView;
+  const canSort = !props.projectFilter && sections.length > 1;
+  const canOrder = canSort && sort === "team";
+  /** Up or down past the next project in view. */
+  const nudge = (id: string, dir: -1 | 1) => {
+    const next = sections[sections.findIndex((p) => p.id === id) + dir];
+    if (!next) return;
+    const ids = projects.map((p) => p.id).filter((x) => x !== id);
+    moveProject(id, ids.indexOf(next.id) + (dir > 0 ? 1 : 0));
+  };
+  const unassigned = inProject.get("") ?? [];
+  const showUnassigned = (!props.projectFilter || props.projectFilter === "none") && (unassigned.length > 0 || props.projects.length === 0);
+  const done = closed.filter((n) => stateOf(n) !== "dropped");
+  const dropped = closed.filter((n) => stateOf(n) === "dropped");
+  const nameOf = (id: string | null | undefined) => props.projects.find((p) => p.id === id)?.name ?? null;
 
   const move = (n: Note, state: "done" | "dropped" | "open") =>
     api.setTask(props.roomId, n.id, { state }).then(
@@ -863,7 +1028,7 @@ function TasksTab(props: {
         props.reload();
         if (state !== "open")
           toast({
-            text: state === "dropped" ? "Dropped" : n.kind === "question" ? "Answered" : "Done",
+            text: state === "dropped" ? "Dropped" : n.kind === "question" ? "Closed without an answer" : "Done",
             action: { label: "Undo", run: () => void api.setTask(props.roomId, n.id, { state: "open" }).then(props.reload, errorToast("Couldn't undo it")) },
           });
         return saved;
@@ -875,6 +1040,14 @@ function TasksTab(props: {
     );
   const notSaid = (n: Note) => void api.setTask(props.roomId, n.id, { saidDone: false }).then(props.reload, errorToast("Couldn't change it"));
 
+  const face = (n: TaskNote) =>
+    n.owner ? (
+      <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`} />
+    ) : (
+      <span className="rc-face none" title={n.kind === "question" ? "Anyone" : "Unassigned"}>
+        ?
+      </span>
+    );
   const list = (notes: TaskNote[], closed = false) => (
     <FollowUpList
       oneLine
@@ -882,11 +1055,39 @@ function TasksTab(props: {
       openId={props.openId}
       onOpen={(n) => props.onOpen(n.id)}
       onToggle={(n, d) => move(n, d ? "done" : "open")}
+      below={(n) =>
+        !closed &&
+        answering === n.id && (
+          <AnswerForm
+            roomId={props.roomId}
+            note={n}
+            onCancel={() => setAnswering(null)}
+            onDone={(done) => {
+              setAnswering(null);
+              props.reload();
+              answeredToast(props.roomId, done, props.reload);
+            }}
+          />
+        )
+      }
       after={(n: TaskNote) => (
         <>
           {!closed && tagged.has(n.id) && <MentionPill mentions={tagged.get(n.id)!} />}
-          {props.topicPicker(n)}
-          {n.kind === "question" && <span className="task-verb">Answer</span>}
+          {props.projectPicker(n)}
+          {n.kind === "question" &&
+            (closed ? (
+              !n.answeredBy && <span className="task-verb">Answer</span>
+            ) : (
+              <button
+                type="button"
+                className="task-verb task-answer"
+                aria-expanded={answering === n.id}
+                title="Write the answer. Stand keeps it as a decision and closes the question."
+                onClick={() => setAnswering(answering === n.id ? null : n.id)}
+              >
+                Answer
+              </button>
+            ))}
           {n.saidDone && !n.doneAt && <SaidDonePill quote={n.saidDone} onUndo={() => notSaid(n)} />}
           {!closed && n.state === "doing" && !work[n.id]?.working && <span className="rc-pill task-doing">Doing</span>}
           {closed && <ClosedPill note={n} />}
@@ -911,17 +1112,36 @@ function TasksTab(props: {
             </button>
           )}
           <ArchiveButton onClick={() => props.onArchive(n)} />
-          {n.owner ? (
-            <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`} />
+          {n.kind === "action" ? (
+            <OwnerPicker note={n} roomId={props.roomId} people={props.people} me={props.me} onSaved={props.reload}>
+              {face(n)}
+            </OwnerPicker>
           ) : (
-            <span className="rc-face none" title={n.kind === "question" ? "Anyone" : "Unassigned"}>
-              ?
-            </span>
+            face(n)
           )}
         </>
       )}
     />
   );
+
+  /** Open tasks by who has them: you first, then the others by how many they have, then nobody. */
+  const byOwner = (notes: TaskNote[]) => {
+    const groups = new Map<string, TaskNote[]>();
+    for (const n of notes) {
+      const k = n.owner ? firstName(n.owner) : "";
+      groups.set(k, [...(groups.get(k) ?? []), n]);
+    }
+    const rank = (k: string) => (k === me ? 0 : k === "" ? 2 : 1);
+    const owners = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || groups.get(b)!.length - groups.get(a)!.length || a.localeCompare(b));
+    return owners.map((o) => (
+      <div key={o || "nobody"} className="sh-task-group by-owner">
+        <p className="sh-group">
+          {o === me ? "You" : o || "No owner"} · {groups.get(o)!.length}
+        </p>
+        {list(groups.get(o)!)}
+      </div>
+    ));
+  };
 
   const fold = (label: string, n: number, open: boolean, toggle: () => void, icon: React.ReactNode) =>
     n > 0 && (
@@ -934,6 +1154,7 @@ function TasksTab(props: {
     );
 
   const deck = props.deck?.slides.length ? props.deck : null;
+  const filterName = props.projectFilter === "none" ? "Unassigned" : nameOf(props.projectFilter);
   return (
     <>
       {deck && (
@@ -948,7 +1169,55 @@ function TasksTab(props: {
         </button>
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
-      {!props.open.length && <p className="sh-card-empty">{props.filtered ? "No open tasks in this topic." : "Nothing open. New tasks come from meetings and what people save here."}</p>}
+      {sweeping && <SweepPop roomId={props.roomId} count={asked} sweep={sweeping} onClose={() => setSweeping(null)} onClosed={props.reload} />}
+      <div className="sh-task-tools">
+        <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only the tasks you own">
+          Mine
+        </button>
+        {adding ? (
+          <ProjectForm
+            label="New project"
+            submit="Add"
+            onCancel={() => setAdding(false)}
+            onSave={async (name, goal) => {
+              await api.createProject(props.roomId, { name, goal: goal || undefined });
+              setAdding(false);
+              props.reload();
+            }}
+          />
+        ) : (
+          <button type="button" className="rp-pill" onClick={() => setAdding(true)}>
+            + Project
+          </button>
+        )}
+        {!props.mine && !props.projectFilter && sweep && (
+          <button
+            type="button"
+            className="rp-pill"
+            onClick={() => setSweeping(sweep)}
+            title={`Stand thinks ${sweep.proposals.length === 1 ? "1 open question is" : `${sweep.proposals.length} open questions are`} settled or no longer ${sweep.proposals.length === 1 ? "matters" : "matter"}. Nothing closes until you confirm.`}
+          >
+            <span className="agent-mark" aria-hidden>
+              ✦
+            </span>
+            Sweep questions
+            <span className="count">{sweep.proposals.length}</span>
+          </button>
+        )}
+        {canSort && (
+          <label className="sh-project-sort" title={sort === "active" ? "Projects with work in progress first, then the ones with the newest to-dos" : "The team's order, most important first. Drag a project to change it."}>
+            <select aria-label="Project order" value={sort} onChange={(e) => pickSort(e.target.value === "team" ? "team" : "active")}>
+              <option value="active">Active first</option>
+              <option value="team">Team order</option>
+            </select>
+          </label>
+        )}
+      </div>
+      {!open.length && !sections.length && (
+        <p className="sh-card-empty">
+          {props.mine ? "Nothing open is yours." : filterName ? `No open tasks in ${filterName}.` : "Nothing open. New tasks come from meetings and what people save here."}
+        </p>
+      )}
       {mentioned.length > 0 && (
         <div className="sh-task-group">
           <p className="sh-group mentioned" title="Someone tagged you in a comment. Reply on the task or dismiss it there.">
@@ -965,14 +1234,72 @@ function TasksTab(props: {
           {list(waiting)}
         </div>
       )}
-      {owners.map((o) => (
-        <div key={o || "nobody"} className="sh-task-group by-owner">
-          <p className="sh-group">
-            {o === me ? "You" : o || "No owner"} · {groups.get(o)!.length}
-          </p>
-          {list(groups.get(o)!)}
-        </div>
-      ))}
+      {sections.map((p, i) => {
+        const notes = inProject.get(p.id) ?? [];
+        const isFolded = folded.has(p.id);
+        const drop = dropAt?.id === p.id && dragging !== p.id ? (dropAt.after ? " drop-after" : " drop-before") : "";
+        return (
+          <section
+            key={p.id}
+            className={`sh-project${isFolded ? " folded" : ""}${dragging === p.id ? " dragging" : ""}${drop}`}
+            aria-label={p.name}
+            onDragOver={
+              dragging
+                ? (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const box = e.currentTarget.getBoundingClientRect();
+                    const after = e.clientY > box.top + box.height / 2;
+                    if (dropAt?.id !== p.id || dropAt.after !== after) setDropAt({ id: p.id, after });
+                  }
+                : undefined
+            }
+            onDrop={
+              dragging
+                ? (e) => {
+                    e.preventDefault();
+                    if (dropAt) dropOn(dropAt.id, dropAt.after);
+                    setDragging(null);
+                    setDropAt(null);
+                  }
+                : undefined
+            }
+          >
+            <ProjectHead
+              project={p}
+              count={notes.length}
+              inProgress={activity.get(p.id)?.inProgress ?? 0}
+              folded={isFolded}
+              onFold={() => toggleFold(p.id)}
+              roomId={props.roomId}
+              reload={props.reload}
+              order={
+                canOrder
+                  ? {
+                      onUp: i > 0 ? () => nudge(p.id, -1) : undefined,
+                      onDown: i < sections.length - 1 ? () => nudge(p.id, 1) : undefined,
+                      onDragStart: () => setDragging(p.id),
+                      onDragEnd: () => (setDragging(null), setDropAt(null)),
+                    }
+                  : undefined
+              }
+            />
+            {!isFolded && (notes.length ? byOwner(notes) : <p className="sh-card-empty small">Nothing open in this project.</p>)}
+          </section>
+        );
+      })}
+      {showUnassigned && unassigned.length > 0 && (
+        <section className={`sh-project unassigned${folded.has("") ? " folded" : ""}`} aria-label="Unassigned">
+          <div className="sh-project-head">
+            <button type="button" className="sh-project-fold" aria-expanded={!folded.has("")} onClick={() => toggleFold("")}>
+              <ChevronIcon />
+              <span className="sh-project-name">{props.projects.length ? "Unassigned" : "All tasks"}</span>
+              <span className="count">{unassigned.length}</span>
+            </button>
+          </div>
+          {!folded.has("") && byOwner(unassigned)}
+        </section>
+      )}
       {done.length > 0 && (
         <div className={showDone ? "sh-done open" : "sh-done"}>
           {fold("Done", done.length, showDone, () => setShowDone((v) => !v), <DoneIcon />)}
@@ -986,6 +1313,184 @@ function TasksTab(props: {
         </div>
       )}
     </>
+  );
+}
+
+/** A project section's header: fold it, drag it by its handle to change the order, and Move up, Move
+ *  down, Rename, Edit goal, Archive or Delete from its menu. */
+function ProjectHead(props: {
+  project: Project;
+  count: number;
+  /** Open to-dos in it that someone is on now. */
+  inProgress: number;
+  folded: boolean;
+  onFold: () => void;
+  roomId: string;
+  reload: () => void;
+  /** Left out when the order can't change here: one project in view, a filter on, or Active first. */
+  order?: { onUp?: () => void; onDown?: () => void; onDragStart: () => void; onDragEnd: () => void };
+}) {
+  const { project: p, order } = props;
+  const [menu, setMenu] = useState(false);
+  const [editing, setEditing] = useState<"name" | "goal" | null>(null);
+  const ref = useDismiss<HTMLSpanElement>(menu, () => setMenu(false));
+  const change = (what: string, run: () => Promise<unknown>) => {
+    setMenu(false);
+    run().then(props.reload, errorToast(`Couldn't ${what}`));
+  };
+  if (editing)
+    return (
+      <div className="sh-project-head editing">
+        <ProjectForm
+          label={editing === "name" ? "Rename project" : "Project goal"}
+          submit="Save"
+          name={p.name}
+          goal={p.goal ?? ""}
+          only={editing}
+          onCancel={() => setEditing(null)}
+          onSave={async (name, goal) => {
+            await api.updateProject(props.roomId, p.id, editing === "name" ? { name } : { goal: goal || null });
+            setEditing(null);
+            props.reload();
+          }}
+        />
+      </div>
+    );
+  return (
+    <div className="sh-project-head">
+      {order && (
+        <span
+          className="sh-project-grip"
+          draggable
+          title="Drag to change the order"
+          aria-hidden
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", p.name);
+            const section = e.currentTarget.closest("section");
+            if (section) e.dataTransfer.setDragImage(section, 12, 12);
+            order.onDragStart();
+          }}
+          onDragEnd={order.onDragEnd}
+        >
+          <GripIcon />
+        </span>
+      )}
+      <button type="button" className="sh-project-fold" aria-expanded={!props.folded} onClick={props.onFold}>
+        <ChevronIcon />
+        <span className="sh-project-name">{p.name}</span>
+        <span className="count">{props.count}</span>
+        {props.inProgress > 0 && <span className="sh-project-live">{props.inProgress} in progress</span>}
+        {p.archived && <span className="muted small">Archived</span>}
+      </button>
+      {p.goal && <span className="sh-project-goal">{p.goal}</span>}
+      <span className="sh-project-menu" ref={ref}>
+        <button type="button" className="sh-project-more" aria-label={`${p.name}: more`} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
+          ⋯
+        </button>
+        {menu && (
+          <span className="sh-menu" role="menu">
+            {order && (
+              <>
+                <button role="menuitem" disabled={!order.onUp} onClick={() => (setMenu(false), order.onUp?.())}>
+                  Move up
+                </button>
+                <button role="menuitem" disabled={!order.onDown} onClick={() => (setMenu(false), order.onDown?.())}>
+                  Move down
+                </button>
+              </>
+            )}
+            <button role="menuitem" onClick={() => (setMenu(false), setEditing("name"))}>
+              Rename
+            </button>
+            <button role="menuitem" onClick={() => (setMenu(false), setEditing("goal"))}>
+              Edit goal
+            </button>
+            {p.archived ? (
+              <button role="menuitem" onClick={() => change("bring it back", () => api.updateProject(props.roomId, p.id, { archived: false }))}>
+                Unarchive
+              </button>
+            ) : (
+              <button
+                role="menuitem"
+                disabled={p.openTodos > 0}
+                title={p.openTodos > 0 ? "Close or move its open to-dos first" : undefined}
+                onClick={() => change("archive it", () => api.updateProject(props.roomId, p.id, { archived: true }))}
+              >
+                Archive
+              </button>
+            )}
+            <button
+              role="menuitem"
+              onClick={() => {
+                if (window.confirm(`Delete the project ${p.name}? Its tasks stay, and go back to their agenda item's project or to Unassigned.`))
+                  change("delete it", () => api.deleteProject(props.roomId, p.id));
+              }}
+            >
+              Delete
+            </button>
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** A project's name and goal line, for a new project or a change to one. */
+function ProjectForm(props: {
+  label: string;
+  submit: string;
+  name?: string;
+  goal?: string;
+  only?: "name" | "goal";
+  onSave: (name: string, goal: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(props.name ?? "");
+  const [goal, setGoal] = useState(props.goal ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const save = async () => {
+    if (saving || (props.only !== "goal" && !name.trim())) return;
+    setSaving(true);
+    setError("");
+    try {
+      await props.onSave(name.trim(), goal.trim());
+    } catch (err) {
+      setError((err as Error).message);
+      setSaving(false);
+    }
+  };
+  return (
+    <form
+      className="sh-project-form"
+      aria-label={props.label}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") props.onCancel();
+      }}
+    >
+      {props.only !== "goal" && (
+        <input autoFocus aria-label="Project name" placeholder="Project name" maxLength={80} value={name} disabled={saving} onChange={(e) => setName(e.target.value)} />
+      )}
+      {props.only !== "name" && (
+        <input autoFocus={props.only === "goal"} aria-label="Goal" placeholder="Goal, in one line (optional)" maxLength={200} value={goal} disabled={saving} onChange={(e) => setGoal(e.target.value)} />
+      )}
+      <button type="submit" disabled={saving || (props.only !== "goal" && !name.trim())}>
+        {saving ? "Saving…" : props.submit}
+      </button>
+      <button type="button" className="link" onClick={props.onCancel}>
+        Cancel
+      </button>
+      {error && (
+        <span className="error" role="alert">
+          {error}
+        </span>
+      )}
+    </form>
   );
 }
 
@@ -1048,12 +1553,9 @@ function StartMenu(props: {
   designReview: DesignReviewSummary | null;
   /** Idea reviews waiting or in a call, each with its page. */
   ideaReviews: Array<{ id: string; title: string; slides: number; status: string; href: string }>;
-  brainstorm: BrainstormSummary | null;
   designHref: string;
   onTalk: () => void;
   onReview: () => void;
-  onBrainstorm: () => void;
-  onSession: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
@@ -1100,14 +1602,6 @@ function StartMenu(props: {
               </span>
             </Link>
           ))}
-          <button type="button" role="menuitem" onClick={pick(props.brainstorm && !props.brainstorm.design ? props.onTalk : props.onBrainstorm)}>
-            <strong>Brainstorm</strong>
-            {props.brainstorm && !props.brainstorm.design && <span className="muted">on now</span>}
-          </button>
-          <button type="button" role="menuitem" onClick={pick(props.brainstorm?.design ? props.onTalk : props.onSession)}>
-            <strong>Design session</strong>
-            {props.brainstorm?.design && <span className="muted">on now</span>}
-          </button>
         </div>
       )}
     </div>
@@ -1132,20 +1626,19 @@ export function BrainstormPop(props: { onStart: (prompt: string) => Promise<void
         aria-label="Brainstorm"
         onSubmit={async (e) => {
           e.preventDefault();
-          // The topic is optional: left blank, Stand names the map from the talk.
-          if (starting) return;
+          if (!prompt.trim() || starting) return;
           setStarting(true);
           await props.onStart(prompt);
           setStarting(false);
         }}
       >
         <h2>Brainstorm</h2>
-        <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A topic or a question, or leave it blank" aria-label="What the brainstorm is about (optional: Stand names it from the talk)" title="Left blank, Stand names it from the talk" maxLength={160} dir="auto" />
+        <input autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A topic or a question to start from" aria-label="What the brainstorm is about" maxLength={160} dir="auto" />
         <div className="brain-pop-end">
           <button type="button" onClick={props.onClose}>
             Cancel
           </button>
-          <button type="submit" className="primary" disabled={starting}>
+          <button type="submit" className="primary" disabled={!prompt.trim() || starting}>
             {starting ? "Starting…" : "Start"}
           </button>
         </div>
@@ -1214,6 +1707,12 @@ export function DesignSessionPop(props: { todos: Array<{ id: string; text: strin
 }
 
 /** A review or brainstorm that ran, as a row that opens its page. */
+/** A product review has no name of its own: its first slides say which one it is. */
+const reviewName = (titles: Array<string | null | undefined>, slides: number) => {
+  const shown = titles.map((t) => (t ?? "").trim()).filter(Boolean).slice(0, 3);
+  return shown.join(" · ") + (slides > shown.length && shown.length ? ` +${slides - shown.length}` : "");
+};
+
 function KindRow(props: { to: string; name: string; at: number | null; children: React.ReactNode }) {
   return (
     <li className="sh-row">
@@ -1393,6 +1892,24 @@ function ChatMarks({ unread, mentions }: { unread: number; mentions: number }) {
   );
 }
 
+const IS_MAC = /Mac/.test(navigator.platform);
+const CHAT_SHORTCUT = `${MOD.cmd} + J`;
+const DOCK_KEY = "stand.chatDock";
+/** From this width chat is a column beside the tabs. Keep in step with .sh-dock in styles.css. */
+const DOCK_FROM = "(min-width: 1200px)";
+
+function useWide() {
+  const [wide, setWide] = useState(() => window.matchMedia(DOCK_FROM).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(DOCK_FROM);
+    const on = () => setWide(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return wide;
+}
+
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
   { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
@@ -1403,7 +1920,7 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
 /** Decisions or open questions across the space's meetings, as the recap lists them. A decision a
  *  later one replaced stays, muted and last, so the change of mind is still on record. */
 function PointList(props: {
-  topicPicker?: (n: Note) => React.ReactNode;
+  projectPicker?: (n: Note) => React.ReactNode;
   kind: "decided" | "question";
   notes: SpaceFeed["decided"];
   empty: string;
@@ -1420,9 +1937,20 @@ function PointList(props: {
           <span className="rc-point-body">
             <span>
               {n.text}
-              {props.topicPicker?.(n)}
+              {props.projectPicker?.(n)}
               {n.quote && <QuoteMark quote={n.quote} />}
               {n.from && <FromChip from={n.from} />}
+              {n.answers && (
+                <span className="rc-pill-wrap">
+                  <span className="rc-pill" tabIndex={0} aria-label={`Answers: ${n.answers}`}>
+                    Answer
+                  </span>
+                  <span className="rc-pop" role="tooltip">
+                    <span className="rc-pop-meta">Answers the question</span>
+                    <span className="rc-pop-crux">{n.answers}</span>
+                  </span>
+                </span>
+              )}
               {n.replacedBy && <ReplacedChip by={n.replacedBy} />}
               {n.mayBeReplacedBy && props.onReplaced && <MaybeReplaced by={n.mayBeReplacedBy} onAnswer={(replaced) => props.onReplaced!(n.id, n.mayBeReplacedBy!.noteId, replaced)} />}
             </span>

@@ -39,6 +39,8 @@ export interface ChatMessage {
   replyTo: string | null;
   editedAt: number | null;
   deletedAt: number | null;
+  /** The key its author's page sent it with, so that page knows it as the one it showed before it was saved. */
+  key: string | null;
 }
 
 /** What the chat tells whoever listens (the space's event stream). */
@@ -46,7 +48,17 @@ export type ChatEvent =
   | { type: "message"; message: ChatMessage }
   | { type: "session"; channelId: string; sessionId: string; open: boolean }
   /** What Stand caught from a session changed: read it again. */
-  | { type: "notes"; channelId: string; sessionId: string };
+  | { type: "notes"; channelId: string; sessionId: string }
+  /** Someone read further. Sending says the same of a message's author, so it has no event of its own. */
+  | ({ type: "read"; channelId: string } & ChatRead);
+
+/** How far someone has read a channel. */
+export interface ChatRead {
+  userId: string;
+  name: string;
+  /** The seq of the last message they have read. */
+  upTo: number;
+}
 
 /** A to-do, open question or decision Stand caught from chat, as the thread shows it. */
 export interface CaughtLine {
@@ -81,6 +93,8 @@ export interface ChatThread {
   caught: ChatCaught[];
   /** The seq of the last message you have read. */
   readUpTo: number;
+  /** How far the other people in the space have read, for those who have read anything. */
+  reads: ChatRead[];
   /** The space's people, to tag with @. */
   people: Array<{ id: string; name: string }>;
 }

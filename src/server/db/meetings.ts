@@ -1,12 +1,26 @@
 // Meetings: what was said (segments), where the focus was, the live board's saved state, and cost.
 import type { StageEvent, StageView } from "../../shared/timeline.ts";
 import type { DatabaseSync } from "node:sqlite";
-import type { AgentCard, Board, ChapterRecap, MeetingCost, NextStep, Segment } from "../../shared/protocol.ts";
+import type { AgentCard, Board, ChapterRecap, MeetingCost, NextStep, Segment, SpaceCost } from "../../shared/protocol.ts";
 import { enqueueConxtMeeting } from "../conxt.ts";
 import { newId } from "../ids.ts";
 import type { ListItem } from "../liveList.ts";
 import { costOf, type UsageRow } from "../usage.ts";
 import { DISCUSSION_SELECT, type OpenMeeting, type Row, toDiscussion, toNote, toSegment } from "./rows.ts";
+
+const USAGE_SUMS = "SUM(input) AS input, SUM(cache_read) AS cache_read, SUM(cache_write) AS cache_write, SUM(output) AS output, COUNT(*) AS calls";
+const priced = (r: Row) => costOf({ model: r.model as string, input: r.input as number, cacheRead: r.cache_read as number, cacheWrite: r.cache_write as number, output: r.output as number });
+
+/** Usage summed by task and model, as dollars by task, most expensive first. */
+function costByTask(rows: Row[]): MeetingCost {
+  const byTask = new Map<string, { usd: number; calls: number }>();
+  for (const r of rows) {
+    const t = byTask.get(r.task as string) ?? { usd: 0, calls: 0 };
+    byTask.set(r.task as string, { usd: t.usd + priced(r), calls: t.calls + (r.calls as number) });
+  }
+  const tasks = [...byTask].map(([task, t]) => ({ task, ...t })).sort((a, b) => b.usd - a.usd);
+  return { usd: tasks.reduce((s, t) => s + t.usd, 0), calls: tasks.reduce((s, t) => s + t.calls, 0), tasks };
+}
 
 export function meetingsStore(db: DatabaseSync) {
   return {
@@ -239,31 +253,43 @@ export function meetingsStore(db: DatabaseSync) {
       return r ? { id: r.id as string, startedAt: r.started_at as number, endedAt: r.ended_at as number } : null;
     },
     addUsage(r: UsageRow) {
-      db.prepare("INSERT INTO llm_usage (meeting_id, task, model, input, cache_read, cache_write, output, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
-        r.meetingId,
-        r.task,
-        r.model,
-        r.input,
-        r.cacheRead,
-        r.cacheWrite,
-        r.output,
-        r.at,
-      );
+      db.prepare(
+        "INSERT INTO llm_usage (meeting_id, room_id, task, model, input, cache_read, cache_write, output, at) VALUES (?, COALESCE(?, (SELECT room_id FROM meetings WHERE id = ?)), ?, ?, ?, ?, ?, ?, ?)",
+      ).run(r.meetingId, r.roomId, r.meetingId, r.task, r.model, r.input, r.cacheRead, r.cacheWrite, r.output, r.at);
     },
     /** What a meeting's Claude calls cost, in dollars, in all and by task; null when none were recorded. */
     meetingCost(meetingId: string): MeetingCost | null {
       const rows = db
-        .prepare("SELECT task, model, SUM(input) AS input, SUM(cache_read) AS cache_read, SUM(cache_write) AS cache_write, SUM(output) AS output, COUNT(*) AS calls FROM llm_usage WHERE meeting_id = ? GROUP BY task, model")
+        .prepare(`SELECT task, model, ${USAGE_SUMS} FROM llm_usage WHERE meeting_id = ? GROUP BY task, model`)
         .all(meetingId) as Row[];
-      if (!rows.length) return null;
-      const byTask = new Map<string, { usd: number; calls: number }>();
-      for (const r of rows) {
-        const usd = costOf({ model: r.model as string, input: r.input as number, cacheRead: r.cache_read as number, cacheWrite: r.cache_write as number, output: r.output as number });
-        const t = byTask.get(r.task as string) ?? { usd: 0, calls: 0 };
-        byTask.set(r.task as string, { usd: t.usd + usd, calls: t.calls + (r.calls as number) });
+      return rows.length ? costByTask(rows) : null;
+    },
+    /** What a space's Claude calls cost from `since` up to `until`: in calls, in chat and between meetings, and
+     *  by day in the viewer's time (`dayOffsetMin`: minutes east of UTC). Calls of no known space are left out. */
+    spaceCost(roomId: string, range: { since: number; until: number; dayOffsetMin: number }): SpaceCost {
+      const offset = Math.round(range.dayOffsetMin) * 60_000;
+      const rows = db
+        .prepare(
+          `SELECT CAST((u.at + ?) / 86400000 AS INTEGER) AS day, CASE WHEN u.meeting_id IS NULL THEN 'between' WHEN m.kind = 'chat' THEN 'chat' ELSE 'calls' END AS place,
+             u.task, u.model, ${USAGE_SUMS}
+           FROM llm_usage u LEFT JOIN meetings m ON m.id = u.meeting_id
+           WHERE u.room_id = ? AND u.at >= ? AND u.at < ?
+           GROUP BY 1, 2, u.task, u.model`,
+        )
+        .all(offset, roomId, range.since, range.until) as Row[];
+      const groups = (["calls", "chat", "between"] as const)
+        .map((where) => ({ where, rows: rows.filter((r) => r.place === where) }))
+        .filter((g) => g.rows.length)
+        .map(({ where, rows }) => ({ where, ...costByTask(rows) }))
+        .sort((a, b) => b.usd - a.usd);
+      const days: SpaceCost["days"] = [];
+      const dayOf = (at: number) => Math.floor((at + offset) / 86_400_000);
+      for (let d = dayOf(range.since); range.until > range.since && d <= dayOf(range.until - 1); d++) {
+        const on = rows.filter((r) => r.day === d);
+        const usd = (where?: string) => on.filter((r) => !where || r.place === where).reduce((s, r) => s + priced(r), 0);
+        days.push({ day: new Date(d * 86_400_000).toISOString().slice(0, 10), usd: usd(), calls: on.reduce((s, r) => s + (r.calls as number), 0), between: usd("between") });
       }
-      const tasks = [...byTask].map(([task, t]) => ({ task, ...t })).sort((a, b) => b.usd - a.usd);
-      return { usd: tasks.reduce((s, t) => s + t.usd, 0), calls: tasks.reduce((s, t) => s + t.calls, 0), tasks };
+      return { since: range.since, until: range.until, usd: groups.reduce((s, g) => s + g.usd, 0), calls: groups.reduce((s, g) => s + g.calls, 0), groups, days };
     },
     getSegments(ids: string[]): Segment[] {
       if (!ids.length) return [];

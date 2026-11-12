@@ -5,7 +5,7 @@ import express from "express";
 import { requireUser } from "./auth.ts";
 import { conxtRoutes } from "./conxt.ts";
 import { openDb } from "./db.ts";
-import { projectRoutes } from "./routes/projects.ts";
+import { sourceRoutes } from "./routes/sources.ts";
 import { spaceRoutes } from "./routes/spaces.ts";
 import type { Services } from "./services.ts";
 import { toSpaceSummary } from "./spaces.ts";
@@ -51,7 +51,7 @@ test("space admins over HTTP: admins rename the space, manage its repos and Conx
   app.use(express.json());
   app.use(requireUser(db));
   spaceRoutes(app, { db, sessions: new Map() } as unknown as Services);
-  projectRoutes(app, { db, githubApp: null, projects: { list: () => [], unlink: () => false } } as unknown as Services);
+  sourceRoutes(app, { db, githubApp: null, sources: { list: () => [], unlink: () => false } } as unknown as Services);
   app.use("/api/rooms/:id/conxt", conxtRoutes(db, []));
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -78,8 +78,8 @@ test("space admins over HTTP: admins rename the space, manage its repos and Conx
     // Someone who isn't an admin can't change anything.
     assert.equal((await asAnn("PUT", `/members/${ann.id}`, { admin: true })).status, 403);
     assert.equal((await asAnn("PATCH", "", { name: "Ann's space" })).status, 403);
-    assert.equal((await asAnn("GET", "/projects")).body.canManage, false);
-    assert.equal((await asAnn("DELETE", "/projects/JoeL377/stand")).status, 403);
+    assert.equal((await asAnn("GET", "/sources")).body.canManage, false);
+    assert.equal((await asAnn("DELETE", "/sources/JoeL377/stand")).status, 403);
     assert.equal((await asAnn("GET", "/conxt")).body.canManage, false);
     assert.equal((await asAnn("DELETE", "/conxt")).status, 403);
 
@@ -92,8 +92,8 @@ test("space admins over HTTP: admins rename the space, manage its repos and Conx
 
     // Ann now manages what the creator manages.
     assert.equal((await asAnn("PATCH", "", { name: "Checkout v3" })).body.name, "Checkout v3");
-    assert.equal((await asAnn("GET", "/projects")).body.canManage, true);
-    assert.equal((await asAnn("DELETE", "/projects/JoeL377/stand")).status, 404, "allowed, but no such repo is linked");
+    assert.equal((await asAnn("GET", "/sources")).body.canManage, true);
+    assert.equal((await asAnn("DELETE", "/sources/JoeL377/stand")).status, 404, "allowed, but no such repo is linked");
     assert.equal((await asAnn("GET", "/conxt")).body.canManage, true);
     assert.equal((await asAnn("DELETE", "/conxt")).status, 200);
 

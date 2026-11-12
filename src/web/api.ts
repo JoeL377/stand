@@ -2,6 +2,7 @@ import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
 import type { ChatCaught, ChatMessage, ChatSession, ChatThread } from "../shared/chat.ts";
 import type { DraftSlide } from "../shared/outline.ts";
+import type { Project } from "../shared/projects.ts";
 import type {
   BrainstormSummary,
   BrainstormView,
@@ -20,8 +21,11 @@ import type {
   Jot,
   MeetingRecap,
   Note,
-  ProjectsStatus,
+  QuestionClose,
+  QuestionClosed,
+  SourcesStatus,
   Snap,
+  SpaceCost,
   SpaceFeed,
   SpaceMembers,
   SpaceSummary,
@@ -81,6 +85,8 @@ export interface RoomInfo {
   synthesisInstructions: string;
   items: Item[];
   decks: Deck[];
+  /** The space's projects in order, archived ones too. */
+  projects: Project[];
   people: Array<{ name: string; picture: string | null }>;
   meetings: Array<{ id: string; startedAt: number; endedAt: number | null; summary: string | null; segmentCount: number }>;
   /** Open action items from the room's past meetings. */
@@ -112,13 +118,13 @@ export const api = {
   createToken: (label: string, scope: AgentToken["scope"]) => call<{ token: string; info: AgentToken }>("POST", "/api/tokens", { label, scope }),
   revokeToken: (id: string) => call<{ ok: true }>("DELETE", `/api/tokens/${id}`),
   github: () => call<GithubStatus>("GET", "/api/github"),
-  projects: (roomId: string) => call<ProjectsStatus>("GET", `/api/rooms/${roomId}/projects`),
+  sources: (roomId: string) => call<SourcesStatus>("GET", `/api/rooms/${roomId}/sources`),
   /** Linking clones the repo first, which can take a while. */
-  linkProject: (roomId: string, repo: string) => call<ProjectsStatus>("POST", `/api/rooms/${roomId}/projects`, { repo }, SLOW_REQUEST_MS),
-  pullProject: (roomId: string, owner: string, repo: string) =>
-    call<ProjectsStatus>("POST", `/api/rooms/${roomId}/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull`, {}, SLOW_REQUEST_MS),
-  unlinkProject: (roomId: string, owner: string, repo: string) =>
-    call<ProjectsStatus>("DELETE", `/api/rooms/${roomId}/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`),
+  linkSource: (roomId: string, repo: string) => call<SourcesStatus>("POST", `/api/rooms/${roomId}/sources`, { repo }, SLOW_REQUEST_MS),
+  pullSource: (roomId: string, owner: string, repo: string) =>
+    call<SourcesStatus>("POST", `/api/rooms/${roomId}/sources/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull`, {}, SLOW_REQUEST_MS),
+  unlinkSource: (roomId: string, owner: string, repo: string) =>
+    call<SourcesStatus>("DELETE", `/api/rooms/${roomId}/sources/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`),
   locateRef: (kind: string, id: string) => call<{ meetingId: string; roomId: string; itemId: string | null; added?: boolean }>("GET", `/api/refs/${kind}/${id}`),
   refPrompt: (kind: string, id: string) => call<{ text: string }>("GET", `/api/refs/${kind}/${id}/prompt`),
   config: () => call<Capabilities>("GET", "/api/config"),
@@ -131,6 +137,8 @@ export const api = {
     call<{ id: string; name: string; purpose: string; synthesisInstructions: string }>("PATCH", `/api/rooms/${id}`, patch),
   members: (roomId: string) => call<SpaceMembers>("GET", `/api/rooms/${roomId}/members`),
   setAdmin: (roomId: string, userId: string, admin: boolean) => call<SpaceMembers>("PUT", `/api/rooms/${roomId}/members/${userId}`, { admin }),
+  /** What Stand spent for the space over the last `days` days, by day in this browser's time. */
+  spaceCost: (roomId: string, days: number) => call<SpaceCost>("GET", `/api/rooms/${roomId}/cost?days=${days}&tz=${-new Date().getTimezoneOffset()}`),
   room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
   feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
@@ -176,10 +184,27 @@ export const api = {
   setFollowUp: (roomId: string, noteId: string, done: boolean) => call<Note>("PATCH", `/api/rooms/${roomId}/followups/${noteId}`, { done }),
   confirmReplaced: (roomId: string, noteId: string, by: string, replaced: boolean) =>
     call<unknown>("POST", `/api/rooms/${roomId}/decisions/${noteId}/replaced`, { by, replaced }),
-  setNoteTopic: (roomId: string, noteId: string, topic: string | null) =>
-    call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/topic`, { topic }),
-  setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false }) =>
+  projects: (roomId: string) => call<Project[]>("GET", `/api/rooms/${roomId}/projects`),
+  createProject: (roomId: string, input: { name: string; goal?: string; fromItemId?: string }) => call<Project>("POST", `/api/rooms/${roomId}/projects`, input),
+  updateProject: (roomId: string, projectId: string, change: { name?: string; goal?: string | null; position?: number; archived?: boolean }) =>
+    call<Project>("PATCH", `/api/rooms/${roomId}/projects/${projectId}`, change),
+  deleteProject: (roomId: string, projectId: string) => call<{ ok: true }>("DELETE", `/api/rooms/${roomId}/projects/${projectId}`),
+  /** A project's id, null for Unassigned, or "auto" to follow the rules again. */
+  setNoteProject: (roomId: string, noteId: string, projectId: string | null | "auto") =>
+    call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/project`, projectId === "auto" ? { auto: true } : { projectId }),
+  /** The to-do it is a part of, or null to take it off. */
+  setNoteParent: (roomId: string, noteId: string, parentId: string | null) => call<Note>("PATCH", `/api/rooms/${roomId}/notes/${noteId}/parent`, { parentId }),
+  /** Links an agenda item to a project, or takes the link off. Returns the agenda. */
+  setItemProject: (roomId: string, itemId: string, projectId: string | null) => call<Item[]>("PATCH", `/api/rooms/${roomId}/items/${itemId}`, { projectId }),
+  /** undoAnswer: with state open on a question, also takes back the decision its answer made. */
+  setTask: (roomId: string, noteId: string, change: { state?: "done" | "dropped" | "open"; reason?: string; saidDone?: false; undoAnswer?: string }) =>
     call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}`, change),
+  /** Closes open questions: each with an answer (kept as a decision), a decision the space has, or a drop with why.
+   *  keep: the sweep's proposals someone unticked, which Stand doesn't propose again. */
+  closeQuestions: (roomId: string, rows: QuestionClose[], keep: string[] = []) =>
+    call<{ closed: QuestionClosed[] }>("POST", `/api/rooms/${roomId}/questions/close`, { rows, keep }),
+  setTaskOwner: (roomId: string, noteId: string, owner: string | null) =>
+    call<Note>("PATCH", `/api/rooms/${roomId}/tasks/${noteId}/owner`, { owner }),
   planReview: (id: string, version?: string) =>
     call<PlanReview>("GET", `/api/tasks/${id}/plan-review${version ? `?version=${encodeURIComponent(version)}` : ""}`),
   changePlanReview: (id: string, input: object) =>

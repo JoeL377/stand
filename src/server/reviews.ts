@@ -182,7 +182,8 @@ export function summaryOfReview(db: DB, review: ReviewRow): ReviewSummary {
   const slides = db.reviewSlides(review.id);
   const outcomes = { ship: 0, fixes: 0, not_yet: 0 };
   for (const s of slides) if (s.outcome && s.outcome in outcomes) outcomes[s.outcome as ReviewOutcome]++;
-  return { id: review.id, startedAt: review.startedAt, endedAt: review.endedAt, meetingId: review.meetingId, slides: slides.length, outcomes };
+  const titles = slides.map((x) => (x.name || x.title || "").trim()).filter(Boolean).slice(0, 3);
+  return { id: review.id, startedAt: review.startedAt, endedAt: review.endedAt, meetingId: review.meetingId, slides: slides.length, titles, outcomes };
 }
 
 /** The space's reviews that ran, newest first. */

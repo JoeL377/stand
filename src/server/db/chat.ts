@@ -1,10 +1,10 @@
 // Chat (chat.ts): channels, the sessions in them, and what chat keeps about a message beside its segment.
 import type { DatabaseSync } from "node:sqlite";
-import type { Channel, ChatMessage, ChatSession } from "../../shared/chat.ts";
+import type { Channel, ChatMessage, ChatRead, ChatSession } from "../../shared/chat.ts";
 import { newId } from "../ids.ts";
 import type { Row } from "./rows.ts";
 
-const MESSAGE_SELECT = `SELECT c.seq, c.channel_id, c.reply_to, c.edited_at, c.deleted_at,
+const MESSAGE_SELECT = `SELECT c.seq, c.channel_id, c.external_id, c.reply_to, c.edited_at, c.deleted_at,
   s.id, s.meeting_id, s.speaker_id, s.speaker_name, s.text, s.ts
   FROM chat_messages c JOIN segments s ON s.id = c.segment_id`;
 
@@ -29,6 +29,13 @@ const toSession = (r: Row): ChatSession => ({
   messages: r.n as number,
 });
 
+/** The key its author's page sent it with: Stand's own chat keeps it as "<author id>:<key>". */
+const sendKey = (r: Row) => {
+  const ext = r.external_id as string | null;
+  const own = `${r.speaker_id as string}:`;
+  return ext?.startsWith(own) ? ext.slice(own.length) : null;
+};
+
 const toMessage = (r: Row): ChatMessage => ({
   seq: r.seq as number,
   id: r.id as string,
@@ -41,6 +48,7 @@ const toMessage = (r: Row): ChatMessage => ({
   replyTo: (r.reply_to as string) ?? null,
   editedAt: (r.edited_at as number) ?? null,
   deletedAt: (r.deleted_at as number) ?? null,
+  key: sendKey(r),
 });
 
 export function chatStore(db: DatabaseSync) {
@@ -195,6 +203,13 @@ export function chatStore(db: DatabaseSync) {
     channelReadUpTo(channelId: string, userId: string): number {
       const r = db.prepare("SELECT read_up_to FROM channel_reads WHERE channel_id = ? AND user_id = ?").get(channelId, userId) as Row | undefined;
       return (r?.read_up_to as number) ?? 0;
+    },
+    /** How far each person has read the channel, for those who have read anything. */
+    channelReads(channelId: string): ChatRead[] {
+      const rows = db
+        .prepare("SELECT r.user_id, u.name, r.read_up_to FROM channel_reads r JOIN users u ON u.id = r.user_id WHERE r.channel_id = ? AND r.read_up_to > 0 ORDER BY u.name, u.id")
+        .all(channelId) as Row[];
+      return rows.map((r) => ({ userId: r.user_id as string, name: r.name as string, upTo: r.read_up_to as number }));
     },
     /** Messages other people wrote that this person hasn't read, in each of their spaces that has some. */
     unreadChat(userId: string): Map<string, number> {

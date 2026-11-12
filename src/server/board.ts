@@ -205,7 +205,7 @@ export class BoardKeeper {
   }
 
   /** One pass over the talk up to `now`. Returns whether the board changed. */
-  async run(segments: Segment[], items: Item[], people: string[], focusItemId: string | null, now: number): Promise<boolean> {
+  async run(segments: Segment[], items: Item[], people: string[], focusItemId: string | null, now: number, note?: string): Promise<boolean> {
     const talk = segments.filter((s) => s.ts <= now).sort((a, b) => a.ts - b.ts);
     const fresh = talk.filter((s) => s.ts > this.lastLook);
     if (!fresh.length) return false;
@@ -225,7 +225,10 @@ export class BoardKeeper {
     const context = [
       `People: ${people.join(", ")}`,
       `Earlier threads:\n${this.threads.filter((t) => t !== this.current).map((t) => `- ${t.id} "${t.title}": ${t.card.summary.join(" ")}`).join("\n") || "(none)"}`,
-    ].join("\n\n");
+      note ?? "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const recent = talk.filter((s) => s.ts > now - WINDOW_MS);
     const live = [
       `Agenda item in focus: ${itemTitle(focusItemId)}`,

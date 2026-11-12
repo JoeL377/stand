@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { BrainCaught, Segment } from "../shared/protocol.ts";
-import { type MapAnswer, MapKeeper, brainstormOfMeeting, brainstormPage, brainstormsOf, finishBrainstorm, starIdea, startBrainstorm } from "./brainstorm.ts";
+import { type MapAnswer, MapKeeper, brainstormOfMeeting, catchUp, brainstormPage, brainstormsOf, finishBrainstorm, starIdea, startBrainstorm } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
+import { migrate } from "./db/schema.ts";
+import { DatabaseSync } from "node:sqlite";
 
 const T0 = 1_000_000;
 const seg = (n: number, who: string, text: string): Segment => ({ id: `s${n}`, meetingId: "m", itemId: null, speakerId: who, speakerName: who, kind: "speech", text, ts: T0 + n * 1000 });
@@ -94,11 +96,25 @@ test("a circle someone took off stays off, and a model that can't answer changes
   assert.equal(again.unreadSince(talk), talk[1].ts);
 });
 
-test("a map is a view: it leaves the agenda alone, and keeps its page after the call", () => {
+test("a line out of the map's scope is never read, and never waits as unread", async () => {
+  const model = scripted([{ add: [{ under: "root", label: "Onboarding", detail: "Ways to get a new team going.", by: "Huy", line: 1 }] }]);
+  const slide = (n: number, who: string, text: string): Segment => ({ ...seg(n, who, text), itemId: "slide" });
+  const map = new MapKeeper(model, "Week one", T0, null, (s) => s.itemId !== "slide");
+  const talk = [slide(1, "Joe", "on this slide the button is blue"), seg(2, "Huy", "onboarding could start from a sample space")];
+  assert.equal(map.unreadSince(talk), talk[1].ts);
+  assert.equal(await map.run(talk, [], [], T0, T0 + 5000), true);
+  assert.doesNotMatch(model.asked[0], /button is blue/);
+  assert.match(model.asked[0], /NEW \[1\] \[0:02\] Huy: onboarding/);
+  talk.push(slide(3, "Joe", "next slide"));
+  assert.equal(map.unreadSince(talk), null);
+});
+
+test("a brainstorm adds nothing to the agenda, and keeps its page after the call", () => {
   const db = openDb(":memory:");
   const room = db.createRoom("Conxt 1.0", null, "");
   const other = db.createRoom("Elsewhere", null, "");
   db.addItems(room.id, [{ source: "agenda", externalId: null, title: "Roadmap", url: null, description: null }]);
+  assert.throws(() => startBrainstorm(db, room.id, "   ", "Joe Liang"), /topic or a question/);
   const b = startBrainstorm(db, room.id, "  How should a  review start? ", "Joe Liang", T0);
   assert.equal(b.prompt, "How should a review start?");
   assert.equal(b.itemId, null);
@@ -131,39 +147,50 @@ test("a map is a view: it leaves the agenda alone, and keeps its page after the 
   assert.equal(starIdea(db, other.id, next.id, "i1", true), null);
   assert.deepEqual(brainstormPage(db, room.id, next.id)!.starred, ["i1"]);
   assert.equal(starIdea(db, room.id, next.id, "i1", false)!.starred, undefined);
-  assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, directions: 1, ideas: 1 });
+  assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, threadId: null, directions: 1, ideas: 1 });
 });
 
-test("a map can start without a topic and hold more than one centre", async () => {
-  const model = scripted([
-    { title: "How a Discord chat gets into Stand.", add: [{ under: "root", label: "A bot", detail: "A bot reads the channels it can see.", by: "Janesh", line: 1 }] },
-    {
-      add: [
-        { under: "root", label: "Detect from talk", topic: "Meeting formats", detail: "Work out the format from what is said.", by: "Joe", line: 1 },
-        { under: "new1", label: "Suggest a brainstorm", detail: "Offer the map when it sounds like one.", by: "Huy", line: 1 },
-        { under: "root", label: "One review", topic: "meeting formats", detail: "Review is the one structured thing.", by: "Janesh", line: 1 },
-        { under: "root", label: "Links to chats", topic: "How a Discord chat gets into Stand", detail: "Does a chat have a link.", by: "Huy", line: 1 },
-      ],
-    },
-  ]);
-  const map = new MapKeeper(model, "", T0);
-  await map.run([seg(1, "Janesh", "you would have a bot that indexes the chats")], ["Janesh", "Joe", "Huy"], [], T0, T0 + 5000);
-  assert.match(model.asked[0], /no name yet/);
-  assert.equal(map.prompt, "How a Discord chat gets into Stand", "Stand named it from the talk");
-  await map.run([seg(1, "Janesh", "x"), seg(9, "Joe", "the format should be detected from the discussion")], ["Janesh", "Joe", "Huy"], [], T0, T0 + 12_000);
-  assert.deepEqual(map.centres(), ["Meeting formats"]);
-  assert.deepEqual(map.all().filter((n) => !n.parent).map((n) => [n.label, n.topic ?? null]), [["A bot", null], ["Detect from talk", "Meeting formats"], ["One review", "Meeting formats"], ["Links to chats", null]]);
-  assert.equal(map.all().find((n) => n.label === "Suggest a brainstorm")!.parent, "d2");
-  // The next pass is shown every centre with what hangs off it.
-  model.asked.length = 0;
-  await map.run([seg(1, "Janesh", "x"), seg(9, "Joe", "y"), seg(20, "Huy", "more")], ["Huy"], [], T0, T0 + 30_000);
-  assert.match(model.asked[0], /Centre 1 \(the first; topic null\): How a Discord chat gets into Stand\n- \[d1\] A bot[\s\S]*\[d4\] Links to chats[\s\S]*Centre 2, topic "Meeting formats":\n- \[d2\] Detect from talk/);
-
-  // In the space: a blank map is allowed, a blank diagram is not, and one never named gets a plain name when it is done.
+test("a brainstorm running from before maps were views lets go of its agenda item", () => {
   const db = openDb(":memory:");
   const room = db.createRoom("Conxt 1.0", null, "");
-  const b = startBrainstorm(db, room.id, "  ", "Joe Liang", T0);
-  assert.equal(b.prompt, "");
-  assert.equal(startBrainstorm(db, room.id, "", "Huy Ngo").id, b.id, "a blank one that is still empty is the same one");
-  assert.equal(finishBrainstorm(db, room.id, null, T0 + 5)!.prompt, "Untitled map");
+  const [item, kept] = db.addItems(room.id, [
+    { source: "agenda", externalId: null, title: "Pricing", url: null, description: null },
+    { source: "agenda", externalId: null, title: "Roadmap", url: null, description: null },
+  ]);
+  const old = db.createBrainstorm({ roomId: room.id, prompt: "Pricing", itemId: item.id, startedBy: "Joe", startedAt: T0 });
+  migrate(db.raw);
+  migrate(db.raw);
+  assert.equal(db.getBrainstorm(old.id)!.itemId, null);
+  assert.equal(db.getBrainstorm(old.id)!.status, "live");
+  assert.deepEqual(db.listItems(room.id).map((i) => i.id), [kept.id]);
+});
+
+test("a long stretch nobody has read is caught up a window at a time; a short one is one pass", async () => {
+  const MIN = 60_000;
+  const line = (n: number): Segment => ({ ...seg(n, "Joe", `line ${n}`), ts: T0 + n * 30_000 });
+  const talk = Array.from({ length: 20 }, (_, i) => line(i + 1));
+  const model = scripted([]);
+  const map = new MapKeeper(model, "Week one", T0);
+  let steps = 0;
+  await catchUp(map, talk, [], [], T0, T0 + 10 * MIN + 1000, () => steps++);
+  assert.ok(model.asked.length > 1);
+  // Each step sees two minutes from the first line it hadn't read, and nothing after.
+  assert.match(model.asked[0], /line 5\b/);
+  assert.doesNotMatch(model.asked[0], /line 6\b/);
+  assert.match(model.asked.at(-1)!, /line 20/);
+  assert.equal(map.unreadSince(talk), null);
+  assert.equal(steps, 0, "nothing changed, so no step to show");
+
+  const short = scripted([]);
+  const again = new MapKeeper(short, "Week one", T0);
+  await catchUp(again, talk.slice(0, 3), [], [], T0, T0 + 2 * MIN);
+  assert.equal(short.asked.length, 1);
+});
+
+test("an old database gets the columns a topic's map keeps", () => {
+  const raw = new DatabaseSync(":memory:");
+  raw.exec("CREATE TABLE brainstorms (id TEXT PRIMARY KEY, room_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, item_id TEXT, meeting_id TEXT, started_by TEXT, started_at INTEGER NOT NULL, ended_at INTEGER, map_json TEXT)");
+  migrate(raw);
+  const cols = (raw.prepare("PRAGMA table_info(brainstorms)").all() as Array<{ name: string }>).map((c) => c.name);
+  assert.ok(cols.includes("thread_id") && cols.includes("spans_json"));
 });

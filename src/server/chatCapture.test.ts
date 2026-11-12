@@ -87,6 +87,8 @@ test("what people write becomes the session's to-dos, open questions, decisions 
     // The model read the messages as lines of chat, with the guide for written talk.
     assert.deepEqual(calls.map((c) => [c.lines, c.tidy, c.keys]), [[["Joe Liang: Can we ship the invite flow on Friday?", "Huy Ngo: Yes. I will send the email copy today. Who reviews it?"], false, []]]);
     assert.match(calls[0].instructions, /written chat/);
+    // Someone who asks for a to-do gets one, though nobody answered.
+    assert.match(calls[0].instructions, /action item even if nobody answered/);
 
     assert.deepEqual(kinds(first.sessionId), [
       "summary: Joe and Huy agreed to ship on Friday.",

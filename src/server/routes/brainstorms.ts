@@ -1,13 +1,14 @@
-// Brainstorms and design sessions: a call that starts from one sentence and draws what's said.
+// Brainstorms and design sessions: a map or a diagram of what's said in a call, drawn from one sentence.
 import type { Express } from "express";
-import { BrainstormError, brainstormPage, brainstormsOf, starIdea, startBrainstorm, toBrainstormView } from "../brainstorm.ts";
+import { BrainstormError, brainstormPage, brainstormsOf, promptOf, starIdea, startBrainstorm, toBrainstormView } from "../brainstorm.ts";
 import { isDiagramText, mermaidIn, parseSeed, SEED_MAX, seedFromAnswer } from "../designSession.ts";
 import type { Services } from "../services.ts";
+import { forSpace } from "../usage.ts";
 import { memberRoom, notFound, route } from "./http.ts";
 
 export function brainstormRoutes(app: Express, ctx: Services) {
   const { db, agent, sessions } = ctx;
-  // Opens a map or a diagram on a topic or a question, for the call that is running or the next one.
+  // Starts one on a topic or a question. A call that's running draws its map or diagram beside the board.
   app.post(
     "/api/rooms/:id/brainstorm/start",
     route(async (req, res) => {
@@ -30,13 +31,20 @@ export function brainstormRoutes(app: Express, ctx: Services) {
           prompt = String(req.body?.prompt ?? "").trim() || task?.text || /^\s*#{1,3}\s+(.+)$/m.exec(pasted)?.[1]?.trim() || "";
           let diagram = parseSeed(pasted ? (isDiagramText(pasted) ? pasted : "") : mermaidIn(plan));
           // Prose, or a plan with no diagram in it: the model finds the design. Without it the session starts blank.
-          if (seed && !diagram.boxes.length && agent.designSeed) diagram = seedFromAnswer(await agent.designSeed(prompt || "not named yet", seed).catch(() => null));
+          if (seed && !diagram.boxes.length && agent.designSeed) diagram = seedFromAnswer(await forSpace(agent, room.id).designSeed!(prompt || "not named yet", seed).catch(() => null));
           if (pasted && !diagram.boxes.length) diagram = parseSeed(pasted);
           design = { diagram, seed: seed || null, taskId: task?.id ?? null };
         }
-        // In a call it opens as a view beside the board: the agenda, the focus and the host stay as they are.
         const s = sessions.get(room.id);
-        const b = s && !s.ended ? s.openView(prompt, req.user!.name, design) : startBrainstorm(db, room.id, prompt, req.user!.name, Date.now(), design);
+        const text = promptOf(prompt, !!design);
+        const live = db.brainstormLive(room.id);
+        // Another one is drawing in the call: it stops first, so it is kept as it would be by Stop drawing.
+        if (s && text && live && !(live.prompt === text && (live.kind === "design") === !!design)) await s.stopView();
+        const b = startBrainstorm(db, room.id, prompt, req.user!.name, Date.now(), design);
+        if (s) {
+          s.itemsChanged();
+          s.brainstormChanged();
+        }
         res.json({ brainstorm: toBrainstormView(b) });
       } catch (err) {
         if (err instanceof BrainstormError) return res.status(400).json({ error: err.message });

@@ -2,10 +2,12 @@
 // out loud that they want a brainstorm, a design session or a review, Stand puts one small card up:
 // "Open a map for this?". Anyone can take it or wave it off, and nothing switches by itself.
 //
-// It starts from the spoken intent only: plain words matched on the line as it is transcribed, with
-// no model call. Guessing from the drift of the talk would be wrong more often and cost a pass.
+// Two signals, both plain words matched on the lines as they are transcribed, with no model call:
+// someone asks for it ("let's brainstorm on…"), or the talk of the last few minutes sounds like one
+// (several people throwing out ideas; someone walking through how parts connect). The second is a
+// guess, so it is slower to speak, says "Sounds like", and only ever offers a map or a diagram.
 //
-// A map or a diagram opens as a view beside the board. A review needs prepared slides or specs, so a
+// A map or a diagram is drawn as a view beside the board. A review needs prepared slides or specs, so a
 // review that was asked for is kept for the recap ("Suggested next") unless someone waves it off.
 import type { NextKind, NextStep } from "../shared/protocol.ts";
 
@@ -59,6 +61,31 @@ function topicIn(after: string): string | null {
   if (t.length < 3 || VAGUE.test(t) || /^(?:the|a|an|our|how|what|some)$/i.test(t)) return null;
   const cut = t.length > TOPIC_MAX ? `${t.slice(0, TOPIC_MAX - 1).trimEnd()}…` : t;
   return cut[0].toUpperCase() + cut.slice(1);
+}
+
+/** A line of the call's talk, as the guess below reads it. */
+export interface Said {
+  speaker: string;
+  text: string;
+  ts: number;
+}
+/** How far back the guess listens, and how long a kind stays quiet after Stand guessed it once. */
+export const SOUNDS_WINDOW_MS = 3 * 60_000;
+export const SOUNDS_QUIET_MS = 15 * 60_000;
+// Throwing out options: the sound of a brainstorm.
+const IDEA = /\b(?:what if|how about|what about|another (?:idea|option|way|thought)|one (?:idea|option)|we could (?:also|just|even)?|maybe we|or (?:we|you|it) (?:could|can|might)|could also|alternatively|or maybe|idea is|imagine if)\b/gi;
+// Walking through parts and how they connect: the sound of a design.
+const PARTS = /\b(?:flows? (?:in)?to|(?:calls?|talks? to|sends?|writes? to|reads? from|pushes|pulls from|hits) the|pipeline|architecture|components?|schema|data model|end ?points?|web ?hooks?|database|tables?|queue|services?|back ?end|front ?end|and then it|which then)\b/gi;
+const hits = (re: RegExp, text: string) => text.match(re)?.length ?? 0;
+
+/** What the last few minutes of talk sound like, if they sound like anything: a brainstorm takes
+ *  ideas from at least two people; a design takes one person saying how the parts connect. */
+export function soundsLike(recent: Said[], now: number): "map" | "diagram" | null {
+  const lines = recent.filter((l) => now - l.ts <= SOUNDS_WINDOW_MS);
+  const ideas = lines.filter((l) => hits(IDEA, l.text) > 0);
+  if (ideas.reduce((n, l) => n + hits(IDEA, l.text), 0) >= 4 && new Set(ideas.map((l) => l.speaker)).size >= 2) return "map";
+  if (lines.reduce((n, l) => n + hits(PARTS, l.text), 0) >= 6) return "diagram";
+  return null;
 }
 
 const REVIEW: NextKind[] = ["design-review", "product-review"];

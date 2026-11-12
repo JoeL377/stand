@@ -9,6 +9,7 @@ import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, type NotesOptio
 import type { ClientMessage, Item, Note, Segment, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
+import type { BoardAnswer } from "./board.ts";
 import { changeReview } from "./planReview.ts";
 import { outlineToSlides } from "../shared/outline.ts";
 import { config } from "./config.ts";
@@ -1343,12 +1344,11 @@ test("presenting a task moves the meeting to an item for it, so what's said is f
   assert.equal(db.taskItem(session.state().roomId, task.id, "Review rollout", null).id, shown?.id);
 });
 
-test("a brainstorm's map is drawn from the call's talk and is done when the meeting ends", async () => {
+test("a brainstorm's map is drawn from the call's talk beside the board, and is done when the meeting ends", async () => {
   const { startBrainstorm } = await import("./brainstorm.ts");
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
-  db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "Roadmap", url: null, description: null }]);
-  const b = startBrainstorm(db, room.id, "How should a review start?", "Joe");
+  const [roadmap] = db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "Roadmap", url: null, description: null }]);
   const asked: string[] = [];
   const agent = Object.assign(new HeuristicAgent(), {
     async brainstormMap(_context: string, talk: string) {
@@ -1361,9 +1361,16 @@ test("a brainstorm's map is drawn from the call's talk and is done when the meet
   const sent: ServerMessage[] = [];
   const session = new RoomSession(db, agent, room, () => {});
   (session as unknown as { broadcast(m: ServerMessage): void }).broadcast = (m) => void sent.push(m);
-  // The map is a view of the call: the agenda is as it was.
-  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
+  const boardWaits: number[] = [];
+  (session as unknown as { boardPasses: { schedule(wait: number): void } }).boardPasses.schedule = (wait) => void boardWaits.push(wait);
+  // Started during the call, it adds nothing to the agenda and the call stays where it was.
+  const b = startBrainstorm(db, room.id, "How should a review start?", "Joe");
+  session.brainstormChanged();
+  assert.equal(b.itemId, null);
+  assert.deepEqual(db.listItems(room.id).map((i) => i.id), [roadmap.id]);
+  assert.equal(session.state().focusItemId, roadmap.id);
   session.addSpeech("p1", "Huy", "each agent could add a slide when it finishes", Date.now());
+  assert.equal(boardWaits.length, 1, "the board goes on while the map draws");
   await (session as unknown as { mapPasses: { run(): Promise<void> } }).mapPasses.run();
   assert.deepEqual(db.getBrainstorm(b.id)!.nodes.map((n) => [n.id, n.label]), [["d1", "From the work"], ["i1", "Agents add slides"]]);
   const maps = sent.flatMap((m) => (m.type === "brainstorm" ? [m.brainstorm] : []));
@@ -1414,7 +1421,7 @@ test("what isn't a message is ignored, and a remark only moves to an item on thi
   assert.equal(db.meetingSegments(meetingId)[0].itemId, null, "General is fine");
 });
 
-test("closing a view mid-call is done at once, reads the talk no pass has read, and the call goes on", async () => {
+test("Finish leaves a map alone; Stop drawing reads the talk no pass has read, keeps the map, and the call goes on", async () => {
   const { startBrainstorm } = await import("./brainstorm.ts");
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
@@ -1427,88 +1434,105 @@ test("closing a view mid-call is done at once, reads the talk no pass has read, 
     },
   });
   const session = new RoomSession(db, agent, room, () => {});
+  const huy = await join(session, { id: "u2", name: "Huy" });
   session.addSpeech("p1", "Huy", "start from what shipped", Date.now());
-  // A review's Finish leaves a view alone.
   assert.deepEqual(await session.finishExperience(), []);
   assert.equal(db.getBrainstorm(b.id)!.status, "live");
-  assert.equal(session.closeView("someone-elses"), false);
-  assert.equal(session.closeView(b.id), true);
-  assert.deepEqual([db.getBrainstorm(b.id)!.status, db.getBrainstorm(b.id)!.meetingId], ["done", session.meetingId], "closed at once");
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal(passes, 1, "one last pass, in the background");
+  // Anyone in the call stops it.
+  await say(huy, { type: "view.stop" });
+  for (let i = 0; i < 50 && db.getBrainstorm(b.id)!.status === "live"; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(passes, 1, "one last pass before the map is the record");
   assert.deepEqual(db.getBrainstorm(b.id)!.nodes.map((n) => n.label), ["From the work"]);
+  assert.equal(db.getBrainstorm(b.id)!.status, "done");
   session.addSpeech("p1", "Huy", "and now something else", Date.now());
   await new Promise((r) => setTimeout(r, 50));
-  assert.equal(passes, 1, "no map passes once it's closed");
+  assert.equal(passes, 1, "no map passes once it's stopped");
+  assert.equal(await session.stopView(), false);
   await session.end();
 });
 
-test("anyone opens and closes a view: the host, the focus and the agenda stay as they were", async () => {
-  const { viewsOfMeeting } = await import("./brainstorm.ts");
+test("whoever starts a review holds the host seat until it is finished; a map lends nothing, and never reads a slide's talk", async () => {
+  const { finishBrainstorm, startBrainstorm } = await import("./brainstorm.ts");
+  const { setUpIdeaReview, startIdeaReview } = await import("./ideaReview.ts");
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
-  db.addItems(room.id, [{ source: "agenda" as const, externalId: null, title: "Roadmap", url: null, description: null }]);
+  const ran = startBrainstorm(db, room.id, "Experiences we should support", "Joe");
+  db.saveBrainstormMap(ran.id, [
+    { id: "d1", parent: null, label: "Reviews", detail: null, by: "Joe", ts: 1, quote: null, points: [], caught: [] },
+    { id: "i1", parent: "d1", label: "Retro meeting", detail: null, by: "Joe", ts: 1, quote: null, points: [], caught: [] },
+  ]);
+  finishBrainstorm(db, room.id, null);
+  const asked: string[] = [];
   const agent = Object.assign(new HeuristicAgent(), {
-    async brainstormMap() {
+    async brainstormMap(_context: string, talk: string) {
+      asked.push(talk);
       return { add: [], extend: [], caught: [] };
     },
   });
   const session = new RoomSession(db, agent, room, () => {});
   await join(session, { id: "u1", name: "Joe" });
-  const janesh = await join(session, { id: "u2", name: "Janesh" });
-  const focus = session.state().focusItemId;
-  const first = session.openView("How should a review start?", "Janesh");
-  assert.ok(session.hosts("u1"), "opening a view takes no seat");
-  assert.equal(session.state().focusItemId, focus);
-  assert.deepEqual(db.listItems(room.id).map((i) => i.title), ["Roadmap"]);
-  // Another view takes its place; the first is kept as this meeting's.
-  const second = session.openView("Pricing", "Joe");
-  assert.deepEqual([db.getBrainstorm(first.id)!.status, db.getBrainstorm(first.id)!.meetingId], ["done", session.meetingId]);
-  // Someone who isn't the host closes it.
-  await say(janesh, { type: "view.close", id: second.id });
-  assert.equal(db.getBrainstorm(second.id)!.status, "done");
-  assert.equal(db.brainstormLive(room.id), null);
-  await session.end();
-  assert.deepEqual(viewsOfMeeting(db, session.meetingId).map((v) => v.prompt), ["How should a review start?", "Pricing"]);
-});
-
-test("a next step said out loud goes on one card: anyone takes it or waves it off, and a review that was asked for reaches the recap", async () => {
-  const { suggestedNext } = await import("./nextSteps.ts");
-  const db = openDb(":memory:");
-  const room = db.createRoom("Test");
-  const agent = Object.assign(new HeuristicAgent(), {
-    async brainstormMap() {
-      return { add: [], extend: [], caught: [] };
-    },
-  });
-  const session = new RoomSession(db, agent, room, () => {});
-  await join(session, { id: "u1", name: "Joe" });
-  const huy = await join(session, { id: "u2", name: "Huy" });
-  session.addSpeech("u1", "Joe", "We did a brainstorm yesterday and it went fine", Date.now());
-  assert.equal(session.state().next, null, "talk about one that happened offers nothing");
-  session.addSpeech("u1", "Joe", "Hold up, let's start a brainstorm on the Discord integration", Date.now());
-  const card = session.state().next!;
-  assert.deepEqual([card.kind, card.topic, card.by, card.state], ["map", "The Discord integration", "Joe", "offered"]);
-  assert.equal(db.brainstormLive(room.id), null, "nothing opens by itself");
-  // Someone who isn't the host takes it: the map opens for everyone, and nothing else moves.
-  await say(huy, { type: "next.take", id: card.id });
-  assert.equal(session.state().next, null);
-  assert.deepEqual([db.brainstormLive(room.id)!.prompt, db.brainstormLive(room.id)!.itemId], ["The Discord integration", null]);
+  await join(session, { id: "u2", name: "Janesh" });
   assert.ok(session.hosts("u1"));
-  session.addSpeech("u2", "Huy", "should we brainstorm on pricing too", Date.now());
-  assert.equal(session.state().next, null, "a map is already open");
-  // A review nobody can start now: taking it keeps it for the recap.
-  session.addSpeech("u2", "Huy", "I think we need a design review on the projects migration", Date.now());
-  const review = session.state().next!;
-  assert.deepEqual([review.kind, review.topic, review.ready], ["design-review", "The projects migration", 0]);
-  await say(huy, { type: "next.take", id: review.id });
-  // Waved off: gone, and that kind stays quiet for a while.
-  session.addSpeech("u1", "Joe", "let's do a product review on the phone views", Date.now());
-  await say(huy, { type: "next.wave", id: session.state().next!.id });
-  session.addSpeech("u1", "Joe", "seriously, we should do a product review", Date.now());
-  assert.equal(session.state().next, null);
+  startBrainstorm(db, room.id, "How should a review start?", "Janesh");
+  session.brainstormChanged();
+  assert.ok(session.hosts("u1"), "a map leaves the seat where it is");
+
+  const started = startIdeaReview(db, room.id, setUpIdeaReview(db, room.id, ran.id, "Janesh").review.id);
+  session.itemsChanged();
+  session.startedBy("u2");
+  assert.ok(session.hosts("u2"), "the starter steers the review");
+  session.startedBy("u9");
+  assert.ok(session.hosts("u2"), "someone who isn't in the call takes nothing");
+  session.setFocus(started.firstItemId, "Janesh", "manual");
+  session.addSpeech("u2", "Janesh", "this slide is about the retro", Date.now() - 1000);
+  const mapPasses = (session as unknown as { mapPasses: { run(): Promise<void> } }).mapPasses;
+  await mapPasses.run();
+  assert.equal(asked.length, 0, "talk on a review slide isn't the map's");
+
+  assert.deepEqual(await session.finishExperience(), ["review"]);
+  assert.ok(session.hosts("u1"), "finished: the seat is back with the host");
+  assert.equal(db.brainstormLive(room.id)?.prompt, "How should a review start?", "the map goes on");
+  session.addSpeech("u1", "Joe", "a review could start from what shipped", Date.now());
+  await mapPasses.run();
+  assert.equal(asked.length, 1);
+  assert.match(asked[0], /start from what shipped/);
+  assert.doesNotMatch(asked[0], /about the retro/);
   await session.end();
-  assert.deepEqual(suggestedNext(db.meetingNext(session.meetingId)).map((n) => [n.kind, n.topic, n.state]), [["design-review", "The projects migration", "noted"]]);
+});
+
+test("starting a diagram stops the map first and keeps it; starting a map saves the diagram's draft spec", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const { parseSeed } = await import("./designSession.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  let passes = 0;
+  const agent = Object.assign(new HeuristicAgent(), {
+    async brainstormMap() {
+      passes++;
+      return { add: [{ under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }], extend: [], caught: [] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  await join(session, { id: "u1", name: "Joe" });
+  const map = startBrainstorm(db, room.id, "How should a review start?", "Joe");
+  session.brainstormChanged();
+  session.addSpeech("u1", "Joe", "start from what shipped", Date.now());
+  // As the start route does when another one is drawing in the call.
+  assert.equal(await session.stopView(), true);
+  const diagram = startBrainstorm(db, room.id, "Stand's primitives", "Joe", Date.now(), { diagram: parseSeed("Task: a to-do\nProject: a group of tasks", Date.now()), seed: null, taskId: null });
+  session.brainstormChanged();
+  assert.equal(passes, 1);
+  const kept = db.getBrainstorm(map.id)!;
+  assert.deepEqual([kept.status, kept.nodes.map((n) => n.label)], ["done", ["From the work"]]);
+
+  assert.equal(await session.stopView(), true);
+  startBrainstorm(db, room.id, "Pricing", "Joe");
+  session.brainstormChanged();
+  const saved = db.getBrainstorm(diagram.id)!;
+  assert.equal(saved.status, "done");
+  assert.match(db.notePlan(saved.taskId!)!.text, /^# Stand's primitives\n/);
+  assert.equal(db.brainstormLive(room.id)?.prompt, "Pricing");
+  await session.end();
 });
 
 test("a line on the board is tied to its note by id: a tick crosses either way, even after the note is reworded", async () => {
@@ -1538,5 +1562,183 @@ test("a line on the board is tied to its note by id: a tick crosses either way, 
   assert.equal(lastList()[0].doneAt, null, "and the note's untick reached the board");
   await say(huy, { type: "task.state", noteId: note.id, state: "done" });
   assert.equal(lastList()[0].doneBy, "Huy", "a Done from the check-in too");
+  await session.end();
+});
+
+/** A call whose board moves when the test says so, and whose map model names an idea per pass. */
+async function onTopics() {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const answers: Array<Partial<BoardAnswer>> = [];
+  const boardAsked: string[] = [];
+  const mapAsked: string[] = [];
+  const agent = Object.assign(new HeuristicAgent(), {
+    async boardCard(context: string): Promise<BoardAnswer> {
+      boardAsked.push(context);
+      return { current: { sentences: [], dropSentences: [], positions: [], add: [], change: [], remove: [], now: "" }, retitle: null, shift: null, ...answers.shift() };
+    },
+    async boardDrift() {
+      return { verdict: "same" as const, title: null };
+    },
+    async brainstormMap(context: string, talk: string) {
+      mapAsked.push(`${context}\n${talk}`);
+      return { add: [{ under: "root", label: `Idea ${mapAsked.length}`, detail: "An idea.", by: "Joe", line: 1 }], extend: [], caught: [] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const inner = session as unknown as { board: { board(): { pending: unknown } }; boardPasses: { run(): Promise<void> }; mapPasses: { run(): Promise<void> }; viewTurn: Promise<void> };
+  // The call began twenty minutes ago, so its talk can be spread out.
+  const t0 = Date.now() - 20 * 60_000;
+  (session as unknown as { meetingStartedAt: number }).meetingStartedAt = t0 - 1000;
+  const settle = async () => {
+    await new Promise((r) => setTimeout(r, 10));
+    await inner.viewTurn;
+  };
+  // Two people, so each line stays its own.
+  const talk = (at: number, ...lines: string[]) => lines.forEach((text, i) => session.addSpeech(i % 2 ? "u2" : "u1", i % 2 ? "Huy" : "Joe", text, t0 + at + i * 1000));
+  /** The board's next pass, then a click on the move it proposes when it waits for one. */
+  const move = async (shift: NonNullable<BoardAnswer["shift"]>) => {
+    answers.push({ shift });
+    await inner.boardPasses.run();
+    if (inner.board.board().pending) await say(joe, { type: "board.accept", title: shift.title });
+    await settle();
+  };
+  const fresh = (title: string): NonNullable<BoardAnswer["shift"]> => ({ kind: "new", returnTo: null, title, card: { summary: [title], positions: [], items: [], now: "" } });
+  const back = (id: string, title: string): NonNullable<BoardAnswer["shift"]> => ({ kind: "return", returnTo: id, title, card: null });
+  const say_ = async (msg: ClientMessage) => {
+    await say(joe, msg);
+    await settle();
+  };
+  return { db, room, session, joe, inner, talk, move, fresh, back, say: say_, boardAsked, mapAsked };
+}
+
+test("the map of a topic is drawn from every line of that topic, those said before it was opened too", async () => {
+  const { db, room, session, inner, talk, move, fresh, say, mapAsked } = await onTopics();
+  talk(0, "we could charge per seat", "or a free tier for small teams");
+  await move(fresh("Pricing"));
+  talk(60_000, "onboarding could start with a welcome video", "or a sample space");
+  await move(fresh("Onboarding"));
+  await say({ type: "view.open" });
+  const map = db.brainstormLive(room.id)!;
+  assert.deepEqual([map.prompt, map.threadId, map.meetingId, map.startedBy], ["Onboarding", "t2", session.meetingId, "Joe"]);
+  await inner.mapPasses.run();
+  assert.equal(mapAsked.length, 1);
+  assert.match(mapAsked[0], /The centre of the map: Onboarding/);
+  assert.match(mapAsked[0], /welcome video/);
+  assert.doesNotMatch(mapAsked[0], /charge per seat/);
+  await session.end();
+});
+
+test("a topic's map parks when the board moves off it, goes on when the talk comes back, and stays stopped once stopped", async () => {
+  const { db, room, session, joe, inner, talk, move, fresh, back, say, boardAsked } = await onTopics();
+  talk(0, "we could charge per seat", "or a free tier for small teams");
+  await move(fresh("Pricing"));
+  talk(60_000, "onboarding could start with a welcome video", "or a sample space");
+  await move(fresh("Onboarding"));
+  assert.ok(boardAsked.every((c) => !c.includes("is brainstorming")));
+  await say({ type: "view.open" });
+  const id = db.brainstormLive(room.id)!.id;
+  await inner.mapPasses.run();
+  assert.deepEqual(db.getBrainstorm(id)!.nodes.map((n) => n.label), ["Idea 1"]);
+
+  // The board is told while the topic's map draws on it.
+  talk(120_000, "the video should be short", "and skippable");
+  await move(back("t1", "Pricing"));
+  assert.match(boardAsked.at(-1)!, /The group is brainstorming "Onboarding". Ideas for it belong to this thread\./);
+  const parked = db.getBrainstorm(id)!;
+  assert.deepEqual([parked.status, parked.endedAt], ["done", null]);
+  assert.ok(parked.spans?.length);
+  assert.equal(db.brainstormLive(room.id), null, "no map starts by itself on the new topic");
+  const sent = joe.got.flatMap((m) => (m.type === "brainstorm" ? [m] : [])).at(-1)!;
+  assert.equal(sent.brainstorm, null);
+  assert.deepEqual(sent.others.map((b) => [b.id, b.threadId]), [[id, "t2"]]);
+
+  talk(180_000, "pricing again: per seat is simpler", "yes per seat");
+  await move(back("t2", "Onboarding"));
+  assert.doesNotMatch(boardAsked.at(-1)!, /is brainstorming/);
+  const resumed = db.brainstormLive(room.id)!;
+  assert.deepEqual([resumed.id, resumed.nodes.map((n) => n.label)], [id, ["Idea 1"]]);
+
+  await say({ type: "view.stop" });
+  assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
+  talk(240_000, "back to pricing", "per seat it is");
+  await move(back("t1", "Pricing"));
+  talk(300_000, "onboarding once more", "the sample space");
+  await move(back("t2", "Onboarding"));
+  assert.equal(db.brainstormLive(room.id), null, "a stopped map doesn't go on by itself");
+  await say({ type: "view.open" });
+  assert.equal(db.brainstormLive(room.id)?.id, id, "opening it again goes on with the same map");
+
+  // Parked when the call ends: it is done with the call.
+  talk(360_000, "pricing to close", "done");
+  await move(back("t1", "Pricing"));
+  assert.equal(db.getBrainstorm(id)!.endedAt, null);
+  await session.end();
+  assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
+});
+
+test("opening a topic's map while a diagram draws saves the diagram's draft spec first", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const { parseSeed } = await import("./designSession.ts");
+  const { db, room, session, talk, move, fresh, say } = await onTopics();
+  const diagram = startBrainstorm(db, room.id, "Stand's primitives", "Joe", Date.now(), { diagram: parseSeed("Task: a to-do\nProject: a group of tasks", Date.now()), seed: null, taskId: null });
+  session.brainstormChanged();
+  talk(0, "we could charge per seat", "or a free tier for small teams");
+  await move(fresh("Pricing"));
+  await say({ type: "view.open" });
+  const saved = db.getBrainstorm(diagram.id)!;
+  assert.equal(saved.status, "done");
+  assert.match(db.notePlan(saved.taskId!)!.text, /^# Stand's primitives\n/);
+  assert.equal(db.brainstormLive(room.id)?.prompt, "Pricing");
+  await session.end();
+});
+
+test("a next step said out loud goes on one card: nothing starts by itself, anyone answers it, and a review that was asked for reaches the recap", async () => {
+  const { suggestedNext } = await import("./nextSteps.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  await join(session, { id: "u1", name: "Joe" });
+  const huy = await join(session, { id: "u2", name: "Huy" });
+  session.addSpeech("u1", "Joe", "We did a brainstorm yesterday and it went fine", Date.now());
+  assert.equal(session.state().next, null, "talk about one that happened offers nothing");
+  session.addSpeech("u1", "Joe", "Hold up, let's start a brainstorm on the Discord integration", Date.now());
+  const card = session.state().next!;
+  assert.deepEqual([card.kind, card.topic, card.by, card.state], ["map", "The Discord integration", "Joe", "offered"]);
+  assert.equal(db.brainstormLive(room.id), null, "nothing is drawn by itself");
+  // Someone who isn't the host answers it; the card is settled for everyone.
+  await say(huy, { type: "next.take", id: card.id, started: true });
+  assert.equal(session.state().next, null);
+  // A review nobody can start now: taking it keeps it for the recap.
+  session.addSpeech("u2", "Huy", "I think we need a design review on the projects migration", Date.now());
+  const review = session.state().next!;
+  assert.deepEqual([review.kind, review.topic, review.ready], ["design-review", "The projects migration", 0]);
+  await say(huy, { type: "next.take", id: review.id });
+  // Waved off: gone, and that kind stays quiet for a while.
+  session.addSpeech("u1", "Joe", "let's do a product review on the phone views", Date.now());
+  await say(huy, { type: "next.wave", id: session.state().next!.id });
+  session.addSpeech("u1", "Joe", "seriously, we should do a product review", Date.now());
+  assert.equal(session.state().next, null);
+  await session.end();
+  assert.deepEqual(suggestedNext(db.meetingNext(session.meetingId)).map((n) => [n.kind, n.topic, n.state]), [["design-review", "The projects migration", "noted"]]);
+});
+
+test("Stand offers a map by itself when two people trade ideas, says it guessed, and doesn't repeat itself", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  await join(session, { id: "u1", name: "Joe" });
+  const huy = await join(session, { id: "u2", name: "Huy" });
+  session.addSpeech("u1", "Joe", "What if the first three seats are free?", Date.now());
+  session.addSpeech("u2", "Huy", "Or we could price per meeting hour.", Date.now());
+  assert.equal(session.state().next, null, "two ideas are not a brainstorm yet");
+  session.addSpeech("u1", "Joe", "Another idea, maybe we charge for the agent only.", Date.now());
+  const card = session.state().next!;
+  assert.deepEqual([card.kind, card.topic, card.guessed, card.state], ["map", "", true, "offered"]);
+  assert.equal(db.brainstormLive(room.id), null, "nothing is drawn by itself");
+  await say(huy, { type: "next.wave", id: card.id });
+  session.addSpeech("u2", "Huy", "What if it is free for open source, or maybe we do a trial?", Date.now());
+  assert.equal(session.state().next, null, "it guessed once and stays quiet");
   await session.end();
 });

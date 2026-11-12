@@ -1,17 +1,16 @@
-// What a call can start. A call is plain talk. A review is the one structured thing: it goes on the
-// board from here, and "Finish" takes it off again so the call goes on as plain talk. A map or a
-// diagram is a view of the talk, not a mode: it opens in a tab beside the board, anyone closes it
-// from its tab, and nothing else in the call moves. The same start from the space page's menu.
+// Reviews inside a call. A call starts as plain talk; the host can put a product review, a design
+// review or an idea review on its board from here, one at a time, and "Finish" takes it off again so
+// the call goes on as plain talk. Each keeps what it would have kept at the end of the call. The same
+// reviews start from the space page's menu, beside Start talking.
 
 import { useEffect, useState } from "react";
-import type { BrainstormView, Item, SpaceFeed } from "../../shared/protocol.ts";
+import type { Item, SpaceFeed } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { errorToast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
-import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
 
-/** The review on the call's board now, in the words people use for it. A view is never "running". */
-export function runningExperience(items: Item[], _brainstorm?: BrainstormView | null): string | null {
+/** The review on the call's board now, in the words people use for it. */
+export function runningExperience(items: Item[]): string | null {
   if (items.some((i) => i.slide?.layout === "review" && i.slide.review?.idea)) return "idea review";
   if (items.some((i) => i.slide?.layout === "review")) return "product review";
   if (items.some((i) => i.slide?.layout === "design")) return "design review";
@@ -22,7 +21,6 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
   const { roomId, running } = props;
   const [open, setOpen] = useState(false);
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
-  const [pop, setPop] = useState<"brainstorm" | "session" | null>(null);
   const [busy, setBusy] = useState(false);
   const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
   // What there is to start is read when the menu opens: slides and specs arrive between calls.
@@ -36,7 +34,7 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
     try {
       await start();
     } catch (err) {
-      errorToast(`Couldn't ${what === "map" || what === "diagram" ? "open" : "start"} the ${what}`)(err);
+      errorToast(`Couldn't start the ${what}`)(err);
     }
     setBusy(false);
   };
@@ -67,13 +65,12 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
   const ideas = feed?.ideaReviews?.filter((r) => r.status === "draft") ?? [];
   return (
     <div className="xp" ref={box}>
-      <button className="control" disabled={props.disabled || busy} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="Start a review, or open a map or a diagram beside the board">
+      <button className="control" disabled={props.disabled || busy} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="Put a review on the board">
         <StartIcon />
-        <span>{busy ? "Starting…" : "Start"}</span>
+        <span>{busy ? "Starting…" : "Start review"}</span>
       </button>
       {open && (
         <div className="rp-menu sh-start-menu xp-menu" role="menu">
-          <span className="xp-group">Reviews</span>
           <button type="button" role="menuitem" disabled={!slides} onClick={run("product review", () => api.startReview(roomId))}>
             <strong>Product review</strong>
             <span className="muted">{!feed ? "…" : slides ? `${slides} ${slides === 1 ? "slide" : "slides"}` : "nothing to show yet"}</span>
@@ -90,35 +87,7 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
               </span>
             </button>
           ))}
-          <span className="xp-group">Views of this call</span>
-          <button type="button" role="menuitem" onClick={() => (setOpen(false), setPop("brainstorm"))}>
-            <strong>Map</strong>
-            <span className="muted xp-hint">ideas, as you brainstorm</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => (setOpen(false), setPop("session"))}>
-            <strong>Diagram</strong>
-            <span className="muted xp-hint">boxes and arrows, as you design</span>
-          </button>
         </div>
-      )}
-      {pop === "brainstorm" && (
-        <BrainstormPop
-          onClose={() => setPop(null)}
-          onStart={async (prompt) => {
-            await run("map", () => api.startBrainstorm(roomId, prompt))();
-            setPop(null);
-          }}
-        />
-      )}
-      {pop === "session" && (
-        <DesignSessionPop
-          todos={[]}
-          onClose={() => setPop(null)}
-          onStart={async (prompt, seed, taskId) => {
-            await run("diagram", () => api.startBrainstorm(roomId, prompt, { seed, taskId }))();
-            setPop(null);
-          }}
-        />
       )}
     </div>
   );

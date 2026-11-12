@@ -34,7 +34,13 @@ export interface CaptureOptions {
   dailyMax?: number;
 }
 
-const CHAT_GUIDE = `This talk is a written chat between meetings, not a call. The lines are typed messages and can be hours apart. An action item needs a clear commitment by a person or a clear agreement by the group. A proposal or a request that nobody answered is not a decision and not an action item. A greeting, a joke, a reaction or thanks is nothing to note.`;
+// Written from the first real chat (Nov 11): "We need a todo to pin colors, assign that to Huy" came
+// out as an open question, because the notes rules want a suggestion accepted and in chat often nobody answers.
+const CHAT_GUIDE = `This talk is a written chat between meetings, not a call. The lines are typed messages and can be hours apart, and often one person writes and nobody answers.
+
+In this chat, when someone asks for a to-do, says that something needs doing, or says they will do something, write it as an action item even if nobody answered. Its owner is the person they name; else the writer, when they took it on themselves; else null. Do not turn such a line into an open question. An open question is something a person asked that nobody answered.
+
+A decision still needs a settled choice: one person's proposal that nobody answered is not a decision. A greeting, a joke, a reaction, thanks, or a line that only tries the chat out is nothing to note. Text pasted in from elsewhere (instructions, a log, a list of steps) is context: note nothing from it unless someone in the chat takes it up.`;
 
 const KEPT = new Set<Note["kind"]>(["action", "question", "decision"]);
 const wordsIn = (texts: string[]) => texts.join(" ").split(/\s+/).filter(Boolean).length;
@@ -117,7 +123,7 @@ export class ChatCapture {
 
   /** What the chat tells its listener (chat.ts): a message sent, changed or deleted, a session opened or closed. */
   heard(e: ChatEvent) {
-    if (this.stopped || e.type === "notes") return;
+    if (this.stopped || e.type === "notes" || e.type === "read") return;
     if (e.type === "session") {
       // Closed: it is read once more, now.
       if (!e.open) this.state(e.channelId).runner.schedule(0);

@@ -18,12 +18,18 @@ export function brainstormsStore(db: DatabaseSync) {
     brainstorms(roomId: string, limit = 30): BrainstormRow[] {
       return (db.prepare("SELECT * FROM brainstorms WHERE room_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?").all(roomId, limit) as Row[]).map(toBrainstorm);
     },
+    /** The map of a board thread in a meeting. */
+    brainstormOfThread(meetingId: string, threadId: string): BrainstormRow | null {
+      const r = db.prepare("SELECT * FROM brainstorms WHERE meeting_id = ? AND thread_id = ? AND kind = 'map' ORDER BY started_at DESC, rowid DESC LIMIT 1").get(meetingId, threadId) as Row | undefined;
+      return r ? toBrainstorm(r) : null;
+    },
+    /** Every map and diagram of a meeting, oldest first. */
+    brainstormsOfMeeting(meetingId: string): BrainstormRow[] {
+      return (db.prepare("SELECT * FROM brainstorms WHERE meeting_id = ? ORDER BY started_at, rowid").all(meetingId) as Row[]).map(toBrainstorm);
+    },
     brainstormByMeeting(meetingId: string): BrainstormRow | null {
       const r = db.prepare("SELECT * FROM brainstorms WHERE meeting_id = ? ORDER BY rowid DESC LIMIT 1").get(meetingId) as Row | undefined;
       return r ? toBrainstorm(r) : null;
-    },
-    brainstormsByMeeting(meetingId: string): BrainstormRow[] {
-      return (db.prepare("SELECT * FROM brainstorms WHERE meeting_id = ? ORDER BY started_at, rowid").all(meetingId) as Row[]).map(toBrainstorm);
     },
     createBrainstorm(b: {
       roomId: string;
@@ -32,9 +38,11 @@ export function brainstormsStore(db: DatabaseSync) {
       startedBy: string | null;
       startedAt: number;
       design?: { diagram: DesignDiagram; seed: string | null; taskId: string | null };
+      threadId?: string | null;
+      meetingId?: string | null;
     }): BrainstormRow {
       const id = newId();
-      db.prepare("INSERT INTO brainstorms (id, room_id, prompt, status, item_id, started_by, started_at, kind, diagram_json, seed, task_id) VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, ?, ?)").run(
+      db.prepare("INSERT INTO brainstorms (id, room_id, prompt, status, item_id, started_by, started_at, kind, diagram_json, seed, task_id, thread_id, meeting_id) VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
         id,
         b.roomId,
         b.prompt,
@@ -45,6 +53,8 @@ export function brainstormsStore(db: DatabaseSync) {
         b.design ? JSON.stringify(b.design.diagram) : null,
         b.design?.seed ?? null,
         b.design?.taskId ?? null,
+        b.threadId ?? null,
+        b.meetingId ?? null,
       );
       return this.getBrainstorm(id)!;
     },
@@ -67,11 +77,11 @@ export function brainstormsStore(db: DatabaseSync) {
       db.prepare("UPDATE brainstorms SET prompt = ? WHERE id = ?").run(prompt, id);
       db.prepare("UPDATE items SET title = ? WHERE id = (SELECT item_id FROM brainstorms WHERE id = ?)").run(prompt, id);
     },
-    setBrainstormPrompt(id: string, prompt: string) {
-      db.prepare("UPDATE brainstorms SET prompt = ? WHERE id = ?").run(prompt, id);
-    },
     saveBrainstormStars(id: string, starred: string[]) {
       db.prepare("UPDATE brainstorms SET stars_json = ? WHERE id = ?").run(starred.length ? JSON.stringify(starred) : null, id);
+    },
+    saveBrainstormSpans(id: string, spans: Array<[number, number]>) {
+      db.prepare("UPDATE brainstorms SET spans_json = ? WHERE id = ?").run(JSON.stringify(spans), id);
     },
     saveBrainstormMap(id: string, nodes: BrainNode[]) {
       db.prepare("UPDATE brainstorms SET map_json = ? WHERE id = ?").run(JSON.stringify(nodes), id);

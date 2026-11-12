@@ -12,6 +12,7 @@ import { closedLabel, closedPr } from "../shared/tasks.ts";
 import { config } from "./config.ts";
 import type { DB } from "./db.ts";
 import type { Agent, DoneDeckDraft } from "./llm.ts";
+import { forSpace } from "./usage.ts";
 import { prOf, shotUrl } from "./workLog.ts";
 
 // Off unless DONE_SINCE=on (config.ts): the pages cost a Claude call after every report between
@@ -301,7 +302,7 @@ export class DoneDecks {
     this.running.add(roomId);
     try {
       const started = Date.now();
-      const draft = await this.agent.doneDeck(donePrompt(input), DONE_SYSTEM).catch((err) => {
+      const draft = await forSpace(this.agent, roomId).doneDeck(donePrompt(input), DONE_SYSTEM).catch((err) => {
         console.error("[agent] done since last time: Claude failed, showing the tasks as they are:", err);
         return null;
       });

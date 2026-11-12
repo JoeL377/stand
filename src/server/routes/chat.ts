@@ -40,6 +40,7 @@ export function chatRoutes(app: Express, ctx: Services) {
         channel,
         ...page(db.channelMessages(channel.id)),
         readUpTo: db.channelReadUpTo(channel.id, req.user!.id),
+        reads: db.channelReads(channel.id).filter((r) => r.userId !== req.user!.id),
         people: db.roomPeople(room.id),
       };
       res.json(thread);
@@ -127,8 +128,12 @@ export function chatRoutes(app: Express, ctx: Services) {
       if (!Number.isSafeInteger(upTo) || upTo < 0) return res.status(400).json({ error: "upTo is a message's seq." });
       // No further than the channel's last message.
       const last = db.channelMessages(channel.id, { limit: 1 })[0]?.seq ?? 0;
+      const was = db.channelReadUpTo(channel.id, req.user!.id);
       db.markChannelRead(channel.id, req.user!.id, Math.min(upTo, last));
-      res.json({ readUpTo: db.channelReadUpTo(channel.id, req.user!.id) });
+      const readUpTo = db.channelReadUpTo(channel.id, req.user!.id);
+      // The other open pages move this person's mark.
+      if (readUpTo > was) spaceEvents.send(channel.roomId, { type: "read", channelId: channel.id, userId: req.user!.id, name: req.user!.name, upTo: readUpTo });
+      res.json({ readUpTo });
     }),
   );
 }

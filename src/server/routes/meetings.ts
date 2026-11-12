@@ -1,12 +1,12 @@
 // A meeting's recap and brief, and the space's follow-ups feed.
 import type { Express } from "express";
 import type { MeetingRecap } from "../../shared/protocol.ts";
-import { brainstormOfMeeting, viewsOfMeeting } from "../brainstorm.ts";
-import { suggestedNext } from "../nextSteps.ts";
+import { brainstormOfMeeting } from "../brainstorm.ts";
 import { briefToMarkdown, buildBrief, buildFollowUps, followUpsToMarkdown } from "../brief.ts";
 import { designReviewOfMeeting } from "../designReviews.ts";
 import { ideaReviewOfMeeting } from "../ideaReview.ts";
 import { reviewOfMeeting } from "../reviews.ts";
+import { suggestedNext } from "../nextSteps.ts";
 import { meetingTimeline } from "../timeline.ts";
 import type { Services } from "../services.ts";
 import { notFound, route } from "./http.ts";
@@ -34,7 +34,6 @@ export function meetingRoutes(app: Express, ctx: Services) {
         ideaReview: ideaReviewOfMeeting(db, m.id),
         designReview: designReviewOfMeeting(db, m.id),
         brainstorm: brainstormOfMeeting(db, m.id),
-        views: viewsOfMeeting(db, m.id),
         next: suggestedNext(db.meetingNext(m.id)),
         timeline: meetingTimeline(db, m.id),
       };

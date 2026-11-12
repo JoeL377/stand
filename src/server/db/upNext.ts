@@ -1,5 +1,6 @@
 // What the suggested agenda reads (upNext.ts), and what it keeps between runs.
 import type { DatabaseSync } from "node:sqlite";
+import type { Swept } from "../questionSweep.ts";
 import type { Settled } from "../spaceSettle.ts";
 import type { Polish, UpNextInput } from "../upNext.ts";
 import { type Row, toNote } from "./rows.ts";
@@ -97,6 +98,26 @@ export function upNextStore(db: DatabaseSync, { updates, captures }: { updates: 
       db.prepare(
         "INSERT INTO space_settled (room_id, at, basis, rows_json) VALUES (?, ?, ?, ?) ON CONFLICT (room_id) DO UPDATE SET at = excluded.at, basis = excluded.basis, rows_json = excluded.rows_json",
       ).run(roomId, settled.at, settled.basis, JSON.stringify(settled.rows));
+    },
+    getQuestionSweep(roomId: string): Swept | null {
+      const r = db.prepare("SELECT at, sweep_json FROM question_sweep WHERE room_id = ?").get(roomId) as Row | undefined;
+      return r ? { ...JSON.parse(r.sweep_json as string), at: r.at as number } : null;
+    },
+    saveQuestionSweep(roomId: string, { at, ...rest }: Swept) {
+      db.prepare(
+        "INSERT INTO question_sweep (room_id, at, sweep_json) VALUES (?, ?, ?) ON CONFLICT (room_id) DO UPDATE SET at = excluded.at, sweep_json = excluded.sweep_json",
+      ).run(roomId, at, JSON.stringify(rest));
+    },
+    /** Spaces with this many questions nobody closed by hand, for the first sweep after a start. */
+    roomsWithQuestions(atLeast: number): string[] {
+      return (
+        db
+          .prepare(
+            `SELECT m.room_id AS id FROM notes n JOIN meetings m ON m.id = n.meeting_id
+             WHERE n.kind = 'question' AND n.done_at IS NULL GROUP BY m.room_id HAVING COUNT(*) >= ?`,
+          )
+          .all(atLeast) as Row[]
+      ).map((r) => r.id as string);
     },
     getPolish(roomId: string): Polish | null {
       const r = db.prepare("SELECT at, rows_json FROM upnext_polish WHERE room_id = ?").get(roomId) as Row | undefined;

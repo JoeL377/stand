@@ -188,12 +188,6 @@ export function RecapPage() {
             </>
           )}
         </p>
-        {/* Every map and diagram that was opened in the call; older recaps know only the last one. */}
-        {(data.views?.length ? data.views : data.brainstorm ? [data.brainstorm] : []).map((v) => (
-          <Link key={v.id} className="rp-pill rc-review rc-view" to={brainstormHref(data.roomId, v.id)} title={v.prompt}>
-            {v.design ? "Diagram" : "Map"} · {v.prompt} · {v.design ? designCount(v.design) : brainCount(v)}
-          </Link>
-        ))}
         {/* Reviews people asked for out loud that didn't happen in the call (server/nextSteps.ts). */}
         {data.next?.map((n) => (
           <span key={n.id} className="rp-pill rc-asked" title={`${n.by.split(/\s+/)[0]} asked for it in the call`}>
@@ -204,6 +198,11 @@ export function RecapPage() {
             {n.topic ? `: ${n.topic}` : ""}
           </span>
         ))}
+        {data.brainstorm && (
+          <Link className="rp-pill rc-review" to={brainstormHref(data.roomId, data.brainstorm.id)}>
+            {data.brainstorm.design ? `Design session · ${designCount(data.brainstorm.design)}` : `Brainstorm · ${brainCount(data.brainstorm)}`}
+          </Link>
+        )}
         {data.designReview && (
           <Link className="rp-pill rc-review" to={designRecordHref(data.roomId, data.designReview.id)}>
             Design review · {data.designReview.titles.length} {data.designReview.titles.length === 1 ? "spec" : "specs"}

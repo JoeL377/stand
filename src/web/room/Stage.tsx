@@ -5,9 +5,12 @@ import { createPortal } from "react-dom";
 import { ReviewStage } from "./ReviewStage.tsx";
 import { DesignStage } from "./DesignStage.tsx";
 import { specAuthor } from "../../shared/designReview.ts";
-import { BrainViews } from "./BrainWords.tsx";
-import { DesignBoard } from "./DesignBoard.tsx";
-import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
+import { NextCard } from "./NextCard.tsx";
+import { ViewPane, type ViewTab } from "./Views.tsx";
+import { runningExperience } from "./Experiences.tsx";
+import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
+import { api } from "../api.ts";
+import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, ConxtLive, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { initials, keyOf } from "../util.ts";
@@ -15,11 +18,10 @@ import { Slide } from "../slides.tsx";
 import { CameraIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
-import { dismissToast, toast, undoing } from "../Toasts.tsx";
+import { dismissToast, errorToast, toast, undoing } from "../Toasts.tsx";
 import { BoardStrip, TopicBoard, type Rewind } from "./TopicBoard.tsx";
 import type { PilotActs } from "./Pilot.tsx";
 import { AgentTabMark } from "./AgentCard.tsx";
-import { NextCard } from "./NextCard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
@@ -45,8 +47,10 @@ export function Stage(props: {
   board: Board | null;
   /** The board's running list (server/liveList.ts); null when the server keeps none. */
   list: ListNote[] | null;
-  /** The brainstorm running in this space (server/brainstorm.ts); its map has the middle while its sentence is in focus. */
+  /** The map or diagram drawing in this space (server/brainstorm.ts); each person looks at it from the board's pills. */
   brainstorm?: BrainstormView | null;
+  /** The other maps and diagrams of this call, oldest first. */
+  brainstorms?: BrainstormSummary[];
   /** What ✦ Stand has put on the board (server/meetingAgent.ts); null when the server runs no agent. */
   agentCards: AgentCard[] | null;
   notes: Note[];
@@ -166,9 +170,7 @@ export function Stage(props: {
     return () => wide.removeEventListener("change", find);
   }, []);
   const following = !canSteer && !!host && !own;
-  // A map or a diagram open in this call (server/brainstorm.ts): a view of the talk, in a tab beside the board.
-  const view = props.brainstorm?.status === "live" ? props.brainstorm : null;
-  const tab = following ? (hostView?.tab === "board" ? "board" : hostView?.tab === "view" && view ? "view" : null) : ownTab;
+  const tab = following ? (hostView?.tab === "board" ? "board" : null) : ownTab;
   const pickTab = (t: string | null) => {
     setTab(t);
     if (following) setOwn(true);
@@ -178,16 +180,6 @@ export function Stage(props: {
   const shownTask = taskId ? { id: taskId, mode: canSteer ? myTaskMode : (hostView?.taskMode ?? "brief") } : null;
   const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask);
   // A review slide's pictures: the host's choice is everyone's, and a look of your own lasts until the host moves.
-  const viewOpen = !!view && tab === "view";
-  // Whoever opened it lands on it; for everyone else a tab appears, marked until they look.
-  const [seenView, setSeenView] = useState<string | null>(null);
-  useEffect(() => {
-    if (!view) return void setTab((t) => (t === "view" ? null : t));
-    if (view.startedBy && view.startedBy === props.me?.name) pickTab("view");
-  }, [view?.id]);
-  useEffect(() => {
-    if (viewOpen && view) setSeenView(view.id);
-  }, [viewOpen, view?.id]);
   const reviewUp = deckUp && focusItem?.slide?.layout === "review";
   // A design review slide: Full spec is each person's own look, and the host's is everyone's until they close it.
   const design = deckUp && focusItem?.slide?.layout === "design" ? (focusItem.slide.design ?? null) : null;
@@ -203,7 +195,7 @@ export function Stage(props: {
   useEffect(() => {
     if (!canSteer) setMyShot(hostView?.shot ?? 0);
   }, [canSteer, hostView?.shot]);
-  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), ...(design && { taskMode: mySpec ? ("spec" as const) : ("brief" as const) }), tab: middleTaken && tab === "board" ? "board" : viewOpen ? "view" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind };
+  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), ...(design && { taskMode: mySpec ? ("spec" as const) : ("brief" as const) }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind };
   const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
   const hostKey = JSON.stringify(hostView);
   useEffect(() => {
@@ -298,7 +290,7 @@ export function Stage(props: {
     setTabs((t) => t.filter((x) => x !== id));
     setTab((t) => (t === id ? null : t));
   };
-  const mainLabel = shownTask ? "Task & spec" : localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : deckUp ? "Slides" : view ? "Board" : "Main screen";
+  const mainLabel = shownTask ? "Task & spec" : localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : deckUp ? "Slides" : "Main screen";
   // The latest snap, small in the corner of everyone's middle screen. Each person can expand
   // it for themselves; the host or whoever took it can take it down for everyone.
   const stageSnap = state.stageSnapId ? state.snaps.find((s) => s.id === state.stageSnapId) : undefined;
@@ -310,8 +302,8 @@ export function Stage(props: {
     onClose: () => send({ type: "stage.snap.close" }),
   };
 
-  // The board: the middle screen, or a tab of its own while a share or a deck has it.
-  const board = (
+  // The topic card: the board's first view.
+  const card = (
     <TopicBoard
       board={props.board}
       segments={props.segments}
@@ -360,6 +352,70 @@ export function Stage(props: {
       }
     />
   );
+  // Beside the card, each person's own look at the map, its words or the diagram drawing in the call.
+  const [view, setView] = useState<ViewTab>("card");
+  const [drawPop, setDrawPop] = useState<"map" | "diagram" | null>(null);
+  const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
+  const steady = !props.offline && !props.ending;
+  const draw = (what: "map" | "diagram") => () => {
+    const other = what === "map" ? live?.design : live && !live.design;
+    if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return;
+    setDrawPop(what);
+  };
+  const thread = props.board?.threads.find((t) => t.id === props.board?.currentId);
+  const open = () => {
+    if (live?.design && !confirm("Draw the map of this topic? The diagram stops, and is kept.")) return;
+    send({ type: "view.open" });
+  };
+  const startDraw = async (what: "map" | "diagram", start: () => Promise<unknown>) => {
+    try {
+      await start();
+      setView(what);
+      setDrawPop(null);
+    } catch (err) {
+      errorToast(`Couldn't start the ${what}`)(err);
+    }
+  };
+  // Taking Stand's card draws the same way the pills do: a topic that was said starts its own map or
+  // diagram, a map with none is the map of the board's topic, and with no topic at all the pop asks.
+  const drawNext = async (what: "map" | "diagram", topic: string): Promise<boolean> => {
+    const other = what === "map" ? live?.design : live && !live.design;
+    if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return false;
+    if (what === "map" && !topic) {
+      if (!thread) return setDrawPop("map"), true;
+      send({ type: "view.open" });
+      setView("map");
+      return true;
+    }
+    try {
+      await api.startBrainstorm(state.roomId, topic, what === "diagram" ? { seed: "", taskId: null } : undefined);
+      setView(what);
+      return true;
+    } catch (err) {
+      errorToast(`Couldn't start the ${what}`)(err);
+      return false;
+    }
+  };
+  // The board: the middle screen, or a tab of its own while a share or a deck has it.
+  const board = (
+    <ViewPane
+      view={view}
+      onView={setView}
+      tabs={!runningExperience(state.items)}
+      card={card}
+      brainstorm={props.brainstorm}
+      others={props.brainstorms ?? []}
+      roomId={state.roomId}
+      topic={thread ? { id: thread.id, title: thread.title } : null}
+      onRemove={steady ? (id) => send({ type: "brainstorm.remove", id }) : undefined}
+      onKeep={steady ? (id) => send({ type: "design.keep", id }) : undefined}
+      onDrop={steady ? (id) => send({ type: "design.drop", id }) : undefined}
+      onDraw={steady ? draw("map") : undefined}
+      onDrawDiagram={steady ? draw("diagram") : undefined}
+      onOpen={steady ? open : undefined}
+      onStop={steady ? () => send({ type: "view.stop" }) : undefined}
+    />
+  );
 
   const nowRow = (
       <div className={nowSlot ? "now in-bar" : "now"}>
@@ -378,12 +434,12 @@ export function Stage(props: {
             )}
           </span>
         )}
-        {(tabSnaps.length > 0 || middleTaken || view) && (
+        {(tabSnaps.length > 0 || middleTaken) && (
           <span className="stage-tabs" role="tablist" aria-label="Main screen, the board and the snaps you opened">
             <button
               role="tab"
-              aria-selected={!openSnap && !boardOpen && !viewOpen}
-              className={openSnap || boardOpen || viewOpen ? "stage-tab" : "stage-tab on"}
+              aria-selected={!openSnap && !boardOpen}
+              className={openSnap || boardOpen ? "stage-tab" : "stage-tab on"}
               onClick={() => pickTab(null)}
             >
               {mainLabel}
@@ -399,33 +455,6 @@ export function Stage(props: {
                 Board
                 {!boardOpen && <AgentTabMark cards={props.agentCards} />}
               </button>
-            )}
-            {view && (
-              <span className={viewOpen ? "stage-tab snap view on" : "stage-tab snap view"} title={`${view.design ? "A diagram" : "A map"} of this call's talk${view.prompt ? `: ${view.prompt}` : ""}`}>
-                <button role="tab" aria-selected={viewOpen} onClick={() => pickTab("view")}>
-                  {view.design ? "Diagram" : "Map"}
-                  {view.prompt && (
-                    <span className="stage-tab-topic" dir="auto">
-                      {view.prompt}
-                    </span>
-                  )}
-                  {!viewOpen && seenView !== view.id && <span className="stage-tab-new" aria-label="New" />}
-                </button>
-                {!props.ending && (
-                  <button
-                    className="stage-tab-x"
-                    disabled={props.offline}
-                    onClick={() => {
-                      if (!send({ type: "view.close", id: view.id })) return;
-                      toast({ text: `Closed the ${view.design ? "diagram" : "map"}. It is kept on its own page.` });
-                    }}
-                    title="Close it for everyone. It is kept on its own page."
-                    aria-label={`Close the ${view.design ? "diagram" : "map"} for everyone`}
-                  >
-                    ✕
-                  </button>
-                )}
-              </span>
             )}
             {tabSnaps.map((s) => (
               <span key={s.id} className={s === openSnap ? "stage-tab snap on" : "stage-tab snap"} title={s.caption ?? undefined}>
@@ -482,6 +511,8 @@ export function Stage(props: {
 
       <div className="screen" ref={screenRef}>
         <div className="nudges">
+        {/* Someone asked for a map, a diagram or a review out loud: Stand offers it to everyone, and anyone answers. */}
+        {state.next && !props.ending && <NextCard key={state.next.id} next={state.next} roomId={state.roomId} offline={props.offline} send={send} onDraw={drawNext} />}
         {/* A quiet nudge for the host only: their click is what moves the meeting. */}
         {canSteer && !props.ending && suggested && state.suggestion && (
           <div className="nudge" role="status" title={state.suggestion.reason}>
@@ -514,7 +545,6 @@ export function Stage(props: {
             </button>
           </div>
         )}
-        {!props.ending && state.next && <NextCard next={state.next} roomId={state.roomId} offline={props.offline} send={send} />}
         {!props.ending && <ConxtNudges cards={state.conxt ?? []} me={props.participantId} offline={props.offline} send={send} />}
         {/* A share or a deck has the middle: the topic stays in view as one line over it. */}
         {middleTaken && !boardOpen && !openSnap && !((reviewUp || design) && !showingScreen && !sharer && !shownTask) && (
@@ -533,20 +563,6 @@ export function Stage(props: {
         {boardOpen && !openSnap && (
           <div className="board-tab" role="tabpanel">
             {board}
-          </div>
-        )}
-        {/* And a map or a diagram: the board, the share or the slides keep running underneath. */}
-        {viewOpen && view && !openSnap && (
-          <div className="board-tab view-tab" role="tabpanel">
-            {view.design ? (
-              <DesignBoard
-                brainstorm={view}
-                onKeep={props.offline || props.ending ? undefined : (id) => send({ type: "design.keep", id })}
-                onDrop={props.offline || props.ending ? undefined : (id) => send({ type: "design.drop", id })}
-              />
-            ) : (
-              <BrainViews brainstorm={view} onRemove={props.offline || props.ending ? undefined : (id) => send({ type: "brainstorm.remove", id })} />
-            )}
           </div>
         )}
         {shownTask && !boardOpen && !openSnap ? (
@@ -657,6 +673,10 @@ export function Stage(props: {
           board
         )}
       </div>
+      {drawPop === "map" && <BrainstormPop onClose={() => setDrawPop(null)} onStart={(prompt) => startDraw("map", () => api.startBrainstorm(state.roomId, prompt))} />}
+      {drawPop === "diagram" && (
+        <DesignSessionPop todos={[]} onClose={() => setDrawPop(null)} onStart={(prompt, seed, taskId) => startDraw("diagram", () => api.startBrainstorm(state.roomId, prompt, { seed, taskId }))} />
+      )}
 
     </main>
   );

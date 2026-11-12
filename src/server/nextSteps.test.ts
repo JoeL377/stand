@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, test } from "node:test";
 import { heardIntent, suggestedNext } from "./nextSteps.ts";
 import type { NextStep } from "../shared/protocol.ts";
 
@@ -41,4 +41,23 @@ describe("suggestedNext", () => {
     ];
     assert.deepEqual(suggestedNext(steps).map((s) => s.id), ["a"]);
   });
+});
+
+test("the talk of the last few minutes can sound like a brainstorm or a design, and plain talk like neither", async () => {
+  const { soundsLike } = await import("./nextSteps.ts");
+  const at = (min: number) => min * 60_000;
+  const ideas = [
+    { speaker: "Joe", text: "What if the first three seats are free?", ts: at(10) },
+    { speaker: "Huy", text: "Or we could price per meeting hour.", ts: at(10.5) },
+    { speaker: "Joe", text: "Another idea, maybe we charge for the agent only.", ts: at(11) },
+  ];
+  assert.equal(soundsLike(ideas, at(11)), "map");
+  assert.equal(soundsLike(ideas.map((l) => ({ ...l, speaker: "Joe" })), at(11)), null, "one person thinking aloud isn't a brainstorm");
+  assert.equal(soundsLike(ideas, at(15)), null, "talk from a while ago doesn't count");
+  const parts = [
+    { speaker: "Huy", text: "The bot calls the webhook, which then writes to the database.", ts: at(20) },
+    { speaker: "Huy", text: "A queue sits between the service and the pipeline, and then it flows into the notes table.", ts: at(20.5) },
+  ];
+  assert.equal(soundsLike(parts, at(21)), "diagram");
+  assert.equal(soundsLike([{ speaker: "Joe", text: "I'll send the invoice today and call the customer.", ts: at(30) }], at(30)), null);
 });

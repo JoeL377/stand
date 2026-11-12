@@ -5,15 +5,17 @@
 // becomes a to-do or decision by itself.
 
 import { brainstormsOf } from "./brainstorm.ts";
-import type { SpaceFeed } from "../shared/protocol.ts";
+import type { Note, SpaceFeed } from "../shared/protocol.ts";
 import { designReviewSummary, designReviewsRan } from "./designReviews.ts";
 import { ideaReviewsOf } from "./ideaReview.ts";
 import { reviewView, reviewsDone } from "./reviews.ts";
 import type { DB } from "./db.ts";
 import type { Agent } from "./llm.ts";
+import { forSpace } from "./usage.ts";
 import { newId } from "./ids.ts";
 import { archivedRows } from "./archive.ts";
 import { withFrom } from "./noteFrom.ts";
+import { currentSweep } from "./questionSweep.ts";
 import { settledView } from "./spaceSettle.ts";
 import { currentDoneDeck } from "./doneDeck.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
@@ -115,7 +117,7 @@ async function fileJot(db: DB, agent: Agent, id: string): Promise<boolean> {
     const room = jot && db.getRoom(jot.roomId);
     if (!jot || !room) return false;
     const items = db.listItems(room.id).filter((i) => !i.deckId);
-    const itemId = await agent.pickItem(room, items, jot.text);
+    const itemId = await forSpace(agent, room.id).pickItem(room, items, jot.text);
     // Someone may have deleted it, or picked an item, while the agent was reading.
     const now = db.getJot(id);
     if (!itemId || !now || now.itemId) return false;
@@ -137,7 +139,7 @@ async function describe(db: DB, agent: Agent, id: string, buf: Buffer, ext: stri
     const mediaType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
     // Pinned to a note, what the note says is what was written about it.
     const said = snap.line ?? (snap.jotId ? (db.getJot(snap.jotId)?.text ?? null) : null);
-    const out = await agent.describeCapture({ data: buf.toString("base64"), mediaType }, room, items, said);
+    const out = await forSpace(agent, room.id).describeCapture({ data: buf.toString("base64"), mediaType }, room, items, said);
     // Someone may have deleted it, or picked an item, while the agent was looking.
     const now = db.getSnap(id);
     if (!out || !now) return false;
@@ -157,11 +159,17 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
   // Archived rows leave the page; the Archived list shows them instead.
   const gone = new Set(archived.map((a) => a.ref));
   const keep = (kind: string) => (x: { id: string }) => !gone.has(`${kind}:${x.id}`);
-  const { decided, open, answered } = settledView(db, roomId);
+  const view = settledView(db, roomId);
+  const { decided, open, answered } = view;
+  // Each to-do, question and decision with the project it is in (shared/projects.ts).
+  const graph = db.projectGraph(roomId);
+  const grouped = <T extends Note>(notes: T[]) => db.withProjects(roomId, notes, graph);
   return {
     archived,
     // Between meetings: what the next one will open on. During one: what it opened on.
     doneDeck: currentDoneDeck(db, roomId),
+    // The open questions Stand's last sweep proposes to close.
+    questionSweep: currentSweep(db, roomId, view),
     // The next product review: slides agents added, and finished work that will join it.
     review: reviewView(db, roomId, baseUrl),
     reviews: reviewsDone(db, roomId),
@@ -176,16 +184,18 @@ export function spaceFeed(db: DB, roomId: string, baseUrl = ""): SpaceFeed {
       .map((j) => ({ ...j, snaps: linkSnaps(db.jotSnaps(j.id), [], [], baseUrl) })),
     meetings: db.feedMeetings(roomId).filter(keep("meeting")),
     updates: db.roomUpdates(roomId, 0, FEED_UPDATES),
-    decided: withFrom(db, decided.filter(keep("decision")).slice(0, FEED_NOTES)),
+    decided: grouped(withFrom(db, decided.filter(keep("decision")).slice(0, FEED_NOTES))),
     // A question someone answered or dropped by hand leaves Open for the Tasks tab's Done and Dropped.
-    open: withFrom(db, open.filter(keep("question")).filter((n) => !isClosed(stateOf(n))).slice(0, FEED_NOTES)),
+    open: grouped(withFrom(db, open.filter(keep("question")).filter((n) => !isClosed(stateOf(n))).slice(0, FEED_NOTES))),
     context: db.spaceContext(roomId, FEED_NOTES),
-    closedQuestions: withFrom(
-      db,
-      [...open.filter((n) => isClosed(stateOf(n))), ...answered]
-        .filter(keep("question"))
-        .sort((a, b) => (b.doneAt ?? b.ts) - (a.doneAt ?? a.ts))
-        .slice(0, FEED_NOTES),
+    closedQuestions: grouped(
+      withFrom(
+        db,
+        [...open.filter((n) => isClosed(stateOf(n))), ...answered]
+          .filter(keep("question"))
+          .sort((a, b) => (b.doneAt ?? b.ts) - (a.doneAt ?? a.ts))
+          .slice(0, FEED_NOTES),
+      ),
     ),
   };
 }

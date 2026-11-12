@@ -16,13 +16,14 @@ import { parseActor, type Actor } from "../shared/actors.ts";
 import type { Channel, ChatSession } from "../shared/chat.ts";
 import { IDEA_OUTCOMES, REVIEW_OUTCOMES } from "../shared/protocol.ts";
 import type { ActionWork, BrainCaught, BrainNode, AgentToken, Discussion, Item, ItemUpdate, Jot, Note, ReviewView, TaskState, UpdateStatus, UpNextSuggestion, UpNext, User } from "../shared/protocol.ts";
+import { projectActivity, type Project } from "../shared/projects.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
-import type { DB } from "./db.ts";
+import { type DB, ParentError, ProjectError } from "./db.ts";
 import { IDEA_SLIDES_MAX, ideaReviewView, reviewedIdeas, setUpIdeaReview } from "./ideaReview.ts";
 import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
 import { recordMentions } from "./mentions.ts";
-import { settledView } from "./spaceSettle.ts";
+import { answerOf, openQuestions, settledView } from "./spaceSettle.ts";
 import { CHECK_INSTRUCTIONS, CHECK_LEASE_MS, CHECK_VERSION, SHOW_FROM } from "./decisionCheck.ts";
 
 /** A position as one line, with the person's own words when the meeting-end run kept them. */
@@ -30,7 +31,7 @@ const positionLine = (p: Discussion["positions"][number]) => `${p.speaker}: ${p.
 import { linkSnaps, type SnapRow } from "./snaps.ts";
 import { UPLOAD_LINK_MAX, UPLOAD_LINK_MS, prOf, readyToShip, shotUrl, workingOn, type UploadLinks } from "./workLog.ts";
 
-export type RefKind = "action" | "decision" | "question" | "context" | "topic";
+export type RefKind = "action" | "decision" | "question" | "context" | "topic" | "project";
 const NOTE_KINDS: Record<string, RefKind> = { action: "action", decision: "decision", question: "question", context: "context" };
 
 export const refOf = (kind: RefKind, id: string) => `stand:${kind}/${id}`;
@@ -38,7 +39,7 @@ export const refUrl = (baseUrl: string, kind: RefKind, id: string) => `${baseUrl
 
 /** Reads "stand:action/n8f2k", "action/n8f2k" or a Stand link to one (…/ref/action/n8f2k). */
 export function parseRef(input: string): { kind: RefKind; id: string } | null {
-  const m = /(?:^|stand:|\/ref\/)(action|decision|question|context|topic)\/([a-z0-9]{4,24})\b/i.exec(input.trim());
+  const m = /(?:^|stand:|\/ref\/)(action|decision|question|context|topic|project)\/([a-z0-9]{4,24})\b/i.exec(input.trim());
   return m ? { kind: m[1].toLowerCase() as RefKind, id: m[2] } : null;
 }
 
@@ -71,6 +72,8 @@ export interface AgentDeps {
   db: DB;
   /** Tells people in a live call that something changed on their space. */
   notify: (roomId: string, what: "updates" | "followups") => void;
+  /** A project was made or brought back: Stand files what nobody filed again soon (projectSuggest.ts). */
+  projectsChanged?: (roomId: string) => void;
   /** The meeting brief (stand.meeting-brief/v1) for a meeting. */
   brief: (meetingId: string, baseUrl: string, transcript: boolean) => unknown;
   /** The space's suggested agenda as people see it in the app. */
@@ -84,7 +87,7 @@ export interface AgentDeps {
   /** A plan changed (a comment, a new version): a design review running on it lays its slides out again. */
   specTouched?: (note: Note & { roomId: string }) => void;
   /** A brainstorm or design session was started or changed from outside a call: a call running in that space picks it up. */
-  brainstormTouched?: (roomId: string, focusItemId: string | null, by: string) => void;
+  brainstormTouched?: (roomId: string) => void;
 }
 
 type Work = Pick<ActionWork, "working" | "ready">;
@@ -168,6 +171,23 @@ export function agentApi(deps: AgentDeps) {
         }
       : {};
 
+  /** Where a question stands, for agents: open, answered (with the decision) or dropped (with why). */
+  const questionInfo = (roomId: string, n: Note) => {
+    const state = stateOf(n);
+    const by = state === "done" ? answerOf(db, n) : null;
+    const settled = by || isClosed(state) ? undefined : settledView(db, roomId).answered.find((x) => x.id === n.id);
+    return {
+      status: state === "dropped" ? "dropped" : state === "done" || settled ? "answered" : "open",
+      answered_by: by ? { ref: refOf("decision", by.id), text: by.text } : settled ? { text: settled.answeredBy } : undefined,
+      why_dropped: state === "dropped" ? (n.dropReason ?? undefined) : undefined,
+    };
+  };
+  /** The questions someone answered with this decision. */
+  const answersOf = (roomId: string, decision: Note) => {
+    const asked = db.notesByIds(db.roomLinks(roomId, "leaves").filter((l) => l.toId === decision.id).map((l) => l.fromId));
+    return asked.length ? asked.map((q) => ({ ref: refOf("question", q.id), text: q.text })) : undefined;
+  };
+
   /** Who's on each to-do right now and what waits to ship: the same reading as the pills on the Tasks page. */
   const workOn = (notes: Note[]) => {
     const updates = db.notesUpdates(notes.map((n) => n.id));
@@ -183,10 +203,78 @@ export function agentApi(deps: AgentDeps) {
     ready: work?.ready ? { by: work.ready.by, since: new Date(work.ready.since).toISOString(), pr: work.ready.pr ?? undefined } : undefined,
   });
 
+  /** The project a note is in, when the note came through grouped (it has project worked out).
+   *  suggested: Stand suggested it and nobody confirmed it. */
+  const projectInfo = (n: Note) => {
+    if (n.project === undefined) return undefined;
+    const name = n.project ? db.projectName(n.project) : null;
+    return n.project && name ? { ref: refOf("project", n.project), name, ...(n.projectSuggested ? { suggested: true } : {}) } : "unassigned";
+  };
+  /** Notes of one space with the project each is in (shared/projects.ts). */
+  const grouped = <T extends Note>(roomId: string, notes: T[]): T[] => db.withProjects(roomId, notes);
+  /** The same for notes from several spaces. */
+  const groupedByRoom = <T extends Note & { roomId: string }>(notes: T[]): T[] => {
+    const rooms = new Map<string, T[]>();
+    for (const n of notes) rooms.set(n.roomId, [...(rooms.get(n.roomId) ?? []), n]);
+    const out = new Map<string, T>();
+    for (const [roomId, list] of rooms) for (const n of db.withProjects(roomId, list)) out.set(n.id, n);
+    return notes.map((n) => out.get(n.id) ?? n);
+  };
+  /** A project as agents see it in lists. */
+  const projectRow = (p: Project, baseUrl: string) => ({
+    ref: refOf("project", p.id),
+    name: p.name,
+    goal: p.goal ?? undefined,
+    open_todos: p.openTodos,
+    url: `${baseUrl}/s/${p.roomId}?project=${p.id}`,
+  });
+  /** A project an agent named: its ref, its name, or "unassigned" (null). Unknown names list what there is. */
+  const projectFor = (roomId: string, input: string): string | null => {
+    const v = input.trim();
+    if (/^(unassigned|none|no project)$/i.test(v)) return null;
+    const ref = parseRef(v);
+    const all = db.listProjects(roomId);
+    const p = ref?.kind === "project" ? all.find((x) => x.id === ref.id) : db.findProject(roomId, v);
+    if (p) return p.id;
+    const names = all.filter((x) => !x.archived).map((x) => `${x.name} (${refOf("project", x.id)})`);
+    throw new AgentError(
+      `No project ${ref ? "with that ref" : `called "${clip(v, 80)}"`} in this space. ${names.length ? `Its projects: ${names.join(", ")}.` : "It has no projects yet."} Use "unassigned" for none, or create_project when your person asks for a new one.`,
+    );
+  };
+
+  /** The to-do an agent named as a parent: its ref, or "none" (null). It must be a to-do that can have
+   *  parts (db.checkParent); childId null for one not added yet. */
+  const parentFor = (roomId: string, input: string, childId: string | null): string | null => {
+    const v = input.trim();
+    if (/^(none|no parent)$/i.test(v)) return null;
+    const ref = parseRef(v);
+    if (ref?.kind !== "action") throw new AgentError('A parent is a to-do\'s ref (stand:action/<id>), or "none" to take it off.');
+    try {
+      db.checkParent(roomId, childId, ref.id);
+    } catch (err) {
+      if (err instanceof ParentError) throw new AgentError(err.message);
+      throw err;
+    }
+    return ref.id;
+  };
+  /** The to-do a to-do or question is a part of, and its own parts, for get. */
+  const familyOf = (n: Note) => {
+    const parent = n.parentId ? db.getNote(n.parentId) : null;
+    const parts = n.kind === "action" ? db.noteParts(n.id) : [];
+    return {
+      parent: parent ? { ref: refOf("action", parent.id), text: parent.text, status: stateOf(parent) } : undefined,
+      parts: parts.length
+        ? parts.map((x) => ({ ref: refOf(x.kind === "question" ? "question" : "action", x.id), text: x.text, status: stateOf(x), owner: x.owner ?? undefined }))
+        : undefined,
+    };
+  };
+
   const actionInfo = (n: Note, work?: Work) => ({
     ref: refOf("action", n.id),
     text: n.text,
     owner: n.owner ?? undefined,
+    project: projectInfo(n),
+    parent: n.parentId && db.getNote(n.parentId) ? refOf("action", n.parentId) : undefined,
     status: stateOf(n, work),
     ...workInfo(work),
     done_by: n.doneBy ?? undefined,
@@ -307,7 +395,8 @@ export function agentApi(deps: AgentDeps) {
   /** Decisions, open questions and open to-dos on an item, newest first, capped. */
   const onItem = (itemId: string | null, skip?: string) => {
     if (!itemId) return { decisions: [], open_questions: [], open_todos: [] };
-    const notes = db.itemNotes(itemId).filter((n) => n.id !== skip);
+    const item = db.getItem(itemId);
+    const notes = item ? grouped(item.roomId, db.itemNotes(itemId).filter((n) => n.id !== skip)) : [];
     // Questions only count from the latest meeting that talked about the item; older ones were answered or carried.
     const latest = notes[0]?.meetingId;
     const openTodos = notes.filter((n) => n.kind === "action" && !n.doneAt).slice(0, 6);
@@ -399,7 +488,7 @@ export function agentApi(deps: AgentDeps) {
   const dependenciesOf = (n: Pick<Note, "id"> & { roomId: string }) => {
     const links = db.roomLinks(n.roomId, "depends_on");
     const todos = (ids: string[]) => {
-      const notes = ids.map((id) => db.getNote(id)).filter((x) => x !== null);
+      const notes = grouped(n.roomId, ids.map((id) => db.getNote(id)).filter((x) => x !== null));
       const work = workOn(notes);
       return notes.map((x) => ({ ...actionInfo(x, work.get(x.id)), done_by: undefined, done_actor: undefined }));
     };
@@ -430,7 +519,8 @@ export function agentApi(deps: AgentDeps) {
   }
 
   /** To-dos as agents see them: the ref, owner and status, plus where they came from and the decision behind them. */
-  function workRows(rows: Array<Note & { roomName: string; meetingStartedAt: number; addedByHand?: boolean; fromChat?: boolean }>, baseUrl: string) {
+  function workRows(all: Array<Note & { roomId: string; roomName: string; meetingStartedAt: number; addedByHand?: boolean; fromChat?: boolean }>, baseUrl: string) {
+    const rows = groupedByRoom(all);
     const items = new Map<string, Item | null>();
     const work = workOn(rows);
     const planned = db.plannedNotes(rows.map((n) => n.id));
@@ -464,6 +554,7 @@ export function agentApi(deps: AgentDeps) {
   function resolve(caller: Caller, refText: string) {
     const ref = parseRef(refText);
     if (!ref) throw new AgentError(`"${clip(refText, 60)}" isn't a Stand reference. They look like stand:action/k3m9xq2p.`);
+    if (ref.kind === "project") throw new AgentError("A project (stand:project/...) isn't a to-do or a note: get reads it, and list_actions with project lists what's in it.");
     if (ref.kind === "topic") {
       const d = db.getDiscussion(ref.id);
       const m = d && db.getMeeting(d.meetingId);
@@ -496,6 +587,8 @@ export function agentApi(deps: AgentDeps) {
           url: `${baseUrl}/s/${room.id}`,
         };
       }
+      const projectRef = parseRef(refText);
+      if (projectRef?.kind === "project") return this.getProject(caller, projectRef.id, baseUrl);
       const r = resolve(caller, refText);
       const item = r.itemId ? db.getItem(r.itemId) : null;
       const where = {
@@ -534,7 +627,7 @@ export function agentApi(deps: AgentDeps) {
           url: refUrl(baseUrl, "topic", r.topic!.id),
         };
       }
-      const n = r.note;
+      const n = r.note.kind === "context" ? r.note : grouped(r.room.id, [r.note])[0];
       // The decision behind a to-do: from its own topic first, else the item's latest decision.
       const sameTopic = r.topic ? db.meetingNotes(r.meeting.id).filter((x) => x.discussionId === r.topic!.id && x.id !== n.id) : [];
       const updates = n.kind === "action" ? db.noteUpdates(n.id) : [];
@@ -550,6 +643,8 @@ export function agentApi(deps: AgentDeps) {
         on_screen: onScreen(n, baseUrl),
         owner: n.owner ?? undefined,
         status: n.kind === "action" ? stateOf(n, work) : undefined,
+        project: projectInfo(n),
+        ...(n.kind === "action" || n.kind === "question" ? familyOf(n) : {}),
         ...workInfo(work),
         plan: plan ? { text: plan.text, by: plan.by, actor: plan.actor, at: new Date(plan.ts).toISOString(), versions: plan.versions } : undefined,
         ...(review ? { plan_version: review.plan.id } : {}),
@@ -559,6 +654,8 @@ export function agentApi(deps: AgentDeps) {
         done_by: n.doneBy ?? undefined,
         ...(n.kind === "decision" ? decisionInfo(settledView(db, r.room.id).decided.find((x) => x.id === n.id)) : {}),
         why_dropped: n.kind === "action" && n.state === "dropped" ? (n.dropReason ?? undefined) : undefined,
+        ...(n.kind === "question" ? questionInfo(r.room.id, n) : {}),
+        answers: n.kind === "decision" ? answersOf(r.room.id, n) : undefined,
         ...where,
         topic,
         decided_with_it: sameTopic.filter((x) => x.kind === "decision").map((x) => x.text),
@@ -591,7 +688,7 @@ export function agentApi(deps: AgentDeps) {
         .filter(Boolean)
         .join(", ");
       const ref = refOf(r.ref.kind, r.note?.id ?? r.topic!.id);
-      const what = { action: "to-do", decision: "decision", question: "open question", context: "line of context", topic: "topic" }[r.ref.kind];
+      const what = { action: "to-do", decision: "decision", question: "open question", context: "line of context", topic: "topic", project: "project" }[r.ref.kind];
       const text = r.note?.text ?? r.topic!.topic;
       const decided =
         r.note?.kind === "decision"
@@ -620,19 +717,104 @@ export function agentApi(deps: AgentDeps) {
       return lines.join("\n");
     },
 
+    /** One project: what it is for, what is open and decided in it, and the agenda items linked to it. */
+    getProject(caller: Caller, projectId: string, baseUrl: string) {
+      const roomId = (db.raw.prepare("SELECT room_id FROM projects WHERE id = ?").get(projectId) as { room_id: string } | undefined)?.room_id;
+      if (!roomId) throw new AgentError("That project doesn't exist any more.");
+      const room = space(roomId, caller);
+      const graph = db.projectGraph(room.id);
+      const p = db.listProjects(room.id, graph).find((x) => x.id === projectId)!;
+      const inIt = <T extends Note>(notes: T[]) => db.withProjects(room.id, notes, graph).filter((n) => n.project === p.id);
+      const todos = inIt(db.memberActions(caller.user.id).filter((n) => n.roomId === room.id));
+      const open = todos.filter((n) => !isClosed(stateOf(n)));
+      const work = workOn(open);
+      const standing = settledView(db, room.id);
+      return {
+        kind: "project",
+        ...projectRow(p, baseUrl),
+        archived: p.archived || undefined,
+        space: { id: room.id, name: room.name },
+        counts: {
+          open_todos: open.length,
+          done_todos: todos.filter((n) => stateOf(n) === "done").length,
+          decisions: inIt(standing.decided.filter((n) => !n.replacedBy)).length,
+          open_questions: inIt(standing.open.filter((n) => !isClosed(stateOf(n)))).length,
+        },
+        open_todos: open.slice(0, 50).map((n) => ({ ...actionInfo(n, work.get(n.id)), project: undefined, ...(n.projectSuggested ? { suggested: true } : {}), url: refUrl(baseUrl, "action", n.id) })),
+        decisions: inIt(standing.decided.filter((n) => !n.replacedBy))
+          .slice(0, 30)
+          .map((n) => ({ ref: refOf("decision", n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, "decision", n.id) })),
+        open_questions: inIt(standing.open.filter((n) => !isClosed(stateOf(n))))
+          .slice(0, 30)
+          .map((n) => ({ ref: refOf("question", n.id), text: n.text, url: refUrl(baseUrl, "question", n.id) })),
+        agenda_items: db
+          .listItems(room.id)
+          .filter((i) => i.projectId === p.id)
+          .map((i) => ({ id: i.id, title: i.title, stand_url: `${baseUrl}/items/${i.id}` })),
+        how: "A to-do is in this project when someone set it, when its agenda item links here, or when Stand suggested it and nobody confirmed it yet (suggested: true). Give a to-do a project, or confirm a suggestion, with create_action or update_action (project).",
+      };
+    },
+
+    /** Makes a project in a space, when the person asks for one. A name an archived project has brings it back. */
+    createProject(caller: Caller, args: { space: string; name: string; goal?: string; itemId?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const room = findSpace(caller, args.space);
+      try {
+        const existed = db.findProject(room.id, args.name);
+        const p = db.createProject(room.id, { name: args.name, goal: args.goal, fromItemId: args.itemId ?? null }, byOf(caller));
+        deps.notify(room.id, "followups");
+        deps.projectsChanged?.(room.id);
+        return {
+          [existed ? "brought_back" : "created"]: projectRow(p, baseUrl),
+          linked_item: args.itemId ? db.getItem(args.itemId)?.title : undefined,
+          space: room.name,
+          next: "Give to-dos this project with create_action or update_action (project: its ref or name). To-dos on a linked agenda item join it by themselves.",
+        };
+      } catch (err) {
+        if (err instanceof ProjectError) throw new AgentError(err.message);
+        throw err;
+      }
+    },
+
+    /** Sets the order of a space's projects, most important first. Those left out keep their order after. */
+    orderProjects(caller: Caller, args: { space: string; projects: string[] }, baseUrl = "") {
+      requireWrite(caller);
+      const room = findSpace(caller, args.space);
+      if (!args.projects.length) throw new AgentError("Name at least one project, most important first.");
+      const ids = args.projects.map((p) => projectFor(room.id, p));
+      if (ids.includes(null)) throw new AgentError("Unassigned is not a project and has no place in the order. Name only projects.");
+      try {
+        const ordered = db.orderProjects(room.id, ids as string[]).filter((p) => !p.archived);
+        deps.notify(room.id, "followups");
+        return {
+          ordered: ordered.map((p) => projectRow(p, baseUrl)),
+          space: room.name,
+          next: "This is the order the Tasks tab and list_spaces show, most important first.",
+        };
+      } catch (err) {
+        if (err instanceof ProjectError) throw new AgentError(err.message);
+        throw err;
+      }
+    },
+
     /** Where a reference lives, for the web app's /ref/... links. */
     locate(caller: Caller, kind: string, id: string) {
+      if (kind === "project") {
+        const roomId = (db.raw.prepare("SELECT room_id FROM projects WHERE id = ?").get(id) as { room_id: string } | undefined)?.room_id;
+        if (!roomId) throw new AgentError("That project doesn't exist any more.");
+        return { meetingId: null, roomId: space(roomId, caller).id, itemId: null };
+      }
       const r = resolve(caller, `stand:${kind}/${id}`);
       return { meetingId: r.meeting.id, roomId: r.room.id, itemId: r.itemId, added: r.meeting.added || undefined };
     },
 
-    listActions(caller: Caller, opts: { space: string; status?: "open" | "done" | "all"; owner?: string }, baseUrl: string) {
+    listActions(caller: Caller, opts: { space: string; status?: "open" | "done" | "all"; owner?: string; project?: string }, baseUrl: string) {
       const status = opts.status ?? "open";
       const room = findSpace(caller, opts.space);
       const who = opts.owner?.trim().toLowerCase();
-      const rows = db
-        .memberActions(caller.user.id)
-        .filter((n) => n.roomId === room.id)
+      const project = opts.project?.trim() ? projectFor(room.id, opts.project) : undefined;
+      const rows = grouped(room.id, db.memberActions(caller.user.id).filter((n) => n.roomId === room.id))
+        .filter((n) => project === undefined || (n.project ?? null) === project)
         .filter((n) => (status === "all" ? true : status === "done" ? !!n.doneAt : !n.doneAt))
         .filter((n) => {
           if (!who) return true;
@@ -645,6 +827,7 @@ export function agentApi(deps: AgentDeps) {
         space: { id: room.id, name: room.name },
         status,
         owner: opts.owner || undefined,
+        project: project === undefined ? undefined : project ? { ref: refOf("project", project), name: db.projectName(project) } : "unassigned",
         count: rows.length,
         actions: workRows(rows.slice(0, 100), baseUrl).map((w) => ({ ...w, space: undefined })),
         note: rows.length > 100 ? "Showing the newest 100. Filter by status or owner to see the rest." : undefined,
@@ -713,6 +896,14 @@ export function agentApi(deps: AgentDeps) {
     },
 
     listSpaces(caller: Caller) {
+      // What is going on in each project, as the Tasks tab's Active first order reads it.
+      const open = groupedByRoom(db.memberActions(caller.user.id).filter((n) => !isClosed(stateOf(n))));
+      const work = workOn(open);
+      const reported = new Map<string, number>();
+      for (const u of db.notesUpdates(open.map((n) => n.id))) if (u.noteId) reported.set(u.noteId, u.ts);
+      const activity = projectActivity(
+        open.map((n) => ({ project: n.project, ts: n.ts, inProgress: stateOf(n, work.get(n.id)) === "doing", reportedAt: reported.get(n.id) })),
+      );
       return db.spaceRows(caller.user.id).map((row) => ({
         id: row.id,
         name: row.name,
@@ -724,6 +915,16 @@ export function agentApi(deps: AgentDeps) {
           .filter((i) => i.source !== "slide")
           .slice(0, 25)
           .map((i) => ({ id: i.id, title: i.externalId ? `${i.externalId} ${i.title}` : i.title })),
+        projects: (() => {
+          const active = db.listProjects(row.id).filter((p) => !p.archived);
+          return active.length
+            ? active.map((p) => {
+                const { url: _u, ...shown } = projectRow(p, "");
+                const a = activity.get(p.id);
+                return { ...shown, in_progress: a?.inProgress || undefined, latest_activity: a ? new Date(a.latest).toISOString() : undefined };
+              })
+            : undefined;
+        })(),
         latest_meeting_id: db.latestMeeting(row.id) ?? undefined,
         live: deps.liveMeeting?.(row.id) ?? null,
         chat: (() => {
@@ -1118,6 +1319,8 @@ export function agentApi(deps: AgentDeps) {
       const room = findSpace(caller, args.space);
       const text = oneLine(args.text, 500);
       if (!text) throw new AgentError("A to-do needs its text: what needs doing, in a line.");
+      const project = args.project?.trim() ? projectFor(room.id, args.project) : undefined;
+      const parent = args.parent?.trim() ? parentFor(room.id, args.parent, null) : undefined;
       let itemId: string | null = null;
       if (args.itemId) {
         const item = db.getItem(args.itemId);
@@ -1126,10 +1329,12 @@ export function agentApi(deps: AgentDeps) {
       }
       const note = db.addTask(room.id, { text, owner: ownerFor(caller, args.owner ?? "me"), itemId }, byOf(caller));
       db.setAddedActor(note.id, actorOf(caller));
-      const { now, update } = applyChange(caller, room.id, note, { ...args, adding: true });
+      if (project !== undefined) db.setNoteProject(room.id, note.id, { projectId: project, by: byOf(caller) });
+      if (parent) db.setNoteParent(room.id, note.id, parent);
+      const { now, update } = applyChange(caller, room.id, db.getNote(note.id) ?? note, { ...args, adding: true });
       deps.notify(room.id, "followups");
       return {
-        created: { ...actionInfo(now), space: room.name, item: itemId ? db.getItem(itemId)?.title : undefined, url: refUrl(baseUrl, "action", now.id) },
+        created: { ...actionInfo(grouped(room.id, [now])[0]), space: room.name, item: itemId ? db.getItem(itemId)?.title : undefined, url: refUrl(baseUrl, "action", now.id) },
         log: update ? updateInfo(update, baseUrl) : undefined,
         shows_on: `The space's Tasks tab in Stand, and the next meeting's check-in while it's open.`,
       };
@@ -1228,11 +1433,11 @@ export function agentApi(deps: AgentDeps) {
       const room = findSpace(caller, opts.space);
       const since = opts.since ? Date.parse(opts.since) : Date.now() - WHATS_NEW_DAYS * 86_400_000;
       if (Number.isNaN(since)) throw new AgentError(`"${clip(opts.since ?? "", 40)}" isn't a date. Use one like 2026-10-11 or 2026-10-11T08:00.`);
-      const recent = (kind: "decision" | "question" | "context") => db.spaceNotes(room.id, kind, 200).filter((n) => n.ts >= since);
+      const recent = (kind: "decision" | "context") => db.spaceNotes(room.id, kind, 200).filter((n) => n.ts >= since);
       const standing = new Map(settledView(db, room.id).decided.map((n) => [n.id, n]));
       const line = (kind: RefKind) => (n: Note) => ({
         ...decisionInfo(standing.get(n.id)), ref: refOf(kind, n.id), text: n.text, on: day(n.ts), url: refUrl(baseUrl, kind, n.id) });
-      const actions = db.memberActions(caller.user.id).filter((n) => n.roomId === room.id);
+      const actions = grouped(room.id, db.memberActions(caller.user.id).filter((n) => n.roomId === room.id));
       const open = actions.filter((n) => !isClosed(stateOf(n)));
       const work = workOn(open);
       const closed = actions.filter((n) => (n.doneAt ?? 0) >= since);
@@ -1271,8 +1476,10 @@ export function agentApi(deps: AgentDeps) {
           })),
         chats: ((channels) => db.roomChatSessions(room.id, since).map((s) => chatInfo(s, channels)))(db.roomChannels(room.id)),
         decided: recent("decision").map(line("decision")),
-        open_questions: recent("question")
-          .filter((n) => !isClosed(stateOf(n)))
+        // As the Tasks tab lists them: without the ones a later decision settled.
+        open_questions: openQuestions(db, room.id)
+          .filter((n) => n.ts >= since)
+          .reverse()
           .map(line("question")),
         context: recent("context").map(line("context")),
         being_worked_on: open
@@ -1318,6 +1525,86 @@ export function agentApi(deps: AgentDeps) {
       };
     },
 
+    /** A space's open questions, oldest first, as its Tasks tab lists them. */
+    listQuestions(caller: Caller, opts: { space: string }, baseUrl = "") {
+      const room = findSpace(caller, opts.space);
+      const open = grouped(room.id, openQuestions(db, room.id));
+      return {
+        space: { id: room.id, name: room.name },
+        count: open.length,
+        questions: open.slice(0, 200).map((n) => ({
+          ref: refOf("question", n.id),
+          text: n.text,
+          asked: day(n.meetingStartedAt),
+          project: projectInfo(n),
+          url: refUrl(baseUrl, "question", n.id),
+        })),
+        note: open.length > 200 ? "Showing the oldest 200." : undefined,
+        how: "close_question closes one: with answer (kept as a decision), with decision (one the space already has that answers it), or with drop (why nobody needs the answer).",
+      };
+    },
+
+    /** Closes an open question. An answer is kept as a decision the question points to, since a
+     *  resolved question becomes a decision; a decision the space already has can answer it
+     *  instead; or it is dropped, with why. */
+    closeQuestion(caller: Caller, args: { ref: string; answer?: string; decision?: string; drop?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:question/${args.ref}`);
+      if (r.note?.kind !== "question") throw new AgentError("Give an open question: stand:question/<id>.");
+      const q = r.note;
+      const answer = oneLine(args.answer, 500);
+      const given = args.decision?.trim() ?? "";
+      const drop = args.drop === undefined ? null : oneLine(args.drop, 200);
+      if ([!!answer, !!given, drop !== null].filter(Boolean).length !== 1)
+        throw new AgentError("Give one of answer (the answer, in a line that stands on its own), decision (the decision that already answers it) or drop (why nobody needs the answer).");
+      if (isClosed(stateOf(q))) throw new AgentError(`That question is already ${q.state === "dropped" ? "dropped" : "answered"}.`);
+      const by = byOf(caller);
+      const actor = actorOf(caller);
+      const ref = refOf("question", q.id);
+      if (drop !== null) {
+        db.setTaskState(r.room.id, q.id, { state: "dropped", by, actor, reason: drop || null });
+        deps.notify(r.room.id, "followups");
+        return { ref, status: "dropped", why_dropped: drop || undefined };
+      }
+      let decision: Note;
+      if (answer) {
+        decision = db.addOutsideMeeting(r.room.id, { kind: "decision", text: answer, owner: null, itemId: q.itemId }, by);
+        db.setAddedActor(decision.id, actor);
+        // The answer goes in the project its question is in.
+        const [asked, made] = grouped(r.room.id, [q, decision]);
+        if (asked.project && !asked.projectSuggested && made.project !== asked.project) db.setNoteProject(r.room.id, decision.id, { projectId: asked.project, by });
+      } else {
+        const d = resolve(caller, given.includes("/") ? given : `stand:decision/${given}`);
+        if (d.note?.kind !== "decision" || d.room.id !== r.room.id) throw new AgentError("decision takes a decision from the same space: stand:decision/<id>.");
+        decision = d.note;
+      }
+      for (const l of db.linksFrom([q.id], "leaves")) db.removeLink(l.fromId, l.toId, "leaves");
+      db.addLink(r.room.id, q.id, decision.id, "leaves", by, actor);
+      db.setTaskState(r.room.id, q.id, { state: "done", by, actor, closedBy: "answered" });
+      deps.notify(r.room.id, "followups");
+      return {
+        ref,
+        status: "answered",
+        answered_by: { ref: refOf("decision", decision.id), text: decision.text, new: answer ? true : undefined, url: refUrl(baseUrl, "decision", decision.id) },
+        shows_on: "The question moves to Done on the space's Tasks tab, with its answer. The decision is on the Decisions tab.",
+      };
+    },
+
+    /** Opens a closed question again. Its answer stays a decision, unless this takes back the answer
+     *  just written (undo: that decision's id). */
+    reopenQuestion(caller: Caller, args: { ref: string; undo?: string }) {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:question/${args.ref}`);
+      if (r.note?.kind !== "question") throw new AgentError("Give a question: stand:question/<id>.");
+      const links = db.linksFrom([r.note.id], "leaves");
+      for (const l of links) db.removeLink(l.fromId, l.toId, "leaves");
+      const note = db.setTaskState(r.room.id, r.note.id, { state: "open", by: byOf(caller) });
+      const made = args.undo && links.some((l) => l.toId === args.undo) ? db.getNote(args.undo) : null;
+      if (made?.kind === "decision" && db.getMeeting(made.meetingId)?.added) db.removeNote(made.id);
+      deps.notify(r.room.id, "followups");
+      return note;
+    },
+
     /** Changes a to-do: its wording, owner or state, and adds a summary to its log. */
     updateAction(caller: Caller, args: TaskChange & { ref: string; text?: string }, baseUrl = "") {
       requireWrite(caller);
@@ -1327,15 +1614,21 @@ export function agentApi(deps: AgentDeps) {
       const text = args.text === undefined ? note.text : oneLine(args.text, 500);
       if (!text) throw new AgentError("A to-do can't have empty text. To close it, set status done or dropped.");
       const owner = args.owner === undefined ? note.owner : ownerFor(caller, args.owner);
+      const project = args.project?.trim() ? projectFor(r.room.id, args.project) : undefined;
+      const moved = project !== undefined && !(note.projectSetBy != null && (note.projectId ?? null) === project);
+      const parent = args.parent?.trim() ? parentFor(r.room.id, args.parent, note.id) : undefined;
+      const reparented = parent !== undefined && parent !== (note.parentId ?? null);
+      if (moved) note = db.setNoteProject(r.room.id, note.id, { projectId: project, by: byOf(caller) }) ?? note;
+      if (reparented) note = db.setNoteParent(r.room.id, note.id, parent) ?? note;
       if (text !== note.text || owner !== note.owner)
         // Who added a to-do by hand is what its pill shows, so an edit keeps that name.
         note = db.editNote(note.id, { text, owner }, r.meeting.added ? (note.editedBy ?? byOf(caller)) : byOf(caller)) ?? note;
       const { now, update, unchanged } = applyChange(caller, r.room.id, note, args);
-      if (unchanged && text === r.note.text && owner === r.note.owner)
-        throw new AgentError("Nothing to change: give text, owner, status or a summary.");
+      if (unchanged && text === r.note.text && owner === r.note.owner && !moved && !reparented)
+        throw new AgentError("Nothing to change: give text, owner, project, parent, status or a summary.");
       deps.notify(r.room.id, "followups");
       return {
-        updated: { ...actionInfo(now), url: refUrl(baseUrl, "action", now.id) },
+        updated: { ...actionInfo(grouped(r.room.id, [now])[0]), url: refUrl(baseUrl, "action", now.id) },
         log: update ? updateInfo(update, baseUrl) : undefined,
       };
     },
@@ -1470,7 +1763,7 @@ export function agentApi(deps: AgentDeps) {
     },
 
     /** A brainstorm's map as an outline: the sentence, its directions, the ideas under each and what was caught on them. */
-    /** Sets up a design session with its background, so it's on the board when the team starts talking.
+    /** Sets up a design session with its background, so it's in the call when the team starts talking.
      *  Called again with the same topic while it waits or runs, it adds to that session's context. */
     startDesignSession(
       caller: Caller,
@@ -1487,7 +1780,7 @@ export function agentApi(deps: AgentDeps) {
       const topic = args.topic.replace(/\s+/g, " ").trim();
       const running = db.brainstormLive(room.id);
       const same = running?.kind === "design" && running.prompt.toLowerCase() === topic.toLowerCase() ? running : null;
-      // Starting a new one ends whatever is running, which would pull the board from under a call.
+      // Starting a new one ends whatever is running, which would pull it from under a call.
       if (running && !same && deps.liveMeeting?.(room.id)) throw new AgentError(`A ${running.kind === "design" ? "design session" : "brainstorm"} is running in a call in ${room.name} right now ("${running.prompt}"). Wait for the call to end, or use the same topic to add context to it.`);
       try {
         const now = Date.now();
@@ -1506,7 +1799,7 @@ export function agentApi(deps: AgentDeps) {
         }
         if (context.length > CONTEXT_MAX) throw new AgentError(`A design session holds up to ${CONTEXT_MAX} pieces of context. Put related notes in one piece.`);
         if (given.length) db.saveBrainstormContext(b.id, context);
-        deps.brainstormTouched?.(room.id, same ? null : b.itemId, caller.user.name);
+        deps.brainstormTouched?.(room.id);
         const live = deps.liveMeeting?.(room.id);
         const d = shownDiagram(db.getBrainstorm(b.id)?.diagram ?? diagram);
         return {
@@ -1521,8 +1814,8 @@ export function agentApi(deps: AgentDeps) {
           },
           space: room.name,
           shows_on: live
-            ? "It's on the board of the call running now. People open the context from the Context button on the board."
-            : `It waits for the team: when someone starts talking in ${room.name}, it's on the board, with the context behind a Context button. The link shows it before then.`,
+            ? "It's in the Diagram tab of the call running now. People open the context from the Context button on the diagram."
+            : `It waits for the team: when someone starts talking in ${room.name}, it's in the Diagram tab, with the context behind a Context button. The link shows it before then.`,
           how: "Call again with the same topic to add or replace context. When the call ends the diagram is saved as a draft spec on a to-do; get_brainstorm reads it.",
         };
       } catch (err) {
@@ -1643,6 +1936,10 @@ interface TaskChange {
   summary?: string;
   /** Why it was dropped. */
   reason?: string;
+  /** A project's ref or name, or "unassigned". */
+  project?: string;
+  /** The to-do it is a part of: its ref, or "none". */
+  parent?: string;
   links?: string[];
   /** The to-do is being added now: its summary is what it's about, not news on it. */
   adding?: boolean;

@@ -1,5 +1,7 @@
 // The tables, and the checks that bring a database made by an older version up to date.
 import type { DatabaseSync } from "node:sqlite";
+import { newId } from "../ids.ts";
+import { normalizeProjectName, projectKey } from "../../shared/projects.ts";
 import type { Row } from "./rows.ts";
 
 const schema = `
@@ -162,6 +164,13 @@ CREATE TABLE IF NOT EXISTS space_settled (
   basis TEXT NOT NULL,
   rows_json TEXT NOT NULL
 );
+-- Stand's last sweep of a space's open questions (questionSweep.ts), as JSON: what it read, which
+-- questions it proposes to close, and the ones someone chose to keep open.
+CREATE TABLE IF NOT EXISTS question_sweep (
+  room_id TEXT PRIMARY KEY,
+  at INTEGER NOT NULL,
+  sweep_json TEXT NOT NULL
+);
 -- "Done since last time" (doneDeck.ts): what the space closed since its last meeting, as pages Claude
 -- laid out for the next one to open on. since: when that meeting ended; basis: what the pass read.
 CREATE TABLE IF NOT EXISTS space_done (
@@ -224,9 +233,11 @@ CREATE TABLE IF NOT EXISTS brainstorms (
   map_json TEXT
 );
 CREATE INDEX IF NOT EXISTS brainstorms_room ON brainstorms(room_id, started_at);
--- Token use of every Claude call (usage.ts), with the meeting it was for (null outside a meeting).
+-- Token use of every Claude call (usage.ts), with the meeting it was for (null outside a meeting) and
+-- its space (null: not known, as for calls between meetings from before the space was kept).
 CREATE TABLE IF NOT EXISTS llm_usage (
   meeting_id TEXT,
+  room_id TEXT,
   task TEXT NOT NULL,
   model TEXT NOT NULL,
   input INTEGER NOT NULL,
@@ -430,6 +441,19 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS chat_messages_channel ON chat_messages(channel_id, seq);
 CREATE UNIQUE INDEX IF NOT EXISTS chat_messages_external ON chat_messages(channel_id, external_id) WHERE external_id IS NOT NULL;
 -- How far each person has read a channel: the seq of the last message they saw.
+-- Projects (shared/projects.ts): named groups of a space's to-dos, open questions and decisions.
+-- A note's own project_id is only what someone set by hand; the rest comes from the rules each read.
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  name TEXT NOT NULL,
+  goal TEXT,
+  position INTEGER NOT NULL,
+  archived_at INTEGER,
+  created_by TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS projects_room ON projects(room_id, position);
 CREATE TABLE IF NOT EXISTS channel_reads (
   channel_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -476,6 +500,13 @@ export function migrate(db: DatabaseSync) {
   // The ideas people starred on a brainstorm's page. Kept beside the map, not in it: the map is
   // rewritten by every pass of a running brainstorm.
   if (!brainCols.includes("stars_json")) db.exec("ALTER TABLE brainstorms ADD COLUMN stars_json TEXT");
+  // The map of a topic: the board thread it follows, and the stretches of the meeting it read.
+  if (!brainCols.includes("thread_id")) db.exec("ALTER TABLE brainstorms ADD COLUMN thread_id TEXT; ALTER TABLE brainstorms ADD COLUMN spans_json TEXT;");
+  // A brainstorm used to lead the agenda with its sentence. A map is now a view beside the board: a
+  // running one lets go of its item.
+  db.exec(
+    "UPDATE items SET archived = 1 WHERE id IN (SELECT item_id FROM brainstorms WHERE status = 'live' AND item_id IS NOT NULL); UPDATE brainstorms SET item_id = NULL WHERE status = 'live' AND item_id IS NOT NULL;",
+  );
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
   // The next steps people asked for out loud in the call (nextSteps.ts).
   if (!meetingCols.includes("next_json")) db.exec("ALTER TABLE meetings ADD COLUMN next_json TEXT");
@@ -486,6 +517,8 @@ export function migrate(db: DatabaseSync) {
   if (!itemCols.includes("slide_json")) db.exec("ALTER TABLE items ADD COLUMN slide_json TEXT");
   // "Present task" (room.ts): the to-do an agenda item walks through.
   if (!itemCols.includes("note_id")) db.exec("ALTER TABLE items ADD COLUMN note_id TEXT");
+  // The project an agenda item links to (shared/projects.ts).
+  if (!itemCols.includes("project_id")) db.exec("ALTER TABLE items ADD COLUMN project_id TEXT");
   const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
   // A product review's deck (reviews.ts).
@@ -501,6 +534,10 @@ export function migrate(db: DatabaseSync) {
   if (!(db.prepare("PRAGMA table_info(review_slides)").all() as Row[]).some((c) => c.name === "idea_json")) db.exec("ALTER TABLE review_slides ADD COLUMN idea_json TEXT;");
   const noteCols = (db.prepare("PRAGMA table_info(notes)").all() as Row[]).map((c) => c.name);
   if (!noteCols.includes("topic")) db.exec("ALTER TABLE notes ADD COLUMN topic TEXT;");
+  if (!noteCols.includes("project_id")) topicsToProjects(db);
+  db.exec("CREATE INDEX IF NOT EXISTS notes_project ON notes(project_id);");
+  // Stand's suggested project (rule 4), and when it last read the note for one. NULL: not read.
+  if (!noteCols.includes("suggested_project_id")) db.exec("ALTER TABLE notes ADD COLUMN suggested_project_id TEXT; ALTER TABLE notes ADD COLUMN project_judged_at INTEGER;");
   if (!noteCols.includes("discussion_id")) db.exec("ALTER TABLE notes ADD COLUMN discussion_id TEXT;");
   if (!noteCols.includes("edited_by")) db.exec("ALTER TABLE notes ADD COLUMN edited_by TEXT;");
   // Who did it, as fields (shared/actors.ts). Older rows read theirs from done_by and edited_by.
@@ -552,4 +589,55 @@ export function migrate(db: DatabaseSync) {
     db.exec(
       "ALTER TABLE decks ADD COLUMN kind TEXT NOT NULL DEFAULT 'pdf'; ALTER TABLE decks ADD COLUMN theme TEXT NOT NULL DEFAULT 'paper';",
     );
+  // Each call's space (Manage spaces shows what a space spent). Older rows with a meeting take its
+  // space; those with no meeting stay unknown.
+  if (!(db.prepare("PRAGMA table_info(llm_usage)").all() as Row[]).some((c) => c.name === "room_id"))
+    db.exec("ALTER TABLE llm_usage ADD COLUMN room_id TEXT; UPDATE llm_usage SET room_id = (SELECT room_id FROM meetings WHERE id = llm_usage.meeting_id) WHERE meeting_id IS NOT NULL;");
+  db.exec("CREATE INDEX IF NOT EXISTS llm_usage_room ON llm_usage (room_id, at);");
+}
+
+/** Once: the free-text topic labels become projects. Each different label in a space becomes one, in the
+ *  spelling used most. A note with a label is set by hand to its project, one with an empty label to
+ *  Unassigned, and one with no label follows the rules. notes.topic stays, but nothing reads it. */
+function topicsToProjects(db: DatabaseSync) {
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE notes ADD COLUMN project_id TEXT; ALTER TABLE notes ADD COLUMN project_set_by TEXT;");
+    const rows = db
+      .prepare("SELECT n.id, n.topic, m.room_id FROM notes n JOIN meetings m ON m.id = n.meeting_id WHERE n.topic IS NOT NULL ORDER BY n.ts, n.rowid")
+      .all() as Array<{ id: string; topic: string; room_id: string }>;
+    // Per space, per label: how often each spelling is used.
+    const spellings = new Map<string, Map<string, Map<string, number>>>();
+    for (const r of rows) {
+      const key = projectKey(r.topic);
+      if (!key) continue;
+      const room = spellings.get(r.room_id) ?? new Map<string, Map<string, number>>();
+      const counts = room.get(key) ?? new Map<string, number>();
+      const name = normalizeProjectName(r.topic);
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+      room.set(key, counts);
+      spellings.set(r.room_id, room);
+    }
+    const insert = db.prepare("INSERT INTO projects (id, room_id, name, goal, position, created_by, created_at) VALUES (?, ?, ?, NULL, ?, 'migrated', ?)");
+    const ids = new Map<string, string>();
+    const now = Date.now();
+    for (const [roomId, labels] of spellings) {
+      const names = [...labels].map(([key, counts]) => ({ key, name: [...counts].sort((a, b) => b[1] - a[1])[0][0] }));
+      names.sort((a, b) => a.name.localeCompare(b.name));
+      names.forEach((n, i) => {
+        const id = newId(12);
+        insert.run(id, roomId, n.name.slice(0, 80), i, now);
+        ids.set(`${roomId}\n${n.key}`, id);
+      });
+    }
+    const set = db.prepare("UPDATE notes SET project_id = ?, project_set_by = 'migrated' WHERE id = ?");
+    for (const r of rows) {
+      const key = projectKey(r.topic);
+      set.run(key ? (ids.get(`${r.room_id}\n${key}`) ?? null) : null, r.id);
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
 }

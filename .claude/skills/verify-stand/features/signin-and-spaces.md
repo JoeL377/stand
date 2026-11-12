@@ -6,7 +6,7 @@ Home (`/`) is find-and-enter: a left sidebar (New space, All spaces, Manage spac
 - Stand-in sign-in (name + email), only while Google isn't configured.
 - New space pop-up: name + "What is it for?" line, Create and enter.
 - Space page: the Meetings, Tasks, Decisions and Up next tabs, Invite (copies the link).
-- Manage spaces (`/spaces/manage`), not yet in a journey.
+- Manage spaces (`/spaces/manage`): only its cost panel is in a journey (`cost.cjs`, [cost.md](cost.md)).
 
 ## How to get to it (user POV)
 Open the app, type a name and work email, Continue. Click **New space** in the sidebar, fill the name, **Create and enter**. You land on the space page.

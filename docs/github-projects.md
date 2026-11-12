@@ -2,7 +2,7 @@
 
 Draft, Nov 5, 2026 · for review · phases 1 and 2 built on branch `github-projects` (see Status at the end)
 
-A space can link a GitHub repo as its **project**. Stand reads the repo and never writes to it. Two things use it:
+A space can link a GitHub repo as a **source**. (This doc first called it the space's "project". That word now means a group of tasks, so the repo link is a source: table `space_sources`, routes `/api/rooms/:id/sources`, `src/server/sources.ts`.) Stand reads the repo and never writes to it. Two things use it:
 
 1. **Ask Stand in a meeting** can read the code and its recent history, so "does the board already handle two hosts?" or "did the Railway retry fix ship?" gets answered from the repo, not from guesses.
 2. **A background pull** watches what lands on the default branch, and when merged work looks like it finishes an open to-do, it puts "Looks done · PR #142" on that to-do with the evidence. One click checks it off.
@@ -36,7 +36,7 @@ The gaps: nothing ties a repo to a space, the app can't read code, the agent can
 **Data model.** New table, one row per linked repo:
 
 ```sql
-CREATE TABLE space_projects (
+CREATE TABLE space_sources (
   room_id TEXT NOT NULL REFERENCES rooms(id),
   owner TEXT NOT NULL, repo TEXT NOT NULL,          -- as GitHub spells them
   installation_id INTEGER NOT NULL,
@@ -55,9 +55,9 @@ It allows more than one repo per space from day one. Conxt 1.0 already spans `nx
 - **v1:** the repo must be in an installation the linker connected (`github_installations.connected_by`). That's cheap and closes the obvious hole, where any Stand user attaches any repo that some installation covers.
 - **v2:** turn on "Request user authorization" for the app and check `GET /user/installations/{id}/repositories` with the person's own GitHub token. That covers org installs someone else connected.
 
-**Flow.** Space settings → Project → *Link a GitHub repo* lists repos from `GET /installation/repositories` for the person's installations (or offers Connect GitHub if they have none). They pick one and Stand clones it. Settings then show the repo, its branch, "pulled 3 min ago" or the error, and *Unlink*.
+**Flow.** Space settings → Sources → *Link a GitHub repo* lists repos from `GET /installation/repositories` for the person's installations (or offers Connect GitHub if they have none). They pick one and Stand clones it. Settings then show the repo, its branch, "pulled 3 min ago" or the error, and *Unlink*.
 
-**API.** `GET/POST /api/rooms/:id/projects`, `DELETE /api/rooms/:id/projects/:owner/:repo`. The space payload gets `projects: Array<{ repo, branch, pulledAt, error }>`.
+**API.** `GET/POST /api/rooms/:id/sources`, `DELETE /api/rooms/:id/sources/:owner/:repo`. The space payload gets `sources: Array<{ repo, branch, pulledAt, error }>`.
 
 ### 2. Access: the read-only guarantee
 
@@ -97,7 +97,7 @@ Needs: `git` in the Dockerfile (`apt-get install git`). Repos are disposable: th
 
 Two additions, the cheap one first.
 
-**a. A project block in the prompt.** A cached digest is rebuilt on each pull: repo and branch at sha, the top two levels of the tree, the first ~60 lines of the README, and the last 15 merged PRs and 7 days of commit titles. It's about 1.5 to 3k tokens and sits in the cached prefix. On its own it answers most "did X ship?" and "who's on Y?" questions with no tool calls.
+**a. A repo block in the prompt.** A cached digest is rebuilt on each pull: repo and branch at sha, the top two levels of the tree, the first ~60 lines of the README, and the last 15 merged PRs and 7 days of commit titles. It's about 1.5 to 3k tokens and sits in the cached prefix. On its own it answers most "did X ship?" and "who's on Y?" questions with no tool calls.
 
 **b. Client tools in `searchRun`.** The loop today only follows `pause_turn` for web search. It also needs to handle `tool_use`: run the tool locally and send back `tool_result`.
 
@@ -108,7 +108,7 @@ Two additions, the cheap one first.
 | `repo_log(path? , query?, since?)` | Commits and merged PRs | 30 rows |
 | `repo_pr(number)` | Title, body, state, changed files and diffstat | Body clipped to 4k |
 
-Each run is capped at 8 tool calls and the existing `AGENT_TIMEOUT_MS`. The meeting cap stays `AGENT_MAX_RUNS`. A space without a project gets exactly today's prompt and tools.
+Each run is capped at 8 tool calls and the existing `AGENT_TIMEOUT_MS`. The meeting cap stays `AGENT_MAX_RUNS`. A space without a source gets exactly today's prompt and tools.
 
 **On the card.** The draft already streams web searches. It also shows `Reading src/server/room.ts` and `Searching "pilotUse"`, so people see it work. Code sources go in the existing `sources` field as GitHub links pinned to the sha with line anchors (`…/blob/<sha>/src/server/room.ts#L1480-L1490`). `toAnswer` drops any source whose path the run didn't actually read, the same way it keeps "real links only" today.
 
@@ -122,7 +122,7 @@ A `ProjectWatch` sits beside `ShipWatch`, with the same busy/again loop:
 
 ```
 every 10 min (and at once on a push or pull_request webhook, when the app has them)
-  for each project: fetch → new commits on the default branch since head_sha
+  for each source: fetch → new commits on the default branch since head_sha
     → their merged PRs (GET /repos/:o/:r/commits/:sha/pulls), plus direct pushes
     → tier A: stand:action/<id> in a PR body or commit message, for a to-do in this space
          → close it as today (closed_by pr:<url>, actor github)
@@ -165,7 +165,7 @@ A rejected pair is never proposed again. It goes in its own table rather than a 
 | --- | --- |
 | The matcher against [the match list](stand-todo-matches.md) (Oct 10 to 30 PRs, the 48 to-dos open on Oct 30) | Finds most of the 7 "strong" rows; among its `done` proposals, at most 1 in 5 wrong |
 | Ask Stand on 20 scripted code questions about this repo | Cites a file it read in every code answer; never cites one it didn't |
-| Ask latency with a project | p50 under 15 s |
+| Ask latency with a source | p50 under 15 s |
 | Cost | No more than +$0.30 a meeting hour; the plan's target is under $3 |
 | Read only | A test fails if any non-GET goes to GitHub, other than the token mint and git fetch |
 
@@ -176,7 +176,7 @@ Unit tests follow the existing pattern: `GithubApp` and `ProjectWatch` take an i
 | Phase | Work | Size |
 | --- | --- | --- |
 | 0 | Turn the GitHub App on in production (already a week 0 item, Joe). Add Contents: Read-only. Add `git` to the image | S |
-| 1 | `space_projects`, link and unlink in space settings, mirror and pull, digest in Ask Stand's prompt | M |
+| 1 | `space_sources`, link and unlink in space settings, mirror and pull, digest in Ask Stand's prompt | M |
 | 2 | Client tools in `searchRun`, streamed reads, pinned code sources | M |
 | 3 | `ProjectWatch`: tier A in the poll, the matcher, `task_evidence`, the Looks done pill, check-in and MCP | M |
 | 4 | Push webhook for instant pulls, Find options with tools, v2 link check (user authorization), more than one repo in the UI | S each |
@@ -203,5 +203,5 @@ Phases 1 and 3 can ship apart: phase 1 is useful on its own, and phase 3 only ne
 
 ## Status
 
-- **Phase 1** (`src/server/projects.ts`, `ProjectPanel.tsx`). Differs from the design: the copy is a full bare repo with no remote rather than a partial clone, so reads never go back to GitHub; repos over 1 GB are refused (no metadata-only mode yet); the digest goes to Ask Stand only, not Find options; settings has a Pull now button.
-- **Phase 2** (`RepoTools` in `projects.ts`, the `tool_use` loop in `llm.ts` `searchRun`). `repo_search`, `repo_read`, `repo_log` and `repo_pr`, up to 8 calls and 45 s of reading per answer, then the model has to answer (`tool_choice: none`). `repo_log` reads git only; merge and squash commits name their PR, and `repo_pr` opens one. Every tool result gives a `Cite:` link pinned to the commit; `toAnswer` keeps a link into a linked repo only when the run saw that file, PR or commit (the digest's PRs and commits count), rewritten to the commit read. The card shows the steps ("Searched “pilotUse”", "Read src/server/room.ts"). Find options doesn't get the tools yet.
+- **Phase 1** (`src/server/sources.ts`, `SourcePanel.tsx`). Differs from the design: the copy is a full bare repo with no remote rather than a partial clone, so reads never go back to GitHub; repos over 1 GB are refused (no metadata-only mode yet); the digest goes to Ask Stand only, not Find options; settings has a Pull now button.
+- **Phase 2** (`RepoTools` in `sources.ts`, the `tool_use` loop in `llm.ts` `searchRun`). `repo_search`, `repo_read`, `repo_log` and `repo_pr`, up to 8 calls and 45 s of reading per answer, then the model has to answer (`tool_choice: none`). `repo_log` reads git only; merge and squash commits name their PR, and `repo_pr` opens one. Every tool result gives a `Cite:` link pinned to the commit; `toAnswer` keeps a link into a linked repo only when the run saw that file, PR or commit (the digest's PRs and commits count), rewritten to the commit read. The card shows the steps ("Searched “pilotUse”", "Read src/server/room.ts"). Find options doesn't get the tools yet.

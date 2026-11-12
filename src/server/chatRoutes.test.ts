@@ -80,9 +80,12 @@ test("people in a space send, read, change and delete its chat; nobody else gets
     const sent = await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Can we ship Friday?", key });
     assert.deepEqual([sent.status, sent.body.author, sent.body.text], [200, "Joe Liang", "Can we ship Friday?"]);
     assert.equal((await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Can we ship Friday?", key })).body.id, sent.body.id);
+    // The message carries its key, so the page that sent it knows it when the stream brings it first.
+    assert.equal(sent.body.key, key);
     assert.equal((await j("POST", `/api/rooms/${room.id}/chat/messages`, { text: "  " })).status, 400);
     const reply = await h<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Yes", replyTo: sent.body.id });
     assert.equal(reply.body.replyTo, sent.body.id);
+    assert.equal(reply.body.key, null);
 
     // Joe wrote the first and hasn't seen the second. Huy sent the second, so he has read up to it.
     assert.deepEqual([db.unreadChat(joe.id).get(room.id), db.unreadChat(huy.id).get(room.id), db.unreadChat(eve.id).size], [1, undefined, 0]);
@@ -160,6 +163,33 @@ test("a page with the space's stream open hears each message, edit and delete as
     s.close();
     for (let i = 0; i < 50 && spaceEvents.watching(room.id); i++) await new Promise((r) => setTimeout(r, 10));
     assert.equal(spaceEvents.watching(room.id), 0);
+  } finally {
+    s.close();
+    await close();
+  }
+});
+
+test("the thread says how far the others have read, and an open page hears when one of them reads on", async () => {
+  const { joe, huy, room, as, stream, close } = await setup();
+  const [j, h] = [as(joe), as(huy)];
+  const s = await stream(joe);
+  try {
+    const first = (await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Deploy is out" })).body;
+    const second = (await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "All green" })).body;
+    for (let i = 0; i < 3; i++) await s.next();
+    // Huy hasn't opened it. Joe has read what he sent, which the thread tells Huy and not Joe himself.
+    assert.deepEqual((await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.reads, []);
+    assert.deepEqual((await h<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.reads, [{ userId: joe.id, name: "Joe Liang", upTo: second.seq }]);
+
+    await h("POST", `/api/channels/${first.channelId}/read`, { upTo: first.seq });
+    assert.deepEqual(await s.next(), { type: "read", channelId: first.channelId, userId: huy.id, name: "Huy Ngo", upTo: first.seq });
+    assert.deepEqual((await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.reads, [{ userId: huy.id, name: "Huy Ngo", upTo: first.seq }]);
+    // Reading the same again, or less, tells nobody: the next thing heard is the read that moved on.
+    await h("POST", `/api/channels/${first.channelId}/read`, { upTo: first.seq });
+    await h("POST", `/api/channels/${first.channelId}/read`, { upTo: 0 });
+    await h("POST", `/api/channels/${first.channelId}/read`, { upTo: second.seq });
+    assert.deepEqual(await s.next(), { type: "read", channelId: first.channelId, userId: huy.id, name: "Huy Ngo", upTo: second.seq });
+    assert.deepEqual((await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.reads, [{ userId: huy.id, name: "Huy Ngo", upTo: second.seq }]);
   } finally {
     s.close();
     await close();

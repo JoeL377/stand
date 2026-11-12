@@ -23,6 +23,8 @@ export interface Item {
   slide: SlideContent | null;
   /** The to-do this item walks through ("Present task"): what's said on it is filed under that to-do's item. */
   taskId?: string | null;
+  /** The project this item links to: its tasks are in that project unless someone set theirs. */
+  projectId?: string | null;
 }
 
 export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote" | "review" | "design";
@@ -126,6 +128,8 @@ export interface ReviewSummary {
   endedAt: number | null;
   meetingId: string | null;
   slides: number;
+  /** What tells this review from the others in a list: its first few slides, by their short names. */
+  titles?: string[];
   outcomes: Record<ReviewOutcome, number>;
 }
 
@@ -196,8 +200,20 @@ export interface Segment {
 export type NoteKind = "summary" | "decision" | "action" | "question" | "context";
 
 export interface Note {
-  /** Optional cross-meeting topic. null inherits the agenda item; "" means no topic. */
-  topic?: string | null;
+  /** The project someone set by hand (shared/projects.ts). Null with projectSetBy: Unassigned by hand. */
+  projectId?: string | null;
+  /** Who set the project by hand; null: it follows the rules. */
+  projectSetBy?: string | null;
+  /** The project it is in by the rules, where the server worked it out for the page. */
+  project?: string | null;
+  /** What the rules give without the hand-set project: what "Follow the agenda" goes back to. */
+  ruledProject?: string | null;
+  /** The project Stand suggests (shared/projects.ts rule 4). Nobody confirmed it. */
+  suggestedProjectId?: string | null;
+  /** When Stand last read it to suggest a project. Kept so a restored note isn't read again. */
+  projectJudgedAt?: number | null;
+  /** True when project is only Stand's suggestion: the rules before it give nothing. */
+  projectSuggested?: boolean;
   id: string;
   meetingId: string;
   itemId: string | null;
@@ -226,7 +242,8 @@ export interface Note {
   /** A spec's id, for a task that is part of one. */
   parentId?: string | null;
   /** What closed it: "pr:<url>" for a merged PR, "agent" for an agent's report, "confirmed" for a
-   *  person's click with nothing to show, "moved" for a to-do carried to another space. */
+   *  person's click with nothing to show, "moved" for a to-do carried to another space, "answered"
+   *  for a question someone answered with a decision. */
   closedBy?: string | null;
   /** Dropped: why, in a line. */
   dropReason?: string | null;
@@ -278,9 +295,6 @@ export interface BrainNode {
   caught: BrainCaught[];
   /** Someone took it off the map. Kept on the server so it isn't added again; never sent. */
   removed?: boolean;
-  /** A direction only: the other centre it belongs to, by name, when the talk moved to a subject the
-   *  first centre doesn't cover. Left out for the first centre (the brainstorm's own sentence). */
-  topic?: string;
 }
 
 /** What a design session is called until it has a topic: one started blank is named from the talk. */
@@ -363,9 +377,11 @@ export interface BrainstormView {
   /** The topic or question it started from. */
   prompt: string;
   status: "live" | "done";
-  /** The agenda item its talk is filed under while it runs. */
+  /** Only on a brainstorm from before maps were views: the agenda item its talk was filed under. */
   itemId: string | null;
   meetingId: string | null;
+  /** The board thread it is the map of; null: it follows no topic. */
+  threadId: string | null;
   startedBy: string | null;
   startedAt: number;
   endedAt: number | null;
@@ -393,6 +409,7 @@ export interface BrainstormSummary {
   status: "live" | "done";
   startedAt: number;
   meetingId: string | null;
+  threadId: string | null;
   directions: number;
   ideas: number;
   /** Set when it is a design session: what its diagram holds. */
@@ -653,10 +670,49 @@ export interface TaskDetail {
   waitsOn: TaskLink[];
   /** To-dos that wait on this one. */
   blocking: TaskLink[];
+  /** The to-do it is a part of, if any. */
+  parent: TaskLink | null;
+  /** A to-do's parts: the to-dos and open questions whose parent it is. */
+  parts: TaskLink[];
+  /** The space's open to-dos it can be made a part of, newest first. Empty when it has parts. */
+  parentChoices: TaskLink[];
   /** The people in its space, whom a comment can tag with @Name. */
   people: Array<{ id: string; name: string }>;
   /** Comments on it that tag you and wait on you, newest first. */
   mentionsYou: TaskMention[];
+  /** A question someone answered: the decision that answers it. */
+  answer?: { id: string; text: string } | null;
+}
+
+/** One way to close an open question: an answer to keep as a decision, a decision the space
+ *  already has, or a drop with why. */
+export type QuestionClose = { id: string } & ({ answer: string } | { decisionId: string } | { drop: string });
+
+/** What closing a question left: the question as it is now, and the decision that answers it
+ *  (made: this close wrote it). */
+export interface QuestionClosed {
+  note: Note;
+  decision?: { id: string; text: string; made: boolean };
+}
+
+/** Stand's last sweep of a space's open questions (server/questionSweep.ts): the proposals that
+ *  still hold, and when it read the questions. */
+export interface QuestionSweep {
+  at: number;
+  proposals: SweepProposal[];
+}
+
+/** Stand's proposal for one open question in a sweep of a space's questions. A person confirms it. */
+export interface SweepProposal {
+  id: string;
+  text: string;
+  /** When the meeting it was asked in started. */
+  askedAt: number;
+  /** answered: a decision the space has settles it. drop: nobody needs the answer any more. */
+  how: "answered" | "drop";
+  decision?: { id: string; text: string };
+  /** One line someone can check. */
+  why: string;
 }
 
 /** A comment that tags someone with @Name: it puts the task first in their task list until they
@@ -690,8 +746,8 @@ export interface GithubStatus {
   installations: GithubInstallation[];
 }
 
-/** A GitHub repo linked to a space as its project: Stand keeps a read-only copy and Ask Stand reads it. */
-export interface SpaceProject {
+/** A GitHub repo linked to a space as a source: Stand keeps a read-only copy and Ask Stand reads it. */
+export interface SpaceSource {
   owner: string;
   repo: string;
   branch: string;
@@ -712,13 +768,13 @@ export interface LinkableRepo {
   private: boolean;
 }
 
-/** A space's projects, as its settings show them. */
-export interface ProjectsStatus {
+/** A space's sources, as its settings show them. */
+export interface SourcesStatus {
   /** Whether this server has the Stand GitHub App set up. */
   available: boolean;
   /** Only the space's creator and its admins link and unlink repos. */
   canManage: boolean;
-  projects: SpaceProject[];
+  sources: SpaceSource[];
   /** For someone who manages the space: repos they can link. Null when they can't, or GitHub couldn't be asked. */
   linkable: LinkableRepo[] | null;
   /** Why linkable is null, when it's GitHub's fault. */
@@ -822,21 +878,23 @@ export interface Participant {
 
 /** What the meeting agent can offer to do next (server/nextSteps.ts). */
 export type NextKind = "map" | "diagram" | "design-review" | "product-review";
-/** One next step heard in the call: someone said they want a brainstorm, a design session or a review. */
+/** One next step heard in the call: someone said they want a map, a diagram or a review. */
 export interface NextStep {
   id: string;
   kind: NextKind;
-  /** What it is on; "" when nobody said and the board had no topic. */
+  /** What the speaker said it is on; "" when they named nothing (a map is then of the board's topic). */
   topic: string;
   /** Who said it, and the line they said it in. */
   by: string;
   ts: number;
   segmentId: string;
-  /** offered: its card is up. opened: its view was opened. started: the review started in this call.
+  /** offered: its card is up. opened: its view was drawn. started: the review started in this call.
    *  noted: kept for the recap. waved: someone said no. missed: the card went away unanswered. */
   state: "offered" | "opened" | "started" | "noted" | "waved" | "missed";
   /** A review: how many slides or specs are waiting, so it could start now. */
   ready?: number;
+  /** Nobody asked: Stand offers it because the talk sounds like one (a map or a diagram only). */
+  guessed?: boolean;
 }
 
 export interface Suggestion {
@@ -901,8 +959,7 @@ export interface DoneSlide {
 export interface HostView {
   /** While the item in focus presents a to-do (Item.taskId): the brief or the full spec, as the host chose. */
   taskMode?: "brief" | "spec";
-  /** "view": the map or diagram open beside the board. */
-  tab: "main" | "board" | "view";
+  tab: "main" | "board";
   /** Which picture of the review slide in focus is up, from 0. */
   shot?: number;
   /** A chapter (or the Kickoff, id "kickoff") as it stood at `at`; live: the thread on screen when it was opened. */
@@ -1052,11 +1109,13 @@ export type ClientMessage = (
   | { type: "note.remove"; noteId: string }
   /** Take a circle off the brainstorm's map (anyone in the call: Stand got it wrong). */
   | { type: "brainstorm.remove"; id: string }
-  /** Anyone: take the next step on the card (open the view, start or note the review), or wave it off. */
+  /** Anyone: the next step on the card was taken (`started`: the view or the review began), or waved off. */
   | { type: "next.take"; id: string; started?: boolean }
   | { type: "next.wave"; id: string }
-  /** Anyone: close the map or diagram that is open beside the board. It is kept on its own page. */
-  | { type: "view.close"; id: string }
+  /** Stop drawing the map or diagram running in the call; it is kept (anyone in the call). */
+  | { type: "view.stop" }
+  /** Draw the map of the board's topic now, or continue it (anyone in the call). */
+  | { type: "view.open" }
   /** Keep or drop something on a design session's diagram, by its id (anyone in the call). Drop also takes a kept one off. */
   | { type: "design.keep"; id: string }
   | { type: "design.drop"; id: string }
@@ -1161,7 +1220,8 @@ export type ServerMessage =
   | { type: "cost"; cost: MeetingCost }
   /** The board's running list, after every change. Null when there's no model to keep one: the tabs read the live notes. */
   | { type: "list"; items: ListNote[] | null }
-  | { type: "brainstorm"; brainstorm: BrainstormView | null }
+  /** `others`: the other maps and diagrams of this call, oldest first. */
+  | { type: "brainstorm"; brainstorm: BrainstormView | null; others: BrainstormSummary[] }
   /** What ✦ Stand, the meeting's own agent, has put on the board so far (meetingAgent.ts). */
   | { type: "agent"; cards: AgentCard[] }
   /** Who pilots ✦ Stand, and who's asking to (server/pilot.ts), after every change. */
@@ -1214,8 +1274,6 @@ export interface MeetingRecap {
   designReview?: DesignReviewRan | null;
   /** The brainstorm that ran in it, if one did. */
   brainstorm?: BrainstormSummary | null;
-  /** Every map and diagram that was opened in it, in order. */
-  views?: BrainstormSummary[];
   /** Reviews people asked for in the call that didn't happen there (server/nextSteps.ts). */
   next?: NextStep[];
   /** Everything in the meeting in order: speech, chat, captures, Ask Stand, focus changes, agents' reports. */
@@ -1227,6 +1285,18 @@ export interface MeetingCost {
   usd: number;
   calls: number;
   tasks: Array<{ task: string; usd: number; calls: number }>;
+}
+
+/** What a space's Claude calls cost over a range of days, in dollars (server/usage.ts). */
+export interface SpaceCost {
+  since: number;
+  until: number;
+  usd: number;
+  calls: number;
+  /** Where the money went, most expensive first: in calls, in chat, or between meetings. Each has the shape of MeetingCost. */
+  groups: Array<{ where: "calls" | "chat" | "between"; usd: number; calls: number; tasks: Array<{ task: string; usd: number; calls: number }> }>;
+  /** One entry for each day in the range (YYYY-MM-DD in the viewer's time), oldest first, days with nothing too. `between`: that day's dollars between meetings. */
+  days: Array<{ day: string; usd: number; calls: number; between: number }>;
 }
 
 /** The recap's words on one chapter: where it landed, and for a long one, the moments that moved it. */
@@ -1284,6 +1354,8 @@ export interface SpaceFeed {
   archived: ArchivedRow[];
   /** What the space got done since its last meeting, as the next meeting will open on it. */
   doneDeck?: DoneDeck | null;
+  /** The open questions Stand's last sweep proposes to close; null when there are none. */
+  questionSweep?: QuestionSweep | null;
   /** The space's next product review, with what a start would add to it; or the one running now. */
   review?: ReviewView | null;
   /** Reviews that ran, newest first: each keeps its page. */
@@ -1321,6 +1393,8 @@ export interface SpaceFeed {
       replacedBy?: ReplacedBy;
       /** What Stand thinks replaced it. It stays kept until someone confirms. */
       mayBeReplacedBy?: ReplacedBy;
+      /** The open question someone answered with it. */
+      answers?: string;
     }
   >;
   /** Open questions from all its meetings that no later decision answered, newest first. */

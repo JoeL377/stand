@@ -1,6 +1,6 @@
 // Spaces: the list, a space and its agenda, its feed and suggested agenda, archiving, and the call's token.
 import type { Express } from "express";
-import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS, type SpaceMembers } from "../../shared/protocol.ts";
+import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS, type Note, type SpaceMembers } from "../../shared/protocol.ts";
 import { archiveRow, restoreRow } from "../archive.ts";
 import { spaceFeed } from "../captures.ts";
 import { capabilities, config } from "../config.ts";
@@ -12,6 +12,21 @@ import { ownedBy, toSpaceSummary } from "../spaces.ts";
 import { upNextView } from "../upNextPolish.ts";
 import type { Services } from "../services.ts";
 import { memberRoom, notFound, route } from "./http.ts";
+
+const DAY_MS = 86_400_000;
+const whole = (v: unknown, min: number, max: number, fallback: number) => {
+  const n = Math.trunc(Number(v));
+  return v === undefined || v === "" || !Number.isFinite(n) ? fallback : Math.min(max, Math.max(min, n));
+};
+
+/** The cost page's range: whole days in the viewer's time (`tz`: minutes east of UTC), the oldest
+ *  `days - 1` days back, up to now. One past now, so a range asked for at midnight still has today. */
+export function costRange(days: unknown, tz: unknown, now: number) {
+  const dayOffsetMin = whole(tz, -840, 840, 0);
+  const offset = dayOffsetMin * 60_000;
+  const today = Math.floor((now + offset) / DAY_MS) * DAY_MS - offset;
+  return { since: today - (whole(days, 1, 90, 30) - 1) * DAY_MS, until: now + 1, dayOffsetMin };
+}
 
 export function spaceRoutes(app: Express, ctx: Services) {
   const { db, sessions, live, polisher, afterItemsChange } = ctx;
@@ -107,6 +122,17 @@ export function spaceRoutes(app: Express, ctx: Services) {
     }),
   );
 
+  // What Stand's Claude calls for the space cost over the last `days` days (usage.ts). Only its admins see it.
+  app.get(
+    "/api/rooms/:id/cost",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      if (!db.managesSpace(room, req.user!.id)) return void res.status(403).json({ error: "Only an admin of this space can see what it spent" });
+      res.json(db.spaceCost(room.id, costRange(req.query.days, req.query.tz, Date.now())));
+    }),
+  );
+
   app.post(
     "/api/rooms",
     route((req, res) => {
@@ -130,18 +156,23 @@ export function spaceRoutes(app: Express, ctx: Services) {
       if (!room) return notFound(res, "Space not found");
       db.touchMembership(room.id, req.user!.id);
       const live = sessions.get(room.id);
+      const graph = db.projectGraph(room.id);
+      const grouped = <T extends Note>(notes: T[]) => db.withProjects(room.id, notes, graph);
       res.json({
         ...room,
         items: db.listItems(room.id),
         decks: db.listDecks(room.id),
+        projects: db.listProjects(room.id, graph),
         meetings: db.listMeetings(room.id),
-        followUps: withFrom(db, db.roomFollowUps(room.id).filter((f) => !f.doneAt)),
-        doneFollowUps: withFrom(
-          db,
-          db
-            .roomFollowUps(room.id)
-            .filter((f) => f.doneAt)
-            .sort((a, b) => b.doneAt! - a.doneAt!),
+        followUps: grouped(withFrom(db, db.roomFollowUps(room.id).filter((f) => !f.doneAt))),
+        doneFollowUps: grouped(
+          withFrom(
+            db,
+            db
+              .roomFollowUps(room.id)
+              .filter((f) => f.doneAt)
+              .sort((a, b) => b.doneAt! - a.doneAt!),
+          ),
         ),
         liveMeetingId: live && !live.ended ? live.meetingId : null,
         // Who is in the call now, for the lobby's avatars.

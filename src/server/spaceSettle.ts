@@ -7,8 +7,10 @@
 
 import { createHash } from "node:crypto";
 import type { Note, ReplacedBy } from "../shared/protocol.ts";
+import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
 import type { Agent, SettleRow } from "./llm.ts";
+import { forSpace } from "./usage.ts";
 
 export interface Settled {
   at: number;
@@ -41,7 +43,7 @@ export async function settleSpace(db: DB, agent: Agent, roomId: string): Promise
   if (db.getSettled(roomId)?.basis === basis) return;
   const started = Date.now();
   const keyed = notes.map((n, i) => ({ n, key: `${n.kind === "decision" ? "D" : "Q"}${i + 1}`, order: i }));
-  const out = await agent.settleSpace(
+  const out = await forSpace(agent, roomId).settleSpace(
     room,
     keyed.map(({ n, key }) => ({ key, kind: n.kind as "decision" | "question", text: n.text, meeting: n.meetingStartedAt })),
   );
@@ -75,6 +77,10 @@ export function settledView(db: DB, roomId: string) {
   const turnedDown = new Set(db.roomLinks(roomId, "not_replaced").map((l) => `${l.fromId}>${l.toId}`));
   const shown = (n?: (typeof notes)[number]): ReplacedBy | undefined =>
     n ? { noteId: n.id, text: n.text, meetingId: n.meetingId, startedAt: n.meetingStartedAt } : undefined;
+  // The decision someone answered a question with (agents.ts closeQuestion): what the pass found comes second.
+  const leaves = db.roomLinks(roomId, "leaves");
+  const left = new Map(leaves.map((l) => [l.fromId, l.toId]));
+  const asked = new Map(leaves.map((l) => [l.toId, (byId.get(l.fromId) ?? db.getNote(l.fromId))?.text]));
   const decided = notes
     .filter((n) => n.kind === "decision")
     .map((n) => {
@@ -84,19 +90,46 @@ export function settledView(db: DB, roomId: string) {
       return {
         ...n,
         decisionState: replacedBy ? ("replaced" as const) : ("kept" as const),
+        /** The question someone answered with it. */
+        answers: asked.get(n.id),
         replacedBy,
         mayBeReplacedBy: replacedBy ? undefined : shown(byId.get(later ?? "")),
       };
     });
+  const handAnswer = (n: Note) => {
+    const id = left.get(n.id);
+    return id ? (byId.get(id) ?? db.getNote(id) ?? undefined) : undefined;
+  };
   return {
     // Standing decisions first, the replaced ones after them.
     decided: [...decided.filter((n) => !n.replacedBy), ...decided.filter((n) => n.replacedBy)],
-    open: notes.filter((n) => n.kind === "question" && !rows.has(n.id)),
+    /** Questions the pass didn't settle. One someone answered by hand is closed, and carries its answer. */
+    open: notes
+      .filter((n) => n.kind === "question" && !rows.has(n.id))
+      .map((n): (typeof notes)[number] & { answeredBy?: string } => {
+        const by = n.doneAt ? handAnswer(n) : undefined;
+        return by ? { ...n, answeredBy: by.text } : n;
+      }),
     /** Questions a later decision answered, as Done Answer tasks with that decision as what closed them. */
     answered: notes.flatMap((n) => {
       const r = rows.get(n.id);
-      const by = r?.how === "answered" ? byId.get(r.byNoteId) : undefined;
-      return n.kind === "question" && by ? [{ ...n, answeredBy: by.text, doneAt: n.doneAt ?? by.ts }] : [];
+      const by = handAnswer(n) ?? (r?.how === "answered" ? byId.get(r.byNoteId) : undefined);
+      return n.kind === "question" && r?.how === "answered" && by ? [{ ...n, answeredBy: by.text, doneAt: n.doneAt ?? by.ts }] : [];
     }),
   };
+}
+
+/** The decision a question was answered with by hand, if it was. */
+export function answerOf(db: DB, question: Pick<Note, "id">): Note | null {
+  const [link] = db.linksFrom([question.id], "leaves");
+  return (link && db.getNote(link.toId)) || null;
+}
+
+/** The questions the space page lists as open, oldest first: nobody answered, dropped or archived
+ *  them, and no later decision settled them. */
+export function openQuestions(db: DB, roomId: string, view = settledView(db, roomId)) {
+  const gone = new Set(db.listArchived(roomId).map((a) => a.ref));
+  return view.open
+    .filter((n) => !isClosed(stateOf(n)) && !gone.has(`question:${n.id}`))
+    .reverse();
 }

@@ -21,7 +21,9 @@ import { startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { labeled } from "./usage.ts";
 import { PlanBriefs } from "./planBrief.ts";
-import { Projects, setProjects } from "./projects.ts";
+import { ProjectSuggester, SUGGEST_AFTER_CHANGE_MS, SUGGEST_AFTER_PROJECT_MS } from "./projectSuggest.ts";
+import { QuestionSweeper } from "./questionSweep.ts";
+import { Sources, setSources } from "./sources.ts";
 import { RoomSession } from "./room.ts";
 import { ShipWatch, githubPrState } from "./shipWatch.ts";
 import { linkSnaps } from "./snaps.ts";
@@ -66,6 +68,10 @@ export function startServices() {
     (roomId) => !!live(roomId),
     (roomId) => live(roomId)?.followUpsChanged(),
   );
+  // Stand's project suggestions for to-dos nobody filed (projectSuggest.ts).
+  const projectSuggester = new ProjectSuggester(db, agent, (roomId) => live(roomId)?.followUpsChanged());
+  // Stand's sweep of open questions, after enough new ones or new decisions (questionSweep.ts).
+  const questionSweeper = new QuestionSweeper(db, agent);
 
   /** The space's meeting, started or picked up as someone arrives. Null when there's no such space. */
   function session(roomId: string): RoomSession | null {
@@ -86,6 +92,9 @@ export function startServices() {
       room,
       (closed) => {
         if (sessions.get(roomId) === closed) sessions.delete(roomId);
+        // The recap is saved: what the meeting caught can be filed, and read against the open questions.
+        projectSuggester.schedule(roomId, 0);
+        questionSweeper.schedule(roomId, 0);
       },
       capabilities().transcription !== "browser" ? (r) => startLiveKitTranscriber(roomId, r, () => keytermsFor(roomId, room.name)) : undefined,
       polisher,
@@ -180,12 +189,11 @@ export function startServices() {
     db,
     briefs: planBriefs,
     specTouched,
-    brainstormTouched: (roomId, itemId, by) => {
+    brainstormTouched: (roomId) => {
       const s = sessions.get(roomId);
       if (!s) return;
       s.itemsChanged();
       s.brainstormChanged();
-      if (itemId) s.setFocus(itemId, by, "manual");
     },
     uploads: uploadLinks,
     readyToShip: () => void shipWatch.check(),
@@ -200,8 +208,11 @@ export function startServices() {
       else {
         polisher.schedule(roomId, POLISH_BATCH_MS);
         doneDecks.schedule(roomId);
+        projectSuggester.schedule(roomId, SUGGEST_AFTER_CHANGE_MS);
+        questionSweeper.schedule(roomId);
       }
     },
+    projectsChanged: (roomId) => projectSuggester.schedule(roomId, SUGGEST_AFTER_PROJECT_MS),
     suggested: (roomId) => upNextView(db, roomId, live(roomId)?.meetingStartedAt ?? null, polisher.busy(roomId)),
     brief: (meetingId, baseUrl, transcript) => {
       const m = db.getMeeting(meetingId)!;
@@ -236,17 +247,31 @@ export function startServices() {
   );
   shipWatch.start();
   doneDecks.start();
+  projectSuggester.start();
+  questionSweeper.start();
 
-  // A space's project: GitHub repos it links, which Stand reads and Ask Stand knows (projects.ts).
-  const projects = new Projects(db.raw, path.join(config.dataDir, "repos"), githubApp);
-  setProjects(projects);
-  projects.start();
+  // A space's sources: GitHub repos it links, which Stand reads and Ask Stand knows (sources.ts).
+  const sources = new Sources(db.raw, path.join(config.dataDir, "repos"), githubApp);
+  setSources(sources);
+  sources.start();
 
   // Chat between meetings (chat.ts). Sessions left open by the last run close here if they went quiet.
   const spaceEvents = new SpaceEvents();
   // What is written there is read for to-dos, open questions and decisions, as a meeting's talk is (chatCapture.ts).
   const capture = config.chatCapture
-    ? new ChatCapture(db, agent, (roomId, e) => spaceEvents.send(roomId, e), { quietMs: config.chatCaptureQuietMs ?? undefined, maxWaitMs: config.chatCaptureMaxWaitMs ?? undefined })
+    ? new ChatCapture(
+        db,
+        agent,
+        (roomId, e) => {
+          spaceEvents.send(roomId, e);
+          // The run over a session that closed is its last: what it caught can be filed.
+          if (e.type === "notes" && db.getChannel(e.channelId)?.openSessionId !== e.sessionId) {
+            projectSuggester.schedule(roomId, 0);
+            questionSweeper.schedule(roomId, 0);
+          }
+        },
+        { quietMs: config.chatCaptureQuietMs ?? undefined, maxWaitMs: config.chatCaptureMaxWaitMs ?? undefined },
+      )
     : null;
   const chat = new Chat(
     db,
@@ -273,9 +298,10 @@ export function startServices() {
     session,
     polisher,
     doneDecks,
+    projectSuggester,
     githubApp,
     shipWatch,
-    projects,
+    sources,
     chat,
     spaceEvents,
     agents,

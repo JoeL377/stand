@@ -6,6 +6,7 @@ import { openDb } from "./db.ts";
 import { type AgendaDraftRow, HeuristicAgent } from "./llm.ts";
 import { applyPolish, computeUpNext, polishBasis, type UpNextInput } from "./upNext.ts";
 import { UpNextPolisher, upNextView } from "./upNextPolish.ts";
+import { recordUsage, setUsageSink, type UsageRow } from "./usage.ts";
 
 // These tests cover the suggested agenda itself, which production has off for now (config.ts).
 config.suggestedAgenda = true;
@@ -298,4 +299,23 @@ test("with the suggested agenda off, nothing is suggested and reports between me
   } finally {
     config.suggestedAgenda = true;
   }
+});
+
+test("the agenda tidy's Claude call is kept with its space, between meetings", async () => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Standup", null, "");
+  const m = db.startMeeting(room.id);
+  db.addNote(m.id, null, { kind: "action", text: "Write the retry doc", owner: "Huy" }, "Joe");
+  db.endMeeting(m.id, null);
+  const rows: UsageRow[] = [];
+  setUsageSink((r) => rows.push(r));
+  try {
+    const agent = Object.assign(new HeuristicAgent(), {
+      polishAgenda: async () => (recordUsage("claude-sonnet-5-5", { input_tokens: 1, output_tokens: 1 }), []),
+    });
+    await new UpNextPolisher(db, agent, () => null, () => {}).run(room.id);
+  } finally {
+    setUsageSink(null);
+  }
+  assert.deepEqual(rows.map((r) => [r.meetingId, r.roomId, r.task]), [[null, room.id, "polishAgenda"]]);
 });

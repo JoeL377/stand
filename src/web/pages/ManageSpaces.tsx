@@ -4,8 +4,9 @@ import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { SYNTHESIS_HINT, SynthesisField } from "../Synthesis.tsx";
 import { ConxtPanel } from "../ConxtPanel.tsx";
+import { CostPanel } from "../CostPanel.tsx";
 import { MembersPanel } from "../MembersPanel.tsx";
-import { ProjectPanel } from "../ProjectPanel.tsx";
+import { SourcePanel } from "../SourcePanel.tsx";
 import { SpacesShell, spaceHref } from "./SpacesShell.tsx";
 
 /** The spaces you manage (you created them, or you're an admin): rename them, keep their purpose current, say what to
@@ -75,7 +76,8 @@ function SpaceEditor({ s }: { s: SpaceSummary }) {
       <SynthesisField value={synthesis} onChange={setSynthesis} />
       <p className="muted small synth-hint">{SYNTHESIS_HINT}</p>
       <ConxtPanel roomId={s.id} />
-      <ProjectPanel roomId={s.id} />
+      <SourcePanel roomId={s.id} />
+      <CostPanel roomId={s.id} />
       <MembersPanel roomId={s.id} />
       <div className="sp-manage-foot">
         <button className="primary" disabled={!dirty || state === "saving"}>
