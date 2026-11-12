@@ -48,21 +48,29 @@ export interface TimelineEntry {
   kind: TimelineKind;
   /** Where it sits: when it was said, typed, asked or done. A capture sits at the line it came from. */
   ts: number;
-  /** Who: the speaker, the person who typed or asked, who moved the focus, or the agent's person. */
+  /** Who did it, exactly: the person (with their id), their agent (its name, connection and model),
+   *  Stand itself, or GitHub. Null only when nothing recorded who (the host changing the view). */
+  actor: Actor | null;
+  /** That actor's person by name and id, for a line's label and color. Null for Stand. */
   who: string | null;
-  /** The speaker's participant id, for their color; null for anything that isn't a line. */
   whoId: string | null;
   text: string;
   /** The agenda item or slide it belongs to. A question to Stand or an agent's report: the one that was up. */
   itemId: string | null;
   /** A capture: what kind of note it is. */
   capture?: Exclude<NoteKind, "summary">;
+  /** A capture: who it is for. The actor is who made it: Stand when it was caught from the talk. */
+  owner?: string | null;
+  /** A capture a person added or reworded by hand in the call (the two aren't told apart). */
+  byHand?: boolean;
   /** A capture or an agent's report: the to-do, decision or question, as stand:<kind>/<id>. */
   ref?: string;
   /** An Ask Stand question: the answer, or the options it gave as one line each. Null while it had none. */
   answer?: string | null;
   /** An Ask Stand question Stand is still working on. */
   pending?: boolean;
+  /** An answered question: Stand, with the model it ran. */
+  answeredBy?: Actor;
   /** A focus change: the item's short label ("Slide 3", "ENG-142" or the review slide's name). */
   label?: string | null;
   /** What the main view showed then. On a change of what's up, a capture, a question to Stand, an
@@ -70,9 +78,8 @@ export interface TimelineEntry {
   shown?: Shown;
   /** A line said or typed: its words point at something on screen ("this button", "as you can see"). */
   points?: boolean;
-  /** An agent's report: what kind of report, and who wrote it. */
+  /** An agent's report: what kind of report. */
   status?: UpdateStatus;
-  actor?: Actor | null;
 }
 
 /** "Joe via Claude Code", "Joe", or "Stand": who an entry is by, as one line. */
@@ -158,6 +165,16 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
   const add = (e: TimelineEntry, rank: number) => out.push({ ...e, rank, seq: seq++ });
 
   const segById = new Map(input.segments.map((s) => [s.id, s]));
+  // Who did each thing. A name with no id (the focus log, a hand edit) takes the id that person's
+  // lines carry, so they are the same person everywhere, color included.
+  const idOf = new Map(input.segments.map((s) => [s.speakerName, s.speakerId]));
+  const known = (a: Actor): Actor => {
+    const id = a.personId ?? (a.person ? idOf.get(a.person) : undefined);
+    return id && !a.personId ? { ...a, personId: id } : a;
+  };
+  const person = (name: string, id?: string | null): Actor => known(id ? { kind: "person", person: name, personId: id } : { kind: "person", person: name });
+  const stand: Actor = { kind: "stand", person: null };
+  const by = (actor: Actor | null) => ({ actor, who: actor?.person ?? null, whoId: actor?.personId ?? null });
   // What was up at a moment: by the focus log when there is one (a finished meeting), else by the
   // last line said or typed before it (a live call, where the page has no focus log).
   const focusLog = [...input.focus].sort((x, y) => x.ts - y.ts);
@@ -197,7 +214,7 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
     // A line carries what was up only when its words point at it, and there was more up than an agenda line.
     const shown = pointsAtScreen(s.text) ? shownAt(s.ts, s.itemId) : null;
     const pointing = shown && shown.kind !== "item" ? { shown, points: true } : {};
-    add({ id: `${s.kind}:${s.id}`, kind: s.kind, ts: s.ts, who: s.speakerName, whoId: s.speakerId, text: s.text, itemId: s.itemId, ...pointing }, 1);
+    add({ id: `${s.kind}:${s.id}`, kind: s.kind, ts: s.ts, ...by(person(s.speakerName, s.speakerId)), text: s.text, itemId: s.itemId, ...pointing }, 1);
   }
 
   // A note is written a little after the words it came from: it sits right after that line, which is
@@ -212,8 +229,24 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
   };
   for (const n of input.notes) {
     if (n.kind === "summary") continue;
+    // Who made it: whoever added it (a person or their agent), a person who wrote it by hand in the
+    // call, else Stand, which caught it from the talk.
+    const hand = !n.addedActor && n.editedBy ? parseActor(n.editedBy) : null;
+    const maker = n.addedActor ? known(n.addedActor) : hand ? known(hand) : stand;
     add(
-      { id: `capture:${n.id}`, kind: "capture", ts: anchor(n), who: n.owner, whoId: null, text: n.text, itemId: n.itemId, capture: n.kind, ref: `stand:${REF_KIND[n.kind]}/${n.id}`, ...withShown(anchor(n), n.itemId) },
+      {
+        id: `capture:${n.id}`,
+        kind: "capture",
+        ts: anchor(n),
+        ...by(maker),
+        text: n.text,
+        itemId: n.itemId,
+        capture: n.kind,
+        owner: n.owner,
+        ...(hand && { byHand: true }),
+        ref: `stand:${REF_KIND[n.kind]}/${n.id}`,
+        ...withShown(anchor(n), n.itemId),
+      },
       2,
     );
   }
@@ -221,13 +254,20 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
   for (const c of input.cards) {
     if (c.status === "listening") continue;
     const ready = c.status === "ready";
-    const rest = { whoId: null, itemId: itemAt(c.at), ...(c.status === "working" && { pending: true }), ...withShown(c.at) };
+    // An answer card keeps the asker's id in `about`; an options card keeps the question's there.
+    const rest = {
+      ...by(person(c.by, c.kind === "answer" ? c.about : null)),
+      itemId: itemAt(c.at),
+      ...(c.status === "working" && { pending: true }),
+      ...(ready && { answeredBy: c.model ? { ...stand, model: c.model } : stand }),
+      ...withShown(c.at),
+    };
     if (c.kind === "answer") {
       if (!c.question.trim()) continue;
-      add({ id: `ask:${c.id}`, kind: "ask", ts: c.at, who: c.by, text: c.question, answer: ready ? c.note : null, ...rest }, 1);
+      add({ id: `ask:${c.id}`, kind: "ask", ts: c.at, text: c.question, answer: ready ? c.note : null, ...rest }, 1);
     } else {
       const options = c.options.map((o) => `${o.title}: ${o.why}`).join("\n");
-      add({ id: `ask:${c.id}`, kind: "ask", ts: c.at, who: c.by, text: `Options for: ${c.about}`, answer: ready ? options || c.note : null, ...rest }, 1);
+      add({ id: `ask:${c.id}`, kind: "ask", ts: c.at, text: `Options for: ${c.about}`, answer: ready ? options || c.note : null, ...rest }, 1);
     }
   }
 
@@ -241,8 +281,7 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
         id: `focus:${f.id}`,
         kind: "focus",
         ts: f.ts,
-        who: f.actor === "system" ? null : f.actor,
-        whoId: null,
+        ...by(f.actor === "system" ? stand : person(f.actor)),
         text: item?.title ?? (f.itemId ? "Removed item" : "General"),
         itemId: f.itemId,
         label: itemKey(item),
@@ -256,28 +295,29 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
   let before: StageView | null = null;
   for (const e of stage) {
     const what = stageChange(before, e.view);
+    // A share starting or stopping is the sharer's doing; the rest is the host's, and isn't recorded.
+    const sharer = e.view.sharing !== (before?.sharing ?? null) ? (e.view.sharing ?? before?.sharing ?? null) : null;
     before = e.view;
     if (!what) continue;
     const item = e.view.itemId ? input.itemById(e.view.itemId) : null;
-    add({ id: `stage:${e.id}`, kind: "focus", ts: e.ts, who: null, whoId: null, text: what, itemId: e.view.itemId, label: itemKey(item), ...withShown(e.ts) }, 0);
+    add({ id: `stage:${e.id}`, kind: "focus", ts: e.ts, ...by(sharer ? person(sharer) : null), text: what, itemId: e.view.itemId, label: itemKey(item), ...withShown(e.ts) }, 0);
   }
 
   const end = meeting.endedAt ?? Number.MAX_SAFE_INTEGER;
   for (const u of input.updates) {
     if (u.ts < meeting.startedAt || u.ts > end || QUIET.has(u.status)) continue;
-    const actor = u.actor ?? parseActor(u.client ? `${u.userName} via ${u.client}` : u.userName);
+    const actor = known(u.actor ?? parseActor(u.client ? `${u.userName} via ${u.client}` : u.userName) ?? { kind: "person", person: u.userName });
     add(
       {
         id: `agent:${u.id}`,
         kind: "agent",
         ts: u.ts,
-        who: u.userName,
-        whoId: null,
+        ...by(actor),
+        who: actor.person ?? u.userName,
         text: u.noteText ? `${u.noteText}${u.text ? `: ${u.text}` : ""}` : u.text,
         itemId: itemAt(u.ts),
         ref: u.noteId ? `stand:action/${u.noteId}` : undefined,
         status: u.status,
-        actor,
         ...withShown(u.ts),
       },
       2,

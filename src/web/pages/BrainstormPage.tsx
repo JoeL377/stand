@@ -7,6 +7,7 @@ import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
 import { BrainMap } from "../room/BrainMap.tsx";
+import { BrainWords } from "../room/BrainWords.tsx";
 import { DesignBoard } from "../room/DesignBoard.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { BrainIdeas } from "./BrainIdeas.tsx";
@@ -27,6 +28,7 @@ export function BrainstormPage() {
   const navigate = useNavigate();
   const [settingUp, setSettingUp] = useState(false);
   const ideas = params.get("view") === "ideas";
+  const words = params.get("view") === "words";
   useEffect(() => {
     setData(null);
     setFailed(false);
@@ -65,8 +67,11 @@ export function BrainstormPage() {
         </span>
         {!b.design && (
           <span className="bp-views" role="group" aria-label="View">
-            <button type="button" className={`rp-pill${ideas ? "" : " on"}`} aria-pressed={!ideas} onClick={() => setParams({}, { replace: true })}>
+            <button type="button" className={`rp-pill${ideas || words ? "" : " on"}`} aria-pressed={!ideas && !words} onClick={() => setParams({}, { replace: true })}>
               Map
+            </button>
+            <button type="button" className={`rp-pill${words ? " on" : ""}`} aria-pressed={words} onClick={() => setParams({ view: "words" }, { replace: true })}>
+              Words
             </button>
             <button type="button" className={`rp-pill${ideas ? " on" : ""}`} aria-pressed={ideas} onClick={() => setParams({ view: "ideas" }, { replace: true })}>
               Ideas
@@ -108,7 +113,7 @@ export function BrainstormPage() {
           )
         )}
       </header>
-      {b.design ? <DesignBoard brainstorm={b} className="bp-map" /> : ideas ? <BrainIdeas brainstorm={b} onStar={star} /> : <BrainMap brainstorm={b} className="bp-map" />}
+      {b.design ? <DesignBoard brainstorm={b} className="bp-map" /> : ideas ? <BrainIdeas brainstorm={b} onStar={star} /> : words ? <BrainWords brainstorm={b} className="bp-map" /> : <BrainMap brainstorm={b} className="bp-map" />}
     </div>
   );
 }
