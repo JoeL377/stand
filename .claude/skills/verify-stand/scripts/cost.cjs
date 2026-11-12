@@ -127,7 +127,9 @@ function writeUsage(rooms) {
 
     await step("a chat stretch: write to the space", async () => {
       await page.goto(`${base}/s/${rooms.cost}`);
-      await page.getByRole("tab", { name: /^Chat/ }).click();
+      // On a wide screen chat is the dock beside every tab; narrower, it is a tab.
+      const tab = page.getByRole("tab", { name: /^Chat/ });
+      if (await tab.count()) await tab.click();
       const box = page.getByRole("combobox", { name: "Write to the space" });
       await box.fill("What did the cost panel say this week?");
       await box.press("Enter");
