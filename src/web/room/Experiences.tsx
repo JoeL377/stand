@@ -94,11 +94,11 @@ export function ExperienceControl(props: { roomId: string; running: string | nul
           <span className="xp-group">Working sessions</span>
           <button type="button" role="menuitem" onClick={() => (setOpen(false), setPop("brainstorm"))}>
             <strong>Brainstorm</strong>
-            <span className="muted">from a topic or a question</span>
+            <span className="muted xp-hint">from a topic or a question</span>
           </button>
           <button type="button" role="menuitem" onClick={() => (setOpen(false), setPop("session"))}>
             <strong>Design session</strong>
-            <span className="muted">draw it as you talk</span>
+            <span className="muted xp-hint">draw it as you talk</span>
           </button>
         </div>
       )}

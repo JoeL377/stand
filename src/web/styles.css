@@ -3448,3 +3448,18 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
   .dr-help, .dr-shape { display: none; }
   .dr-ask button:disabled { display: none; }
 }
+
+/* One way out of a call: Leave. The host, with others still in the call, gets a two-line menu. */
+.leave { position: relative; display: flex; }
+.rp-menu.leave-menu { top: auto; bottom: calc(100% + 8px); left: auto; right: 0; min-width: 170px; }
+.leave-menu button { display: block; width: 100%; padding: 9px 12px; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--text); font-size: 13px; text-align: left; height: auto; }
+.leave-menu button:hover { background: var(--panel-2); }
+.leave-menu button.danger { color: #ef4444; }
+/* The Start menu on a phone: as wide as the screen, just above the controls, names and counts only. */
+@media (max-width: 760px) {
+  .xp { position: static; }
+  .rp-menu.sh-start-menu.xp-menu { left: 8px; right: 8px; transform: none; min-width: 0; max-width: none; bottom: calc(100% + 4px); }
+  .xp-menu button { padding: 9px 12px; font-size: 14px; }
+  .xp-menu .xp-hint { display: none; }
+  .xp-menu .xp-idea { max-width: 55vw; }
+}

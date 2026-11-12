@@ -183,7 +183,7 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", "```mermaid", 
       lastPage = rae;
       await rae.goto(spaceUrl);
       await rae.getByRole("button", { name: "Start talking" }).click();
-      await rae.getByRole("button", { name: "End meeting" }).waitFor();
+      await rae.getByRole("button", { name: "Leave", exact: true }).waitFor();
     });
 
     await step("the author starts the design review from its page and lands in the call", async () => {
@@ -304,8 +304,10 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", "```mermaid", 
     fs.writeFileSync(path.join(out, "host-page.txt"), agenda);
 
     await step("the host ends the meeting", async () => {
-      await rae.getByRole("button", { name: "End meeting" }).click();
-      await rae.getByRole("button", { name: "End meeting" }).waitFor({ state: "detached", timeout: 180_000 });
+      // Leave ends the meeting for the last person in it; with others there, the host picks End for everyone.
+      await rae.getByRole("button", { name: "Leave", exact: true }).click();
+      await rae.getByRole("menuitem", { name: "End for everyone" }).click({ timeout: 1500 }).catch(() => {});
+      await rae.locator("footer.controls").waitFor({ state: "detached", timeout: 180_000 });
       await rae.waitForLoadState("networkidle");
     });
     const state = await vera.request.get(`${base}/api/tasks/${taskId}/design-review`).then((r) => r.json());
