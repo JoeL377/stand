@@ -17,6 +17,8 @@ function SpacePage({ roomId }: { roomId: string }) {
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [joined, setJoined] = useState(false);
+  // Coming in from a phone's join sheet with the mic off.
+  const [muted, setMuted] = useState(false);
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
 
@@ -71,9 +73,11 @@ function SpacePage({ roomId }: { roomId: string }) {
         roomId={room.id}
         user={user}
         caps={caps}
+        startMuted={muted}
         onEnded={(meetingId) => nav(`/meetings/${meetingId}`)}
         onLeave={() => {
           setJoined(false);
+          setMuted(false);
           // After the room hears we've gone, so the lobby doesn't show us as still here.
           setTimeout(load, 500);
         }}
@@ -81,7 +85,10 @@ function SpacePage({ roomId }: { roomId: string }) {
     );
   }
 
-  return <SpaceHome room={room} onJoin={() => setJoined(true)} reload={refresh} />;
+  return <SpaceHome room={room} onJoin={(opts) => {
+        setMuted(Boolean(opts?.muted));
+        setJoined(true);
+      }} reload={refresh} />;
 }
 
 export function ModeNote({ caps }: { caps: Capabilities }) {

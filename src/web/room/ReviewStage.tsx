@@ -41,6 +41,8 @@ export function ReviewStage(props: {
   /** The host takes a line off that Stand got wrong, or adds one it missed. */
   onRemove?: (note: Note) => void;
   onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
+  /** False for someone following along on a phone: the outcome shows as a status, without its buttons. */
+  canDecide?: boolean;
   className?: string;
 }) {
   const { item, deck, index, count, canFlip, disabled } = props;
@@ -207,7 +209,12 @@ export function ReviewStage(props: {
         <span className="muted small rv-pos">
           {index + 1} of {count}
         </span>
-        <div className="rv-outcomes" role="group" aria-label="How this slide ended">
+        {props.canDecide === false && (
+          <span className={`rv-outcome rv-status ${outcome ?? "none"}${outcome ? " on" : ""}`} title={outcome && outcomeBy ? `${outcomeBy} said so` : undefined}>
+            {outcomes.find((o) => o.id === outcome)?.label ?? (idea ? "Not decided yet" : "No verdict yet")}
+          </span>
+        )}
+        <div className="rv-outcomes" role="group" aria-label="How this slide ended" hidden={props.canDecide === false}>
           {outcomes.map((o) => {
             const on = outcome === o.id;
             return (

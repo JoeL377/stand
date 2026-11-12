@@ -52,6 +52,8 @@ export function DesignStage(props: {
   /** Anyone in the call opens a question of the slide, for everyone. */
   onGo: (itemId: string) => void;
   onOutcome: (outcome: DesignOutcome | null) => void;
+  /** False for someone following on a phone: the outcome reads as a status. */
+  canDecide?: boolean;
   /** The host takes a line off that Stand got wrong, or adds one it missed. */
   onRemove?: (note: Note) => void;
   onAdd?: (kind: "action" | "decision" | "question", text: string) => void;
@@ -271,7 +273,12 @@ export function DesignStage(props: {
           Slide {pages.findIndex((s) => s.id === page.id) + 1} of {pages.length}
           {asked && ` · Question ${steps.findIndex((q) => q.id === asked.id) + 1} of ${steps.length}`}
         </span>
-        {outcomes.length > 0 && (
+        {outcomes.length > 0 && props.canDecide === false && (
+          <span className={`rv-outcome rv-status ${design.outcome ? `${TONE[design.outcome]} on` : "none"}`}>
+            {design.outcome ? (outcomes.find((o) => o.id === design.outcome)?.label ?? designOutcomeLabel(design.outcome)) : design.role === "verdict" ? "No verdict yet" : "Not settled yet"}
+          </span>
+        )}
+        {outcomes.length > 0 && props.canDecide !== false && (
           <div className="rv-outcomes" role="group" aria-label={design.role === "verdict" ? "The verdict on this spec" : "How this question ended"}>
             {outcomes.map((o) => {
               const on = design.outcome === o.id;

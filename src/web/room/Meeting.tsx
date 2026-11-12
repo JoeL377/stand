@@ -19,7 +19,9 @@ import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { MOD, meetingShortcuts } from "../shortcuts.ts";
 import { ExperienceControl, runningExperience } from "./Experiences.tsx";
-import { mayTakeOver } from "./presenter.ts";
+import { TaskPicker } from "./TaskPresentation.tsx";
+import { PhoneViewer, usePhone } from "../phone.ts";
+import { mayTakeOver, presentingLine } from "./presenter.ts";
 import { nextAsk } from "./NextCard.tsx";
 import { PilotRequest, type PilotActs, seatOf, usePilotNotices } from "./Pilot.tsx";
 
@@ -27,13 +29,15 @@ export function Meeting(props: {
   roomId: string;
   user: User;
   caps: Capabilities;
+  /** Come in with the mic off (the phone's join sheet offers it). */
+  startMuted?: boolean;
   onEnded: (meetingId: string) => void;
   onLeave: () => void;
 }) {
   const { roomId, caps } = props;
   const participantId = props.user.id;
   const room = useRoomSocket(roomId, true);
-  const media = useMedia({ roomId, livekit: caps.livekit, enabled: true });
+  const media = useMedia({ roomId, livekit: caps.livekit, enabled: true, startMuted: props.startMuted });
   const [now, setNow] = useState(Date.now());
   const [ending, setEnding] = useState(false);
   const { send, state } = room;
@@ -318,9 +322,18 @@ export function Meeting(props: {
     setSidePeek(false);
     setSideFolded((f) => remember(SIDE_FOLDED_KEY, !f));
   };
-  // On a phone the three columns don't fit: one shows at a time, picked from a strip under the top bar.
+  // On a phone the middle screen is the whole call. The agenda and the chat come up over it as sheets,
+  // and what is done once or twice a call sits behind More.
   const phone = usePhone();
-  const [phoneView, setPhoneView] = useState<"agenda" | "board" | "chat">("board");
+  const [sheet, setSheet] = useState<"agenda" | "chat" | "more" | null>(null);
+  const [chatUnseen, setChatUnseen] = useState(0);
+  // The map and diagram pills show on a phone once there is one, or once More asked for them.
+  const [phoneViews, setPhoneViews] = useState(false);
+  useEffect(() => {
+    if (!phone) setSheet(null);
+  }, [phone]);
+  useWakeLock(phone);
+  useKeyboardRoom(phone);
   const foldAgenda = () => setAgendaFolded((f) => remember(AGENDA_FOLDED_KEY, !f));
   const foldRef = useRef(foldAgenda);
   foldRef.current = foldAgenda;
@@ -382,7 +395,38 @@ export function Meeting(props: {
 
   return (
   <PersonColors.Provider value={colorFor}>
-    <div className="meeting">
+  <PhoneViewer.Provider value={phone ? props.user.name.split(" ")[0] : null}>
+    <div className={phone ? "meeting is-phone" : "meeting"}>
+      {phone && (
+        <header className="topbar phone-top">
+          <button type="button" className="phone-now" aria-haspopup="dialog" aria-expanded={sheet === "agenda"} onClick={() => setSheet(sheet === "agenda" ? null : "agenda")}>
+            <span className={notRecording ? "rec-dot off" : "rec-dot"} aria-hidden />
+            <span className="phone-now-text">
+              <strong dir="auto">
+                {focusItem ? focusItem.title : "General / off-agenda"}
+                <span className="phone-now-caret" aria-hidden>
+                  ▾
+                </span>
+              </strong>
+              <small>{phoneSub(state, focusItem, participantId, now)}</small>
+            </span>
+          </button>
+          {notRecording && !micFirst && (
+            <button className="badge not-recording" onClick={() => toast({ tone: "error", text: notRecording })}>
+              Not recording
+            </button>
+          )}
+          {media.audioDown && !media.audioAway && <span className="badge not-recording">No audio</span>}
+          <ConnectionPill room={room} />
+          {state.ending && (
+            <span className="badge" title={writingTitle}>
+              Writing notes
+            </span>
+          )}
+          <People participants={state.participants} participantId={participantId} speaking={media.speaking} interims={room.interims} canSteer={canSteer && !writingUp} offline={!room.connected} send={send} />
+        </header>
+      )}
+      {!phone && (
       <header className="topbar">
         <div className="topbar-left">
           <Logo size={20} />
@@ -470,6 +514,7 @@ export function Meeting(props: {
           </button>
         </div>
       </header>
+      )}
 
       {showKeys && <Shortcuts canSteer={canSteer} onClose={() => setShowKeys(false)} />}
       {media.needsAudioUnlock && (
@@ -478,27 +523,17 @@ export function Meeting(props: {
         </div>
       )}
 
-      {phone && (
-        <div className="phone-views" role="tablist" aria-label="Meeting views">
-          {(["agenda", "board", "chat"] as const).map((v) => (
-            <button key={v} role="tab" aria-selected={phoneView === v} className={phoneView === v ? "on" : undefined} onClick={() => setPhoneView(v)}>
-              {v === "agenda" ? "Agenda" : v === "board" ? "Board" : "Chat"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Stand's card lives on the board. On a phone's other tabs one line says it is up, so nobody misses
-          what the rest of the call is deciding on. */}
-      {phone && phoneView !== "board" && state.next && !state.ending && (
+      {/* Stand's card lives on the board. While a sheet covers it on a phone, one line says it is up, so
+          nobody misses what the rest of the call is deciding on. */}
+      {phone && sheet && state.next && !state.ending && (
         <div className="phone-next" role="status">
           <span className="agent-mark" aria-hidden>
             ✦
           </span>
-          <button type="button" className="phone-next-what" onClick={() => setPhoneView("board")}>
+          <button type="button" className="phone-next-what" onClick={() => setSheet(null)}>
             {nextAsk(state.next)}
           </button>
-          <button type="button" className="link" onClick={() => setPhoneView("board")}>
+          <button type="button" className="link" onClick={() => setSheet(null)}>
             Show
           </button>
           <button type="button" className="link muted" onClick={() => send({ type: "next.wave", id: state.next!.id })} aria-label="No thanks">
@@ -508,9 +543,9 @@ export function Meeting(props: {
       )}
 
       <div
-        className={`meeting-grid${agendaFolded && !phone ? " agenda-folded" : ""}${sideFolded && !phone ? " side-folded" : ""}${phone ? ` phone-${phoneView}` : ""}`}
-        // Picking an item from the agenda on a phone goes back to the board to show it.
-        onClick={(e) => phone && phoneView === "agenda" && (e.target as HTMLElement).closest(".item-main") && setPhoneView("board")}
+        className={`meeting-grid${agendaFolded && !phone ? " agenda-folded" : ""}${sideFolded && !phone ? " side-folded" : ""}${phone ? ` phone${sheet === "agenda" || sheet === "chat" ? ` sheet-${sheet}` : ""}` : ""}`}
+        // Picking an item from the agenda on a phone closes the sheet to show it.
+        onClick={(e) => phone && sheet === "agenda" && (e.target as HTMLElement).closest(".item-main") && setSheet(null)}
       >
         <AgendaPanel
           folded={agendaFolded && !phone}
@@ -547,6 +582,8 @@ export function Meeting(props: {
           notesBusy={room.notesBusy}
           offline={!room.connected}
           ending={writingUp}
+          phone={phone}
+          phoneViews={phoneViews}
           livekit={caps.livekit}
           snapRef={stageSnap}
         />
@@ -562,12 +599,116 @@ export function Meeting(props: {
           participantId={participantId}
           board={room.board}
           folded={sideFolded && !phone}
+          phone={phone}
+          open={sheet === "chat"}
+          onUnseen={setChatUnseen}
           peeking={sidePeek}
           onFold={foldSide}
           onPeek={setSidePeek}
         />
       </div>
 
+      {phone && sheet && <div className="phone-scrim" onClick={() => setSheet(null)} />}
+      {phone && (sheet === "agenda" || sheet === "chat") && (
+        <button type="button" className="phone-sheet-close" aria-label="Close" onClick={() => setSheet(null)}>
+          ✕
+        </button>
+      )}
+      {phone && sheet === "more" && (
+        <div className="phone-sheet phone-more" role="dialog" aria-label="More">
+          <div className="phone-sheet-head">
+            <strong>More</strong>
+            <button type="button" className="toast-x" aria-label="Close" onClick={() => setSheet(null)}>
+              ✕
+            </button>
+          </div>
+          <div className="phone-more-grid" onClick={(e) => (e.target as HTMLElement).closest("[role=menuitem], [data-close]") && setSheet(null)}>
+            <ExperienceControl roomId={roomId} running={runningExperience(state.items)} disabled={writingUp || !room.connected} mayStart={() => mayTakeOver(state, participantId)} />
+            {canSteer && (
+              <TaskPicker
+                roomId={roomId}
+                notes={room.notes}
+                disabled={!room.connected || writingUp}
+                onPick={(task) => {
+                  if (send({ type: "task.present", taskId: task.id })) setSheet(null);
+                }}
+              />
+            )}
+            <button
+              type="button"
+              className="control"
+              data-close
+              onClick={() => setPhoneViews(true)}
+              title="Shows the Map, Words and Diagram views on the board"
+            >
+              <span>Map or diagram</span>
+            </button>
+            <MicMenu mics={media.mics} micId={media.micId} onPick={(id) => void media.pickMic(id)} onOpen={() => void media.refreshMics()} />
+            <button type="button" className="control" onClick={copyInvite}>
+              <LinkIcon />
+              <span>{copied ? "Copied ✓" : "Copy invite link"}</span>
+            </button>
+            <a className="control" href={`/meetings/${state.meetingId}`} target="_blank" rel="noreferrer" data-close>
+              <span>Notes so far</span>
+            </a>
+            {canSteer && (!caps.livekit || !caps.llm) ? (
+              <button className="control" data-close onClick={() => send({ type: "demo.play" })}>
+                <PlayIcon />
+                <span>Play demo</span>
+              </button>
+            ) : null}
+          </div>
+          <ul className="phone-how">
+            <li>Everything said is filed under the item named at the top. Tap it for the agenda and who is here.</li>
+            <li>✦ marks what Stand wrote or suggests.</li>
+          </ul>
+        </div>
+      )}
+      {phone && (
+        <footer className="controls phone-bar">
+          <button
+            className={media.micOn && !media.audioDown ? "control mic" : "control mic off"}
+            onClick={() => void (media.audioAway ? media.talkHere() : media.audioDown ? undefined : media.toggleMic())}
+            disabled={media.micStarting || (media.audioDown && !media.audioAway)}
+          >
+            {media.micOn && !media.audioDown ? <MicIcon /> : <MicOffIcon />}
+            <span>{media.audioAway === "elsewhere" ? "Talk here" : media.audioAway ? "Reconnect" : media.audioDown ? "No audio" : media.micStarting ? "Starting…" : media.micOn ? "Mute" : media.micError ? micLabel : "Unmute"}</span>
+          </button>
+          {room.agentCards && !writingUp && (
+            <AskStand pilot={pilot} send={send} offline={!room.connected} micOn={media.micOn && !media.audioDown} canUnmute={!media.audioDown && !media.audioAway} toggleMic={media.toggleMic} />
+          )}
+          <button className={sheet === "chat" ? "control on" : "control"} aria-expanded={sheet === "chat"} onClick={() => setSheet(sheet === "chat" ? null : "chat")}>
+            <ChatGlyph />
+            <span>Chat</span>
+            {chatUnseen > 0 && sheet !== "chat" && (
+              <i className="phone-badge" aria-label={`${chatUnseen} new`}>
+                {chatUnseen}
+              </i>
+            )}
+          </button>
+          <button className={sheet === "more" ? "control on" : "control"} aria-expanded={sheet === "more"} onClick={() => setSheet(sheet === "more" ? null : "more")}>
+            <MoreGlyph />
+            <span>More</span>
+          </button>
+          <span className="spacer" />
+          <LeaveControl
+            canEnd={canSteer && !writingUp && room.connected}
+            alone={(state?.participants.length ?? 1) <= 1}
+            writingUp={writingUp}
+            onLeave={() => {
+              const n = room.waiting;
+              if (n && !confirm(`${n === 1 ? "1 change hasn't" : `${n} changes haven't`} reached Stand yet and will be lost. Leave anyway?`)) return;
+              media.leave();
+              props.onLeave();
+            }}
+            onEnd={() => {
+              if (send({ type: "meeting.end" })) setEnding(true);
+            }}
+          />
+          <PilotRequest acts={pilot} />
+        </footer>
+      )}
+      {!phone && (
       <footer className="controls">
         <div className="controls-group">
           {/* With no audio connection, unmuting can't help: the button says what's wrong and retries. */}
@@ -673,6 +814,7 @@ export function Meeting(props: {
         />
         <PilotRequest acts={pilot} />
       </footer>
+      )}
       {popOut.win && state && (
         <PopOutBar
           win={popOut.win}
@@ -687,6 +829,7 @@ export function Meeting(props: {
         />
       )}
     </div>
+  </PhoneViewer.Provider>
   </PersonColors.Provider>
   );
 }
@@ -729,16 +872,84 @@ function LeaveControl(props: { canEnd: boolean; alone: boolean; writingUp: boole
 
 const canShare = typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getDisplayMedia);
 
-const PHONE = "(max-width: 820px)";
-function usePhone() {
-  const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches);
+const ChatGlyph = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" />
+  </svg>
+);
+const MoreGlyph = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <circle cx="5" cy="12" r="1.8" />
+    <circle cx="12" cy="12" r="1.8" />
+    <circle cx="19" cy="12" r="1.8" />
+  </svg>
+);
+
+/** Under the phone's top line: what kind of thing is on, who presents it, and how long the call has run. */
+function phoneSub(state: NonNullable<ReturnType<typeof useRoomSocket>["state"]>, focus: { id: string; deckId?: string | null } | null | undefined, me: string, now: number) {
+  const parts: string[] = [];
+  if (focus?.deckId) {
+    const slides = state.items.filter((i) => i.deckId === focus.deckId);
+    const at = slides.findIndex((i) => i.id === focus.id);
+    if (at >= 0 && slides.length > 1) parts.push(`${at + 1} of ${slides.length}`);
+  }
+  if (state.presenter) parts.push(presentingLine(state.presenter, me));
+  else {
+    const host = state.participants.find((p) => p.isHost);
+    if (host && host.id !== me) parts.push(`${host.name.split(" ")[0]} is hosting`);
+  }
+  parts.push(fmtDuration(now - state.meetingStartedAt));
+  return parts.join(" · ");
+}
+
+/** A phone's keyboard covers the foot of the page without resizing it. The call is sized to what is
+ *  left showing (--vvh), so the chat box and the bar ride up above the keyboard. */
+function useKeyboardRoom(on: boolean) {
   useEffect(() => {
-    const mq = window.matchMedia(PHONE);
-    const on = () => setPhone(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return phone;
+    const vv = window.visualViewport;
+    if (!on || !vv) return;
+    const root = document.documentElement;
+    const fit = () => {
+      root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
+      // Safari scrolls the page up under the keyboard; the call has nothing to scroll to.
+      if (vv.offsetTop) window.scrollTo(0, 0);
+    };
+    fit();
+    vv.addEventListener("resize", fit);
+    vv.addEventListener("scroll", fit);
+    return () => {
+      vv.removeEventListener("resize", fit);
+      vv.removeEventListener("scroll", fit);
+      root.style.removeProperty("--vvh");
+    };
+  }, [on]);
+}
+
+/** A phone that is only listening dims and locks; in a call the screen stays on while the page shows. */
+function useWakeLock(on: boolean) {
+  useEffect(() => {
+    const wl = (navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<{ release: () => Promise<void> }> } }).wakeLock;
+    if (!on || !wl) return;
+    let lock: { release: () => Promise<void> } | null = null;
+    let gone = false;
+    const take = () => {
+      if (document.visibilityState !== "visible") return;
+      wl.request("screen").then(
+        (l) => {
+          if (gone) void l.release();
+          else lock = l;
+        },
+        () => {},
+      );
+    };
+    take();
+    document.addEventListener("visibilitychange", take);
+    return () => {
+      gone = true;
+      document.removeEventListener("visibilitychange", take);
+      void lock?.release().catch(() => {});
+    };
+  }, [on]);
 }
 
 const PopOutIcon = () => (

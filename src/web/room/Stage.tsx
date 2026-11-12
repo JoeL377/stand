@@ -58,6 +58,9 @@ export function Stage(props: {
   /** Items whose live notes are being redrawn right now (keyed "" for off the agenda). */
   notesBusy: string[];
   livekit: boolean;
+  /** A phone: the stage is the whole call, and the map and diagram pills wait until there is one or they're asked for. */
+  phone?: boolean;
+  phoneViews?: boolean;
   /** Set to a function that snaps the shared screen while one is up, for the pop-out bar. */
   snapRef?: MutableRefObject<(() => Promise<boolean>) | null>;
 }) {
@@ -422,7 +425,8 @@ export function Stage(props: {
       view={view}
       onView={pickView}
       // During a review the board is the card only, unless a map or a diagram someone asked for there is drawing.
-      tabs={!runningExperience(state.items) || !!live}
+      tabs={(!runningExperience(state.items) || !!live) && (!props.phone || !!props.phoneViews || !!live || view !== "card" || (props.brainstorms ?? []).length > 0)}
+      phone={props.phone}
       card={card}
       brainstorm={props.brainstorm}
       others={props.brainstorms ?? []}
@@ -621,6 +625,7 @@ export function Stage(props: {
               notes={props.notes}
               busy={props.notesBusy.includes(focusItem.id)}
               canFlip
+              canDecide={!props.phone || amLeader || canSteer}
               disabled={Boolean(props.offline || props.ending)}
               shot={myShot}
               onShot={setMyShot}
@@ -640,6 +645,7 @@ export function Stage(props: {
               notes={props.notes}
               busy={props.notesBusy.includes(focusItem.id)}
               canSteer={canSteer}
+              canDecide={!props.phone || amLeader || canSteer || myDesign}
               author={myDesign}
               disabled={Boolean(props.offline || props.ending)}
               specOpen={specOpen}

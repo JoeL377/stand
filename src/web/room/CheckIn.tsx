@@ -9,6 +9,7 @@ import type { FollowUp } from "../../shared/protocol.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
 import { Face } from "../RecapChapters.tsx";
+import { usePhoneViewer } from "../phone.ts";
 
 /** With the topic card up this long and nobody answering, the check-in gives the middle back. */
 export const CHECKIN_IDLE_MS = 3 * 60_000;
@@ -33,6 +34,8 @@ export const checkInRows = (followUps: FollowUp[], meetingStartedAt: number) => 
 /** embedded: a page of the opening board (Opener.tsx), which has the header and shows what closed since. */
 export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number; acts: CheckInActs | null; embedded?: boolean }) {
   const colorFor = usePersonColors();
+  // On a phone only your own to-dos keep their buttons, and they come first; the rest is a list to read.
+  const mine = usePhoneViewer();
   const start = props.meetingStartedAt;
   const work = useWork(props.followUps.filter((f) => !f.doneAt).map((f) => f.id));
   // Closed between the last meeting and this one: news to glance at.
@@ -46,16 +49,16 @@ export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number
     groups.set(k, [...(groups.get(k) ?? []), f]);
   }
   // Owners in the order of their oldest open task; nobody's last.
-  const owners = [...groups.keys()].sort((a, b) => (a === "") !== (b === "") ? (a === "" ? 1 : -1) : groups.get(a)![0].ts - groups.get(b)![0].ts);
-  const acts = props.acts;
+  const owners = [...groups.keys()].sort((a, b) => (mine && (a === mine) !== (b === mine) ? (a === mine ? -1 : 1) : (a === "") !== (b === "") ? (a === "" ? 1 : -1) : groups.get(a)![0].ts - groups.get(b)![0].ts));
+  const all = props.acts;
   return (
     <section className={props.embedded ? "checkin embedded" : "checkin"} aria-label="Since last time">
       {!props.embedded && (
         <header className="checkin-head">
           <h2>Since last time</h2>
           <span className="checkin-count">{left} to check</span>
-          {acts && (
-            <button type="button" className="checkin-close" onClick={acts.onClose}>
+          {all && (
+            <button type="button" className="checkin-close" onClick={all.onClose}>
               Move on
             </button>
           )}
@@ -71,8 +74,8 @@ export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number
               <span className="checkin-text">{f.text}</span>
               <ClosedPill note={f} />
               {f.owner && <Face name={f.owner} color={colorFor(f.owner)} size={18} />}
-              {acts && (
-                <button type="button" className="checkin-btn quiet" onClick={() => acts.onState(f.id, "open")}>
+              {all && (
+                <button type="button" className="checkin-btn quiet" onClick={() => all.onState(f.id, "open")}>
                   Reopen
                 </button>
               )}
@@ -80,8 +83,10 @@ export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number
           ))}
         </ul>
       )}
-      {owners.map((o) => (
-        <div key={o || "nobody"} className="checkin-group">
+      {owners.map((o) => {
+        const acts = !mine || o === mine ? all : null;
+        return (
+        <div key={o || "nobody"} className={acts || !all ? "checkin-group" : "checkin-group read"}>
           <h3>
             {o ? <Face name={o} color={colorFor(o)} size={18} /> : <span className="rc-face none">?</span>}
             {o || "No owner"}
@@ -131,7 +136,8 @@ export function CheckIn(props: { followUps: FollowUp[]; meetingStartedAt: number
             })}
           </ul>
         </div>
-      ))}
+        );
+      })}
     </section>
   );
 }

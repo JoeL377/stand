@@ -12,6 +12,7 @@ import { STATE_LABEL, VERB_LABEL, stateOf, verbOf } from "../shared/tasks.ts";
 import { api } from "./api.ts";
 import { useAuth } from "./auth.tsx";
 import { CopyForAgent } from "./CopyForAgent.tsx";
+import { usePhoneViewer } from "./phone.ts";
 import { CloseIcon } from "./icons.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
 import { LastReview, designReviewHref } from "./pages/DesignReviewPage.tsx";
@@ -111,10 +112,13 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange
 
   const n = task?.note;
   const state = n && stateOf(n, task.work);
+  // On a phone the drawer is for reading and for a comment; only your own to-do keeps its controls.
+  const mine = usePhoneViewer();
+  const read = Boolean(mine && n && n.owner?.split(" ")[0] !== mine);
   // On the body, so the page panel's own layering can't put the page over it.
   return createPortal(
     <>
-      <aside className="task-drawer" role="complementary" aria-label="Task">
+      <aside className={read ? "task-drawer read" : "task-drawer"} role="complementary" aria-label="Task">
         <div className="td-head">
           {n && state && (
             <span className="td-kind">
@@ -228,7 +232,7 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange
             <Links title="Waits on" links={task.waitsOn} onOpen={onOpen} />
             <Links title="Blocking" links={task.blocking} onOpen={onOpen} />
 
-            <section className="td-section" ref={activity}>
+            <section className="td-section td-activity" ref={activity}>
               <h3>Activity</h3>
               {task.work.log.length ? <WorkCard work={task.work} noPlan /> : <p className="muted">Nothing reported yet.</p>}
             </section>

@@ -31,6 +31,11 @@ export function SidePanel(props: {
   peeking?: boolean;
   onFold?: () => void;
   onPeek?: (on: boolean) => void;
+  /** On a phone the panel is a sheet over the call: open or not, never a rail. */
+  phone?: boolean;
+  open?: boolean;
+  /** Chat messages from others that came in while the sheet was closed. */
+  onUnseen?: (n: number) => void;
 }) {
   const { state, segments, interims, send } = props;
   // Two tabs. The transcript is the record of the item on screen, in order: what was said, what was
@@ -38,7 +43,7 @@ export function SidePanel(props: {
   // The chat is the meeting's one conversation, whichever item each message landed on. The topics
   // and their notes sit on the middle screen, so the transcript opens first.
   const [tab, setTab] = useState<"chat" | "transcript">("transcript");
-  const shut = !!props.folded && !props.peeking;
+  const shut = props.phone ? !props.open : !!props.folded && !props.peeking;
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   // The running list sits out a product review (the notes agent files what's said under the slide),
   // so on a review slide what was caught comes from the notes.
@@ -81,9 +86,11 @@ export function SidePanel(props: {
   const othersChats = chats.filter((s) => s.speakerId !== props.participantId).length;
   const [chatSeen, setChatSeen] = useState(othersChats);
   useEffect(() => {
-    if (tab === "chat" && !shut) setChatSeen(othersChats);
-  }, [tab, othersChats, shut]);
+    // On a phone the open sheet shows chat in either view.
+    if ((tab === "chat" || props.phone) && !shut) setChatSeen(othersChats);
+  }, [tab, othersChats, shut, props.phone]);
   const chatUnseen = Math.max(0, othersChats - chatSeen);
+  useEffect(() => props.onUnseen?.(chatUnseen), [chatUnseen]);
   // Folded, a message from someone else opens the chat for a moment, then it folds again unless the
   // pointer or the cursor is in it.
   const lastChats = useRef(othersChats);
@@ -103,7 +110,7 @@ export function SidePanel(props: {
   const isHost = state.participants.some((p) => p.id === props.participantId && p.isHost);
   const focusSnaps = (state.snaps ?? []).filter((p) => p.itemId === state.focusItemId);
 
-  if (shut)
+  if (shut && !props.phone)
     return (
       <aside className="panel side rail" aria-label="Chat and transcript">
         <button className="icon side-fold" title="Show chat and transcript" aria-label="Show chat and transcript" onClick={props.onFold}>
@@ -158,8 +165,8 @@ export function SidePanel(props: {
 
       <div className="side-toggle" role="tablist" aria-label="Discussion views">
         <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
-          Chat
-          {tab !== "chat" && chatUnseen > 0 && (
+          {props.phone ? "Chat only" : "Chat"}
+          {tab !== "chat" && chatUnseen > 0 && !props.phone && (
             <span className="side-tab-badge" aria-label={`${chatUnseen} new`}>
               {chatUnseen}
             </span>
@@ -171,7 +178,7 @@ export function SidePanel(props: {
           className={tab === "transcript" ? "on" : ""}
           onClick={() => setTab("transcript")}
         >
-          Transcript
+          {props.phone ? "Everything" : "Transcript"}
           {tab !== "transcript" && unseen > 0 && (
             <span className="side-tab-badge" aria-label={`${unseen} new`}>
               {unseen}
