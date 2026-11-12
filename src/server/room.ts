@@ -140,6 +140,8 @@ export class RoomSession implements SpeechSink {
   private pendingUser = new Map<WebSocket, User>();
   private participants = new Map<string, Participant & { conns: number }>();
   private hostId: string | null = null;
+  /** Who held the host seat before someone started an experience and took it for its length. */
+  private lentFrom: string | null = null;
   private focusItemId: string | null = null;
   /** See RoomState.stageSnapId. */
   private stageSnapId: string | null = null;
@@ -336,6 +338,28 @@ export class RoomSession implements SpeechSink {
     return this.hostId === userId;
   }
 
+  /** Someone in the call started a review, a brainstorm or a design session: they steer the board
+   *  while it runs, so the host seat is theirs until it is finished, and then goes back. */
+  startedBy(userId: string) {
+    if (this.ended || !this.participants.has(userId) || userId === this.hostId) return;
+    // Lent once: a second experience started by someone else still gives the seat back to the first host.
+    this.lentFrom ??= this.hostId;
+    this.setHost(userId);
+    this.suggestion = null;
+    this.broadcastState();
+  }
+
+  /** The experience is over: the seat goes back to whoever lent it, when they are still here and
+   *  nobody moved it on by hand in the meantime. */
+  private returnSeat() {
+    const to = this.lentFrom;
+    this.lentFrom = null;
+    if (!to || to === this.hostId || !this.participants.has(to)) return;
+    this.setHost(to);
+    this.suggestion = null;
+    this.broadcastState();
+  }
+
   /** "Finish this": the review, brainstorm or design session running in this call is over, and the
    *  call goes on as plain talk. Each keeps what it would have kept at the end of the call; what the
    *  meeting files afterwards (reviews.ts refileReview, designReviews.ts writeBackReview) still runs then. */
@@ -368,6 +392,7 @@ export class RoomSession implements SpeechSink {
       // Its slides or its sentence left the agenda: the call is back on General.
       this.itemsChanged();
       this.followUpsChanged();
+      this.returnSeat();
     }
     return done;
   }
@@ -889,6 +914,8 @@ export class RoomSession implements SpeechSink {
         if ((isHost || !hostHere) && this.participants.has(msg.participantId)) {
           if (conn.participantId === this.createdBy && msg.participantId !== this.createdBy) this.creatorHandedOver = true;
           if (msg.participantId === this.createdBy) this.creatorHandedOver = false;
+          // Handed over by hand: that stands, whatever is running.
+          this.lentFrom = null;
           this.setHost(msg.participantId);
           this.suggestion = null;
           this.broadcastState();
