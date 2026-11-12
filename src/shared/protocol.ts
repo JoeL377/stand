@@ -786,6 +786,8 @@ export interface Participant {
   isSharing: boolean;
   /** Browser transcription can't hear this person (blocked, or a browser without it). */
   notRecording?: boolean;
+  /** Their mic is off: muted, or not started yet. Left out until their page has said. */
+  muted?: boolean;
 }
 
 export interface Suggestion {
@@ -959,6 +961,8 @@ export type ClientMessage = (
   /** Take the host role when nobody holds it, or (as host) hand it to someone. */
   | { type: "host.give"; participantId: string }
   | { type: "sharing"; on: boolean }
+  /** Whether this person's mic is on, so everyone can see who is muted. */
+  | { type: "mic"; on: boolean }
   /** Browser transcription: whether this person's words are being picked up. */
   | { type: "recording"; on: boolean }
   /** Try the notes for an item again now, after the agent failed. */

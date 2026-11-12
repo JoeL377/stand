@@ -2528,6 +2528,10 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .people-face.unheard::after, .people-face.sharing::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
 .people-face.sharing::after { background: var(--ok); }
 .people-face.unheard::after { background: #f04438; }
+/* Muted: a small crossed-out mic at the foot of the face. The sharing or not-recorded dot moves up to make room. */
+.people-mute { position: absolute; right: -4px; bottom: -4px; z-index: 2; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: var(--panel-2); color: #ff9a9a; box-shadow: 0 0 0 2px var(--bg); }
+.people-mute svg { width: 9px; height: 9px; stroke-width: 2.4; }
+.people-face.muted::after { bottom: auto; top: -1px; }
 .people-more { margin-left: 4px; font-size: 11.5px; color: var(--muted); }
 .people-talking, .people-unheard { display: inline-flex; align-items: center; gap: 5px; max-width: 160px; padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
 .people-talking { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
