@@ -382,10 +382,11 @@ export function TopicBoard(props: {
     window.addEventListener(PILOT_OPEN, go);
     return () => window.removeEventListener(PILOT_OPEN, go);
   }, []);
-  // "Show on the board" in the transcript: the card it names opens here.
+  // "Show on the board" in the transcript, for what someone's own agent said: its card opens here.
+  // ✦ Stand's cards keep their own way there (the Open tab, under the question).
   const showRef = useRef((_id: string) => {});
   showRef.current = (id) => {
-    const e = entries.find((x) => x.id === id || x.chain?.some((c) => c.id === id));
+    const e = entries.find((x) => x.kind === "said" && x.id === id);
     if (e && e.id !== shownId) open(e.id);
   };
   useEffect(() => {
