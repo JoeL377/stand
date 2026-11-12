@@ -24,7 +24,7 @@ import type {
   Suggestion,
 } from "../shared/protocol.ts";
 import { BOARD_EVERY_MS, BoardKeeper } from "./board.ts";
-import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, ListKeeper } from "./liveList.ts";
+import { LIST_DEBOUNCE_MS, LIST_MAX_WAIT_MS, type ListItem, ListKeeper } from "./liveList.ts";
 import { MAP_DEBOUNCE_MS, MAP_MAX_WAIT_MS, MapKeeper, finishBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { DiagramKeeper, sessionBackground, saveDraftSpec } from "./designSession.ts";
 import { PilotSeat } from "./pilot.ts";
@@ -1025,13 +1025,14 @@ export class RoomSession implements SpeechSink {
           if (!it) break;
           this.listChanged();
           // The same to-do in the live notes, so the recap and the space page have it too.
-          this.mirrorDone(it.text, it.doneBy);
+          this.mirrorDone(it);
           break;
         }
         const note = this.db.setActionDone(this.roomId, msg.noteId, msg.done ? conn.name : null);
         if (!note) break;
         // An action from this meeting: resend its item's notes so every card updates.
         if (note.meetingId === this.meetingId) this.sendItemNotes(note.itemId);
+        this.tickLine(note.id, msg.done ? conn.name : null);
         this.broadcastState();
         break;
       }
@@ -1048,6 +1049,7 @@ export class RoomSession implements SpeechSink {
         if (!note) break;
         this.checkInAnsweredAt = Date.now();
         if (note.meetingId === this.meetingId) this.sendItemNotes(note.itemId);
+        if (msg.state !== "dropped") this.tickLine(note.id, msg.state === "done" ? conn.name : null);
         this.broadcastState();
         break;
       }
@@ -1173,8 +1175,12 @@ export class RoomSession implements SpeechSink {
         // Titles are written to stand on their own ("Move hosting to Fly.io"), as a decision or a to-do.
         const text = option.title;
         const kind = msg.as === "decision" ? "decided" : "todo";
-        if (this.list.addByHand(kind, null, text, itemId, msg.as === "decision" ? card.about : null)) this.listChanged();
-        this.db.addNote(this.meetingId, itemId, { kind: msg.as === "decision" ? "decision" : "action", text, owner: null }, conn.name);
+        const line = this.list.addByHand(kind, null, text, itemId, msg.as === "decision" ? card.about : null);
+        const note = this.db.addNote(this.meetingId, itemId, { kind: msg.as === "decision" ? "decision" : "action", text, owner: null }, conn.name);
+        if (line) {
+          this.list.link(line.id, note.id);
+          this.listChanged();
+        }
         this.sendItemNotes(itemId);
         if (msg.as === "task") this.broadcastState();
         this.agentChanged();
@@ -1205,8 +1211,12 @@ export class RoomSession implements SpeechSink {
         const card = this.agentCards.takeTodo(msg.cardId, conn.name);
         if (!card?.todo) return;
         const itemId = this.focusItemId;
-        if (this.list.addByHand("todo", null, card.todo, itemId)) this.listChanged();
-        this.db.addNote(this.meetingId, itemId, { kind: "action", text: card.todo, owner: null }, conn.name);
+        const line = this.list.addByHand("todo", null, card.todo, itemId);
+        const note = this.db.addNote(this.meetingId, itemId, { kind: "action", text: card.todo, owner: null }, conn.name);
+        if (line) {
+          this.list.link(line.id, note.id);
+          this.listChanged();
+        }
         this.sendItemNotes(itemId);
         this.broadcastState();
         this.agentChanged();
@@ -1833,12 +1843,44 @@ export class RoomSession implements SpeechSink {
   }
 
   /** A to-do checked off on the board's list: the same to-do in the live notes too, so the recap,
-   *  the space page and the next meeting see it. */
-  private mirrorDone(text: string, by: string | null) {
-    const note = this.db.meetingNotes(this.meetingId).find((n) => n.kind === "action" && !n.doneAt === !!by && similar(n.text, text));
-    if (!note) return;
+   *  the space page and the next meeting see it. By the note the line is tied to; a line no notes
+   *  run has tied yet is matched by its words once, and tied from then on. */
+  private mirrorDone(line: ListItem, by = line.doneBy) {
+    const list = this.list;
+    if (!list) return;
+    const notes = this.db.meetingNotes(this.meetingId);
+    let note = line.noteId ? notes.find((n) => n.id === line.noteId) : undefined;
+    if (!note) {
+      note = notes.find((n) => n.kind === "action" && !list.byNote(n.id) && similar(n.text, line.text));
+      if (!note) return;
+      list.link(line.id, note.id);
+      this.db.saveList(this.meetingId, list.saved());
+    }
+    if (!note.doneAt === !by) return;
     if (this.db.setActionDone(this.roomId, note.id, by)) this.sendItemNotes(note.itemId);
     this.broadcastState();
+  }
+
+  /** A to-do ticked in the notes (its card, the check-in, the space): the line it is on the board too. */
+  private tickLine(noteId: string, by: string | null) {
+    const line = this.list?.byNote(noteId);
+    if (!line || !line.doneAt === !by) return;
+    if (this.list!.setDone(line.id, by)) this.listChanged();
+  }
+
+  /** After a notes run: each list line is tied to the note written for it, and a tick made on one
+   *  side before they were tied goes to the other. */
+  private linkList() {
+    const list = this.list;
+    if (!list) return;
+    const tied = list.linkNotes(this.db.meetingNotes(this.meetingId));
+    if (!tied.length) return;
+    for (const { line, note } of tied) {
+      if (line.kind !== "todo" || !line.doneAt === !note.doneAt) continue;
+      if (line.doneAt) this.mirrorDone(line, line.doneBy ?? "Stand");
+      else list.setDone(line.id, note.doneBy ?? "Stand");
+    }
+    this.listChanged();
   }
 
   // ---- board --------------------------------------------------------------
@@ -2076,6 +2118,7 @@ export class RoomSession implements SpeechSink {
       return { discussions, current, notes };
     });
     this.broadcast({ type: "notes", meetingId: this.meetingId, itemId, notes, discussions });
+    this.linkList();
     // A snap belongs to the topic its remarks are in, and the topics were just redrafted.
     if (this.snaps().some((p) => p.itemId === itemId)) this.broadcastState();
     const before = new Set(current.map((n) => n.id));
@@ -2242,7 +2285,10 @@ export class RoomSession implements SpeechSink {
       // To-dos checked off on the board's list: the tidy run may have written them in other words.
       const doneOnList = (this.list?.notes(this.meetingId) ?? []).filter((n) => n.kind === "action" && n.doneAt);
       if (doneOnList.length) {
-        for (const n of doneOnList) this.mirrorDone(n.text, n.doneBy ?? "Stand");
+        for (const n of doneOnList) {
+          const line = this.list?.get(n.id);
+          if (line) this.mirrorDone(line, line.doneBy ?? "Stand");
+        }
         for (const p of perItem) p.notes = this.db.meetingNotes(this.meetingId).filter((n) => n.itemId === (p.item?.id ?? null));
       }
       // A review ran: each capture goes under the slide it was about, not the one on screen when it was said.

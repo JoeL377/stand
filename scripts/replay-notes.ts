@@ -24,6 +24,11 @@
 // --merge off        don't place the smaller topics (server/topicMerge.ts); on by default, at most every
 //                    2 minutes of the meeting, as the room does. Each call is in merges.json.
 // --final-merge      once the talk ends, place them once more on the tidy model, as a meeting's end does.
+// --list             run the board's running list too (server/liveList.ts), on the meeting's clock with the
+//                    room's own pause rules. Without it, list passes run on real timers, if at all.
+// --end              end the meeting as the host would (the tidy run, the recap), and save every note it
+//                    ends with, and the list, in final.json.
+// STAND_BEDROCK=1    call the models on Amazon Bedrock with this machine's AWS credentials (scripts/modelClient.ts).
 // REPLAY_DUMP_RUNS=50,300   also save those runs' requests (request-50.json...), to see what a run sends.
 // NOTES_LAYOUT=stable, NOTES_LAST_TOPICS=on   the notes prompt experiments in server/config.ts.
 // REPLAY_STANDIN_DROP=0.1   the stand-in leaves out that share of the lines it lists, as Haiku does now and then.
@@ -35,6 +40,7 @@ import { openDb } from "../src/server/db.ts";
 import { ClaudeAgent, type CapturedNote, type SettledTopic } from "../src/server/llm.ts";
 import { RoomSession } from "../src/server/room.ts";
 import { config } from "../src/server/config.ts";
+import { modelClient } from "./modelClient.ts";
 import type { Item, Segment } from "../src/shared/protocol.ts";
 
 interface Line {
@@ -63,14 +69,17 @@ const { values: args, positionals } = parseArgs({
     until: { type: "string" },
     merge: { type: "string", default: "on" },
     "final-merge": { type: "boolean", default: false },
+    list: { type: "boolean", default: false },
+    end: { type: "boolean", default: false },
   },
 });
 const file = positionals[0];
 if (!file) throw new Error("Give the meeting file: scripts/replay-notes.ts meeting.json");
 const meeting: Meeting = JSON.parse(fs.readFileSync(file, "utf8"));
 const apiKey = process.env.STAND_ANTHROPIC_API_KEY?.trim() || config.anthropicKey;
-const useModel = (args.agent ?? (apiKey ? "claude" : "stand-in")) === "claude";
-if (useModel && !apiKey) throw new Error("--agent claude needs ANTHROPIC_API_KEY or STAND_ANTHROPIC_API_KEY");
+const client = modelClient(apiKey);
+const useModel = (args.agent ?? (client ? "claude" : "stand-in")) === "claude";
+if (useModel && !client) throw new Error("--agent claude needs ANTHROPIC_API_KEY, STAND_ANTHROPIC_API_KEY or STAND_BEDROCK=1");
 const DEBOUNCE = Number(args.debounce);
 const MAX_WAIT = Number(args["max-wait"]);
 const out = path.resolve(args.out ?? `replay-${useModel ? "claude" : "stand-in"}-${DEBOUNCE}-${MAX_WAIT}`);
@@ -102,7 +111,7 @@ const made = db.addItems(
   agendaItems.map((i) => ({ source: "agenda" as const, externalId: null, title: i.title, url: null, description: null })),
 );
 const itemIdOf = new Map<string | null, string | null>([[null, null], ...agendaItems.map((i, k) => [i.id, made[k].id] as [string, string])]);
-const agent = new ClaudeAgent(apiKey ?? "stand-in");
+const agent = new ClaudeAgent(client ?? "stand-in");
 const session = new RoomSession(db, agent, room, () => {});
 const meetingId = session.meetingId;
 // Private parts of the room the replay drives directly.
@@ -122,6 +131,14 @@ roomInternals.scheduleMerge = () => {
   if (args.merge === "off" || mergeDue !== null) return;
   mergeDue = Math.max(sim, roomInternals.mergedAt + MERGE_EVERY_MS);
 };
+
+// ---- the running list and the board: on the meeting's clock with --list, off otherwise ----
+const passes = session as unknown as Record<"listPasses" | "boardPasses", { schedule: (wait: number) => void; run: () => Promise<void> }>;
+let listDue: number | null = null;
+passes.listPasses.schedule = (wait) => {
+  if (args.list) listDue = Math.min(listDue ?? Infinity, sim + Math.max(0, wait));
+};
+passes.boardPasses.schedule = () => {};
 
 // ---- run cadence, on the meeting's clock (the same rule as the room's scheduleNotes) ----
 const pending = new Map<string | null, { since: number; due: number }>();
@@ -380,12 +397,28 @@ if (session.state().focusItemId !== (itemIdOf.get(lines[0]?.itemId ?? null) ?? n
 
 let i = 0;
 let n = 0;
-while (i < lines.length || pending.size || mergeDue !== null) {
+let listRuns = 0;
+while (i < lines.length || pending.size || mergeDue !== null || listDue !== null) {
   const next = [...pending].sort((a, b) => a[1].due - b[1].due)[0];
-  const nextAt = Math.min(next?.[1].due ?? Infinity, mergeDue ?? Infinity);
+  const nextAt = Math.min(next?.[1].due ?? Infinity, mergeDue ?? Infinity, listDue ?? Infinity);
   if (i < lines.length && lines[i].ts <= nextAt) {
     sim = Math.max(sim, lines[i].ts);
     say(i++);
+    continue;
+  }
+  if (listDue !== null && listDue <= Math.min(next?.[1].due ?? Infinity, mergeDue ?? Infinity)) {
+    sim = Math.max(sim, listDue);
+    listDue = null;
+    lastCall = null;
+    await passes.listPasses.run();
+    listRuns++;
+    // Talk said while the pass was going waits for the next one.
+    const end = sim + (callJustMade()?.ms ?? 0);
+    while (i < lines.length && lines[i].ts <= end) {
+      sim = Math.max(sim, lines[i].ts);
+      say(i++);
+    }
+    sim = Math.max(sim, end);
     continue;
   }
   if (mergeDue !== null && mergeDue <= (next?.[1].due ?? Infinity)) {
@@ -442,6 +475,16 @@ while (i < lines.length || pending.size || mergeDue !== null) {
 }
 if (args["final-merge"]) await placeTopics(true);
 Date.now = realNow;
+if (args.end) {
+  const list = () => (session as unknown as { list: { notes(id: string): unknown[] } | null }).list?.notes(meetingId) ?? [];
+  const listBefore = list();
+  await session.end(sim);
+  const note = (x: ReturnType<typeof db.meetingNotes>[number]) => ({ id: x.id, kind: x.kind, text: x.text, owner: x.owner ?? null, done: !!x.doneAt, state: x.state ?? null });
+  fs.writeFileSync(
+    path.join(out, "final.json"),
+    JSON.stringify({ listRuns, list: listBefore, notes: db.meetingNotes(meetingId).filter((x) => x.kind !== "summary").map(note), summary: db.getMeeting(meetingId)?.summary ?? null }, null, 1),
+  );
+}
 // The placing runs beside the notes runs, so its snapshots can land between theirs.
 snapshots.sort((a, b) => a.at - b.at);
 
