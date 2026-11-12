@@ -19,8 +19,13 @@ type Meeting = {
 export interface BriefTimelineEntry {
   at: string;
   kind: TimelineKind;
-  /** "Joe", "Joe via Claude", or null for Stand moving the focus by itself. */
+  /** Who did it, in a line: "Joe Liang", "Joe Liang via Claude Code", or "Stand". Null when not recorded. */
   who: string | null;
+  /** The same as fields: person (by hand), agent (that person's own agent, with its name and model),
+   *  stand (the meeting's agent) or github. */
+  by?: { kind: "person" | "agent" | "stand" | "github"; person?: string; agent?: string; model?: string };
+  /** A capture: who it is for. `who` and `by` are who made it. */
+  owner?: string;
   text: string;
   /** Ask Stand: its answer. */
   answer?: string | null;
@@ -356,7 +361,9 @@ export function buildBrief(input: {
     brief.timeline = input.timeline.map((e) => ({
       at: iso(e.ts),
       kind: e.kind,
-      who: e.who || e.actor ? timelineWho(e) : null,
+      who: e.actor ? timelineWho(e) : null,
+      ...(e.actor && { by: { kind: e.actor.kind, ...(e.actor.person && { person: e.actor.person }), ...(e.actor.agent && { agent: e.actor.agent }), ...(e.actor.model && { model: e.actor.model }) } }),
+      ...(e.owner && { owner: e.owner }),
       text: e.text,
       ...(e.answer !== undefined && { answer: e.answer }),
       ...(e.ref && { ref: e.ref }),
@@ -541,9 +548,9 @@ function timelineLine(e: BriefTimelineEntry): string {
   const ref = `${e.ref ? ` (${e.ref})` : ""}${e.on_screen ? ` [on screen: ${e.on_screen}]` : ""}`;
   switch (e.kind) {
     case "focus":
-      return `- ${at} → ${e.label && !e.text.startsWith(e.label) ? `${e.label}: ` : ""}${e.text}${e.who ? ` (moved by ${e.who})` : ""}`;
+      return `- ${at} → ${e.label && !e.text.startsWith(e.label) ? `${e.label}: ` : ""}${e.text}${e.who && !e.text.startsWith(e.who) ? ` (moved by ${e.who})` : ""}`;
     case "capture":
-      return `- ${at} Caught: ${e.text}${ref}`;
+      return `- ${at} ${e.by?.kind === "stand" || !e.who ? "Stand caught" : `${e.who} added`}: ${e.text}${ref}${e.owner ? ` [owner: ${e.owner}]` : ""}`;
     case "ask":
       return `- ${at} ${e.who} asked Stand: ${e.text}${ref}${e.answer ? `\n  - Stand: ${e.answer.replace(/\n/g, "\n    ")}` : ""}`;
     case "agent":

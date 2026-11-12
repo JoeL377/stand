@@ -3,7 +3,8 @@
 // It draws each kind the way the call's own transcript does, with chips to leave kinds out.
 
 import { useState } from "react";
-import { type Shown, type TimelineEntry, type TimelineKind, timelineWho } from "../shared/timeline.ts";
+import type { Actor } from "../shared/actors.ts";
+import type { Shown, TimelineEntry, TimelineKind } from "../shared/timeline.ts";
 import { Linkified } from "./Linkified.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { usePersonColors } from "./PersonColors.tsx";
@@ -69,18 +70,13 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
       return (
         <div className="seg board-move tl-focus" role="note">
           <span className="board-move-text">
-            {/* ✦ is Stand moving the focus by itself; a share or a spec going up is a person's doing. */}
-            {!e.who && !e.id.startsWith("stage:") && (
-              <span className="agent-mark" aria-hidden>
-                ✦{" "}
-              </span>
-            )}
-            {/* A change on the main view that wasn't a move to another item: a share, a spec, the board. */}
+            {/* A change on the main view that wasn't a move to another item (a share, a spec, the board)
+                says who in its own words. A move names who moved it: a person, or Stand by itself. */}
             {e.id.startsWith("stage:") ? (
               <strong>{e.text}</strong>
             ) : (
               <>
-                {e.who ? `${e.who} moved to` : "Moved to"} · <strong>{e.label && !e.text.startsWith(e.label) ? `${e.label}: ${e.text}` : e.text}</strong>
+                <ActorTag actor={e.actor} /> moved to · <strong>{e.label && !e.text.startsWith(e.label) ? `${e.label}: ${e.text}` : e.text}</strong>
               </>
             )}
           </span>
@@ -91,16 +87,15 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
       return (
         <div className={`seg capture-event capture-${e.capture}`} role="note">
           <div className="capture-head">
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>
-            <strong>Caught: {CAUGHT[e.capture ?? ""] ?? "Note"}</strong>
+            <strong>
+              {e.actor?.kind === "stand" ? "Caught" : "Added"}: {CAUGHT[e.capture ?? ""] ?? "Note"}
+            </strong>
             <span className="seg-time">{fmtTime(e.ts)}</span>
           </div>
           <div className="capture-text">
             <Linkified text={e.text} />
           </div>
-          {e.who && <span className="capture-owner">{e.who}</span>}
+          <MadeBy e={e} />
           <ShownChip shown={e.shown} />
         </div>
       );
@@ -125,6 +120,49 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
         </div>
       );
   }
+}
+
+/** Who did it, exactly: the person by name in their own color, their agent by name with its model,
+ *  or Stand. Never just "a person" or "an agent". */
+export function ActorTag({ actor }: { actor: Actor | null | undefined }) {
+  const colorFor = usePersonColors();
+  if (!actor) return <span className="tl-actor">Someone</span>;
+  if (actor.kind === "stand")
+    return (
+      <span className="tl-actor" title={actor.model ? `Stand, the meeting's own agent, running ${actor.model}` : "Stand, the meeting's own agent"}>
+        <span className="agent-mark" aria-hidden>
+          ✦
+        </span>{" "}
+        Stand
+      </span>
+    );
+  const name = actor.person ?? "Someone";
+  const who = (
+    <span className="tl-actor-person" style={{ color: colorFor(actor.personId ?? name) }}>
+      {name}
+    </span>
+  );
+  if (actor.kind === "person") return <span className="tl-actor">{who}</span>;
+  const through = actor.kind === "github" ? "GitHub" : (actor.agent ?? "their agent");
+  return (
+    <span className="tl-actor" title={`${name}, through ${through}${actor.model ? `, running ${actor.model}` : ""}`}>
+      {who}{" "}
+      <span className="tl-actor-via">
+        via {through}
+        {actor.model ? ` (${actor.model})` : ""}
+      </span>
+    </span>
+  );
+}
+
+/** Under a capture: who made it, and who it is for. The two are often different people. */
+export function MadeBy({ e }: { e: Pick<TimelineEntry, "actor" | "owner" | "byHand"> }) {
+  return (
+    <span className="capture-owner tl-made">
+      {e.actor?.kind === "stand" ? "Caught by" : e.byHand ? "By hand:" : "Added by"} <ActorTag actor={e.actor} />
+      {e.owner && <> · Owner: {e.owner}</>}
+    </span>
+  );
 }
 
 /** What the main view showed when something was said or done, as a quiet link to it. It says what was
@@ -154,15 +192,19 @@ export function AskRow({ e, onShow }: { e: TimelineEntry; onShow?: () => void })
   return (
     <div className="seg capture-event capture-ask" role="note">
       <div className="capture-head">
-        <span className="agent-mark" aria-hidden>
-          ✦
-        </span>
-        <strong>{e.who ?? "Someone"} asked Stand</strong>
+        <strong>
+          <ActorTag actor={e.actor} /> asked Stand
+        </strong>
         <span className="seg-time">{fmtTime(e.ts)}</span>
       </div>
       <div className="capture-text">{e.text}</div>
       {e.answer ? (
-        <Markdown className="capture-text tl-answer" text={e.answer} breaks />
+        <div className="tl-answer">
+          <span className="capture-owner">
+            <ActorTag actor={e.answeredBy} /> answered
+          </span>
+          <Markdown className="capture-text" text={e.answer} breaks />
+        </div>
       ) : (
         <span className="capture-owner">{e.pending ? "Stand is working on it…" : "No answer"}</span>
       )}
@@ -182,7 +224,7 @@ export function AgentRow({ e }: { e: TimelineEntry }) {
     <div className="seg capture-event capture-agent" role="note">
       <div className="capture-head">
         <strong>
-          {timelineWho(e)} {VERB[e.status ?? ""] ?? "reported"}
+          <ActorTag actor={e.actor} /> {VERB[e.status ?? ""] ?? "reported"}
         </strong>
         <span className="seg-time">{fmtTime(e.ts)}</span>
       </div>

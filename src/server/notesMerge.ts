@@ -44,6 +44,20 @@ const words = (t: string) =>
       .filter((w) => w.length > 2),
   );
 
+/** A word's stem, roughly: "links", "linking" and "linked" are one word here. */
+const stem = (w: string) => w.replace(/(ings|ing|ed|es|s)$/, "") || w;
+
+/** How much two lines share, 0 to 1: their stemmed words in common over all of them. For tying a
+ *  board line to its note (liveList.ts), where the best pair counts, not a fixed bar. */
+export function overlap(a: string, b: string): number {
+  const x = new Set([...words(a)].map(stem));
+  const y = new Set([...words(b)].map(stem));
+  if (!x.size || !y.size) return 0;
+  let shared = 0;
+  for (const w of x) if (y.has(w)) shared++;
+  return shared / (x.size + y.size - shared);
+}
+
 /** Same task or decision in different words, for when the model forgot to say so. */
 export function similar(a: string, b: string): boolean {
   const x = words(a);
