@@ -244,7 +244,14 @@ const dayLabel = (ts: number) => {
 
 const newKey = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
-export function SpaceChat(props: { roomId: string; me: { id: string; name: string }; chat: SpaceChatState; onOpenTask?: (id: string) => void }) {
+export function SpaceChat(props: {
+  roomId: string;
+  me: { id: string; name: string };
+  chat: SpaceChatState;
+  onOpenTask?: (id: string) => void;
+  /** Each rise puts the cursor in the box. */
+  focus?: number;
+}) {
   const { roomId, me, chat } = props;
   const { thread } = chat;
   const scroller = useRef<HTMLDivElement>(null);
@@ -417,6 +424,7 @@ export function SpaceChat(props: { roomId: string; me: { id: string; name: strin
         </button>
       )}
       <Composer
+        focus={props.focus}
         roomId={roomId}
         people={thread.people.filter((p) => p.id !== me.id)}
         onSend={(text) => {
@@ -644,8 +652,12 @@ function SessionRecap({ caught }: { caught: ChatCaught }) {
 }
 
 /** The box at the foot of the thread. Enter sends, and Shift+Enter makes a new line. */
-function Composer(props: { roomId: string; people: Array<{ id: string; name: string }>; onSend: (text: string) => void }) {
+function Composer(props: { roomId: string; people: Array<{ id: string; name: string }>; onSend: (text: string) => void; focus?: number }) {
   const draftKey = `stand.chatDraft.${props.roomId}`;
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (props.focus) form.current?.querySelector("textarea")?.focus();
+  }, [props.focus]);
   const [text, setText] = useState(() => {
     try {
       return sessionStorage.getItem(draftKey) ?? "";
@@ -668,6 +680,7 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
   };
   return (
     <form
+      ref={form}
       className="chat-compose"
       onSubmit={(e) => {
         e.preventDefault();

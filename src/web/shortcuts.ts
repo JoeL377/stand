@@ -8,6 +8,7 @@ export type Shortcut = [keys: string, what: string];
 
 export const pageShortcuts = (): Shortcut[] => [
   [`${MOD.cmd} + B`, "Fold or open the sidebar"],
+  [`${MOD.cmd} + J`, "Open or close the space's chat"],
   ["Esc", "Close a menu or form"],
 ];
 

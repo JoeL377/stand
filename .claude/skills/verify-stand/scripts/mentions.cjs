@@ -64,7 +64,7 @@ const thread = (page) => page.locator(".chat-thread");
   const browser = await chromium.launch({ channel: process.env.STAND_VERIFY_CHANNEL || undefined });
   const errors = [];
   const open = async () => {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const ctx = await browser.newContext({ viewport: { width: 1100, height: 800 } });
     const page = await ctx.newPage();
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
     return page;
@@ -158,7 +158,7 @@ const thread = (page) => page.locator(".chat-thread");
       const pill = await bo.locator(".chat-jump").boundingBox();
       const write = await box(bo).boundingBox();
       check("on a phone the pill is on the screen, above the box", !!pill && !!write && pill.y > 0 && pill.y + pill.height <= write.y, pill && write && { pill: Math.round(pill.y + pill.height), box: Math.round(write.y) });
-      await bo.setViewportSize({ width: 1280, height: 800 });
+      await bo.setViewportSize({ width: 1100, height: 800 });
     });
 
     await step("Bo goes home; Vera tags him again, and the space's card says so", async () => {

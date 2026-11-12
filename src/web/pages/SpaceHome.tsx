@@ -31,6 +31,7 @@ import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { ShotZoom } from "../room/ReviewStage.tsx";
 import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
+import { MOD } from "../shortcuts.ts";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { TaskDrawer } from "../TaskDrawer.tsx";
 import { SpaceChat, useSpaceChat } from "../SpaceChat.tsx";
@@ -48,11 +49,28 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
   const [feed, setFeed] = useState<SpaceFeed | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Someone tags you in chat while you're elsewhere on the page, or on another tab: a toast says so.
-  const tabNow = useRef<TabKey>("tasks");
+  // On a wide screen chat is a column beside every tab (the dock); on a narrower one it is a tab.
+  const wide = useWide();
+  const [dockOpen, setDockOpen] = useState(() => {
+    try {
+      return localStorage.getItem(DOCK_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const showDock = (open: boolean) => {
+    setDockOpen(open);
+    try {
+      localStorage.setItem(DOCK_KEY, open ? "1" : "0");
+    } catch {}
+  };
+  // Each rise puts the cursor in the chat box.
+  const [focusChat, setFocusChat] = useState(0);
+  // Someone tags you in chat while it isn't on screen, or from another tab: a toast says so.
+  const chatShown = useRef(false);
   const openChat = useRef(() => {});
   const chat = useSpaceChat(room.id, user.id, (m) => {
-    if (tabNow.current === "chat" && document.visibilityState === "visible") return;
+    if (chatShown.current && document.visibilityState === "visible") return;
     const said = m.text.length > 120 ? `${m.text.slice(0, 119)}…` : m.text;
     toast({ text: `${firstName(m.author)} mentioned you in chat: “${said}”`, action: { label: "Open chat", run: () => openChat.current() }, ms: 10_000 });
   });
@@ -82,7 +100,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [showReview, setShowReview] = useState(false);
   const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session">("");
-  const [tab, setTab] = useState<TabKey>(() => {
+  const [picked, setTab] = useState<TabKey>(() => {
     if (openTask) return "tasks";
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
@@ -98,8 +116,42 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       localStorage.setItem(`stand.spaceTab.${room.id}`, key);
     } catch {}
   };
-  tabNow.current = tab;
-  openChat.current = () => pickTab("chat");
+  // A wide screen has no Chat tab: one saved from a narrower screen shows Tasks, with the dock open.
+  const tab: TabKey = wide && picked === "chat" ? "tasks" : picked;
+  const docked = wide && dockOpen;
+  chatShown.current = wide ? dockOpen : tab === "chat";
+  const pickedChat = useRef(picked === "chat");
+  useEffect(() => {
+    if (wide && pickedChat.current) showDock(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wide]);
+  pickedChat.current = picked === "chat";
+  const toChat = () => {
+    if (wide) showDock(true);
+    else pickTab("chat");
+    setFocusChat((n) => n + 1);
+  };
+  openChat.current = toChat;
+  // Command + J opens chat with the cursor in its box, and closes the dock again; typing in the box keeps it.
+  const chatKey = useRef(() => {});
+  chatKey.current = () => (docked ? showDock(false) : toChat());
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "j") return;
+      e.preventDefault();
+      chatKey.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // The task drawer opens beside the dock when there is room for both.
+  useEffect(() => {
+    if (!docked) return;
+    document.documentElement.dataset.chatDock = "";
+    return () => {
+      delete document.documentElement.dataset.chatDock;
+    };
+  }, [docked]);
   // The browser tab says how much is new in this space's chat, so it shows from another tab too.
   useEffect(() => {
     const was = document.title;
@@ -321,6 +373,18 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
                 {faces.length > 4 && <span className="sh-faces-more">+{faces.length - 4}</span>}
               </span>
             )}
+            {wide && (
+              <button
+                className={docked ? "sh-invite sh-chat-toggle on" : "sh-invite sh-chat-toggle"}
+                aria-pressed={docked}
+                onClick={() => (docked ? showDock(false) : toChat())}
+                title={`${docked ? "Hide" : "Show"} chat (${CHAT_SHORTCUT})`}
+              >
+                <ChatIcon size={14} />
+                Chat
+                {!docked && <ChatMarks unread={chat.unread} mentions={chat.mentions} />}
+              </button>
+            )}
             <button className="sh-invite" onClick={copy} title="Copy a link others can join with">
               <LinkIcon />
               {copied ? "Copied" : "Invite"}
@@ -339,7 +403,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         <ModeNote caps={caps} />
 
         <div className="sh-tabs" role="tablist" aria-label="The space">
-          {TABS.map((t) => (
+          {TABS.filter((t) => !(wide && t.key === "chat")).map((t) => (
             <button
               key={t.key}
               role="tab"
@@ -380,7 +444,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         )}
 
         <section className={`sh-panel ${tab}`} role="tabpanel">
-          {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} />}
+          {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
           {tab === "meetings" && (
             <>
               {error && !feed && (
@@ -583,6 +647,18 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         )}
         </div>
       </main>
+      {docked && (
+        <aside className="sh-dock" aria-label="Chat">
+          <div className="sh-dock-head">
+            <ChatIcon size={14} />
+            <strong>Chat</strong>
+            <button className="icon-btn" aria-label="Close chat" title={`Close chat (${CHAT_SHORTCUT})`} onClick={() => showDock(false)}>
+              <CloseIcon />
+            </button>
+          </div>
+          <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />
+        </aside>
+      )}
     </SpacesShell>
   </PersonColors.Provider>
   );
@@ -1741,6 +1817,24 @@ function ChatMarks({ unread, mentions }: { unread: number; mentions: number }) {
       )}
     </span>
   );
+}
+
+const IS_MAC = /Mac/.test(navigator.platform);
+const CHAT_SHORTCUT = `${MOD.cmd} + J`;
+const DOCK_KEY = "stand.chatDock";
+/** From this width chat is a column beside the tabs. Keep in step with .sh-dock in styles.css. */
+const DOCK_FROM = "(min-width: 1200px)";
+
+function useWide() {
+  const [wide, setWide] = useState(() => window.matchMedia(DOCK_FROM).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(DOCK_FROM);
+    const on = () => setWide(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return wide;
 }
 
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
