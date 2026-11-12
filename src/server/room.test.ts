@@ -13,6 +13,7 @@ import type { BoardAnswer } from "./board.ts";
 import { changeReview } from "./planReview.ts";
 import { outlineToSlides } from "../shared/outline.ts";
 import { config } from "./config.ts";
+import { addSlide, startReview } from "./reviews.ts";
 
 function setup() {
   const db = openDb(":memory:");
@@ -744,6 +745,57 @@ test("End meeting shows everyone it's ending, and the meeting ends even when the
   assert.ok(db.getMeeting(meetingId)?.endedAt);
 });
 
+test("ending lets everyone go to the recap at once; the recap is written after, and a new call can start meanwhile", async () => {
+  const { db, session } = setup();
+  const room = db.getRoom(session.roomId)!;
+  await session.end();
+  const agent = new HeuristicAgent();
+  let writeRecap!: () => void;
+  const recapped = new Promise<void>((r) => (writeRecap = r));
+  const slow = agent.recapMeeting.bind(agent);
+  agent.recapMeeting = async (input) => {
+    await recapped;
+    return slow(input);
+  };
+  const s = new RoomSession(db, agent, room, () => {});
+  let released = false;
+  s.onRelease = () => (released = true);
+  const ws = await join(s, { id: "u1", name: "Joe" });
+  s.addSpeech("u1", "Joe", "Something worth a note", Date.now());
+  const ending = s.end();
+  for (let i = 0; i < 20 && !released; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(released, "the space is let go before the recap is written");
+  assert.ok(ws.got.some((m) => m.type === "meeting.ended" && m.meetingId === s.meetingId));
+  assert.equal(db.getMeeting(s.meetingId)?.endedAt, null);
+  assert.ok(db.getMeeting(s.meetingId)?.endRequestedAt);
+  // Someone who comes back with the old meeting is sent to its recap, not into the new call.
+  const next = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  const late = await join(next, { id: "u1", name: "Joe" }, { type: "hello", meetingId: s.meetingId });
+  assert.deepEqual(late.got, [{ type: "meeting.ended", meetingId: s.meetingId }]);
+  writeRecap();
+  await ending;
+  assert.ok(db.getMeeting(s.meetingId)?.endedAt);
+  await next.end();
+});
+
+test("anyone in the call flips a review's slides, but only the host moves to an item outside it", async () => {
+  const { db, session, items } = setup();
+  addSlide(db, session.roomId, { title: "Mic picker", summary: "", addedBy: "x" });
+  addSlide(db, session.roomId, { title: "Dark mode", summary: "", addedBy: "x" });
+  const host = await join(session, { id: "u1", name: "Joe" });
+  const guest = await join(session, { id: "u2", name: "Huy" });
+  const started = startReview(db, session.roomId);
+  session.itemsChanged();
+  await say(host, { type: "focus", itemId: started.firstItemId });
+  const slides = db.listItems(session.roomId).filter((i) => i.deckId === started.deckId);
+  assert.equal(slides.length, 2);
+  await say(guest, { type: "focus", itemId: slides[1].id });
+  assert.equal(session.state().focusItemId, slides[1].id);
+  await say(guest, { type: "focus", itemId: items[0].id });
+  assert.equal(session.state().focusItemId, slides[1].id, "an item outside the review stays the host's");
+  await session.end();
+});
+
 test("a note change from someone who isn't the host says why, and puts their screen back", async () => {
   const { db, session, meetingId } = setup();
   await join(session, { id: "u1", name: "Joe" });
@@ -854,17 +906,18 @@ test("the room keeps what the main view showed each time it changed", async () =
   await session.end();
 });
 
-test("only one person shares at a time; the second is told who is", async () => {
+test("one person shares at a time: a second share takes over, and the first sharer is told", async () => {
   const { session } = setup();
   const joe = await join(session, { id: "u1", name: "Joe" });
   const ann = await join(session, { id: "u2", name: "Ann" });
   await say(joe, { type: "sharing", on: true });
   await say(ann, { type: "sharing", on: true });
-  const err = ann.got.find((m) => m.type === "error");
-  assert.match(err?.type === "error" ? err.message : "", /Joe is already sharing/);
+  const told = joe.got.find((m) => m.type === "notice");
+  assert.match(told?.type === "notice" ? told.message : "", /Ann is sharing now/);
+  assert.ok(!ann.got.some((m) => m.type === "error"));
   assert.deepEqual(
     session.state().participants.filter((p) => p.isSharing).map((p) => p.id),
-    ["u1"],
+    ["u2"],
   );
   await session.end();
 });

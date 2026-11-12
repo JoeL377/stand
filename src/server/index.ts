@@ -31,6 +31,12 @@ const app = express();
 githubWebhook(app, services);
 app.use(express.json({ limit: "1mb" }));
 
+// For the deploy gate (.github/workflows/deploy-gate.yml): whether any call is running, and nothing else.
+// A merge waits on it, so a redeploy doesn't cut a call.
+app.get("/api/live", (_req, res) => {
+  res.json({ live: [...services.sessions.values()].some((s) => !s.ended) });
+});
+
 // For the host's health check: up and able to read the database.
 app.get("/api/health", (_req, res) => {
   db.getRoom("health");
@@ -107,6 +113,16 @@ setInterval(() => {
     ws.ping();
   }
 }, 30_000).unref();
+
+// A deploy stops this server: everyone in a call is told Stand is updating, rather than a bare
+// "Reconnecting…". Their audio carries on (LiveKit), and the meeting picks up when the new server starts.
+let stopping = false;
+process.on("SIGTERM", () => {
+  if (stopping) return;
+  stopping = true;
+  for (const s of services.sessions.values()) if (!s.ended) s.restarting();
+  setTimeout(() => process.exit(0), 300).unref();
+});
 
 server.listen(config.port, () => {
   const c = capabilities();

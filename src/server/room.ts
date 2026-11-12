@@ -266,6 +266,10 @@ export class RoomSession implements SpeechSink {
   ended = false;
   /** When End meeting started the write-up. */
   endingSince = 0;
+  /** Everyone has been let go: the recap is written in the background and the space can start a new call. */
+  released = false;
+  /** Called once when everyone is let go, before the recap is written. */
+  onRelease?: (s: RoomSession) => void;
 
   constructor(
     private db: DB,
@@ -959,7 +963,8 @@ export class RoomSession implements SpeechSink {
       const user = this.pendingUser.get(ws);
       if (!user || this.conns.get(ws)) return;
       // The meeting this client was in ended while it was away: show it the recap, not a new meeting.
-      if (msg.meetingId && msg.meetingId !== this.meetingId && this.db.getMeeting(msg.meetingId)?.endedAt) {
+      const was = msg.meetingId && msg.meetingId !== this.meetingId ? this.db.getMeeting(msg.meetingId) : null;
+      if (msg.meetingId && (was?.endedAt || was?.endRequestedAt)) {
         this.send(ws, { type: "meeting.ended", meetingId: msg.meetingId });
         ws.close();
         return;
@@ -1019,9 +1024,10 @@ export class RoomSession implements SpeechSink {
     const isHost = this.isHost(conn.participantId);
 
     switch (msg.type) {
-      // Only the host moves the meeting between items.
+      // Only the host moves the meeting between items. Anyone in the call flips a review's slides,
+      // within the review: a product, idea or design review's deck.
       case "focus":
-        if (!isHost || this.ended) return;
+        if (this.ended || !(isHost || this.flipsReview(msg.itemId))) return;
         this.pinnedBy = null;
         this.setFocus(msg.itemId, conn.name, "manual");
         break;
@@ -1084,10 +1090,15 @@ export class RoomSession implements SpeechSink {
         break;
       }
       case "sharing": {
-        // One screen at a time: two people pressing Share together, the second is told.
+        // One screen at a time, and the newest share takes over (their page asked first). The person
+        // taken over is told; their browser stops its share when it sees someone else's counted
+        // instead. A review they were running carries on.
         const other = msg.on && [...this.participants.values()].find((p) => p.isSharing && p.id !== conn.participantId);
-        // Their browser stops the share it started when it sees someone else's counted instead.
-        if (other) return this.send(ws, { type: "error", message: `${other.name} is already sharing, so yours was stopped. Ask them to stop first.` });
+        if (other && me) {
+          other.isSharing = false;
+          for (const [w, c] of this.conns) if (c?.participantId === other.id) this.send(w, { type: "notice", message: `${conn.name} is sharing now, so your share stopped.` });
+          if (other.id === this.hostId) this.suggestion = null;
+        }
         // A share that ends takes the screen nudge with it; one Stand never counted doesn't.
         const wasSharing = Boolean(me?.isSharing);
         if (me) me.isSharing = msg.on;
@@ -1477,6 +1488,14 @@ export class RoomSession implements SpeechSink {
     const host = this.hostId ? this.names.get(this.hostId) : null;
     this.send(ws, { type: "error", message: `Couldn't ${what}: only the host can change notes${host ? `, and ${host} is hosting now` : ""}.` });
     if (itemId !== undefined) this.send(ws, this.itemNotes(itemId));
+  }
+
+  /** The board is on a review's slide and this goes to another slide of the same review. */
+  private flipsReview(itemId: string | null) {
+    const items = this.items();
+    const from = items.find((i) => i.id === this.focusItemId);
+    const to = items.find((i) => i.id === itemId);
+    return !!from?.deckId && from.deckId === to?.deckId && isReviewDeck(from) && isReviewDeck(to);
   }
 
   /** Whether this signed-in person is driving the meeting right now. */
@@ -2372,7 +2391,7 @@ export class RoomSession implements SpeechSink {
     this.noteTimers.clear();
     if (this.mergeTimer) clearTimeout(this.mergeTimer);
     this.mergeTimer = null;
-    // Everyone sees "Writing notes…"; a restart before it's done finishes the recap instead of resuming.
+    // A restart before the recap is saved finishes it instead of resuming the call.
     // Each step below stands alone: one that fails is logged, and the meeting still ends and frees the room.
     const step = (what: string, fn: () => unknown) => {
       try {
@@ -2389,6 +2408,9 @@ export class RoomSession implements SpeechSink {
     step("finishing the idea review", () => finishIdeaReview(this.db, this.roomId, this.meetingId));
     step("finishing the design review", () => finishDesignReview(this.db, this.roomId, this.meetingId));
     step("archiving task items", () => this.db.archiveTaskItems(this.roomId));
+    // Nobody waits for the write-up: everyone goes to the recap page, which fills in when it's done,
+    // and the space is free for a new call. A restart before it's done still finishes it (services.ts).
+    this.release();
     // So is a brainstorm: one last look at the talk no pass has read, then its map is the record.
     if (this.brain) {
       await this.mapPasses.idle();
@@ -2491,10 +2513,23 @@ export class RoomSession implements SpeechSink {
       const synthesis = await synthesizing;
       step("saving the recap", () => this.db.endMeeting(this.meetingId, summary || null, synthesis, endedAt, chapterNotes));
       this.polisher?.schedule(this.roomId, 0);
-      this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
-      for (const ws of this.conns.keys()) ws.close();
+      this.release();
       this.onClosed(this);
     }
+  }
+
+  /** The server is stopping for an update: everyone's page says so, and reconnects to this meeting once it's back. */
+  restarting() {
+    this.broadcast({ type: "restarting" });
+  }
+
+  /** Sends everyone to the recap and lets the space go. Once. */
+  private release() {
+    if (this.released) return;
+    this.released = true;
+    this.broadcast({ type: "meeting.ended", meetingId: this.meetingId });
+    for (const ws of this.conns.keys()) ws.close();
+    this.onRelease?.(this);
   }
 
   /** Everything the recap looks at: each item's notes and topics, and the snaps

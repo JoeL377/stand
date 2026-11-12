@@ -53,7 +53,7 @@ export function brainstormRoutes(app: Express, ctx: Services) {
     }),
   );
 
-  // "Finish this": the host ends the review running in the call, and the call goes on as plain talk.
+  // "Finish this": someone in the call ends the review running in the call, and the call goes on as plain talk.
   app.post(
     "/api/rooms/:id/experience/finish",
     route(async (req, res) => {
@@ -61,7 +61,8 @@ export function brainstormRoutes(app: Express, ctx: Services) {
       if (!room) return;
       const s = sessions.get(room.id);
       if (!s) return void res.status(409).json({ error: "No call is running in this space." });
-      if (!s.hostIs(req.user!.id)) return void res.status(403).json({ error: "Only the host can finish it." });
+      // Anyone in the call can finish it, as anyone can call a slide's outcome.
+      if (!s.has(req.user!.id)) return void res.status(403).json({ error: "Join the call to finish it." });
       res.json({ finished: await s.finishExperience() });
     }),
   );
