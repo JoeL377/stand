@@ -169,6 +169,33 @@ test("a page with the space's stream open hears each message, edit and delete as
   }
 });
 
+test("the thread says how far the others have read, and an open page hears when one of them reads on", async () => {
+  const { joe, huy, room, as, stream, close } = await setup();
+  const [j, h] = [as(joe), as(huy)];
+  const s = await stream(joe);
+  try {
+    const first = (await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Deploy is out" })).body;
+    const second = (await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "All green" })).body;
+    for (let i = 0; i < 3; i++) await s.next();
+    // Huy hasn't opened it. Joe has read what he sent, which the thread tells Huy and not Joe himself.
+    assert.deepEqual((await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.reads, []);
+    assert.deepEqual((await h<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.reads, [{ userId: joe.id, name: "Joe Liang", upTo: second.seq }]);
+
+    await h("POST", `/api/channels/${first.channelId}/read`, { upTo: first.seq });
+    assert.deepEqual(await s.next(), { type: "read", channelId: first.channelId, userId: huy.id, name: "Huy Ngo", upTo: first.seq });
+    assert.deepEqual((await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.reads, [{ userId: huy.id, name: "Huy Ngo", upTo: first.seq }]);
+    // Reading the same again, or less, tells nobody: the next thing heard is the read that moved on.
+    await h("POST", `/api/channels/${first.channelId}/read`, { upTo: first.seq });
+    await h("POST", `/api/channels/${first.channelId}/read`, { upTo: 0 });
+    await h("POST", `/api/channels/${first.channelId}/read`, { upTo: second.seq });
+    assert.deepEqual(await s.next(), { type: "read", channelId: first.channelId, userId: huy.id, name: "Huy Ngo", upTo: second.seq });
+    assert.deepEqual((await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.reads, [{ userId: huy.id, name: "Huy Ngo", upTo: second.seq }]);
+  } finally {
+    s.close();
+    await close();
+  }
+});
+
 test("what Stand caught from chat comes with the thread; anyone in the space removes a line that isn't one, and it doesn't come back", async () => {
   const { db, joe, huy, eve, room, as, stream, close } = await setup();
   const [j, h, e] = [as(joe), as(huy), as(eve)];

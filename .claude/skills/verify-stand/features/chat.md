@@ -10,6 +10,7 @@ Under it, a space has a channel, a message is a chat segment, and a stretch of t
 - Live: the page holds the space's event stream open (`GET /api/rooms/<id>/events`, server-sent events) and adds or changes rows as events arrive.
 - Change and delete: the tools show on your own message when the pointer is on it. A deleted message keeps its place and says "Message deleted".
 - Unread: a filled count on the Chat tab, a dot by the space in the nav, `(N)` in the browser tab's title, and `unread` on the space in `/api/spaces`. Looking at the tab reads everything shown. A "New" line marks where you had read to.
+- Read marks: a small face at the right, under the last message each other person has read (`.chat-reads`, with "Read up to here by …" as its `title` and for a screen reader). It moves down as they read on, with no reload (a `read` event on the stream). Nobody's mark shows under their own message, and you never see your own. `reads` in `/api/rooms/<id>/chat` is how far the others have read.
 - Mentions: a message that tags you (`@Full Name`, or `@First` when the first name is unique in the space) is marked in amber, with your name in it marked too. While it is unread there is an `@` on the Chat tab, an `@` by the space in the nav, `(@)` in the title, "Mentioned in chat" on the home card, and `chatMentions` on the space in `/api/spaces`. A toast with **Open chat** says so when it comes in while you are on another tab of the page.
 - New below: scrolled up while messages come in, a pill over the box says "N new messages" (or "A new message mentions you"). It takes you down to them.
 - @Names everywhere: chat, comments, notes, the meeting's side panel and the recap mark the names of people in the space in blue, and yours in amber (`.mention`, `.mention.you`).
@@ -28,6 +29,8 @@ Under it, a space has a channel, a message is a chat segment, and a stretch of t
 
 `scripts/mentions.cjs <run>` drives the mention and new-message marks with two people: the toast, the tab and nav marks, `chatMentions` in `/api/spaces`, the marked message for each person, the pill on a wide screen and on a phone, and the home card.
 
+`scripts/chat-reads.cjs <run>` drives the read marks with three people at 1100px, where a person reads only when they open the Chat tab. It checks which message each mark sits under on the writer's page as the others open the tab, fall behind and catch up, that someone who joined after the page loaded gets a mark, `reads` in `/api/rooms/<id>/chat`, and the marks after a reload, in the dock and on a phone.
+
 ## Gotchas
 - `mentions.cjs` counts the unread dots in the whole sidebar. Run it on a clean instance, or before the other chat journeys: their spaces leave unread messages for the same people.
 - The task drawer slides in. Wait for its animations to finish before measuring it.
@@ -38,3 +41,4 @@ Under it, a space has a channel, a message is a chat segment, and a stretch of t
 - Removing a caught line asks with the browser's `confirm()`.
 - Where a caught line sits: after the last message written when Stand caught it, until the stretch closes and the run then finds the message it came from (only a real model gives that).
 - A session closes after an hour of quiet; `CHAT_QUIET_MS` shortens that for a run. The unit tests in `src/server/chat.test.ts` and `src/server/chatCapture.test.ts` cover the session and capture rules with their own clock.
+- From 1200px the dock is open by default, so a person with the space page in front reads the chat without opening anything, and their mark moves. `chat-reads.cjs` runs narrower so that reading is a step of its own.

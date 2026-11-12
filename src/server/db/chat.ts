@@ -1,6 +1,6 @@
 // Chat (chat.ts): channels, the sessions in them, and what chat keeps about a message beside its segment.
 import type { DatabaseSync } from "node:sqlite";
-import type { Channel, ChatMessage, ChatSession } from "../../shared/chat.ts";
+import type { Channel, ChatMessage, ChatRead, ChatSession } from "../../shared/chat.ts";
 import { newId } from "../ids.ts";
 import type { Row } from "./rows.ts";
 
@@ -203,6 +203,13 @@ export function chatStore(db: DatabaseSync) {
     channelReadUpTo(channelId: string, userId: string): number {
       const r = db.prepare("SELECT read_up_to FROM channel_reads WHERE channel_id = ? AND user_id = ?").get(channelId, userId) as Row | undefined;
       return (r?.read_up_to as number) ?? 0;
+    },
+    /** How far each person has read the channel, for those who have read anything. */
+    channelReads(channelId: string): ChatRead[] {
+      const rows = db
+        .prepare("SELECT r.user_id, u.name, r.read_up_to FROM channel_reads r JOIN users u ON u.id = r.user_id WHERE r.channel_id = ? AND r.read_up_to > 0 ORDER BY u.name, u.id")
+        .all(channelId) as Row[];
+      return rows.map((r) => ({ userId: r.user_id as string, name: r.name as string, upTo: r.read_up_to as number }));
     },
     /** Messages other people wrote that this person hasn't read, in each of their spaces that has some. */
     unreadChat(userId: string): Map<string, number> {
