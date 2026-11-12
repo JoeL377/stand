@@ -180,12 +180,11 @@ export function startServices() {
     db,
     briefs: planBriefs,
     specTouched,
-    brainstormTouched: (roomId, itemId, by) => {
+    brainstormTouched: (roomId) => {
       const s = sessions.get(roomId);
       if (!s) return;
       s.itemsChanged();
       s.brainstormChanged();
-      if (itemId) s.setFocus(itemId, by, "manual");
     },
     uploads: uploadLinks,
     readyToShip: () => void shipWatch.check(),

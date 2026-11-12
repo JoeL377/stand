@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { ArchivedKind, ArchivedRow, BrainstormSummary, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
+import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { matchesProject, type Project } from "../../shared/projects.ts";
 import { ProjectPicker } from "../ProjectPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
@@ -81,8 +81,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
   const setProjectFilter = (value: string) => setParam("project", value);
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [showReview, setShowReview] = useState(false);
-  const [showBrain, setShowBrain] = useState(false);
-  const [showSession, setShowSession] = useState(false);
   const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session">("");
   const [tab, setTab] = useState<TabKey>(() => {
     if (openTask) return "tasks";
@@ -273,22 +271,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
       errorToast("Couldn't start the review")(err);
     }
   };
-  const startBrainstorm = async (prompt: string) => {
-    try {
-      await api.startBrainstorm(room.id, prompt);
-      props.onJoin();
-    } catch (err) {
-      errorToast("Couldn't start the brainstorm")(err);
-    }
-  };
-  const startSession = async (prompt: string, seed: string, taskId: string | null) => {
-    try {
-      await api.startBrainstorm(room.id, prompt, { seed, taskId });
-      props.onJoin();
-    } catch (err) {
-      errorToast("Couldn't start the design session")(err);
-    }
-  };
   const removeSlide = async (slideId: string) => {
     try {
       await api.removeReviewSlide(room.id, slideId);
@@ -348,12 +330,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
               review={feed?.review ?? null}
               designReview={feed?.designReview ?? null}
               ideaReviews={(feed?.ideaReviews ?? []).filter((r) => r.status !== "done").map((r) => ({ ...r, href: reviewHref(room.id, r.id) }))}
-              brainstorm={(feed?.brainstorms ?? []).find((b) => b.status === "live") ?? null}
-              onSession={() => setShowSession(true)}
               designHref={designReviewHref(room.id)}
               onTalk={props.onJoin}
               onReview={() => setShowReview(true)}
-              onBrainstorm={() => setShowBrain(true)}
             />
           </span>
         </header>
@@ -399,8 +378,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: () => void; reload: (
         {showReview && feed?.review && (
           <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
         )}
-        {showBrain && <BrainstormPop onStart={startBrainstorm} onClose={() => setShowBrain(false)} />}
-        {showSession && <DesignSessionPop todos={todos.filter((t) => !t.doneAt)} onStart={startSession} onClose={() => setShowSession(false)} />}
 
         <section className={`sh-panel ${tab}`} role="tabpanel">
           {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} />}
@@ -1397,12 +1374,9 @@ function StartMenu(props: {
   designReview: DesignReviewSummary | null;
   /** Idea reviews waiting or in a call, each with its page. */
   ideaReviews: Array<{ id: string; title: string; slides: number; status: string; href: string }>;
-  brainstorm: BrainstormSummary | null;
   designHref: string;
   onTalk: () => void;
   onReview: () => void;
-  onBrainstorm: () => void;
-  onSession: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
@@ -1449,14 +1423,6 @@ function StartMenu(props: {
               </span>
             </Link>
           ))}
-          <button type="button" role="menuitem" onClick={pick(props.brainstorm && !props.brainstorm.design ? props.onTalk : props.onBrainstorm)}>
-            <strong>Brainstorm</strong>
-            {props.brainstorm && !props.brainstorm.design && <span className="muted">on now</span>}
-          </button>
-          <button type="button" role="menuitem" onClick={pick(props.brainstorm?.design ? props.onTalk : props.onSession)}>
-            <strong>Design session</strong>
-            {props.brainstorm?.design && <span className="muted">on now</span>}
-          </button>
         </div>
       )}
     </div>

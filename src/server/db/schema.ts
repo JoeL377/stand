@@ -491,6 +491,11 @@ export function migrate(db: DatabaseSync) {
   // The ideas people starred on a brainstorm's page. Kept beside the map, not in it: the map is
   // rewritten by every pass of a running brainstorm.
   if (!brainCols.includes("stars_json")) db.exec("ALTER TABLE brainstorms ADD COLUMN stars_json TEXT");
+  // A brainstorm used to lead the agenda with its sentence. A map is now a view beside the board: a
+  // running one lets go of its item.
+  db.exec(
+    "UPDATE items SET archived = 1 WHERE id IN (SELECT item_id FROM brainstorms WHERE status = 'live' AND item_id IS NOT NULL); UPDATE brainstorms SET item_id = NULL WHERE status = 'live' AND item_id IS NOT NULL;",
+  );
   if (!meetingCols.includes("list_json")) db.exec("ALTER TABLE meetings ADD COLUMN list_json TEXT");
   // What ✦ Stand did on the board (meetingAgent.ts): its cards, which are also its log.
   if (!meetingCols.includes("agent_json")) db.exec("ALTER TABLE meetings ADD COLUMN agent_json TEXT");

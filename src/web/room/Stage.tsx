@@ -5,8 +5,10 @@ import { createPortal } from "react-dom";
 import { ReviewStage } from "./ReviewStage.tsx";
 import { DesignStage } from "./DesignStage.tsx";
 import { specAuthor } from "../../shared/designReview.ts";
-import { BrainViews } from "./BrainWords.tsx";
-import { DesignBoard } from "./DesignBoard.tsx";
+import { ViewPane, type ViewTab } from "./Views.tsx";
+import { runningExperience } from "./Experiences.tsx";
+import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
+import { api } from "../api.ts";
 import type { AgentCard, Board, BrainstormView, ClientMessage, ConxtLive, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
@@ -15,7 +17,7 @@ import { Slide } from "../slides.tsx";
 import { CameraIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
 import { macApp } from "../macApp.ts";
-import { dismissToast, toast, undoing } from "../Toasts.tsx";
+import { dismissToast, errorToast, toast, undoing } from "../Toasts.tsx";
 import { BoardStrip, TopicBoard, type Rewind } from "./TopicBoard.tsx";
 import type { PilotActs } from "./Pilot.tsx";
 import { AgentTabMark } from "./AgentCard.tsx";
@@ -44,7 +46,7 @@ export function Stage(props: {
   board: Board | null;
   /** The board's running list (server/liveList.ts); null when the server keeps none. */
   list: ListNote[] | null;
-  /** The brainstorm running in this space (server/brainstorm.ts); its map has the middle while its sentence is in focus. */
+  /** The map or diagram drawing in this space (server/brainstorm.ts); each person looks at it from the board's pills. */
   brainstorm?: BrainstormView | null;
   /** What ✦ Stand has put on the board (server/meetingAgent.ts); null when the server runs no agent. */
   agentCards: AgentCard[] | null;
@@ -175,7 +177,6 @@ export function Stage(props: {
   const shownTask = taskId ? { id: taskId, mode: canSteer ? myTaskMode : (hostView?.taskMode ?? "brief") } : null;
   const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask);
   // A review slide's pictures: the host's choice is everyone's, and a look of your own lasts until the host moves.
-  const brainUp = !!props.brainstorm && props.brainstorm.status === "live" && !!focusItem && focusItem.id === props.brainstorm.itemId;
   const reviewUp = deckUp && focusItem?.slide?.layout === "review";
   // A design review slide: Full spec is each person's own look, and the host's is everyone's until they close it.
   const design = deckUp && focusItem?.slide?.layout === "design" ? (focusItem.slide.design ?? null) : null;
@@ -298,8 +299,8 @@ export function Stage(props: {
     onClose: () => send({ type: "stage.snap.close" }),
   };
 
-  // The board: the middle screen, or a tab of its own while a share or a deck has it.
-  const board = (
+  // The topic card: the board's first view.
+  const card = (
     <TopicBoard
       board={props.board}
       segments={props.segments}
@@ -346,6 +347,41 @@ export function Stage(props: {
               onPage: (page) => send({ type: "checkin.page", page }),
             }
       }
+    />
+  );
+  // Beside the card, each person's own look at the map, its words or the diagram drawing in the call.
+  const [view, setView] = useState<ViewTab>("card");
+  const [drawPop, setDrawPop] = useState<"map" | "diagram" | null>(null);
+  const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
+  const steady = !props.offline && !props.ending;
+  const draw = (what: "map" | "diagram") => () => {
+    const other = what === "map" ? live?.design : live && !live.design;
+    if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return;
+    setDrawPop(what);
+  };
+  const startDraw = async (what: "map" | "diagram", start: () => Promise<unknown>) => {
+    try {
+      await start();
+      setView(what);
+      setDrawPop(null);
+    } catch (err) {
+      errorToast(`Couldn't start the ${what}`)(err);
+    }
+  };
+  // The board: the middle screen, or a tab of its own while a share or a deck has it.
+  const board = (
+    <ViewPane
+      view={view}
+      onView={setView}
+      tabs={!runningExperience(state.items)}
+      card={card}
+      brainstorm={props.brainstorm}
+      onRemove={steady ? (id) => send({ type: "brainstorm.remove", id }) : undefined}
+      onKeep={steady ? (id) => send({ type: "design.keep", id }) : undefined}
+      onDrop={steady ? (id) => send({ type: "design.drop", id }) : undefined}
+      onDraw={steady ? draw("map") : undefined}
+      onDrawDiagram={steady ? draw("diagram") : undefined}
+      onStop={steady ? () => send({ type: "view.stop" }) : undefined}
     />
   );
 
@@ -516,16 +552,6 @@ export function Stage(props: {
               {sharer.isHost ? "; the agent still reads it." : ". The agent follows only the host's screen."}
             </p>
           </div>
-        ) : brainUp ? (
-          props.brainstorm!.design ? (
-            <DesignBoard
-              brainstorm={props.brainstorm!}
-              onKeep={props.offline || props.ending ? undefined : (id) => send({ type: "design.keep", id })}
-              onDrop={props.offline || props.ending ? undefined : (id) => send({ type: "design.drop", id })}
-            />
-          ) : (
-            <BrainViews brainstorm={props.brainstorm!} onRemove={props.offline || props.ending ? undefined : (id) => send({ type: "brainstorm.remove", id })} />
-          )
         ) : reviewUp && focusItem ? (
           <div className="screen-empty">
             <ReviewStage
@@ -613,6 +639,10 @@ export function Stage(props: {
           board
         )}
       </div>
+      {drawPop === "map" && <BrainstormPop onClose={() => setDrawPop(null)} onStart={(prompt) => startDraw("map", () => api.startBrainstorm(state.roomId, prompt))} />}
+      {drawPop === "diagram" && (
+        <DesignSessionPop todos={[]} onClose={() => setDrawPop(null)} onStart={(prompt, seed, taskId) => startDraw("diagram", () => api.startBrainstorm(state.roomId, prompt, { seed, taskId }))} />
+      )}
 
     </main>
   );

@@ -1,13 +1,13 @@
-// Brainstorms and design sessions: a call that starts from one sentence and draws what's said.
+// Brainstorms and design sessions: a map or a diagram of what's said in a call, drawn from one sentence.
 import type { Express } from "express";
-import { BrainstormError, brainstormPage, brainstormsOf, starIdea, startBrainstorm, toBrainstormView } from "../brainstorm.ts";
+import { BrainstormError, brainstormPage, brainstormsOf, promptOf, starIdea, startBrainstorm, toBrainstormView } from "../brainstorm.ts";
 import { isDiagramText, mermaidIn, parseSeed, SEED_MAX, seedFromAnswer } from "../designSession.ts";
 import type { Services } from "../services.ts";
 import { memberRoom, notFound, route } from "./http.ts";
 
 export function brainstormRoutes(app: Express, ctx: Services) {
   const { db, agent, sessions } = ctx;
-  // Starts one on a topic or a question. It leads the agenda, and a call that's running goes to it.
+  // Starts one on a topic or a question. A call that's running draws its map or diagram beside the board.
   app.post(
     "/api/rooms/:id/brainstorm/start",
     route(async (req, res) => {
@@ -34,13 +34,15 @@ export function brainstormRoutes(app: Express, ctx: Services) {
           if (pasted && !diagram.boxes.length) diagram = parseSeed(pasted);
           design = { diagram, seed: seed || null, taskId: task?.id ?? null };
         }
-        const b = startBrainstorm(db, room.id, prompt, req.user!.name, Date.now(), design);
         const s = sessions.get(room.id);
+        const text = promptOf(prompt, !!design);
+        const live = db.brainstormLive(room.id);
+        // Another one is drawing in the call: it stops first, so it is kept as it would be by Stop drawing.
+        if (s && text && live && !(live.prompt === text && (live.kind === "design") === !!design)) await s.stopView();
+        const b = startBrainstorm(db, room.id, prompt, req.user!.name, Date.now(), design);
         if (s) {
           s.itemsChanged();
           s.brainstormChanged();
-          s.startedBy(req.user!.id);
-          if (b.itemId) s.setFocus(b.itemId, req.user!.name, "manual");
         }
         res.json({ brainstorm: toBrainstormView(b) });
       } catch (err) {
@@ -50,8 +52,7 @@ export function brainstormRoutes(app: Express, ctx: Services) {
     }),
   );
 
-  // "Finish this": the host ends the review, brainstorm or design session running in the call, and the
-  // call goes on as plain talk.
+  // "Finish this": the host ends the review running in the call, and the call goes on as plain talk.
   app.post(
     "/api/rooms/:id/experience/finish",
     route(async (req, res) => {
