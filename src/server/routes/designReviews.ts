@@ -50,7 +50,7 @@ export function designReviewRoutes(app: Express, ctx: Services) {
         const s = sessions.get(room.id);
         if (s) {
           s.itemsChanged();
-          s.startedBy(req.user!.id);
+          s.present(req.user!.id, "design review");
           s.setFocus(started.firstItemId, req.user!.name, "manual");
         }
         // A spec Stand is still writing the slides of: they fill in when it has.

@@ -3773,6 +3773,9 @@ a .mention { color: inherit; }
 .next-card .nudge-text strong { font-weight: 600; }
 .rc-asked { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-asked .agent-mark { font-size: 12px; color: var(--accent-text); }
+/* Who presents what's in the middle of the call (RoomState.presenter): named in the top bar, also beside a share's or a deck's tabs. */
+.host-note.presenting { color: var(--accent-text); font-weight: 500; }
+.stage-tabs + .host-note.presenting { display: inline; }
 /* A phone's Agenda and Chat tabs: Stand's card, which lives on the board, as one line under the tabs. */
 .phone-next { display: flex; align-items: center; gap: 8px; margin: 0 8px 6px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 10px; background: var(--panel); font-size: 14px; }
 .phone-next .agent-mark { color: var(--accent-text); flex: none; }

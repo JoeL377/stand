@@ -796,6 +796,38 @@ test("anyone in the call flips a review's slides, but only the host moves to an 
   await session.end();
 });
 
+test("presenting: whoever starts something presents it, everyone else is told and follows their view, and it ends with it", async () => {
+  const { session } = setup();
+  const joe = await join(session, { id: "u1", name: "Joe Liang" });
+  const jan = await join(session, { id: "u2", name: "Janesh Chhabra" });
+  const huy = await join(session, { id: "u3", name: "Huy Ngo" });
+  const notices = (ws: FakeSocket) => ws.got.flatMap((m) => (m.type === "notice" ? [m.message] : []));
+  // Janesh starts sharing: he presents, the host seat stays with Joe, and the others are told.
+  await say(jan, { type: "sharing", on: true });
+  assert.deepEqual(session.state().presenter, { id: "u2", name: "Janesh Chhabra", what: "screen" });
+  assert.ok(session.hosts("u1"));
+  assert.deepEqual(notices(joe), ["Janesh is presenting their screen"]);
+  assert.deepEqual(notices(jan), []);
+  // Only the presenter's view is everyone's now, the map tab included; the host's isn't.
+  await say(joe, { type: "host.view", view: { tab: "board", rewind: null, pane: "words" } });
+  assert.equal(session.state().hostView, null);
+  await say(jan, { type: "host.view", view: { tab: "board", rewind: null, pane: "map" } });
+  assert.equal(session.state().hostView?.pane, "map");
+  // Huy takes over the screen: Janesh is told his share stopped, Joe that Huy presents.
+  await say(huy, { type: "sharing", on: true });
+  assert.equal(session.state().presenter?.id, "u3");
+  assert.match(notices(jan).at(-1)!, /Huy is sharing now/);
+  assert.equal(notices(joe).at(-1), "Huy is presenting their screen");
+  // Huy opens a review while sharing, then stops sharing: the review is his to present again.
+  session.present("u3", "product review");
+  await say(huy, { type: "sharing", on: false });
+  assert.deepEqual(session.state().presenter, { id: "u3", name: "Huy Ngo", what: "product review" });
+  // Huy leaves: nobody presents, and everyone follows the host again.
+  huy.close();
+  assert.equal(session.state().presenter, null);
+  await session.end();
+});
+
 test("a note change from someone who isn't the host says why, and puts their screen back", async () => {
   const { db, session, meetingId } = setup();
   await join(session, { id: "u1", name: "Joe" });
@@ -1441,7 +1473,7 @@ test("Finish leaves a map alone; Stop drawing reads the talk no pass has read, k
   await session.end();
 });
 
-test("whoever starts a review holds the host seat until it is finished; a map lends nothing, and never reads a slide's talk", async () => {
+test("whoever starts a review presents it until it is finished, and the host seat stays; a map never reads a slide's talk", async () => {
   const { finishBrainstorm, startBrainstorm } = await import("./brainstorm.ts");
   const { setUpIdeaReview, startIdeaReview } = await import("./ideaReview.ts");
   const db = openDb(":memory:");
@@ -1469,10 +1501,11 @@ test("whoever starts a review holds the host seat until it is finished; a map le
 
   const started = startIdeaReview(db, room.id, setUpIdeaReview(db, room.id, ran.id, "Janesh").review.id);
   session.itemsChanged();
-  session.startedBy("u2");
-  assert.ok(session.hosts("u2"), "the starter steers the review");
-  session.startedBy("u9");
-  assert.ok(session.hosts("u2"), "someone who isn't in the call takes nothing");
+  session.present("u2", "idea review");
+  assert.ok(session.hosts("u1"), "the host seat stays where it was");
+  assert.deepEqual(session.state().presenter, { id: "u2", name: "Janesh", what: "idea review" });
+  session.present("u9", "product review");
+  assert.equal(session.state().presenter?.id, "u2", "someone who isn't in the call takes nothing");
   session.setFocus(started.firstItemId, "Janesh", "manual");
   session.addSpeech("u2", "Janesh", "this slide is about the retro", Date.now() - 1000);
   const mapPasses = (session as unknown as { mapPasses: { run(): Promise<void> } }).mapPasses;
@@ -1480,7 +1513,8 @@ test("whoever starts a review holds the host seat until it is finished; a map le
   assert.equal(asked.length, 0, "talk on a review slide isn't the map's");
 
   assert.deepEqual(await session.finishExperience(), ["review"]);
-  assert.ok(session.hosts("u1"), "finished: the seat is back with the host");
+  assert.ok(session.hosts("u1"));
+  assert.equal(session.state().presenter, null, "finished: nobody presents, and everyone follows the host again");
   assert.equal(db.brainstormLive(room.id)?.prompt, "How should a review start?", "the map goes on");
   session.addSpeech("u1", "Joe", "a review could start from what shipped", Date.now());
   await mapPasses.run();

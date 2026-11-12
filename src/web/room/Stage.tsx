@@ -8,6 +8,7 @@ import { specAuthor } from "../../shared/designReview.ts";
 import { NextCard } from "./NextCard.tsx";
 import { ViewPane, type ViewTab } from "./Views.tsx";
 import { runningExperience } from "./Experiences.tsx";
+import { mayTakeOver, presentingLine } from "./presenter.ts";
 import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
 import { api } from "../api.ts";
 import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
@@ -64,6 +65,10 @@ export function Stage(props: {
   const suggested = state.suggestion ? state.items.find((i) => i.id === state.suggestion!.itemId) : null;
   const sharer = state.participants.find((p) => p.isSharing);
   const host = state.participants.find((p) => p.isHost);
+  // Whoever presents leads everyone's middle screen; with nobody presenting, the host does.
+  const presenter = state.presenter ?? null;
+  const leader = (presenter && state.participants.find((p) => p.id === presenter.id)) || host;
+  const amLeader = !!leader && leader.id === props.participantId;
   // Accepting a nudge moves what was said since it started from this item to the suggested one.
   const movingIds = state.suggestion
     ? props.segments.filter((s) => s.itemId === state.focusItemId && s.ts >= state.suggestion!.since).map((s) => s.id)
@@ -162,6 +167,8 @@ export function Stage(props: {
   const taskId = focusItem?.taskId ?? null;
   useEffect(() => setMyTaskMode("brief"), [taskId]);
   const [own, setOwn] = useState(false);
+  // Beside the card, the map, its words or the diagram drawing in the call: the presenter's, until you pick your own.
+  const [view, setView] = useState<ViewTab>("card");
   // The slot the top bar keeps for what's being discussed; none on a phone, where the bar is full.
   const [nowSlot, setNowSlot] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
@@ -171,7 +178,14 @@ export function Stage(props: {
     wide.addEventListener("change", find);
     return () => wide.removeEventListener("change", find);
   }, []);
-  const following = !canSteer && !!host && !own;
+  const following = !amLeader && !!leader && !own;
+  useEffect(() => {
+    if (following && hostView?.pane) setView(hostView.pane);
+  }, [following, hostView?.pane]);
+  const pickView = (v: ViewTab) => {
+    setView(v);
+    if (following && v !== hostView?.pane) setOwn(true);
+  };
   const tab = following ? (hostView?.tab === "board" ? "board" : null) : ownTab;
   const pickTab = (t: string | null) => {
     setTab(t);
@@ -179,7 +193,7 @@ export function Stage(props: {
   };
   // What this screen's board has open on its bar (null: live), as it last said.
   const [myRewind, setMyRewind] = useState<Rewind | null>(null);
-  const shownTask = taskId ? { id: taskId, mode: canSteer ? myTaskMode : (hostView?.taskMode ?? "brief") } : null;
+  const shownTask = taskId ? { id: taskId, mode: amLeader ? myTaskMode : (hostView?.taskMode ?? "brief") } : null;
   const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask);
   // A review slide's pictures: the host's choice is everyone's, and a look of your own lasts until the host moves.
   const reviewUp = deckUp && focusItem?.slide?.layout === "review";
@@ -188,25 +202,26 @@ export function Stage(props: {
   const [mySpec, setMySpec] = useState<boolean | null>(null);
   useEffect(() => setMySpec(null), [focusItem?.id]);
   useEffect(() => {
-    if (!canSteer) setMySpec(null);
+    if (!amLeader) setMySpec(null);
   }, [hostView?.taskMode]);
-  const specOpen = !!design && (mySpec ?? (canSteer ? false : hostView?.taskMode === "spec"));
+  const specOpen = !!design && (mySpec ?? (amLeader ? false : hostView?.taskMode === "spec"));
   const myDesign = !!design && !!props.me && specAuthor(design, props.me);
   const [myShot, setMyShot] = useState(0);
   useEffect(() => setMyShot(0), [focusItem?.id]);
   useEffect(() => {
-    if (!canSteer) setMyShot(hostView?.shot ?? 0);
-  }, [canSteer, hostView?.shot]);
-  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), ...(design && { taskMode: mySpec ? ("spec" as const) : ("brief" as const) }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind };
-  const sameView = (a: HostView | null, b: HostView) => (a?.tab ?? "main") === b.tab && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
+    if (!amLeader) setMyShot(hostView?.shot ?? 0);
+  }, [amLeader, hostView?.shot]);
+  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), ...(design && { taskMode: mySpec ? ("spec" as const) : ("brief" as const) }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind, pane: view };
+  const sameView = (a: HostView | null, b: HostView) =>
+    (a?.tab ?? "main") === b.tab && (a?.pane ?? "card") === (b.pane ?? "card") && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
   const hostKey = JSON.stringify(hostView);
   useEffect(() => {
     if (own && sameView(hostView, myView)) setOwn(false);
   }, [hostKey]);
   const myKey = JSON.stringify(myView);
   useEffect(() => {
-    if (canSteer && !props.offline) send({ type: "host.view", view: myView });
-  }, [canSteer, myKey, props.offline]);
+    if (amLeader && !props.offline) send({ type: "host.view", view: myView });
+  }, [amLeader, myKey, props.offline, presenter?.id, presenter?.what]);
   const boardOpen = middleTaken && tab === "board";
   // Once the middle is free the board is the main screen again; the next share opens on itself.
   useEffect(() => {
@@ -354,18 +369,18 @@ export function Stage(props: {
       }
     />
   );
-  // Beside the card, each person's own look at the map, its words or the diagram drawing in the call.
-  const [view, setView] = useState<ViewTab>("card");
   const [drawPop, setDrawPop] = useState<"map" | "diagram" | null>(null);
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
   const steady = !props.offline && !props.ending;
   const draw = (what: "map" | "diagram") => () => {
+    if (!mayTakeOver(state, props.participantId)) return;
     const other = what === "map" ? live?.design : live && !live.design;
     if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return;
     setDrawPop(what);
   };
   const thread = props.board?.threads.find((t) => t.id === props.board?.currentId);
   const open = () => {
+    if (!mayTakeOver(state, props.participantId)) return;
     if (live?.design && !confirm("Draw the map of this topic? The diagram stops, and is kept.")) return;
     send({ type: "view.open" });
   };
@@ -381,6 +396,7 @@ export function Stage(props: {
   // Taking Stand's card draws the same way the pills do: a topic that was said starts its own map or
   // diagram, a map with none is the map of the board's topic, and with no topic at all the pop asks.
   const drawNext = async (what: "map" | "diagram", topic: string): Promise<boolean> => {
+    if (!mayTakeOver(state, props.participantId)) return false;
     const other = what === "map" ? live?.design : live && !live.design;
     if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return false;
     if (what === "map" && !topic) {
@@ -404,7 +420,7 @@ export function Stage(props: {
   const board = (
     <ViewPane
       view={view}
-      onView={setView}
+      onView={pickView}
       // During a review the board is the card only, unless a map or a diagram someone asked for there is drawing.
       tabs={!runningExperience(state.items) || !!live}
       card={card}
@@ -475,15 +491,19 @@ export function Stage(props: {
             ))}
           </span>
         )}
-        {host ? (
+        {leader ? (
           <>
-            {/* Looking on your own while the host shows something else: one click back to their screen. */}
-            {!canSteer && own && !sameView(hostView, myView) ? (
-              <button key={hostKey} type="button" className="follow-host" onClick={() => setOwn(false)} title={`${host.name} is hosting: see what they see`}>
-                Follow {host.name.split(" ")[0]} →
+            {/* Looking on your own while the presenter (or host) shows something else: one click back to their screen. */}
+            {!amLeader && own && !sameView(hostView, myView) ? (
+              <button key={hostKey} type="button" className="follow-host" onClick={() => setOwn(false)} title={`${leader.name} is ${presenter ? "presenting" : "hosting"}: see what they see`}>
+                Follow {leader.name.split(" ")[0]} →
               </button>
+            ) : presenter ? (
+              <span className="host-note presenting small" title={host && host.id !== presenter.id ? `${host.name} is hosting` : undefined}>
+                {presentingLine(presenter, props.participantId)}
+              </span>
             ) : (
-              !canSteer && <span className="host-note muted small">{host.name} is hosting</span>
+              !canSteer && <span className="host-note muted small">{leader.name} is hosting</span>
             )}
           </>
         ) : (
@@ -575,20 +595,18 @@ export function Stage(props: {
         ) : localScreen ? (
           <Video
             stream={localScreen}
-            label={`You're sharing your screen${macApp ? ` · ${SNAP_KEYS_WORDS} snaps it` : ""}${canSteer ? "" : " · The agent reads only the host's screen"}`}
+            label={`You're sharing your screen${macApp ? ` · ${SNAP_KEYS_WORDS} snaps it` : ""}`}
           />
         ) : remoteScreen ? (
           <RemoteVideo
             screen={remoteScreen}
-            label={`${state.participants.find((p) => p.id === remoteScreen.participantId)?.name ?? "Someone"}'s screen${
-              host && remoteScreen.participantId !== host.id ? " · The agent reads only the host's screen" : ""
-            }`}
+            label={`${state.participants.find((p) => p.id === remoteScreen.participantId)?.name ?? "Someone"}'s screen`}
           />
         ) : sharer && !props.livekit ? (
           <div className="screen-empty">
             <p>
               <strong>{sharer.name}</strong> is sharing. In mock mode only they can see it
-              {sharer.isHost ? "; the agent still reads it." : ". The agent follows only the host's screen."}
+; the agent still reads it.
             </p>
           </div>
         ) : reviewUp && focusItem ? (
