@@ -1438,6 +1438,29 @@ test("finishing a brainstorm mid-call reads the talk no pass has read, then the 
   await session.end();
 });
 
+test("whoever starts an experience holds the host seat until it is finished, then it goes back", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const agent = Object.assign(new HeuristicAgent(), {
+    async brainstormMap() {
+      return { add: [], extend: [], caught: [] };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  await join(session, { id: "u1", name: "Joe" });
+  await join(session, { id: "u2", name: "Janesh" });
+  assert.ok(session.hosts("u1"));
+  startBrainstorm(db, room.id, "How should a review start?", "Janesh");
+  session.brainstormChanged();
+  session.startedBy("u2");
+  assert.ok(session.hosts("u2"), "the starter steers the board");
+  session.startedBy("u9");
+  assert.ok(session.hosts("u2"), "someone who isn't in the call takes nothing");
+  assert.deepEqual(await session.finishExperience(), ["brainstorm"]);
+  assert.ok(session.hosts("u1"), "finished: the seat is back with the host");
+});
+
 test("a line on the board is tied to its note by id: a tick crosses either way, even after the note is reworded", async () => {
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
