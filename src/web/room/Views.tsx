@@ -2,7 +2,8 @@
 // words, or a design session's diagram. Each person picks theirs; nothing else in the call changes.
 
 import type { ReactNode } from "react";
-import type { BrainstormView } from "../../shared/protocol.ts";
+import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts";
+import { brainstormHref } from "../pages/BrainstormPage.tsx";
 import { BrainMap } from "./BrainMap.tsx";
 import { BrainWords } from "./BrainWords.tsx";
 import { DesignBoard } from "./DesignBoard.tsx";
@@ -23,11 +24,17 @@ export function ViewPane(props: {
   tabs: boolean;
   card: ReactNode;
   brainstorm: BrainstormView | null | undefined;
+  /** The other maps and diagrams of this call. */
+  others: BrainstormSummary[];
+  roomId: string;
+  /** The board's thread on screen: the topic a map can be drawn of. */
+  topic: { id: string; title: string } | null;
   onRemove?: (id: string) => void;
   onKeep?: (id: string) => void;
   onDrop?: (id: string) => void;
   onDraw?: () => void;
   onDrawDiagram?: () => void;
+  onOpen?: () => void;
   onStop?: () => void;
 }) {
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
@@ -35,6 +42,8 @@ export function ViewPane(props: {
   const diagram = live?.design ? live : null;
   const view = props.tabs ? props.view : "card";
   const drawing = (key: ViewTab) => (key === "map" && !!map) || (key === "diagram" && !!diagram);
+  const maps = props.others.filter((b) => !b.design);
+  const stopped = props.topic && maps.some((b) => b.threadId === props.topic!.id);
   const stop = (what: string, kept: string) => () => {
     if (confirm(`Stop drawing the ${what}? The call goes on, and ${kept}.`)) props.onStop?.();
   };
@@ -55,6 +64,11 @@ export function ViewPane(props: {
               Stop drawing
             </button>
           )}
+          {view === "map" && map && (
+            <a className="link muted view-stop" href={brainstormHref(props.roomId, map.id)} target="_blank" rel="noreferrer">
+              Open its page
+            </a>
+          )}
           {view === "diagram" && diagram && (
             <span className="view-what" dir="auto" title={diagram.prompt}>
               {diagram.prompt}
@@ -72,13 +86,44 @@ export function ViewPane(props: {
           <BrainMap brainstorm={map} onRemove={props.onRemove} />
         ) : (
           <div className="view-empty">
-            <p>No map in this call yet.</p>
-            {props.onDraw && (
-              <button type="button" className="primary" onClick={props.onDraw}>
-                Draw a map
-              </button>
+            {props.topic ? (
+              <>
+                <p dir="auto">{stopped ? `The map of "${props.topic.title}" is stopped.` : `No map of "${props.topic.title}" yet.`}</p>
+                {props.onOpen && (
+                  <button type="button" className="primary" onClick={props.onOpen}>
+                    {stopped ? "Continue the map of this topic" : "Draw the map of this topic"}
+                  </button>
+                )}
+                <p className="muted">Stand reads what was said on this topic, and goes on while you talk.</p>
+              </>
+            ) : (
+              <>
+                <p>No map in this call yet.</p>
+                {props.onDraw && (
+                  <button type="button" className="primary" onClick={props.onDraw}>
+                    Draw a map
+                  </button>
+                )}
+                <p className="muted">Stand draws what is said from here on, while you talk.</p>
+              </>
             )}
-            <p className="muted">Stand draws what is said from here on, while you talk.</p>
+            {maps.length > 0 && (
+              <div className="view-maps">
+                <h4>Maps in this call</h4>
+                <ul>
+                  {maps.map((b) => (
+                    <li key={b.id}>
+                      <a href={brainstormHref(props.roomId, b.id)} target="_blank" rel="noreferrer" dir="auto">
+                        {b.prompt}
+                      </a>
+                      <span className="muted">
+                        {b.ideas} {b.ideas === 1 ? "idea" : "ideas"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )
       ) : view === "words" ? (

@@ -135,6 +135,8 @@ export const toBrainstorm = (r: Row): BrainstormRow => ({
   taskId: (r.task_id as string) ?? null,
   context: r.context_json ? (JSON.parse(r.context_json as string) as DesignContext[]) : [],
   starred: r.stars_json ? (JSON.parse(r.stars_json as string) as string[]) : [],
+  threadId: (r.thread_id as string) ?? null,
+  spans: r.spans_json ? (JSON.parse(r.spans_json as string) as Array<[number, number]>) : null,
 });
 export const toReviewSlide = (r: Row): ReviewSlideRow => ({
   id: r.id as string,

@@ -17,6 +17,7 @@ import { similar } from "./notesMerge.ts";
 export const MAP_DEBOUNCE_MS = 4_000;
 export const MAP_MAX_WAIT_MS = 12_000;
 const MAP_WINDOW_MS = 2 * 60_000;
+const CATCH_UP_STEPS = 20;
 export const MAX_DIRECTIONS = 8;
 export const MAX_IDEAS = 12;
 const MAX_POINTS = 8;
@@ -215,6 +216,31 @@ export class MapKeeper {
   }
 }
 
+/** One map pass over a long stretch no pass has read, a window at a time, so the model never gets
+ *  more than MAP_WINDOW_MS of new talk at once. `onStep` follows each step that changed the map. */
+export async function catchUp(
+  keeper: MapKeeper,
+  segments: Segment[],
+  people: string[],
+  caught: BrainCaught[],
+  meetingStartedAt: number,
+  now: number,
+  onStep?: () => void,
+): Promise<boolean> {
+  const upTo = segments.filter((s) => s.ts <= now);
+  let changed = false;
+  for (let step = 0; step < CATCH_UP_STEPS; step++) {
+    const first = keeper.unreadSince(upTo);
+    if (first === null) return changed;
+    if (first + MAP_WINDOW_MS >= now) break;
+    if (await keeper.run(segments, people, caught, meetingStartedAt, first + MAP_WINDOW_MS)) {
+      changed = true;
+      onStep?.();
+    }
+  }
+  return (await keeper.run(segments, people, caught, meetingStartedAt, now)) || changed;
+}
+
 // ---- the record -----------------------------------------------------------------------------
 
 export interface BrainstormRow {
@@ -239,6 +265,10 @@ export interface BrainstormRow {
   taskId: string | null;
   /** Ids of the ideas people starred on its page. */
   starred: string[];
+  /** The board thread it is the map of; null: it follows no topic. */
+  threadId: string | null;
+  /** The stretches of the meeting a topic's map read, as of when it last parked, stopped or ended. */
+  spans: Array<[number, number]> | null;
 }
 
 /** A diagram as people see it: without what was dropped. */
@@ -257,6 +287,7 @@ export const toBrainstormView = (b: BrainstormRow, busy = false): BrainstormView
   status: b.status,
   itemId: b.itemId,
   meetingId: b.meetingId,
+  threadId: b.threadId,
   startedBy: b.startedBy,
   startedAt: b.startedAt,
   endedAt: b.endedAt,
@@ -275,6 +306,7 @@ const summaryOf = (b: BrainstormRow): BrainstormSummary => {
     status: b.status,
     startedAt: b.startedAt,
     meetingId: b.meetingId,
+    threadId: b.threadId,
     directions: live.filter((n) => !n.parent).length,
     ideas: live.filter((n) => n.parent).length,
     ...(d ? { design: { boxes: d.boxes.filter((x) => !x.suggested).length, arrows: d.arrows.filter((x) => !x.suggested).length } } : {}),
@@ -315,6 +347,21 @@ export function finishBrainstorm(db: DB, roomId: string, meetingId: string | nul
   if (live.itemId) db.archiveItem(live.itemId);
   return db.getBrainstorm(live.id);
 }
+
+/** The board moved off a topic: its map stops reading, and goes on by itself when the talk comes back. */
+export function parkBrainstorm(db: DB, id: string, meetingId: string, spans: Array<[number, number]>) {
+  db.setBrainstorm(id, { status: "done", meetingId });
+  db.saveBrainstormSpans(id, spans);
+}
+
+/** A parked or stopped map draws again, as the same map. */
+export function resumeBrainstorm(db: DB, id: string) {
+  db.setBrainstorm(id, { status: "live", endedAt: null });
+}
+
+/** The other maps and diagrams of a meeting, oldest first. */
+export const othersOfMeeting = (db: DB, meetingId: string, except: string | null): BrainstormSummary[] =>
+  db.brainstormsOfMeeting(meetingId).filter((b) => b.id !== except).map(summaryOf);
 
 export const brainstormLive = (db: DB, roomId: string): BrainstormView | null => {
   const b = db.brainstormLive(roomId);

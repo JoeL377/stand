@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { BrainCaught, Segment } from "../shared/protocol.ts";
-import { type MapAnswer, MapKeeper, brainstormOfMeeting, brainstormPage, brainstormsOf, finishBrainstorm, starIdea, startBrainstorm } from "./brainstorm.ts";
+import { type MapAnswer, MapKeeper, brainstormOfMeeting, catchUp, brainstormPage, brainstormsOf, finishBrainstorm, starIdea, startBrainstorm } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
 import { migrate } from "./db/schema.ts";
+import { DatabaseSync } from "node:sqlite";
 
 const T0 = 1_000_000;
 const seg = (n: number, who: string, text: string): Segment => ({ id: `s${n}`, meetingId: "m", itemId: null, speakerId: who, speakerName: who, kind: "speech", text, ts: T0 + n * 1000 });
@@ -146,7 +147,7 @@ test("a brainstorm adds nothing to the agenda, and keeps its page after the call
   assert.equal(starIdea(db, other.id, next.id, "i1", true), null);
   assert.deepEqual(brainstormPage(db, room.id, next.id)!.starred, ["i1"]);
   assert.equal(starIdea(db, room.id, next.id, "i1", false)!.starred, undefined);
-  assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, directions: 1, ideas: 1 });
+  assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, threadId: null, directions: 1, ideas: 1 });
 });
 
 test("a brainstorm running from before maps were views lets go of its agenda item", () => {
@@ -162,4 +163,34 @@ test("a brainstorm running from before maps were views lets go of its agenda ite
   assert.equal(db.getBrainstorm(old.id)!.itemId, null);
   assert.equal(db.getBrainstorm(old.id)!.status, "live");
   assert.deepEqual(db.listItems(room.id).map((i) => i.id), [kept.id]);
+});
+
+test("a long stretch nobody has read is caught up a window at a time; a short one is one pass", async () => {
+  const MIN = 60_000;
+  const line = (n: number): Segment => ({ ...seg(n, "Joe", `line ${n}`), ts: T0 + n * 30_000 });
+  const talk = Array.from({ length: 20 }, (_, i) => line(i + 1));
+  const model = scripted([]);
+  const map = new MapKeeper(model, "Week one", T0);
+  let steps = 0;
+  await catchUp(map, talk, [], [], T0, T0 + 10 * MIN + 1000, () => steps++);
+  assert.ok(model.asked.length > 1);
+  // Each step sees two minutes from the first line it hadn't read, and nothing after.
+  assert.match(model.asked[0], /line 5\b/);
+  assert.doesNotMatch(model.asked[0], /line 6\b/);
+  assert.match(model.asked.at(-1)!, /line 20/);
+  assert.equal(map.unreadSince(talk), null);
+  assert.equal(steps, 0, "nothing changed, so no step to show");
+
+  const short = scripted([]);
+  const again = new MapKeeper(short, "Week one", T0);
+  await catchUp(again, talk.slice(0, 3), [], [], T0, T0 + 2 * MIN);
+  assert.equal(short.asked.length, 1);
+});
+
+test("an old database gets the columns a topic's map keeps", () => {
+  const raw = new DatabaseSync(":memory:");
+  raw.exec("CREATE TABLE brainstorms (id TEXT PRIMARY KEY, room_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, item_id TEXT, meeting_id TEXT, started_by TEXT, started_at INTEGER NOT NULL, ended_at INTEGER, map_json TEXT)");
+  migrate(raw);
+  const cols = (raw.prepare("PRAGMA table_info(brainstorms)").all() as Array<{ name: string }>).map((c) => c.name);
+  assert.ok(cols.includes("thread_id") && cols.includes("spans_json"));
 });
