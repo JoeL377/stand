@@ -96,33 +96,9 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
         </div>
       );
     case "ask":
-      return (
-        <div className="seg capture-event capture-ask" role="note">
-          <div className="capture-head">
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>
-            <strong>{e.who ?? "Someone"} asked Stand</strong>
-            <span className="seg-time">{fmtTime(e.ts)}</span>
-          </div>
-          <div className="capture-text">{e.text}</div>
-          {e.answer ? <Markdown className="capture-text tl-answer" text={e.answer} breaks /> : <span className="capture-owner">No answer</span>}
-        </div>
-      );
+      return <AskRow e={e} />;
     case "agent":
-      return (
-        <div className="seg capture-event capture-agent" role="note">
-          <div className="capture-head">
-            <strong>
-              {timelineWho(e)} {VERB[e.status ?? ""] ?? "reported"}
-            </strong>
-            <span className="seg-time">{fmtTime(e.ts)}</span>
-          </div>
-          <div className="capture-text">
-            <Linkified text={e.text} />
-          </div>
-        </div>
-      );
+      return <AgentRow e={e} />;
     default:
       return (
         <div className={e.kind === "chat" ? "seg chat" : "seg"}>
@@ -139,4 +115,47 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
         </div>
       );
   }
+}
+
+/** A question someone asked Stand, with its answer under it. onShow: a way to the card itself, in a call. */
+export function AskRow({ e, onShow }: { e: TimelineEntry; onShow?: () => void }) {
+  return (
+    <div className="seg capture-event capture-ask" role="note">
+      <div className="capture-head">
+        <span className="agent-mark" aria-hidden>
+          ✦
+        </span>
+        <strong>{e.who ?? "Someone"} asked Stand</strong>
+        <span className="seg-time">{fmtTime(e.ts)}</span>
+      </div>
+      <div className="capture-text">{e.text}</div>
+      {e.answer ? (
+        <Markdown className="capture-text tl-answer" text={e.answer} breaks />
+      ) : (
+        <span className="capture-owner">{e.pending ? "Stand is working on it…" : "No answer"}</span>
+      )}
+      {onShow && (
+        <button type="button" className="link small tl-show" onClick={onShow}>
+          Show on the board
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Something a person's agent (or a person) reported to the space while the meeting ran. */
+export function AgentRow({ e }: { e: TimelineEntry }) {
+  return (
+    <div className="seg capture-event capture-agent" role="note">
+      <div className="capture-head">
+        <strong>
+          {timelineWho(e)} {VERB[e.status ?? ""] ?? "reported"}
+        </strong>
+        <span className="seg-time">{fmtTime(e.ts)}</span>
+      </div>
+      <div className="capture-text">
+        <Linkified text={e.text} />
+      </div>
+    </div>
+  );
 }

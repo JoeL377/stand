@@ -205,3 +205,22 @@ test("the brief with its transcript carries the timeline, in JSON and Markdown",
   assert.match(md, /Huy \(chat\): the link/);
   assert.match(md, /Huy asked Stand: Who owns it\?\n {2}- Stand: Joe/);
 });
+
+test("a question to Stand and an agent's report go under the item that was up", () => {
+  const onB = { ...seg("s2", 3000, "Now the second slide"), itemId: "i2" };
+  const cards = [card({ id: "c1", question: "Early?", at: 1500, note: "Yes" }), card({ id: "c2", question: "Later?", at: 3500, status: "working" })];
+  const updates = [update({ id: "u1", ts: 3600, status: "added", itemId: "elsewhere" })];
+  // A live call: no focus log, so the last line before it says where it was.
+  const live = buildTimeline({ ...base, meeting: { startedAt: 1000, endedAt: null }, segments: [seg("s1", 1000, "First slide"), onB], cards, updates });
+  assert.deepEqual(
+    live.filter((e) => e.kind !== "speech").map((e) => [e.id, e.itemId, e.pending ?? false]),
+    [
+      ["ask:c1", "i1", false],
+      ["ask:c2", "i2", true],
+      ["agent:u1", "i2", false],
+    ],
+  );
+  // A finished meeting: the focus log decides, even with nothing said on the item yet.
+  const done = buildTimeline({ ...base, segments: [seg("s1", 1000, "First slide")], cards, focus: [{ id: "f1", ts: 3400, itemId: "i3", actor: "Joe", reason: "manual" }] });
+  assert.equal(done.find((e) => e.id === "ask:c2")?.itemId, "i3");
+});

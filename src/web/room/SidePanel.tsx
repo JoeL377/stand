@@ -1,6 +1,9 @@
 import { usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useRef, useState } from "react";
-import type { Board, ClientMessage, Item, ListNote, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import type { AgentCard, Board, ClientMessage, Item, ListNote, Note, RoomState, Segment } from "../../shared/protocol.ts";
+import { buildTimeline, type TimelineEntry } from "../../shared/timeline.ts";
+import { AgentRow, AskRow } from "../Timeline.tsx";
+import { showCard } from "./AgentCard.tsx";
 import { moverText } from "./TopicBoard.tsx";
 import type { Interim } from "./useRoomSocket.ts";
 import { fmtTime, keyOf } from "../util.ts";
@@ -17,6 +20,8 @@ export function SidePanel(props: {
   notesBusy: string[];
   notes: Note[];
   list: ListNote[] | null;
+  /** What ✦ Stand was asked in this meeting, and what it answered. */
+  cards?: AgentCard[] | null;
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => boolean;
   participantId: string;
@@ -28,18 +33,29 @@ export function SidePanel(props: {
   onPeek?: (on: boolean) => void;
 }) {
   const { state, segments, interims, send } = props;
-  // Two tabs: the meeting's chat and the spoken transcript. The topics and their notes sit on the
-  // middle screen, so the transcript opens first.
+  // Two tabs. The transcript is the record of the item on screen, in order: what was said, what was
+  // typed in the chat, what Stand caught, what Stand was asked and answered, and what agents reported.
+  // The chat is the meeting's one conversation, whichever item each message landed on. The topics
+  // and their notes sit on the middle screen, so the transcript opens first.
   const [tab, setTab] = useState<"chat" | "transcript">("transcript");
   const shut = !!props.folded && !props.peeking;
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
-  const shown = segments.filter((s) => s.itemId === state.focusItemId && s.kind !== "chat");
   // The running list sits out a product review (the notes agent files what's said under the slide),
   // so on a review slide what was caught comes from the notes.
   const captures = (focus?.slide?.layout === "review" || focus?.slide?.layout === "design" ? props.notes : (props.list ?? props.notes)).filter(
     (n) => n.meetingId === state.meetingId && n.itemId === state.focusItemId && n.kind !== "summary" && !("closed" in n && (n as ListNote).closed?.how === "wrong"),
   );
-  const transcriptCount = shown.length + captures.length;
+  const shown = buildTimeline({
+    meeting: { startedAt: state.meetingStartedAt, endedAt: null },
+    segments,
+    notes: captures,
+    discussions: [],
+    cards: props.cards ?? [],
+    focus: [],
+    updates: state.updates ?? [],
+    itemById: (id) => state.items.find((i) => i.id === id) ?? null,
+  }).filter((e) => e.itemId === state.focusItemId);
+  const transcriptCount = shown.length;
   // Each time the board moved to another topic on this item, and who moved it (Stand by itself, or a person).
   const threads = props.board?.threads ?? [];
   const moves = (props.board?.moves ?? []).flatMap((m) => {
@@ -176,13 +192,12 @@ export function SidePanel(props: {
         </p>
       )}
       {tab === "transcript" ? (
-        <Transcript segments={shown} captures={captures} moves={moves} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." />
+        <Transcript entries={shown} segments={segments} captures={captures} moves={moves} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." tagChat />
       ) : (
-        <>
-          <Transcript segments={chats} items={state.items} interims={{}} send={send} empty="No messages yet." />
-          {!state.ending && <ChatBox send={send} />}
-        </>
+        <Transcript entries={chats.map(lineOf)} segments={chats} items={state.items} interims={{}} send={send} empty="No messages yet." />
       )}
+      {/* Under both tabs: what's typed from the transcript lands in it, at the moment it was sent. */}
+      {!state.ending && <ChatBox send={send} />}
       <div className="side-foot">
         <a
           href={`/meetings/${state.meetingId}`}
@@ -200,8 +215,16 @@ export function SidePanel(props: {
 /** A line in the transcript where the board moved to another topic. */
 type MoveRow = { key: string; ts: number; by: string | null; text: string; title: string };
 
+/** A line said or typed, as the timeline has it. */
+const lineOf = (s: Segment): TimelineEntry => ({ id: `${s.kind}:${s.id}`, kind: s.kind, ts: s.ts, who: s.speakerName, whoId: s.speakerId, text: s.text, itemId: s.itemId });
+
 function Transcript(props: {
+  /** What to show, in order (shared/timeline.ts). */
+  entries: TimelineEntry[];
+  /** The lines and notes those entries came from, for moving a line and for a capture's state. */
   segments: Segment[];
+  /** Mark typed lines as chat (the transcript; the chat tab has only those). */
+  tagChat?: boolean;
   moves?: MoveRow[];
   captures?: Note[];
   items: Item[];
@@ -210,7 +233,10 @@ function Transcript(props: {
   empty: string;
 }) {
   const colorFor = usePersonColors();
-  const { segments, items, interims, send } = props;
+  const { entries, items, interims, send } = props;
+  const segOf = new Map(props.segments.map((s) => [s.id, s]));
+  const noteOf = new Map((props.captures ?? []).map((n) => [n.id, n]));
+  const sourceId = (e: TimelineEntry) => e.id.slice(e.kind.length + 1);
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const interimList = Object.values(interims);
@@ -218,7 +244,7 @@ function Transcript(props: {
   useEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [segments.length, props.moves?.length, props.captures?.length, interimList.length, interimList.map((i) => i.text).join("")]);
+  }, [entries.length, entries.filter((e) => e.answer).length, props.moves?.length, interimList.length, interimList.map((i) => i.text).join("")]);
 
   return (
     <div
@@ -229,30 +255,36 @@ function Transcript(props: {
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {segments.length === 0 && !props.moves?.length && !props.captures?.length && interimList.length === 0 && (
+      {entries.length === 0 && !props.moves?.length && interimList.length === 0 && (
         <p className="muted empty">{props.empty}</p>
       )}
-      {[...segments.map((s) => ({ ts: s.ts, seg: s, move: null, capture: null })), ...(props.moves ?? []).map((m) => ({ ts: m.ts, seg: null, move: m, capture: null })), ...(props.captures ?? []).map((n) => ({ ts: n.ts, seg: null, move: null, capture: n }))]
+      {[...entries.map((e) => ({ ts: e.ts, e, move: null as MoveRow | null })), ...(props.moves ?? []).map((m) => ({ ts: m.ts, e: null as TimelineEntry | null, move: m }))]
         .sort((a, b) => a.ts - b.ts)
-        .map((r) =>
-          r.seg ? (
-            <SegmentRow key={r.seg.id} segment={r.seg} items={items} send={send} />
-          ) : r.capture ? (
-            <CaptureRow key={`capture-${r.capture.id}`} note={r.capture} />
-          ) : (
-            <div key={r.move!.key} className="seg board-move" role="note" title={`${r.move!.text}: ${r.move!.title}`}>
-              <span className="board-move-text">
-                {!r.move!.by && (
-                  <span className="agent-mark" aria-hidden>
-                    ✦{" "}
-                  </span>
-                )}
-                {r.move!.text} · <strong>{r.move!.title}</strong>
-              </span>
-              <span className="seg-time">{fmtTime(r.move!.ts)}</span>
-            </div>
-          ),
-        )}
+        .map((r) => {
+          const e = r.e;
+          if (!e)
+            return (
+              <div key={r.move!.key} className="seg board-move" role="note" title={`${r.move!.text}: ${r.move!.title}`}>
+                <span className="board-move-text">
+                  {!r.move!.by && (
+                    <span className="agent-mark" aria-hidden>
+                      ✦{" "}
+                    </span>
+                  )}
+                  {r.move!.text} · <strong>{r.move!.title}</strong>
+                </span>
+                <span className="seg-time">{fmtTime(r.move!.ts)}</span>
+              </div>
+            );
+          if (e.kind === "ask") return <AskRow key={e.id} e={e} onShow={() => showCard(sourceId(e))} />;
+          if (e.kind === "agent") return <AgentRow key={e.id} e={e} />;
+          if (e.kind === "capture") {
+            const note = noteOf.get(sourceId(e));
+            return note ? <CaptureRow key={e.id} note={note} /> : null;
+          }
+          const seg = segOf.get(sourceId(e));
+          return seg ? <SegmentRow key={e.id} segment={seg} items={items} send={send} tag={props.tagChat} /> : null;
+        })}
       {interimList.map((i) => (
         <div key={i.speakerId} className="seg interim">
           <span className="seg-who" style={{ color: colorFor(i.speakerId) }}>
@@ -334,7 +366,7 @@ function ChatBox({ send }: { send: (m: ClientMessage) => boolean }) {
   );
 }
 
-function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => boolean }) {
+function SegmentRow({ segment: s, items, send, tag }: { segment: Segment; items: Item[]; send: (m: ClientMessage) => boolean; tag?: boolean }) {
   const colorFor = usePersonColors();
   const [moving, setMoving] = useState(false);
   return (
@@ -343,6 +375,7 @@ function SegmentRow({ segment: s, items, send }: { segment: Segment; items: Item
         <span className="seg-who" style={{ color: colorFor(s.speakerId) }}>
           {s.speakerName}
         </span>
+        {tag && s.kind === "chat" && <span className="seg-kind">chat</span>}
         <span className="seg-time">{fmtTime(s.ts)}</span>
         <button className="seg-move" onClick={() => setMoving((m) => !m)} title="This was about a different item">
           Move
