@@ -3610,6 +3610,8 @@ button.chat-caught-text { padding: 0; }
 .chat-recap-summary { margin: 4px 0 0; line-height: 1.5; }
 .chat-recap-topics { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .chat-recap-topics li { padding: 1px 8px; border-radius: 999px; font-size: 12px; color: var(--muted); background: var(--hover); }
+.chat-reads { display: flex; justify-content: flex-end; gap: 3px; margin: 3px 8px 0; }
+.chat-reads .avatar { flex: none; font-size: 8px !important; box-shadow: none; }
 .chat-compose { flex: none; position: relative; }
 .chat-compose .mention-box textarea { display: block; min-height: 42px; max-height: 180px; padding: 10px 46px 10px 12px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 10px; resize: none; field-sizing: content; }
 .chat-compose .chat-send { right: 8px; bottom: 8px; width: 26px; height: 26px; min-height: 0; }
@@ -3729,6 +3731,7 @@ a .mention { color: inherit; }
 .sh-dock .space-chat { max-width: none; }
 .sh-dock .chat-msg { padding: 1px 4px; }
 .sh-dock .chat-caught { margin-left: 42px; margin-right: 4px; }
+.sh-dock .chat-reads { margin-right: 4px; }
 .sh-chat-toggle.on { border-color: var(--text); }
 /* With room for both, the task drawer opens to the left of the dock, so chat stays in view. */
 @media (min-width: 1360px) {

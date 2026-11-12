@@ -7,6 +7,7 @@ import { mentionedIn } from "../shared/mentions.ts";
 import { api } from "./api.ts";
 import { mergeCaught, placeCaught } from "./chatCaught.ts";
 import { asMessage, restore, serial, unsaved, type PendingMessage } from "./chatPending.ts";
+import { moveRead, placeReads } from "./chatReads.ts";
 import { CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
 import { Linkified } from "./Linkified.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
@@ -90,14 +91,19 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   heard.current.mentionsMe = mentionsMe;
   heard.current.onMention = onMention;
 
-  const apply = useCallback((m: ChatMessage) => {
-    setThread((t) => {
-      if (!t || m.channelId !== t.channel.id) return t;
-      const at = t.messages.findIndex((x) => x.id === m.id);
-      const messages = at >= 0 ? t.messages.map((x) => (x.id === m.id ? m : x)) : [...t.messages, m].sort((a, b) => a.seq - b.seq);
-      return { ...t, messages };
-    });
-  }, []);
+  const apply = useCallback(
+    (m: ChatMessage) => {
+      setThread((t) => {
+        if (!t || m.channelId !== t.channel.id) return t;
+        const at = t.messages.findIndex((x) => x.id === m.id);
+        const messages = at >= 0 ? t.messages.map((x) => (x.id === m.id ? m : x)) : [...t.messages, m].sort((a, b) => a.seq - b.seq);
+        // Whoever writes in Stand's own chat has read up to what they wrote.
+        const reads = m.authorId !== me && t.channel.source === "stand" ? moveRead(t.reads, { userId: m.authorId, name: m.author, upTo: m.seq }) : t.reads;
+        return { ...t, messages, reads };
+      });
+    },
+    [me],
+  );
 
   // The channel whose first page is in: a later reload only adds to it.
   const loadedFor = useRef<string | null>(null);
@@ -156,6 +162,8 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
           (c) => setThread((t) => (t && t.channel.id === e.channelId ? { ...t, caught: mergeCaught(t.caught, [c]) } : t)),
           () => {},
         );
+      // Someone else read further: their mark moves down.
+      else if (e.type === "read" && e.userId !== me) setThread((t) => (t && t.channel.id === e.channelId ? { ...t, reads: moveRead(t.reads, { userId: e.userId, name: e.name, upTo: e.upTo }) } : t));
     };
     // The browser connects again by itself. What was sent meanwhile is read then.
     stream.onerror = () => {
@@ -166,7 +174,7 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
       dropped = false;
     };
     return () => stream.close();
-  }, [roomId, reload, apply]);
+  }, [roomId, me, reload, apply]);
 
   const loadOlder = useCallback(async () => {
     const first = thread?.messages[0];
@@ -300,8 +308,9 @@ export function SpaceChat(props: {
   };
 
   const rows = useMemo(() => {
-    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; pending: PendingMessage["state"] | null }> = [];
+    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; pending: PendingMessage["state"] | null; readBy: string[] }> = [];
     const placed = placeCaught(thread?.messages ?? [], thread?.caught ?? [], thread?.channel.openSessionId ?? null);
+    const reads = placeReads(thread?.messages ?? [], thread?.reads ?? []);
     const states = new Map(chat.pending.map((p) => [p.key, p.state]));
     const shown = thread ? [...thread.messages, ...chat.pending.map((p) => asMessage(p, me, thread.channel.id))] : [];
     let marked = false;
@@ -320,11 +329,12 @@ export function SpaceChat(props: {
         caught: placed.lines.get(m.id) ?? [],
         recap: placed.recaps.get(m.id) ?? null,
         pending: (m.sessionId === "" && m.key && states.get(m.key)) || null,
+        readBy: reads.get(m.id) ?? [],
       });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread?.messages, thread?.caught, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
+  }, [thread?.messages, thread?.caught, thread?.reads, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
 
   // The newest message stays in view, unless you scrolled up to read older ones. The thread scrolls
   // on a wide screen and the page on a phone, so both are kept.
@@ -395,10 +405,11 @@ export function SpaceChat(props: {
             Nothing here yet. Write to the people in this space between meetings: what you send stays here for them to read.
           </p>
         )}
-        {rows.map(({ m, day, head, fresh, caught, recap, pending }) => (
+        {rows.map(({ m, day, head, fresh, caught, recap, pending, readBy }) => (
           <MessageRow
             key={m.id}
             pending={pending}
+            readBy={readBy}
             onRetry={() => m.key && chat.retry(m.key)}
             onDiscard={() => m.key && chat.discard(m.key)}
             m={m}
@@ -440,6 +451,8 @@ function MessageRow(props: {
   m: ChatMessage;
   /** Not saved yet: on its way, or failed and waiting for Retry. */
   pending: PendingMessage["state"] | null;
+  /** The other people whose reading stops at this message. */
+  readBy: string[];
   onRetry: () => void;
   onDiscard: () => void;
   day: string | null;
@@ -579,7 +592,21 @@ function MessageRow(props: {
         <CaughtRow key={line.id} line={line} onOpen={props.onOpenTask} onRemove={props.onRemoveCaught} />
       ))}
       {props.recap && <SessionRecap caught={props.recap} />}
+      {props.readBy.length > 0 && <ReadMarks names={props.readBy} />}
     </>
+  );
+}
+
+/** Who has read up to a message and no further, as small faces at its right. */
+function ReadMarks({ names }: { names: string[] }) {
+  const label = `Read up to here by ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]}`;
+  return (
+    <div className="chat-reads" title={label}>
+      <span className="sr-only">{label}</span>
+      {names.map((name) => (
+        <Avatar key={name} id={name} name={name} size={18} />
+      ))}
+    </div>
   );
 }
 
