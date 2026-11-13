@@ -1381,7 +1381,7 @@ test("a brainstorm's map is drawn from the call's talk beside the board, and is 
       asked.push(talk);
       return asked.length > 1
         ? { add: [], extend: [], caught: [] }
-        : { add: [{ under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }, { under: "new1", label: "Agents add slides", detail: "Each agent adds a slide when it finishes.", by: "Huy", line: 1 }], extend: [], caught: [] };
+        : { add: [{ cluster: null, under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }, { cluster: null, under: "new1", label: "Agents add slides", detail: "Each agent adds a slide when it finishes.", by: "Huy", line: 1 }], extend: [], caught: [] };
     },
   });
   const sent: ServerMessage[] = [];
@@ -1456,7 +1456,7 @@ test("Finish leaves a map alone; Stop drawing reads the talk no pass has read, k
   const agent = Object.assign(new HeuristicAgent(), {
     async brainstormMap() {
       passes++;
-      return { add: [{ under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }], extend: [], caught: [] };
+      return { add: [{ cluster: null, under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }], extend: [], caught: [] };
     },
   });
   const session = new RoomSession(db, agent, room, () => {});
@@ -1537,7 +1537,7 @@ test("starting a diagram stops the map first and keeps it; starting a map saves 
   const agent = Object.assign(new HeuristicAgent(), {
     async brainstormMap() {
       passes++;
-      return { add: [{ under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }], extend: [], caught: [] };
+      return { add: [{ cluster: null, under: "root", label: "From the work", detail: "Start from what shipped.", by: "Huy", line: 1 }], extend: [], caught: [] };
     },
   });
   const session = new RoomSession(db, agent, room, () => {});
@@ -1610,7 +1610,7 @@ async function onTopics() {
     },
     async brainstormMap(context: string, talk: string) {
       mapAsked.push(`${context}\n${talk}`);
-      return { add: [{ under: "root", label: `Idea ${mapAsked.length}`, detail: "An idea.", by: "Joe", line: 1 }], extend: [], caught: [] };
+      return { add: [{ cluster: null, under: "root", label: `Idea ${mapAsked.length}`, detail: "An idea.", by: "Joe", line: 1 }], extend: [], caught: [] };
     },
   });
   const session = new RoomSession(db, agent, room, () => {});
@@ -1658,7 +1658,7 @@ test("the map of a topic is drawn from every line of that topic, those said befo
   await session.end();
 });
 
-test("a topic's map keeps drawing when the board moves: the new topic is a direction on the same map, and a stopped map stays stopped", async () => {
+test("a topic's map keeps drawing when the board moves: the same map goes on, and a stopped map stays stopped", async () => {
   const { db, room, session, joe, inner, talk, move, fresh, back, say, boardAsked, mapAsked } = await onTopics();
   talk(0, "we could charge per seat", "or a free tier for small teams");
   await move(fresh("Pricing"));
@@ -1669,7 +1669,7 @@ test("a topic's map keeps drawing when the board moves: the new topic is a direc
   const id = db.brainstormLive(room.id)!.id;
   await inner.mapPasses.run();
   assert.deepEqual(db.getBrainstorm(id)!.nodes.map((n) => n.label), ["Idea 1"]);
-  assert.doesNotMatch(mapAsked.at(-1)!, /now on another topic/);
+  assert.doesNotMatch(mapAsked.at(-1)!, /board's current topic/);
 
   // The board is told while the topic's map draws on it.
   talk(120_000, "the video should be short", "and skippable");
@@ -1686,7 +1686,7 @@ test("a topic's map keeps drawing when the board moves: the new topic is a direc
   session.addSpeech("u1", "Joe", "pricing again: per seat is simpler", Date.now());
   session.addSpeech("u2", "Huy", "yes per seat", Date.now());
   await inner.mapPasses.run();
-  assert.match(mapAsked.at(-1)!, /The talk is now on another topic: Pricing/);
+  assert.match(mapAsked.at(-1)!, /The board's current topic: Pricing/);
   assert.match(mapAsked.at(-1)!, /per seat is simpler/);
 
   await say({ type: "view.stop" });
@@ -1699,6 +1699,47 @@ test("a topic's map keeps drawing when the board moves: the new topic is a direc
 
   await session.end();
   assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
+});
+
+test("a map started with a typed topic hears the board's topic too, so talk that moves on can start a cluster", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const { db, room, session, inner, talk, move, fresh, mapAsked } = await onTopics();
+  startBrainstorm(db, room.id, "Jensen's downfall", "Joe");
+  session.brainstormChanged();
+  talk(0, "we could charge per seat", "or a free tier for small teams");
+  await move(fresh("Credit cards"));
+  await new Promise((r) => setTimeout(r, 5));
+  session.addSpeech("u1", "Joe", "I have three credit cards", Date.now());
+  await inner.mapPasses.run();
+  assert.match(mapAsked.at(-1)!, /The centre of the map: Jensen's downfall\nThe board's current topic: Credit cards/);
+  await session.end();
+});
+
+test("a diagram whose model gives no answer says so in the call, and one that heard nothing to draw says that", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  let fail = true;
+  const agent = Object.assign(new HeuristicAgent(), {
+    async designDiagram() {
+      if (fail) throw new Error("400 bad schema");
+      return { boxes: [], arrows: [], extend: [], caught: [], place: [], groups: [], topic: null };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  startBrainstorm(db, room.id, "Untitled design", "Joe", Date.now(), { diagram: { boxes: [], arrows: [] }, seed: null, taskId: null });
+  session.brainstormChanged();
+  session.addSpeech("u1", "Joe", "The chat is the intake for all the text", Date.now());
+  const inner = session as unknown as { mapPasses: { run(): Promise<void> } };
+  await inner.mapPasses.run().catch(() => {});
+  const last = () => joe.got.flatMap((m) => (m.type === "brainstorm" ? [m] : [])).at(-1)!.brainstorm!;
+  assert.equal(last().heard, "failed");
+  fail = false;
+  session.addSpeech("u1", "Joe", "and Discord feeds it", Date.now() + 1);
+  await inner.mapPasses.run();
+  assert.equal(last().heard, "nothing");
+  await session.end();
 });
 
 test("opening a topic's map while a diagram draws saves the diagram's draft spec first", async () => {

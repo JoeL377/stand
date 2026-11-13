@@ -2,7 +2,7 @@
 // map into the screen's width, which leaves its labels too small to read there; this reads at once.
 
 import type { BrainNode, BrainstormView } from "../../shared/protocol.ts";
-import { KIND } from "./BrainMap.tsx";
+import { KIND, clustersOf } from "./BrainMap.tsx";
 
 const KINDS = ["action", "decision", "question"] as const;
 function KindIcon({ kind }: { kind: (typeof KINDS)[number] }) {
@@ -23,35 +23,52 @@ export function BrainOutline(props: { brainstorm: BrainstormView }) {
       <p className="brain-outline-topic" dir="auto">
         {prompt}
       </p>
-      {dirs.length === 0 && <p className="muted">Nothing on the map yet. Ideas show here as people talk.</p>}
-      {dirs.map((d) => (
-        <section key={d.id}>
-          <h4 dir="auto">{d.label}</h4>
-          <ul>
-            {under(d).map((n) => (
-              <li key={n.id} className={fresh(n) ? "new" : undefined}>
-                <span className="brain-outline-idea">
-                  <strong dir="auto">{n.label}</strong>
-                  {n.by && <span className="muted">{n.by}</span>}
-                  {KINDS.map((kind) => {
-                    const count = n.caught.filter((c) => c.kind === kind).length;
-                    return count ? (
-                      <i key={kind} className={`brain-outline-mark ${kind}`} title={`${KIND[kind].label}: ${count}`}>
-                        <KindIcon kind={kind} /> {count}
-                      </i>
-                    ) : null;
-                  })}
-                </span>
-                {n.detail && (
-                  <span className="brain-outline-detail muted" dir="auto">
-                    {n.detail}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+      {dirs.length === 0 && (
+        <p className="muted">
+          {props.brainstorm.heard === "failed" && live
+            ? "Stand couldn't read the talk just now. It tries again as you talk."
+            : "Nothing on the map yet. Ideas show here as people talk."}
+        </p>
+      )}
+      {[null, ...clustersOf(nodes)].flatMap((c) => [
+        ...(c
+          ? [
+              <p key={`hub:${c}`} className="brain-outline-topic hub" dir="auto">
+                {c}
+              </p>,
+            ]
+          : []),
+        ...dirs
+          .filter((d) => (d.cluster ?? null) === c)
+          .map((d) => (
+            <section key={d.id}>
+              <h4 dir="auto">{d.label}</h4>
+              <ul>
+                {under(d).map((n) => (
+                  <li key={n.id} className={fresh(n) ? "new" : undefined}>
+                    <span className="brain-outline-idea">
+                      <strong dir="auto">{n.label}</strong>
+                      {n.by && <span className="muted">{n.by}</span>}
+                      {KINDS.map((kind) => {
+                        const count = n.caught.filter((c) => c.kind === kind).length;
+                        return count ? (
+                          <i key={kind} className={`brain-outline-mark ${kind}`} title={`${KIND[kind].label}: ${count}`}>
+                            <KindIcon kind={kind} /> {count}
+                          </i>
+                        ) : null;
+                      })}
+                    </span>
+                    {n.detail && (
+                      <span className="brain-outline-detail muted" dir="auto">
+                        {n.detail}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )),
+      ])}
     </div>
   );
 }

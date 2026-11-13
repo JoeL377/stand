@@ -244,6 +244,9 @@ export class RoomSession implements SpeechSink {
   private pilotTimer: ReturnType<typeof setTimeout> | null = null;
   /** The brainstorm running in this space, if one is (brainstorm.ts): its map, one pass at a time. */
   private brain: { id: string; threadId: string | null; map: MapKeeper | DiagramKeeper; reviewToo?: boolean } | null = null;
+  /** How the brain's last pass went, and whether the model gave no answer during it. */
+  private brainHeard: "drew" | "nothing" | "failed" | undefined;
+  private brainNoAnswer = false;
   /** The next steps people asked for out loud in this call (nextSteps.ts); the one offered is on a card. */
   private nextSteps: NextStep[] = [];
   private nextTimer: NodeJS.Timeout | null = null;
@@ -348,6 +351,7 @@ export class RoomSession implements SpeechSink {
       if (this.brain.map instanceof DiagramKeeper) this.brain.map.background(sessionBackground(b));
       return;
     }
+    this.brainHeard = undefined;
     // Only talk from this call, after the brainstorm began, belongs on its map; never what was said on a review slide.
     const since = Math.max(b.startedAt, this.meetingStartedAt) - 1;
     const review = new Map<string, boolean>();
@@ -362,17 +366,26 @@ export class RoomSession implements SpeechSink {
     if (b.kind === "design") {
       // A design session: the same passes, drawing a diagram of boxes and arrows (designSession.ts).
       // One opened in this call also reads what was said just before, which is often why it was opened.
-      const model = this.agent.designDiagram ? { designDiagram: this.agent.designDiagram.bind(this.agent) } : { designDiagram: async () => null };
+      const model = { designDiagram: this.noticed(this.agent.designDiagram ? this.agent.designDiagram.bind(this.agent) : async (_c: string, _t: string) => null) };
       const from = b.startedAt >= this.meetingStartedAt ? Math.max(this.meetingStartedAt, b.startedAt - DIAGRAM_LOOK_BACK_MS) - 1 : since;
       this.brain = { id: b.id, threadId: null, map: new DiagramKeeper(model, b.prompt, from, b.diagram, sessionBackground(b), inScope), reviewToo };
       return;
     }
-    const model = this.agent.brainstormMap ? { brainstormMap: this.agent.brainstormMap.bind(this.agent) } : { brainstormMap: async () => null };
+    const model = { brainstormMap: this.noticed(this.agent.brainstormMap ? this.agent.brainstormMap.bind(this.agent) : async (_c: string, _t: string) => null) };
     const thread = b.threadId;
-    if (!thread) return void (this.brain = { id: b.id, threadId: null, map: new MapKeeper(model, b.prompt, since, b.nodes, inScope), reviewToo });
+    // Every map hears which topic the board is on, so talk that moves to another subject can start a
+    // cluster of its own on the same map instead of hanging off the centre.
+    const topicNow = () => {
+      const board = this.board?.board();
+      return board?.threads.find((t) => t.id === board.currentId)?.title ?? null;
+    };
+    if (!thread) {
+      const keeper = new MapKeeper(model, b.prompt, since, b.nodes, inScope);
+      keeper.topicNow = topicNow;
+      return void (this.brain = { id: b.id, threadId: null, map: keeper, reviewToo });
+    }
     // A topic's map reads every line of its thread in this call, those said before it was opened too,
-    // and from then on the whole call: when the board moves to another topic, that topic becomes a
-    // direction of the same map instead of a map of its own.
+    // and from then on the whole call: when the board moves to another topic, the same map goes on.
     const openedAt = Math.max(b.startedAt, this.meetingStartedAt);
     const onThread = (s: Segment) => {
       const board = this.board?.board();
@@ -382,11 +395,22 @@ export class RoomSession implements SpeechSink {
       return t.spans.some(([from, to], i) => s.ts >= from && (s.ts <= to || (open && i === t.spans.length - 1)));
     };
     const keeper = new MapKeeper(model, b.prompt, this.meetingStartedAt - 1, b.nodes, (s) => inScope(s) && (s.ts >= openedAt || onThread(s)));
-    keeper.topicNow = () => {
-      const board = this.board?.board();
-      return board?.threads.find((t) => t.id === board.currentId)?.title ?? null;
-    };
+    keeper.topicNow = topicNow;
     this.brain = { id: b.id, threadId: thread, map: keeper };
+  }
+
+  /** A map or diagram model call that notes when it gave no answer, so the call can say so. */
+  private noticed<A extends unknown[], T>(call: (...args: A) => Promise<T | null>): (...args: A) => Promise<T | null> {
+    return async (...args) => {
+      try {
+        const out = await call(...args);
+        if (out === null) this.brainNoAnswer = true;
+        return out;
+      } catch (e) {
+        this.brainNoAnswer = true;
+        throw e;
+      }
+    };
   }
 
   /** The stretches of the meeting a board thread was on screen. */
@@ -586,7 +610,8 @@ export class RoomSession implements SpeechSink {
     const b = this.brain && this.db.getBrainstorm(this.brain.id);
     if (!b) return null;
     const map = this.brain!.map;
-    return toBrainstormView(map instanceof DiagramKeeper ? { ...b, diagram: map.all() } : { ...b, nodes: map.all() }, busy);
+    const view = toBrainstormView(map instanceof DiagramKeeper ? { ...b, diagram: map.all() } : { ...b, nodes: map.all() }, busy);
+    return this.brainHeard ? { ...view, heard: this.brainHeard } : view;
   }
 
   private broadcastBrainstorm(busy = false) {
@@ -630,18 +655,23 @@ export class RoomSession implements SpeechSink {
     const segments = this.db.meetingSegments(this.meetingId);
     if (brain.map.unreadSince(segments) === null) return;
     if (!this.ended) this.broadcastBrainstorm(true);
+    this.brainNoAnswer = false;
+    let heard: "drew" | "nothing" | "failed" = "failed";
     try {
       const map = brain.map;
+      let drew = false;
       if (map instanceof MapKeeper) {
         // A topic's map opened late reads its earlier talk a window at a time; people watch it fill in.
-        await catchUp(map, segments, this.people(segments), this.brainCaught(), this.meetingStartedAt, Date.now(), () => {
+        drew = await catchUp(map, segments, this.people(segments), this.brainCaught(), this.meetingStartedAt, Date.now(), () => {
           if (this.brain !== brain) return;
           this.db.saveBrainstormMap(brain.id, map.all());
           this.broadcastBrainstorm(true);
         });
-      } else await map.run(segments, this.people(segments), this.brainCaught(), this.meetingStartedAt, Date.now());
+      } else drew = await map.run(segments, this.people(segments), this.brainCaught(), this.meetingStartedAt, Date.now());
+      heard = drew ? "drew" : this.brainNoAnswer ? "failed" : "nothing";
     } finally {
       if (this.brain === brain) {
+        this.brainHeard = heard;
         brain.map.refresh(this.brainCaught());
         this.saveBrainstorm();
       }

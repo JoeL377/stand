@@ -1973,7 +1973,8 @@ export function agentApi(deps: AgentDeps) {
           idea_review: ideaReview.ideaReview
             ? { url: `${baseUrl}/s/${room.id}/review/${ideaReview.ideaReview.id}`, status: ideaReview.ideaReview.status === "draft" ? "waiting to start" : ideaReview.ideaReview.status === "live" ? "in a call now" : "finished" }
             : undefined,
-          directions: nodes.filter((n) => !n.parent).map(circle),
+          // A direction of a separate subject the talk moved to says which, under cluster.
+          directions: nodes.filter((n) => !n.parent).map((n) => (n.cluster ? { ...circle(n), cluster: n.cluster } : circle(n))),
           // A design session: its board is a diagram of parts and how they relate, and it has no directions.
           ...(b.kind === "design" ? { design_session: designInfo(b) } : {}),
         },

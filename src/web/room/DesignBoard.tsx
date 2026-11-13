@@ -280,11 +280,23 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
           </button>
         )}
         {waiting > 0 && <span className="design-waiting">{waiting} {live ? "suggested" : "left as suggestions"}</span>}
-        {brainstorm.busy && <span className="design-busy">Listening…</span>}
+        {brainstorm.busy ? (
+          <span className="design-busy">Listening…</span>
+        ) : (
+          live && brainstorm.heard === "failed" && <span className="design-busy trouble">Stand couldn't read the talk just now</span>
+        )}
       </div>
       <div className="design-frame" ref={frame}>
         {boxes.length === 0 ? (
-          <p className="design-empty muted">{live ? "Start talking it through. What Stand hears shows here as suggestions, and joins the diagram when someone keeps it." : "Nothing was put on this diagram."}</p>
+          <p className="design-empty muted">
+            {!live
+              ? "Nothing was put on this diagram."
+              : brainstorm.heard === "failed"
+                ? "Stand couldn't read the talk just now. It tries again as you talk."
+                : brainstorm.heard === "nothing"
+                  ? "Stand is listening, and hasn't heard the parts of a design yet. Say what the parts are and how they connect."
+                  : "Start talking it through. What Stand hears shows here as suggestions, and joins the diagram when someone keeps it."}
+          </p>
         ) : (
           laid && (
             <Board.Provider value={board}>

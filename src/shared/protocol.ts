@@ -293,6 +293,9 @@ export interface BrainNode {
   quote: Quote | null;
   points: BrainPoint[];
   caught: BrainCaught[];
+  /** A direction of a separate subject the talk moved to: that cluster's name, drawn as a centre of
+   *  its own. Absent: it hangs off the map's own centre. */
+  cluster?: string;
   /** Someone took it off the map. Kept on the server so it isn't added again; never sent. */
   removed?: boolean;
 }
@@ -401,6 +404,9 @@ export interface BrainstormView {
   context?: DesignContext[];
   /** A pass is reading the latest talk right now. */
   busy?: boolean;
+  /** How the last pass went in the call: it added something, found nothing to add, or couldn't get
+   *  an answer from the model (people see that, so a blank diagram isn't mistaken for a quiet one). */
+  heard?: "drew" | "nothing" | "failed";
 }
 
 export interface BrainstormSummary {
