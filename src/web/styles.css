@@ -4344,3 +4344,14 @@ footer.controls .control.pill { padding: 7px 16px; }
 .topic-col .topic-section-empty { font-size: 14px; }
 .running-list > .topic-sections { padding-top: 18px; border-top: 1px solid var(--line); }
 @media (max-width: 760px) { .topic-now { padding: 18px 16px 14px; } .topic-now > .topic-now-title { font-size: 21px; } }
+
+/* ---- card lists are plain bullets: the section's label already says what a line is ---- */
+.topic-now .topic-tasks li.topic-task:not(.heard):not(.leaving) > .topic-note-mark { align-self: flex-start; display: inline-flex; align-items: center; justify-content: center; height: 20px; font-size: 0; }
+.topic-now .topic-tasks li.topic-task:not(.heard):not(.leaving) > .topic-note-mark::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--muted) 75%, transparent); }
+/* An open to-do is a bullet until the pointer is on its line; then it is the box to tick. */
+@media (hover: hover) {
+  .topic-now .topic-check:not([aria-pressed="true"]) { border-color: transparent; transition: border-color 120ms; }
+  .topic-now .topic-check:not([aria-pressed="true"])::before { content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: color-mix(in srgb, var(--muted) 75%, transparent); transition: opacity 120ms; }
+  .topic-now li.topic-task:hover .topic-check:not([aria-pressed="true"]):not(:disabled), .topic-now .topic-check:not([aria-pressed="true"]):focus-visible { border-color: color-mix(in srgb, var(--text) 45%, transparent); }
+  .topic-now li.topic-task:hover .topic-check:not([aria-pressed="true"]):not(:disabled)::before, .topic-now .topic-check:not([aria-pressed="true"]):focus-visible::before { opacity: 0; }
+}
