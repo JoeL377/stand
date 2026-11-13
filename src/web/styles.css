@@ -3798,6 +3798,21 @@ a .mention { color: inherit; }
 /* The slide carries it while a review's slide is what shows; under a board or a snap opened over the slide, the screen does. */
 .screen:has(.rv-dock):not(:has(.board-tab, .snap-tab)) > .next-dock { display: none; }
 .rv-strip ~ .rv-dock { bottom: 66px; }
+/* A card from someone's own agent while the board is out of view: a notice in the same dock, over Stand's
+   suggestion when both are up, and Open shows the card in a panel over the middle screen, for this screen only. */
+.next-dock { flex-direction: column; align-items: center; gap: 8px; }
+.said-notice { gap: 10px; padding: 7px 8px 7px 12px; border-radius: 12px; font-size: 14px; max-width: 100%; background: var(--panel-2); box-shadow: 0 8px 28px rgb(0 0 0 / 0.5), inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+@starting-style { .said-notice { opacity: 0; transform: translateY(6px); } }
+.said-notice .agent-mark { color: var(--accent-text); flex: none; }
+.said-notice-who { flex: none; font-weight: 600; white-space: nowrap; }
+.said-notice-what { min-width: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--text); font: inherit; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.said-notice-more { flex: none; font-size: 13px; }
+.said-notice-open { flex: none; padding: 5px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.said-notice-line .said-notice-who { font-size: 13px; }
+.meeting:has(.phone-next:not(.said-notice-line)) .said-notice-line { bottom: calc(var(--bar) + 54px); }
+.said-panel { position: absolute; z-index: 7; top: 12px; right: 12px; bottom: 12px; width: min(560px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 14px; padding: 16px 18px; overflow-y: auto; border-radius: 14px; background: var(--panel); box-shadow: 0 12px 40px rgb(0 0 0 / 0.55), inset 0 0 0 1px var(--line); }
+.said-panel-foot { display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 4px; }
+@media (max-width: 820px) { .said-panel { inset: 8px; width: auto; } }
 .rv-pic:has(.rv-dock) .rv-landed { bottom: 70px; }
 .rv-pic:has(.rv-dock) .rv-strip ~ .rv-landed { bottom: 122px; }
 .rc-asked { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

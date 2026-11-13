@@ -1100,6 +1100,7 @@ export function agentApi(deps: AgentDeps) {
         showing: shown ? { kind: shown.kind, label: shown.label, ref: shown.ref, image_url: shown.snapUrl ? `${baseUrl}${shown.snapUrl}` : undefined } : null,
         caught: tail.caught.flatMap((n) => (NOTE_KINDS[n.kind] ? [{ ref: refOf(NOTE_KINDS[n.kind], n.id), kind: NOTE_KINDS[n.kind], text: n.text, owner: n.owner ?? undefined }] : [])),
         answers: tail.answers.map((c) => ({
+          id: c.id,
           at: iso(c.readyAt ?? c.at),
           by: c.agent ? `${c.agent.person ?? c.by}'s agent${c.agent.agent ? ` (${c.agent.agent})` : ""}` : "Stand",
           asked_by: c.question ? c.by : undefined,
