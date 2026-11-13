@@ -1573,7 +1573,7 @@ function TasksTab(props: {
       }}
     />
   );
-  // On the cards a new project starts as a faint card of its own, after the last project: a click
+  // On the cards a new project starts as a faint card of its own, the last one in the grid: a click
   // turns it into the form, in the place the project will take.
   const ghost = grid && !plain && viewing === null && !onlyPinned && !props.mine;
   const pills = (
@@ -1754,17 +1754,6 @@ function TasksTab(props: {
           {grid && pins.size > 0 && <div className="pj-grid pinned">{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
           <div className={grid ? "pj-grid" : "pj-list"}>
             {sections.filter((p) => !grid || !pins.has(p.id)).map(projectSection)}
-            {ghost && (
-              <section className={adding ? "sh-project pj-ghost adding" : "sh-project pj-ghost"}>
-                {adding ? (
-                  projectForm
-                ) : (
-                  <button type="button" className="pj-ghost-add" onClick={() => setAdding(true)}>
-                    + New project
-                  </button>
-                )}
-              </section>
-            )}
             {(unassigned.length > 0 || props.loose) && !onlyPinned && (
               <section className={`sh-project unassigned`} aria-label="Unassigned">
                 <ProjectLine
@@ -1776,6 +1765,17 @@ function TasksTab(props: {
                   roomId={props.roomId}
                   reload={props.reload}
                 />
+              </section>
+            )}
+            {ghost && (
+              <section className={adding ? "sh-project pj-ghost adding" : "sh-project pj-ghost"}>
+                {adding ? (
+                  projectForm
+                ) : (
+                  <button type="button" className="pj-ghost-add" onClick={() => setAdding(true)}>
+                    + New project
+                  </button>
+                )}
               </section>
             )}
             {!grid && !adding && !onlyPinned && !props.mine && addProject}
