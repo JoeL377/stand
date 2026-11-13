@@ -70,7 +70,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   };
   // Each rise puts the cursor in the chat box.
   const [focusChat, setFocusChat] = useState(0);
-  // On a wide screen the Tasks tab's tools (Mine, the sweep, its menu) sit in the tab row, not a row of their own.
+  // On a wide screen the Projects tab's tools (Mine, the sweep, its menu) sit in the tab row, not a row of their own.
   const [tabTools, setTabTools] = useState<HTMLSpanElement | null>(null);
   // Someone tags you in chat while it isn't on screen, or from another tab: a toast says so.
   const chatShown = useRef(false);
@@ -108,12 +108,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session">("");
   // Nothing saved: Projects when the space has any, otherwise Tasks.
   const [picked, setTab] = useState<TabKey | "">(() => {
-    if (openTask) return "tasks";
+    if (openTask) return "projects";
     if (params.get("project")) return "projects";
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
-      // To do and Questions became one Tasks tab, and Done since moved into it. Up next is gone: saved "next" falls through to Tasks.
-      if (saved === "todo" || saved === "questions" || saved === "done") return "tasks";
+      // Tasks and Decisions are inside each project now: a saved one of those opens Projects.
       if (saved && TABS.some((t) => t.key === saved)) return saved as TabKey;
     } catch {}
     return "";
@@ -125,7 +124,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     } catch {}
   };
   // A wide screen has no Chat tab: one saved from a narrower screen shows Tasks, with the dock open.
-  const home: TabKey = (room.projects ?? []).some((p) => !p.archived) ? "projects" : "tasks";
+  const home: TabKey = "projects";
   const tab: TabKey = picked === "" || (wide && picked === "chat") ? home : picked;
   const docked = wide && dockOpen;
   chatShown.current = wide ? dockOpen : tab === "chat";
@@ -319,9 +318,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const meetings = (feed?.meetings ?? []).filter((m) => !gone.has(`meeting:${m.id}`));
   const counts: Record<TabKey, number> = {
     meetings: meetings.length,
-    tasks: todos.length + questions.length,
     projects: (room.projects ?? []).filter((p) => !p.archived).length,
-    decisions: decisions.filter((n) => !n.replacedBy).length,
     // Chat counts what you haven't read, not what is there.
     chat: chat.unread,
   };
@@ -331,9 +328,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const closedQuestions = (feed?.closedQuestions ?? []).filter((n) => !gone.has(`question:${n.id}`));
 
   const projects = room.projects ?? [];
-  const matching = (n: Note) => matchesProject(n.project ?? null, projectFilter);
-  const projectPicker = (n: Note, own?: boolean) => <ProjectPicker note={n} roomId={room.id} projects={projects} onSaved={load} own={own} />;
   const filtered = projectProblem(projects, projectFilter);
+  const hasProjects = projects.some((p) => !p.archived);
+  // The project whose page is open ("none" is Unassigned). A space with no projects is one page of everything.
+  const pageOf = !hasProjects ? "none" : filtered ? "" : projectFilter;
+  const inProject = (n: Note) => !hasProjects || matchesProject(n.project ?? null, pageOf);
+  const show: ProjectShow = params.get("show") === "questions" ? "questions" : params.get("show") === "decisions" ? "decisions" : "tasks";
+  const projectPicker = (n: Note, own?: boolean) => <ProjectPicker note={n} roomId={room.id} projects={projects} onSaved={load} own={own} />;
 
   const reviews = feed?.reviews ?? [];
   const designReviews = feed?.designReviews ?? [];
@@ -479,22 +480,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               )}
             </button>
           ))}
-          {!phone && (tab === "tasks" || tab === "projects") && <span className="sh-tab-tools" ref={setTabTools} />}
+          {!phone && tab === "projects" && <span className="sh-tab-tools" ref={setTabTools} />}
           {tab === "chat" && <span className="sh-chat-bell"><ChatNotifyBell roomId={room.id} /></span>}
-          {/* One pill at the end of the tab row filters Decisions by project. Tasks opens a project from its row. */}
-          {tab === "decisions" && (
-            <label className={projectFilter ? "sh-project-filter on" : "sh-project-filter"} title="Filter by project">
-              {/* A phone has room for the mark only; the menu opens from it. */}
-              <svg className="sh-project-mark" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-                <path d="M2.5 4h11M4.5 8h7M6.5 12h3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-              <select aria-label="Filter by project" value={filtered ? "" : projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
-                <option value="">All projects</option>
-                {projects.filter((p) => !p.archived || p.id === projectFilter).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                <option value="none">Unassigned</option>
-              </select>
-            </label>
-          )}
         </div>
         </div>
         {/* The lists scroll in here, under the header, which is a fixed part of the page. */}
@@ -608,27 +595,54 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             </>
           )}
 
-          {(tab === "tasks" || tab === "projects") && (
+          {tab === "projects" && (
             <TasksTab
-              key={tab}
-              mode={tab}
+              key={mine ? "mine" : "projects"}
+              mode={mine ? "tasks" : "projects"}
               roomId={room.id}
               me={user.name}
               people={members}
-              deck={tab === "tasks" ? deck : null}
+              deck={null}
               sweep={feed?.questionSweep ?? null}
-              open={[...todos, ...questions].filter(tab === "projects" ? matching : () => true)}
-              closed={[...done, ...closedQuestions].filter(tab === "projects" ? matching : () => true)}
+              open={[...todos, ...questions].filter(mine ? () => true : inProject)}
+              closed={[...done, ...closedQuestions].filter(mine ? () => true : inProject)}
               all={[...todos, ...questions, ...done, ...closedQuestions]}
               mentions={feed?.mentions ?? []}
               projectPicker={projectPicker}
               projects={projects}
-              projectFilter={filtered || tab === "tasks" ? "" : projectFilter}
+              projectFilter={mine ? "" : pageOf}
+              solo={!hasProjects}
+              loose={decisions.some((n) => !n.replacedBy && matchesProject(n.project ?? null, "none"))}
               onProject={setProjectFilter}
               pinned={room.pinnedProjects ?? []}
-              decided={decisions.filter((n) => !n.replacedBy)}
-              onDecisions={() => pickTab("decisions")}
-              mine={tab === "tasks" && mine}
+              show={show}
+              onShow={(v) => setParam("show", v === "tasks" ? "" : v)}
+              decisionCount={decisions.filter((n) => !n.replacedBy && inProject(n)).length}
+              decisions={
+                <>
+                  <PointList
+                    kind="decided"
+                    notes={decisions.filter(inProject)}
+                    projectPicker={projectPicker}
+                    empty="No decisions yet."
+                    onArchive={(id) => archive(`decision:${id}`)}
+                    onReplaced={(id, by, replaced) => void api.confirmReplaced(room.id, id, by, replaced).then(load, errorToast("Couldn't save that"))}
+                  />
+                  {pageOf === "none" && context.length > 0 && (
+                    <>
+                      <p className="sh-group" title="What's true in this space that nobody had to choose">
+                        Context · {context.length}
+                      </p>
+                      <ul className="sh-list">
+                        {context.map((n) => (
+                          <li key={n.id}>{n.text}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
+              }
+              mine={mine}
               onMine={(on) => setParam("mine", on ? "1" : "")}
               toolsIn={phone ? null : tabTools}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
@@ -637,32 +651,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               onOpen={showTask}
             />
           )}
-          {tab === "decisions" && (
-            <>
-              <PointList
-                kind="decided"
-                notes={decisions.filter(matching)}
-                projectPicker={projectPicker}
-                empty={projectFilter ? "No decisions in this project." : "No decisions yet."}
-                onArchive={(id) => archive(`decision:${id}`)}
-                onReplaced={(id, by, replaced) => void api.confirmReplaced(room.id, id, by, replaced).then(load, errorToast("Couldn't save that"))}
-              />
-              {!projectFilter && context.length > 0 && (
-                <>
-                  <p className="sh-group" title="What's true in this space that nobody had to choose">
-                    Context · {context.length}
-                  </p>
-                  <ul className="sh-list">
-                    {context.map((n) => (
-                      <li key={n.id}>{n.text}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </>
-          )}
 
-          {tab !== "chat" && tab !== "projects" && (tab !== "decisions" || !projectFilter) && <ArchivedList
+          {/* What was archived: meetings under Meetings, everything else under the projects. */}
+          {tab !== "chat" && (tab !== "projects" || (!pageOf && !mine) || !hasProjects) && <ArchivedList
             rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
             open={showArchived}
             onToggle={() => setShowArchived((v) => !v)}
@@ -1015,9 +1006,16 @@ function TasksTab(props: {
   /** The projects the person looking pinned: theirs alone, first on the list and open. */
   pinned: string[];
   /** How many kept decisions each project has, by id: the project's view links to them. */
-  /** The space's standing decisions: a project's page lists its own beside its work. */
-  decided: Note[];
-  onDecisions: () => void;
+  /** The decisions of the project whose page is open, as their list. */
+  decisions: React.ReactNode;
+  decisionCount: number;
+  /** Which kind a project's page lists, and how to change it. */
+  show: ProjectShow;
+  onShow: (show: ProjectShow) => void;
+  /** A space with no projects: one page of everything, with no project line over it. */
+  solo: boolean;
+  /** There are decisions in no project, so Unassigned has something to show even with no open work. */
+  loose: boolean;
   /** Only the tasks of the person looking (?mine=1). */
   mine: boolean;
   onMine: (on: boolean) => void;
@@ -1081,8 +1079,6 @@ function TasksTab(props: {
       localStorage.setItem(viewKey, JSON.stringify(next));
     } catch {}
   };
-  const isOpen = (id: string) => view.open[id] ?? pins.has(id);
-  const toggleOpen = (id: string) => saveView({ ...view, open: { ...view.open, [id]: !isOpen(id) } });
   const onlyPinned = view.onlyPinned && pins.size > 0;
   // The tasks that wait on you sit behind a pill, so the projects come first.
   // The open question someone is writing an answer to.
@@ -1363,23 +1359,13 @@ function TasksTab(props: {
     const doing = (f: Family) => f.note.kind === "action" && !ready(f) && stateOf(f.note, work[f.note.id]) === "doing";
     // One list of to-dos, furthest along first: a row's own pill says where it stands, so no heading per state.
     const todo = (f: Family) => f.note.kind === "action";
-    const groups: Array<[string, Family[]]> = [
-      ["To-dos", [...families.filter(ready), ...families.filter(doing), ...families.filter((f) => todo(f) && !ready(f) && !doing(f))]],
-      ["Questions", families.filter((f) => !todo(f))],
-    ];
-    return groups
-      .filter(([, fs]) => fs.length > 0)
-      .map(([label, fs]) => (
-        <div key={label} className={`sh-task-group pj-state ${label.split(" ")[0].toLowerCase()}`}>
-          <p className="sh-group">
-            {label === "To-dos" ? <TodoIcon size={13} /> : <QuestionIcon size={13} />}
-            {label} <span>{fs.length}</span>
-          </p>
-          {label === "To-dos"
-            ? list(fs.flatMap((f) => [f.note, ...f.parts]), false, section, new Set(fs.flatMap((f) => f.parts.map((p) => p.id))))
-            : byOwner(fs, section)}
-        </div>
-      ));
+    const fs = [...families.filter(ready), ...families.filter(doing), ...families.filter((f) => todo(f) && !ready(f) && !doing(f)), ...families.filter((f) => !todo(f))];
+    if (!fs.length) return null;
+    return (
+      <div className="sh-task-group pj-state to-dos">
+        {list(fs.flatMap((f) => [f.note, ...f.parts]), false, section, new Set(fs.flatMap((f) => f.parts.map((p) => p.id))))}
+      </div>
+    );
   };
   /** Who has a project's open work, by first name; the counts are in each name's tooltip. */
   const ownerFaces = (notes: TaskNote[]) => {
@@ -1429,7 +1415,7 @@ function TasksTab(props: {
       <section
         key={p.id}
         aria-label={p.name}
-        className={`sh-project${!grid && isOpen(p.id) ? " open" : ""}${!grid && p.id === firstUnpinned ? " after-pins" : ""}${dragging === p.id ? " dragging" : ""}${drop}`}
+        className={`sh-project${!grid && p.id === firstUnpinned ? " after-pins" : ""}${dragging === p.id ? " dragging" : ""}${drop}`}
         onDragOver={
           dragging
             ? (e) => {
@@ -1459,11 +1445,9 @@ function TasksTab(props: {
           card={grid}
           now={nowOf(p.id)}
           nows={nowsOf(p.id)}
-          expanded={isOpen(p.id)}
           pinned={pins.has(p.id)}
           onPin={() => togglePin(p.id)}
-          onOpen={grid ? () => props.onProject(p.id) : () => toggleOpen(p.id)}
-          onAlone={grid ? undefined : () => props.onProject(p.id)}
+          onOpen={() => props.onProject(p.id)}
           roomId={props.roomId}
           reload={props.reload}
           order={
@@ -1477,7 +1461,6 @@ function TasksTab(props: {
               : undefined
           }
         />
-        {!grid && isOpen(p.id) && <div className="pj-body">{openIn.has(p.id) ? byState(openIn.get(p.id)!, p.id) : <p className="sh-card-empty small">Nothing open in this project.</p>}</div>}
       </section>
     );
   };
@@ -1493,7 +1476,7 @@ function TasksTab(props: {
     );
 
   const mineButton = (
-    <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only the tasks you own">
+    <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only what is yours, across every project">
       Mine
     </button>
   );
@@ -1510,10 +1493,10 @@ function TasksTab(props: {
           Pinned
         </button>
       )}
-      {plain && mineButton}
+      {(plain || viewing === null || props.solo) && mineButton}
     </>
   );
-  const sweepButton = plain && !props.mine && !props.projectFilter && sweep && (
+  const sweepButton = !plain && (viewing === null || props.solo) && sweep && (
     <button
       type="button"
       className="rp-pill desk-only"
@@ -1574,7 +1557,7 @@ function TasksTab(props: {
           />
         </div>
       )}
-      {viewing !== null && !plain && (
+      {viewing !== null && !plain && !props.solo && (
         <ProjectLine
           head
           project={viewing ? (projects.find((p) => p.id === viewing) ?? null) : null}
@@ -1584,7 +1567,7 @@ function TasksTab(props: {
           reload={props.reload}
         />
       )}
-      {!open.length && (plain || viewing !== null) && (
+      {!open.length && plain && (
         <p className="sh-card-empty">
           {props.mine ? "Nothing open is yours." : filterName ? `No open tasks in ${filterName}.` : "Nothing open. New tasks come from meetings and what people save here."}
         </p>
@@ -1611,50 +1594,59 @@ function TasksTab(props: {
         </>
       ) : viewing !== null ? (
         (() => {
-          // A project's page: what there is to do on the left, what there is to settle and what was settled beside it.
+          // A project's page lists one kind at a time: its to-dos, its open questions or its decisions.
+          const todos = open.filter((n) => n.kind === "action");
           const asked = open.filter((n) => n.kind !== "action");
-          const settled = viewing ? props.decided.filter((n) => n.project === viewing) : [];
-          const side = !phone && (asked.length > 0 || settled.length > 0);
+          const closedOf = (kind: "action" | "question") => ({ done: done.filter((n) => (n.kind === "action") === (kind === "action")), dropped: dropped.filter((n) => (n.kind === "action") === (kind === "action")) });
+          const folds = (kind: "action" | "question") => {
+            const c = closedOf(kind);
+            return (
+              <>
+                {c.done.length > 0 && (
+                  <div className={showDone ? "sh-done open" : "sh-done"}>
+                    {fold(kind === "action" ? "Done" : "Answered", c.done.length, showDone, () => setShowDone((v) => !v), <DoneIcon />)}
+                    {showDone && list(c.done, true)}
+                  </div>
+                )}
+                {c.dropped.length > 0 && (
+                  <div className={showDropped ? "sh-done open" : "sh-done"}>
+                    {fold("Dropped", c.dropped.length, showDropped, () => setShowDropped((v) => !v), <CloseIcon size={13} />)}
+                    {showDropped && list(c.dropped, true)}
+                  </div>
+                )}
+              </>
+            );
+          };
+          const views: Array<{ key: ProjectShow; label: string; n: number; icon: React.ReactNode }> = [
+            { key: "tasks", label: "Tasks", n: withParts(todos).length, icon: <TodoIcon size={13} /> },
+            { key: "questions", label: "Questions", n: asked.length, icon: <QuestionIcon size={13} /> },
+            { key: "decisions", label: "Decisions", n: props.decisionCount, icon: <DecidedIcon size={13} /> },
+          ];
           return (
-            <section className={side ? "sh-project open pj-page with-side" : "sh-project open pj-page"} aria-label={viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
-              <div className="pj-main">
-                {byState(side ? open.filter((n) => n.kind === "action") : open, viewing)}
-                {side && !open.some((n) => n.kind === "action") && <p className="sh-card-empty">No open to-dos.</p>}
+            <section className="sh-project open pj-page" aria-label={props.solo ? "Everything" : viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
+              <div className="pj-views" role="tablist" aria-label="What to show">
+                {views.map((v) => (
+                  <button key={v.key} type="button" role="tab" aria-selected={props.show === v.key} className={props.show === v.key ? "pj-view on" : "pj-view"} onClick={() => props.onShow(v.key)}>
+                    {v.icon}
+                    {v.label}
+                    {v.n > 0 && <span className="count">{v.n}</span>}
+                  </button>
+                ))}
               </div>
-              {(side || settled.length > 0) && (
-                <aside className="pj-side">
-                  {side && asked.length > 0 && (
-                    <div className="sh-task-group pj-state questions">
-                      <p className="sh-group">
-                        <QuestionIcon size={13} />
-                        Questions <span>{asked.length}</span>
-                      </p>
-                      {list(asked, false, viewing)}
-                    </div>
-                  )}
-                  {settled.length > 0 && (
-                    <div className="sh-task-group pj-state decisions">
-                      <p className="sh-group">
-                        <DecidedIcon size={13} />
-                        Decisions <span>{settled.length}</span>
-                      </p>
-                      <ul className="pj-decided">
-                        {settled.slice(0, 5).map((n) => (
-                          <li key={n.id} title={n.text}>
-                            <span dir="auto">{n.text}</span>
-                            <time>{new Date(n.ts).toLocaleDateString([], { month: "short", day: "numeric" })}</time>
-                          </li>
-                        ))}
-                      </ul>
-                      {settled.length > 5 && (
-                        <button type="button" className="pj-add" onClick={props.onDecisions}>
-                          All {settled.length} decisions
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </aside>
+              {props.show === "tasks" && (
+                <>
+                  {todos.length > 0 ? byState(todos, viewing) : <p className="sh-card-empty">No open to-dos.</p>}
+                  {folds("action")}
+                </>
               )}
+              {props.show === "questions" && (
+                <>
+                  {asked.length > 0 ? <div className="sh-task-group pj-state questions">{list(asked, false, viewing)}</div> : <p className="sh-card-empty">No open questions.</p>}
+                  {folds("question")}
+                </>
+              )}
+              {props.show === "decisions" && <div className="pj-decisions">{props.decisions}</div>}
+              {props.solo && !adding && addProject}
             </section>
           );
         })()
@@ -1664,20 +1656,18 @@ function TasksTab(props: {
           {grid && pins.size > 0 && <div className="pj-grid pinned">{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
           <div className={grid ? "pj-grid" : "pj-list"}>
             {sections.filter((p) => !grid || !pins.has(p.id)).map(projectSection)}
-            {unassigned.length > 0 && !onlyPinned && (
-              <section className={`sh-project unassigned${!grid && isOpen("") ? " open" : ""}`} aria-label="Unassigned">
+            {(unassigned.length > 0 || props.loose) && !onlyPinned && (
+              <section className={`sh-project unassigned`} aria-label="Unassigned">
                 <ProjectLine
                   project={null}
                   {...lineOf("")}
                   card={grid}
                   now={nowOf("")}
                   nows={nowsOf("")}
-                  expanded={isOpen("")}
-                  onOpen={grid ? () => props.onProject("none") : () => toggleOpen("")}
+                  onOpen={() => props.onProject("none")}
                   roomId={props.roomId}
                   reload={props.reload}
                 />
-                {!grid && isOpen("") && <div className="pj-body">{byState(unassigned, "")}</div>}
               </section>
             )}
             {!grid && !adding && !onlyPinned && !props.mine && addProject}
@@ -1685,13 +1675,13 @@ function TasksTab(props: {
           {grid && !adding && !onlyPinned && !props.mine && addProject}
         </>
       )}
-      {done.length > 0 && (plain || viewing !== null) && (
+      {done.length > 0 && plain && (
         <div className={showDone ? "sh-done open" : "sh-done"}>
           {fold("Done", done.length, showDone, () => setShowDone((v) => !v), <DoneIcon />)}
           {showDone && list(done, true)}
         </div>
       )}
-      {dropped.length > 0 && (plain || viewing !== null) && (
+      {dropped.length > 0 && plain && (
         <div className={showDropped ? "sh-done open" : "sh-done"}>
           {fold("Dropped", dropped.length, showDropped, () => setShowDropped((v) => !v), <CloseIcon size={13} />)}
           {showDropped && list(dropped, true)}
@@ -2352,7 +2342,9 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "projects" | "tasks" | "chat" | "meetings" | "decisions";
+type TabKey = "projects" | "chat" | "meetings";
+/** What a project's page lists: one kind at a time. */
+type ProjectShow = "tasks" | "questions" | "decisions";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
@@ -2374,11 +2366,9 @@ function ArchiveButton({ onClick }: { onClick: () => void }) {
 
 /** Which archived rows each tab lists at its bottom. */
 const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
-  projects: [],
-  tasks: ["todo", "question"],
+  projects: ["todo", "question", "decision"],
   chat: [],
   meetings: ["meeting", "snap", "jot"],
-  decisions: ["decision"],
 };
 
 /** A tab's archived rows, folded at its bottom like Done, each with Restore. */
@@ -2459,10 +2449,8 @@ const ProjectsIcon = () => (
 
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "projects", label: "Projects", icon: <ProjectsIcon /> },
-  { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
   { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
-  { key: "decisions", label: "Decisions", icon: <DecidedIcon size={14} /> },
 ];
 
 /** Decisions or open questions across the space's meetings, as the recap lists them. A decision a

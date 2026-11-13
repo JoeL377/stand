@@ -857,7 +857,7 @@ export function agentApi(deps: AgentDeps) {
         return {
           ordered: ordered.map((p) => projectRow(p, baseUrl)),
           space: room.name,
-          next: "This is the order the Tasks tab and list_spaces show, most important first.",
+          next: "This is the order the Projects tab and list_spaces show, most important first.",
         };
       } catch (err) {
         if (err instanceof ProjectError) throw new AgentError(err.message);

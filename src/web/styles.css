@@ -4637,3 +4637,13 @@ footer.controls .control.pill { padding: 7px 16px; }
 .pj-state > .sh-group { display: flex; align-items: center; gap: 6px; color: var(--text); font-weight: 600; }
 .pj-state > .sh-group > svg { flex: none; color: var(--muted); }
 .pj-state > .sh-group > span { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+
+/* A project's page lists one kind at a time; these pick which. They read as a quiet second row of tabs. */
+.pj-views { display: flex; align-items: center; gap: 4px; margin: 10px 0 8px; }
+.sh-panel .pj-view { display: inline-flex; align-items: center; gap: 6px; height: 30px; min-height: 0; padding: 0 12px; border: 0; border-radius: 999px; background: none; box-shadow: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.sh-panel .pj-view:hover { color: var(--text); background: var(--hover); }
+.sh-panel .pj-view.on { color: var(--text); background: var(--panel-2); }
+.pj-view > svg { flex: none; color: inherit; }
+.pj-view .count { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+/* Inside a project its decisions don't each name the project again; the pill comes back under the pointer to move one. */
+.pj-decisions li:not(:hover):not(:focus-within) .project-picker:not(:has(.suggested)) { display: none; }

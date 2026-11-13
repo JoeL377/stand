@@ -83,7 +83,7 @@ const thread = (page) => page.locator(".chat-thread");
       spaceUrl = vera.url();
       await signIn(bo, "Bo Tester", "bo@verify.test");
       await bo.goto(spaceUrl);
-      await bo.getByRole("tab", { name: /^Tasks/ }).click();
+      await bo.getByRole("tab", { name: /^Projects/ }).click();
       // Vera's page learns Bo is in the space when it loads again.
       await vera.reload();
       await vera.getByRole("tab", { name: /^Chat/ }).click();
