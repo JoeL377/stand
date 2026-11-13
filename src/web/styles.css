@@ -4571,25 +4571,14 @@ footer.controls .control.pill { padding: 7px 16px; }
 .pj-now.ready::before { background: var(--ok); }
 .pj-line.card .pj-moving { visibility: hidden; }
 
-/* A project's page: to-dos in the main column, its open questions and decisions in a narrower one beside. */
-.pj-page.with-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 34%); gap: 0 36px; align-items: start; }
-.pj-page.with-side .pj-side { border-left: 1px solid var(--line); padding-left: 28px; min-height: 120px; }
+/* A project's page: to-dos on the left, its open questions and decisions on the right, one line each. */
+.pj-page.with-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 32px; align-items: start; }
+.pj-page.with-side .pj-side { border-left: 1px solid var(--line); padding-left: 28px; min-width: 0; }
 .pj-side .pj-state:first-child > .sh-group, .pj-main .pj-state:first-child > .sh-group { margin-top: 10px; }
-.pj-state > .sh-group { display: flex; align-items: center; }
-.pj-state > .sh-group::before { content: ""; flex: none; position: static; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 8px; background: var(--muted); opacity: 0.5; vertical-align: 1px; }
-.pj-state.ready > .sh-group::before { background: var(--ok); opacity: 1; }
-.pj-state.in > .sh-group::before { background: var(--accent); opacity: 1; }
-.pj-state.questions > .sh-group::before { background: var(--warn); opacity: 1; }
-.pj-state.decisions > .sh-group::before { background: var(--ok); opacity: 1; border-radius: 2px; }
-.pj-decided { list-style: none; margin: 4px 0 0; padding: 0; }
-.pj-decided li { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; font-size: 14px; line-height: 1.4; }
-.pj-decided li > span { flex: 1; min-width: 0; }
+.pj-decided { list-style: none; margin: 0; padding: 0; }
+.pj-decided li { display: flex; align-items: baseline; gap: 12px; padding: 5px 0; font-size: 14px; line-height: 1.4; }
+.pj-decided li > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pj-decided time { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.pj-page.with-side .pj-side .followups.one-line .fu-body { min-width: 0; }
-.pj-page.with-side .pj-side .followups.one-line .fu-text { flex: 1; flex-wrap: nowrap; align-items: flex-start; }
-.pj-page.with-side .pj-side .followups.one-line .fu-text > .fu-open { flex: 1 1 0; white-space: normal; text-align: left; }
-.pj-page.with-side .pj-side .followups.one-line li { align-items: flex-start; }
-.pj-page.with-side .pj-side .followups.one-line li > .check { margin-top: 2px; }
 /* The side column is narrow: a row is its text; the editing bits are in the task's drawer. */
 .pj-page.with-side .pj-side .followups li > :is(.row-quiet, .sh-archive, .cfa, .rc-face.none) { display: none; }
 
@@ -4602,14 +4591,11 @@ footer.controls .control.pill { padding: 7px 16px; }
 .pp-head button { flex: none; font-size: 12px; }
 .project-presentation > p { padding: 18px 22px; }
 .pp-body { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 32px; padding: 8px 22px 22px; align-content: start; }
-.pp-body:has(.pp-side) { grid-template-columns: minmax(0, 1fr) minmax(240px, 36%); }
+.pp-body:has(.pp-side) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .pp-side { border-left: 1px solid var(--line); padding-left: 24px; }
 .pp-label { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; font-size: 11px; font-weight: 600; color: var(--muted); }
-.pp-label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: 0.5; }
-.pp-group.ready .pp-label::before { background: var(--ok); opacity: 1; }
-.pp-group.doing .pp-label::before { background: var(--accent); opacity: 1; }
-.pp-group.questions .pp-label::before { background: var(--warn); opacity: 1; }
-.pp-group.decisions .pp-label::before { background: var(--ok); opacity: 1; border-radius: 2px; }
+.pp-tag { flex: none; font-size: 12px; color: var(--accent-text); }
+.pp-tag.ready { color: var(--ok); }
 .pp-group ul { list-style: none; margin: 0; padding: 0; }
 .pp-group li { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; font-size: 15px; line-height: 1.4; }
 .pp-group li > button { flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -4622,3 +4608,5 @@ footer.controls .control.pill { padding: 7px 16px; }
   .pp-side { border-left: 0; padding-left: 0; }
   .pp-goal { display: none; }
 }
+/* Half a page wide: a to-do's hover-only bits take no room until the pointer is on its row. */
+.pj-page.with-side .pj-main .followups li:not(:hover):not(:focus-within):not(.opened) > :is(.row-quiet, .sh-archive, .cfa) { display: none; }

@@ -48,6 +48,7 @@ export function ProjectPresentation(props: {
   const ready = todos.filter((n) => work[n.id]?.ready);
   const doing = todos.filter((n) => !work[n.id]?.ready && stateOf(n, work[n.id]) === "doing");
   const rest = todos.filter((n) => !ready.includes(n) && !doing.includes(n));
+  const tag = (n: Note) => (ready.includes(n) ? "Ready to ship" : doing.includes(n) ? "In progress" : null);
   const row = (n: Note) => (
     <li key={n.id}>
       {props.canSteer ? (
@@ -57,6 +58,7 @@ export function ProjectPresentation(props: {
       ) : (
         <span>{n.text}</span>
       )}
+      {tag(n) && <span className={ready.includes(n) ? "pp-tag ready" : "pp-tag"}>{tag(n)}</span>}
       {n.owner && <span className="pp-owner">{n.owner.split(" ")[0]}</span>}
     </li>
   );
@@ -86,9 +88,7 @@ export function ProjectPresentation(props: {
       {open && (
         <div className="pp-body">
           <div className="pp-main">
-            {group("Ready to ship", "ready", ready)}
-            {group("In progress", "doing", doing)}
-            {group("To do", "todo", rest)}
+            {group("To-dos", "todo", [...ready, ...doing, ...rest])}
             {!todos.length && <p className="muted">No open to-dos.</p>}
           </div>
           {(asked.length > 0 || decided.length > 0) && (

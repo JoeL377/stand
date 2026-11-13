@@ -1357,11 +1357,11 @@ function TasksTab(props: {
     const families = withParts(notes);
     const ready = (f: Family) => !!work[f.note.id]?.ready;
     const doing = (f: Family) => f.note.kind === "action" && !ready(f) && stateOf(f.note, work[f.note.id]) === "doing";
+    // One list of to-dos, furthest along first: a row's own pill says where it stands, so no heading per state.
+    const todo = (f: Family) => f.note.kind === "action";
     const groups: Array<[string, Family[]]> = [
-      ["Ready to ship", families.filter(ready)],
-      ["In progress", families.filter(doing)],
-      ["To do", families.filter((f) => f.note.kind === "action" && !ready(f) && !doing(f))],
-      ["Questions", families.filter((f) => f.note.kind !== "action")],
+      ["To-dos", [...families.filter(ready), ...families.filter(doing), ...families.filter((f) => todo(f) && !ready(f) && !doing(f))]],
+      ["Questions", families.filter((f) => !todo(f))],
     ];
     return groups
       .filter(([, fs]) => fs.length > 0)
@@ -1370,7 +1370,9 @@ function TasksTab(props: {
           <p className="sh-group">
             {label} · {fs.length}
           </p>
-          {byOwner(fs, section)}
+          {label === "To-dos"
+            ? list(fs.flatMap((f) => [f.note, ...f.parts]), false, section, new Set(fs.flatMap((f) => f.parts.map((p) => p.id))))
+            : byOwner(fs, section)}
         </div>
       ));
   };
@@ -1624,7 +1626,7 @@ function TasksTab(props: {
                       <p className="sh-group">Decisions · {settled.length}</p>
                       <ul className="pj-decided">
                         {settled.slice(0, 5).map((n) => (
-                          <li key={n.id}>
+                          <li key={n.id} title={n.text}>
                             <span dir="auto">{n.text}</span>
                             <time>{new Date(n.ts).toLocaleDateString([], { month: "short", day: "numeric" })}</time>
                           </li>
