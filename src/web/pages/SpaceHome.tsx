@@ -791,6 +791,7 @@ function SnapRow(props: {
   const who = snap.takenById === props.me ? "You" : firstName(snap.takenBy);
   return (
     <li className="sh-row">
+      <time className="sh-time">{fmtTime(snap.ts)}</time>
       <button className="sh-thumb" onClick={props.onOpen} aria-label="Open the snap">
         <img src={snap.url} alt="" loading="lazy" />
       </button>
@@ -805,7 +806,6 @@ function SnapRow(props: {
         )}
       </span>
       <ItemPill of={snap} room={props.room} onPick={props.onPick} />
-      <time className="sh-time">{fmtTime(snap.ts)}</time>
       <ArchiveButton onClick={props.onArchive} />
     </li>
   );
@@ -831,7 +831,8 @@ function JotRow(props: {
   const snaps = jot.snaps ?? [];
   return (
     <li className="sh-row">
-      {snaps.length ? (
+      <time className="sh-time">{fmtTime(jot.ts)}</time>
+      {snaps.length > 0 && (
         <button
           className="sh-thumb"
           onClick={props.onOpen}
@@ -840,10 +841,6 @@ function JotRow(props: {
           <img src={snaps[0].url} alt="" loading="lazy" />
           {snaps.length > 1 && <span className="sh-thumb-more">+{snaps.length - 1}</span>}
         </button>
-      ) : (
-        <span className="sh-icon" aria-hidden>
-          <EditIcon size={16} />
-        </span>
       )}
       <span className="sh-row-text">
         <span className="sh-who">{mine ? "You" : firstName(jot.by)}</span>
@@ -871,7 +868,6 @@ function JotRow(props: {
         </button>
       )}
       <ItemPill of={jot} room={props.room} onPick={props.onPick} />
-      <time className="sh-time">{fmtTime(jot.ts)}</time>
       <ArchiveButton onClick={props.onArchive} />
     </li>
   );
@@ -933,40 +929,48 @@ function ItemPill(props: {
   );
 }
 
-/** No mark of its own: every meeting row would carry the same one. Its name says what kind it was. */
+/**
+ * A meeting, on the same lines as every other row: when, what kind and how long, then what came out
+ * of it in three columns that line up down the list (to-dos, open questions, decisions), then the
+ * page it left behind. No mark of its own: its name says what kind it was.
+ */
 function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; kind?: { name: string; open: string; to: string }; onArchive: () => void }) {
   const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  // What came out of it, in the tabs' order and colors.
+  // In the tabs' order and colors. A kind with nothing keeps its column, empty.
   const counts = [
     { n: m.todos, kind: "todo", Icon: TodoIcon, label: plural(m.todos, "to-do") },
     { n: m.open, kind: "question", Icon: QuestionIcon, label: plural(m.open, "open question") },
     { n: m.decided, kind: "decided", Icon: DecidedIcon, label: plural(m.decided, "decision") },
-  ].filter((c) => c.n > 0);
+  ];
   return (
     <li className="sh-row">
       <Link to={`/meetings/${m.id}`} className="sh-row-link" title={m.summary ?? undefined}>
+        <time className="sh-time">{fmtTime(m.endedAt)}</time>
         <span className="sh-row-text">
           <span className="sh-who">{kind?.name ?? "Meeting"}</span>
-          <span className="sh-what muted">{minutes} min</span>
-          {counts.length > 0 && (
-            <span className="sh-counts">
-              {counts.map(({ n, kind, Icon, label }) => (
-                <span key={kind} className={`sh-count ${kind}`} title={label} aria-label={label}>
-                  <Icon size={13} />
-                  {n}
-                </span>
-              ))}
-            </span>
+          <span className="sh-what sh-len muted">{minutes} min</span>
+        </span>
+        <span className="sh-counts">
+          {counts.map(({ n, kind, Icon, label }) =>
+            n > 0 ? (
+              <span key={kind} className={`sh-count ${kind}`} title={label} aria-label={label}>
+                <Icon size={13} />
+                {n}
+              </span>
+            ) : (
+              <span key={kind} className="sh-count" aria-hidden />
+            ),
           )}
         </span>
-        <time className="sh-time">{fmtTime(m.endedAt)}</time>
       </Link>
-      {kind && (
-        <Link className="rp-pill" to={kind.to}>
-          {kind.open}
-        </Link>
-      )}
+      <span className="sh-end">
+        {kind && (
+          <Link className="rp-pill" to={kind.to}>
+            {kind.open}
+          </Link>
+        )}
+      </span>
       <ArchiveButton onClick={onArchive} />
     </li>
   );
@@ -1975,11 +1979,11 @@ function KindRow(props: { to: string; name: string; at: number | null; children:
   return (
     <li className="sh-row">
       <Link to={props.to} className="sh-row-link">
+        <time className="sh-time">{reviewDay(props.at)}</time>
         <span className="sh-row-text">
           <span className="sh-who">{props.name}</span>
           {props.children}
         </span>
-        <time className="sh-time">{reviewDay(props.at)}</time>
       </Link>
     </li>
   );

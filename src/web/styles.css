@@ -1735,7 +1735,8 @@ html.mac-app :is(button, a, input, textarea, select, label, summary, [role="butt
 .sh-row:hover .sh-row-del, .sh-row-del:focus-visible { opacity: 1; }
 .sh-row-del:hover { color: var(--danger); background: var(--hover); }
 .sh-row-del svg { width: 14px; height: 14px; }
-.sh-time { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 58px; text-align: right; }
+/* When it happened leads every row, so meetings, notes and snaps start on one line down the list. */
+.sh-time { flex: none; width: 60px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sh-pill-wrap { position: relative; flex: none; display: inline-flex; }
 .sh-pill { display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: auto; min-height: 0; padding: 2px 9px; border: 1px solid transparent; border-radius: 999px; font-size: 12px; line-height: 1.5; color: var(--text); background: var(--hover); cursor: pointer; text-decoration: none; box-shadow: none; }
 a.sh-pill:hover { text-decoration: none; }
@@ -2268,12 +2269,15 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .rc-points .sh-archive svg, .rc-points .cfa-btn svg { color: inherit; }
 
 /* A meeting row's to-dos, open questions and decisions: small chips in the tabs' colors. */
-.sh-counts { display: inline-flex; align-items: center; gap: 6px; align-self: center; flex: none; }
-.sh-count { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px 1px 5px; border-radius: 999px; background: var(--hover); color: var(--text); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 18px; }
-.sh-count svg { flex: none; }
-.sh-count.todo svg { color: var(--accent); }
-.sh-count.question svg { color: var(--warn); }
-.sh-count.decided svg { color: var(--ok); }
+/* Three columns at the end of the row, the same on every meeting, so the numbers line up down the list. */
+.sh-counts { display: grid; grid-template-columns: repeat(3, 44px); align-items: center; flex: none; }
+.sh-counts .sh-count { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 18px; }
+.sh-counts .sh-count svg { flex: none; }
+.sh-counts .sh-count.todo svg { color: var(--accent); }
+.sh-counts .sh-count.question svg { color: var(--warn); }
+.sh-counts .sh-count.decided svg { color: var(--ok); }
+/* The page a meeting left behind (Slides, Map...): a slot every meeting row keeps, filled or not. */
+.sh-end { flex: none; width: 76px; display: inline-flex; justify-content: flex-end; }
 
 /* ---- phones ---- */
 @media (max-width: 760px) {
@@ -3413,7 +3417,7 @@ button.ds-q:focus-visible { outline: 2px solid var(--accent); }
 .sh-kinds .rp-pill { cursor: pointer; flex: none; }
 .sh-kinds .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
 .sh-kinds .rp-pill.on .muted { color: inherit; opacity: 0.7; }
-.sh-row > a.rp-pill { flex: none; }
+.sh-row > a.rp-pill, .sh-end > a.rp-pill { flex: none; }
 .rp-head .dr-again { flex: none; height: 32px; padding: 0 14px; font-size: 13px; }
 
 /* What came out of a circle: marks for to-dos, decisions and open questions, and pills that show one kind. */
@@ -3942,7 +3946,10 @@ a .mention { color: inherit; }
   /* Only your own to-dos tick from a phone; the rest show their state. */
   .followups .check.read { opacity: 0.45; pointer-events: none; }
   /* A meeting's row: its kind and what came out of it; the length is on its page. */
-  .sh-row .sh-what:has(+ .sh-counts) { display: none; }
+  .sh-row .sh-len { display: none; }
+  .sh-counts { grid-template-columns: repeat(3, 38px); }
+  /* A note with no item says nothing about it on a phone; filing it is for a bigger screen. */
+  .sh-rows .sh-pill.none:not([aria-expanded="true"]) { display: none; }
   /* A task on a phone: what happened first, then the rest; the comment box stays at the foot. */
   .task-drawer .td-body { display: flex; flex-direction: column; }
   .task-drawer .td-body > * { flex: none; }
