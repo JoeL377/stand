@@ -5,6 +5,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 // meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, QuestionSweep, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { activeFirst, matchesProject, projectActivity, type Project } from "../../shared/projects.ts";
@@ -69,6 +70,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   };
   // Each rise puts the cursor in the chat box.
   const [focusChat, setFocusChat] = useState(0);
+  // On a wide screen the Tasks tab's tools (Mine, the sweep, its menu) sit in the tab row, not a row of their own.
+  const [tabTools, setTabTools] = useState<HTMLSpanElement | null>(null);
   // Someone tags you in chat while it isn't on screen, or from another tab: a toast says so.
   const chatShown = useRef(false);
   const openChat = useRef(() => {});
@@ -457,6 +460,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               )}
             </button>
           ))}
+          {!phone && tab === "tasks" && <span className="sh-tab-tools" ref={setTabTools} />}
           {/* One pill at the end of the tab row filters Tasks and Decisions by project. */}
           {(tab === "tasks" || tab === "decisions") && (
             <label className={projectFilter ? "sh-project-filter on" : "sh-project-filter"} title="Filter by project">
@@ -596,6 +600,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               projectFilter={filtered ? "" : projectFilter}
               mine={mine}
               onMine={(on) => setParam("mine", on ? "1" : "")}
+              toolsIn={phone ? null : tabTools}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
               reload={load}
               openId={openTask}
@@ -973,6 +978,8 @@ function TasksTab(props: {
   /** Only the tasks of the person looking (?mine=1). */
   mine: boolean;
   onMine: (on: boolean) => void;
+  /** Where its tools go instead of a row above the list: the tab row, on a wide screen. */
+  toolsIn?: HTMLElement | null;
   roomId: string;
   me: string;
   /** The space's people, by name: who a to-do can be given to. */
@@ -1314,6 +1321,25 @@ function TasksTab(props: {
       </button>
     );
 
+  const mineButton = (
+    <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only the tasks you own">
+      Mine
+    </button>
+  );
+  const sweepButton = !props.mine && !props.projectFilter && sweep && (
+    <button
+      type="button"
+      className="rp-pill desk-only"
+      onClick={() => setSweeping(sweep)}
+      title={`Stand thinks ${sweep.proposals.length === 1 ? "1 open question is" : `${sweep.proposals.length} open questions are`} settled or no longer ${sweep.proposals.length === 1 ? "matters" : "matter"}. Nothing closes until you confirm.`}
+    >
+      <span className="agent-mark" aria-hidden>
+        ✦
+      </span>
+      Sweep<span className="sh-sweep-long"> questions</span>
+      <span className="count">{sweep.proposals.length}</span>
+    </button>
+  );
   const deck = props.deck?.slides.length ? props.deck : null;
   const filterName = props.projectFilter === "none" ? "Unassigned" : nameOf(props.projectFilter);
   return (
@@ -1331,11 +1357,38 @@ function TasksTab(props: {
       )}
       {showDeck && deck && <DonePop deck={deck} onClose={() => setShowDeck(false)} />}
       {sweeping && <SweepPop roomId={props.roomId} count={asked} sweep={sweeping} onClose={() => setSweeping(null)} onClosed={props.reload} />}
-      <div className="sh-task-tools">
-        <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only the tasks you own">
-          Mine
-        </button>
-        {adding ? (
+      {props.toolsIn
+        ? createPortal(
+            <>
+              {mineButton}
+              {sweepButton}
+              <TaskMenu
+                onAdd={() => setAdding(true)}
+                sort={canSort ? sort : null}
+                onSort={pickSort}
+              />
+            </>,
+            props.toolsIn,
+          )
+        : !adding && (
+            <div className="sh-task-tools">
+              {mineButton}
+              <button type="button" className="rp-pill desk-only" onClick={() => setAdding(true)}>
+                + Project
+              </button>
+              {sweepButton}
+              {canSort && (
+                <label className="sh-project-sort" title={sort === "active" ? "Projects with work in progress first, then the ones with the newest to-dos" : "The team's order, most important first. Drag a project to change it."}>
+                  <select aria-label="Project order" value={sort} onChange={(e) => pickSort(e.target.value === "team" ? "team" : "active")}>
+                    <option value="active">Active first</option>
+                    <option value="team">Team order</option>
+                  </select>
+                </label>
+              )}
+            </div>
+          )}
+      {adding && (
+        <div className="sh-task-tools">
           <ProjectForm
             label="New project"
             submit="Add"
@@ -1346,34 +1399,8 @@ function TasksTab(props: {
               props.reload();
             }}
           />
-        ) : (
-          <button type="button" className="rp-pill desk-only" onClick={() => setAdding(true)}>
-            + Project
-          </button>
-        )}
-        {!props.mine && !props.projectFilter && sweep && (
-          <button
-            type="button"
-            className="rp-pill desk-only"
-            onClick={() => setSweeping(sweep)}
-            title={`Stand thinks ${sweep.proposals.length === 1 ? "1 open question is" : `${sweep.proposals.length} open questions are`} settled or no longer ${sweep.proposals.length === 1 ? "matters" : "matter"}. Nothing closes until you confirm.`}
-          >
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>
-            Sweep questions
-            <span className="count">{sweep.proposals.length}</span>
-          </button>
-        )}
-        {canSort && (
-          <label className="sh-project-sort" title={sort === "active" ? "Projects with work in progress first, then the ones with the newest to-dos" : "The team's order, most important first. Drag a project to change it."}>
-            <select aria-label="Project order" value={sort} onChange={(e) => pickSort(e.target.value === "team" ? "team" : "active")}>
-              <option value="active">Active first</option>
-              <option value="team">Team order</option>
-            </select>
-          </label>
-        )}
-      </div>
+        </div>
+      )}
       {!open.length && !sections.length && (
         <p className="sh-card-empty">
           {props.mine ? "Nothing open is yours." : filterName ? `No open tasks in ${filterName}.` : "Nothing open. New tasks come from meetings and what people save here."}
@@ -1476,6 +1503,37 @@ function TasksTab(props: {
         </div>
       )}
     </>
+  );
+}
+
+/** The Tasks tab's less used tools, in one menu at the end of the tab row: a new project, and the project order. */
+function TaskMenu(props: { onAdd: () => void; sort: "active" | "team" | null; onSort: (sort: "active" | "team") => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
+  const pick = (run: () => void) => () => (setOpen(false), run());
+  return (
+    <span className="sh-project-menu sh-task-menu" ref={ref}>
+      <button type="button" className="sh-project-more" aria-label="More for tasks" aria-haspopup="menu" aria-expanded={open} title="New project, project order" onClick={() => setOpen((v) => !v)}>
+        ⋯
+      </button>
+      {open && (
+        <span className="sh-menu" role="menu">
+          <button role="menuitem" onClick={pick(props.onAdd)}>
+            New project
+          </button>
+          {props.sort && (
+            <>
+              <button role="menuitemradio" aria-checked={props.sort === "active"} className={props.sort === "active" ? "on" : undefined} title="Projects with work in progress first, then the ones with the newest to-dos" onClick={pick(() => props.onSort("active"))}>
+                Active projects first
+              </button>
+              <button role="menuitemradio" aria-checked={props.sort === "team"} className={props.sort === "team" ? "on" : undefined} title="The team's order, most important first. Drag a project to change it." onClick={pick(() => props.onSort("team"))}>
+                Team order
+              </button>
+            </>
+          )}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -2120,7 +2178,10 @@ function PointList(props: {
           <span className="rc-point-body">
             <span>
               {n.text}
-              {props.projectPicker?.(n)}
+              {n.projectSuggested && props.projectPicker?.(n)}
+              {/* Its project, quote, date and the question it answers wait for a hover. */}
+              <span className="pt-quiet">
+              {!n.projectSuggested && props.projectPicker?.(n)}
               {n.quote && <QuoteMark quote={n.quote} />}
               {n.from && <FromChip from={n.from} />}
               {n.answers && (
@@ -2134,6 +2195,7 @@ function PointList(props: {
                   </span>
                 </span>
               )}
+              </span>
               {n.replacedBy && <ReplacedChip by={n.replacedBy} />}
               {n.mayBeReplacedBy && props.onReplaced && <MaybeReplaced by={n.mayBeReplacedBy} onAnswer={(replaced) => props.onReplaced!(n.id, n.mayBeReplacedBy!.noteId, replaced)} />}
             </span>

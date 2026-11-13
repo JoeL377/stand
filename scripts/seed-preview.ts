@@ -388,8 +388,21 @@ db.saveQuestionSweep(room.id, {
   kept: [],
 });
 
+// Projects, as real spaces have them: most to-dos and questions sit in one, a few in none.
+const projects: Array<[string, string, RegExp]> = [
+  ["Payments", "Cards that fail get paid anyway", /retry|payment|card|chargeback|apple pay|fraud|runbook|on call/i],
+  ["Guest checkout", "Buy without an account", /guest|launch|terms|support|help page/i],
+  ["Checkout page", "One page from cart to paid", /summary|layout|order number|outlook|promo|email/i],
+];
+for (const [name, goal, match] of projects) {
+  const p = db.createProject(room.id, { name, goal }, sam.id);
+  for (const n of [...db.openActions(room.id), ...db.spaceNotes(room.id, "question", 100), ...db.spaceNotes(room.id, "decision", 100)]) {
+    if (!n.projectId && match.test(n.text)) db.setNoteProject(room.id, n.id, { projectId: p.id, by: sam.name });
+  }
+}
+
 // What's true in the space.
-const old = api.addContext(samsAgent, { space: room.id, text: "Stripe is the only card processor" });
+const old =api.addContext(samsAgent, { space: room.id, text: "Stripe is the only card processor" });
 api.addContext(samsAgent, { space: room.id, text: "Stripe takes cards; Adyen takes everything in the EU", replaces: old.created.ref });
 api.addContext(samsAgent, { space: room.id, text: "Launch freeze starts Nov 28" });
 

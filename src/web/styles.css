@@ -3985,3 +3985,43 @@ a .mention { color: inherit; }
   .sh-panel.tasks .sh-project-fold { font-weight: 650; }
   .sh-panel.tasks .sh-project:not(.folded) > .followups, .sh-panel.tasks .sh-project:not(.folded) > div { margin-top: 4px; }
 }
+/* A quieter space page on a wide screen. The header stays one line; the Tasks tab's tools sit in the
+   tab row; and what is only needed to edit (a project's menu and its owner faces, a row's project,
+   its "Part of", a question's Answer, an empty owner, a decision's project, quote and date, a note's
+   "No item") waits for the pointer. Pills that say where work stands stay. */
+@media (min-width: 821px) {
+  .sh-head { flex-wrap: nowrap; }
+  .sh-purpose { flex: 1 1 auto; }
+  .sh-tab-tools { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+  .sh-tab-tools:empty { display: none; }
+  .sh-tab-tools .rp-pill { flex: none; height: 26px; font-size: 12.5px; }
+  .sh-tab-tools .rp-pill.on { background: var(--text); color: var(--panel); border-color: var(--text); }
+  .sh-tab-tools .rp-pill .agent-mark { font-size: 12px; }
+  .sh-tab-tools .rp-pill .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .sh-tab-tools + .sh-project-filter { margin-left: 6px; }
+  .sh-tabs:has(.sh-tab-tools) .sh-tab { flex: none; }
+  .sh-tabs:has(.sh-tab-tools) .sh-project-filter { flex: 0 1 auto; min-width: 0; }
+  .sh-tabs .sh-task-menu { margin-left: 0; }
+  /* Its menu opens below the row, so the row lets it out. */
+  .sh-tabs:has(.sh-task-menu) { overflow: visible; }
+  .sh-tabs .sh-task-menu .sh-project-more { height: 26px; min-height: 0; padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 16px; line-height: 1; }
+  .sh-tabs .sh-task-menu .sh-menu { left: auto; right: 0; }
+  .sh-menu > button.on { font-weight: 600; }
+  .sh-menu > button[role="menuitemradio"].on::after { content: "✓"; margin-left: auto; padding-left: 12px; color: var(--accent-text); }
+}
+@media (min-width: 821px) and (max-width: 1240px) {
+  .sh-tab-tools .sh-sweep-long { display: none; }
+}
+@media (min-width: 821px) and (hover: hover) {
+  .sh-panel.tasks .sh-project-owners, .sh-panel.tasks .sh-project-live, .sh-panel.tasks .sh-project-menu { opacity: 0; transition: opacity 0.12s ease; }
+  .sh-panel.tasks .sh-project-head:hover :is(.sh-project-owners, .sh-project-live, .sh-project-menu),
+  .sh-panel.tasks .sh-project-head:focus-within :is(.sh-project-owners, .sh-project-live, .sh-project-menu),
+  .sh-panel.tasks .sh-project-menu:has([aria-expanded="true"]) { opacity: 1; }
+  .sh-panel.tasks .followups li:not(:hover):not(:focus-within):not(.opened) :is(.task-answer:not([aria-expanded="true"]), .rc-face.none) { opacity: 0; }
+  /* A row's project and "Part of" go to the end of its line, so nothing moves when they show. */
+  .sh-panel.tasks .followups.one-line .fu-text > :is(.task-part-of, .project-picker) { order: 2; }
+  .sh-panel.tasks .followups li:not(:hover):not(:focus-within):not(.opened) .fu-text > .task-part-of,
+  .sh-panel.tasks .followups li:not(:hover):not(:focus-within):not(.opened) .fu-text > .project-picker:not(:has(.suggested)) { display: none; }
+  .sh-panel.decisions .rc-points li:not(:hover):not(:focus-within) .pt-quiet { display: none; }
+  .sh-panel .sh-rows li:not(:hover):not(:focus-within) .sh-pill.none:not([aria-expanded="true"]) { opacity: 0; }
+}
