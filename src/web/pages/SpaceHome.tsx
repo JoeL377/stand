@@ -1428,6 +1428,8 @@ function TasksTab(props: {
         <>
           {/* The row is its box, its title and its owner. What can be done to it waits behind one button;
               where it came from and its project are in the task itself, a click away. */}
+          {/* Copy for agent is used often enough to sit on the row, beside the menu, under the pointer. */}
+          <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} />
           <RowMore>
             {!closed && (
               <button type="button" role="menuitem" onClick={() => void move(n, "dropped")}>
@@ -1439,7 +1441,6 @@ function TasksTab(props: {
               <ArchiveIcon />
               Archive
             </button>
-            <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} label />
           </RowMore>
           {/* On Mine every row is yours, so your own face says nothing there; someone else's still shows. */}
           {props.mine && isMine(n) ? null : n.kind === "action" ? (
