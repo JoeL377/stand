@@ -54,6 +54,16 @@ export function NextCard(props: {
   };
   return (
     <div className="nudge next-card" role="status" title={next.guessed ? "Stand offers it from the last few minutes of talk" : `${first(next.by)} asked for it`}>
+      {/* What to do about it comes first and is the one solid button, so it is what people see. */}
+      {review && ready > 0 ? (
+        <button className="primary next-do" onClick={() => void start()} disabled={props.offline || busy}>
+          {busy ? "Starting…" : "Start now"}
+        </button>
+      ) : (
+        <button className="primary next-do" onClick={() => void take()} disabled={props.offline || busy} title={review ? "Keeps it in the recap as a suggested next step" : "Draws it beside the board. Nothing else in the call moves."}>
+          {review ? "Add to recap" : busy ? "Drawing…" : next.kind === "map" ? "Draw map" : "Draw diagram"}
+        </button>
+      )}
       <span className="agent-mark" aria-hidden>
         ✦
       </span>
@@ -63,13 +73,10 @@ export function NextCard(props: {
         {next.topic && <strong dir="auto">{next.topic}</strong>}?{review && ready > 0 && <span className="muted"> · {waiting}</span>}
       </span>
       {review && ready > 0 && (
-        <button className="link" onClick={() => void start()} disabled={props.offline || busy}>
-          {busy ? "Starting…" : "Start now"}
+        <button className="link muted" onClick={() => void take()} disabled={props.offline || busy} title="Keeps it in the recap as a suggested next step">
+          Later
         </button>
       )}
-      <button className={review && ready > 0 ? "link muted" : "link"} onClick={() => void take()} disabled={props.offline || busy} title={review ? "Keeps it in the recap as a suggested next step" : "Draws it beside the board. Nothing else in the call moves."}>
-        {review ? (ready > 0 ? "Later" : "Add to recap") : next.kind === "map" ? "Draw map" : "Draw diagram"}
-      </button>
       <button className="link muted" onClick={() => send({ type: "next.wave", id: next.id })} aria-label="No thanks">
         ✕
       </button>

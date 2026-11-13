@@ -2,7 +2,7 @@
 // how the slide ended (Ship, Ship with fixes, Not yet) and what the team said about it so far.
 // The host flips slides and everyone follows; anyone can set the outcome.
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { IDEA_OUTCOMES, REVIEW_OUTCOMES, type Deck, type IdeaOutcome, type Item, type Note, type ReviewOutcome } from "../../shared/protocol.ts";
 import { IdeaCard } from "./IdeaCard.tsx";
 import { CloseIcon } from "../icons.tsx";
@@ -44,6 +44,8 @@ export function ReviewStage(props: {
   /** False for someone following along on a phone: the outcome shows as a status, without its buttons. */
   canDecide?: boolean;
   className?: string;
+  /** Stand's suggestion card, shown at the bottom of the slide (NextCard.tsx). */
+  dock?: ReactNode;
 }) {
   const { item, deck, index, count, canFlip, disabled } = props;
   const review = item.slide?.review;
@@ -129,6 +131,7 @@ export function ReviewStage(props: {
             ))}
           </div>
         )}
+        {props.dock && <div className="next-dock rv-dock">{props.dock}</div>}
         {!wrap && !open && landed.length > 0 && (
           <div className="rv-landed" aria-live="polite">
             {landed.map((n) => {
