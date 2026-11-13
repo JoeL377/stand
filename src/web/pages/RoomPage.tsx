@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { enterWhenShown } from "../motion.ts";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { Capabilities } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
@@ -45,6 +46,15 @@ function SpacePage({ roomId }: { roomId: string }) {
     setJoined(true);
     setParams({}, { replace: true });
   }, [room, params, setParams]);
+
+  // Going into the call, its screen opens up from just under full size; leaving it, the space's page
+  // fades back in. Only on the switch, never on the first page of a visit.
+  const wasJoined = useRef(joined);
+  useLayoutEffect(() => {
+    if (wasJoined.current === joined) return;
+    wasJoined.current = joined;
+    return enterWhenShown((page) => page, joined ? { scale: 0.985 } : { y: 4 });
+  }, [joined]);
 
   if (error) {
     return (

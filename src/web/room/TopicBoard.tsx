@@ -27,6 +27,7 @@ import { type CSSProperties, Fragment, useContext, useEffect, useRef, useState }
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { BarSlot } from "./barSlot.ts";
+import { useFadeOnPick } from "../motion.ts";
 import { Typed, useUpdated } from "./written.tsx";
 import type { AgentCard, Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
@@ -1096,6 +1097,8 @@ function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; tasks: Task
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // Another tab's list fades in under the tabs.
+  useFadeOnPick(wrap, tab, (el) => [...el.querySelectorAll(":scope > .topic-tab-panel")]);
   if (cols)
     return (
       <div className="topic-cols" ref={wrap}>

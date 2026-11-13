@@ -4839,6 +4839,9 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
 .sh-archived-kind { flex: none; width: 64px; font-size: 12px; color: var(--muted); }
 .archived-pop .sh-archived-title { color: var(--text); }
 .sh-head-menu button .count { margin-left: auto; color: var(--muted); font-size: 12px; }
+/* In a call: the board's tab over a share or a deck, and a snap's tab, fade in when picked. */
+.board-tab, .snap-tab { animation: fade-in 140ms var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { .board-tab, .snap-tab { animation: none; } }
 
 /* The space's Activity tab (Activity.tsx): what agents did, one line each, grouped by day. Quiet on
    purpose: grey text, a small face, and color only on the one word that says something waits. */

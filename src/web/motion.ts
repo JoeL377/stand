@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 
 /** Motion for moving around the app, and only for that: a tab, a project, a space, a drawer or a
  *  sheet. Lists and data that change on their own never move here; the call board has its own
@@ -79,4 +80,57 @@ export function useTabInk(ref: React.RefObject<HTMLElement | null>, selectedKey:
     // The tabs themselves are fixed for a row; re-observe if the selection changes which exist.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
+}
+
+/** Bring in the page (the app root's first element), or the part of it `pick` names, once it has
+ *  something to show rather than "Loading…". Gives up after about 1.5 s rather than move late.
+ *  Returns a cancel, for an effect's cleanup. */
+export function enterWhenShown(pick: (page: Element) => Element | null, from: From, ms = 200): () => void {
+  let frame = 0;
+  let tries = 0;
+  const look = () => {
+    const page = document.getElementById("root")?.firstElementChild;
+    const el = page && !page.classList.contains("loading") ? pick(page) : null;
+    if (el) return enter(el, from, ms);
+    if (++tries < 90) frame = requestAnimationFrame(look);
+  };
+  look();
+  return () => cancelAnimationFrame(frame);
+}
+
+/** Pages that sit in the spaces frame (the sidebar and a page beside it). Everything else, a
+ *  meeting's recap, a review or a brainstorm, is a page of its own opened from one of them. */
+const framed = (path: string) => /^\/($|s\/[^/]+\/?$|r\/[^/]+\/?$|spaces\/manage|agents)/.test(path);
+/** /r/<id> and /s/<id> are the same space. */
+const placeOf = (path: string) => path.replace(/^\/r\//, "/s/").replace(/\/$/, "") || "/";
+
+/** Moving between pages. Opening a recap, review or brainstorm brings it in from the right; going
+ *  back to the space brings the space's page in from the left while the sidebar holds still; another
+ *  space (or All spaces) fades the page in with a small lift. Not on the first page of a visit, and
+ *  not for anything inside one page (tabs, a project, joining the call). Renders nothing. */
+export function RouteMotion(): null {
+  const { pathname } = useLocation();
+  const was = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const from = was.current;
+    was.current = pathname;
+    if (from === null || placeOf(from) === placeOf(pathname)) return;
+    const a = framed(from), b = framed(pathname);
+    // A page that is still loading comes in once it has something to show, so the move lands on
+    // the page and not on "Loading…".
+    return enterWhenShown((page) => (b ? page.querySelector(".sp-surface") ?? (a ? null : page) : page), a && b ? { y: 6 } : b ? { x: -12 } : a ? { x: 12 } : { y: 4 });
+  }, [pathname]);
+  return null;
+}
+
+/** Fade in what a pick shows when `key` changes, never on first show: the children of `ref` (or the
+ *  ones `pick` chooses), leaving the picker itself still. For lists behind tabs and pills. */
+export function useFadeOnPick<K>(ref: React.RefObject<Element | null>, key: K, pick: (el: Element) => Element[] = (el) => [...el.children], ms = 140): void {
+  const prev = useRef(key);
+  useLayoutEffect(() => {
+    if (Object.is(prev.current, key)) return;
+    prev.current = key;
+    if (ref.current) for (const el of pick(ref.current)) enter(el, {}, ms);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 }

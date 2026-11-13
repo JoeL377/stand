@@ -1,5 +1,6 @@
 import { usePersonColors } from "../PersonColors.tsx";
 import { useEffect, useRef, useState } from "react";
+import { useFadeOnPick } from "../motion.ts";
 import type { AgentCard, Board, ClientMessage, Item, ListNote, Note, RoomState, Segment } from "../../shared/protocol.ts";
 import { buildTimeline, type TimelineEntry } from "../../shared/timeline.ts";
 import { AgentRow, AskRow, MadeBy } from "../Timeline.tsx";
@@ -45,6 +46,9 @@ export function SidePanel(props: {
   // what agents reported. Said and Stand are parts of it. Chat is the meeting's one conversation,
   // whichever item each message landed on.
   const [tab, setTab] = useState<View>("all");
+  // All / Chat / Said / Stand: the list fades in under the pills.
+  const sideRef = useRef<HTMLElement>(null);
+  useFadeOnPick(sideRef, tab, (el) => [...el.querySelectorAll(".transcript")]);
   const shut = props.phone ? !props.open : !!props.folded && !props.peeking;
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   // The running list sits out a product review (the notes agent files what's said under the slide),
@@ -170,6 +174,7 @@ export function SidePanel(props: {
 
   return (
     <aside
+      ref={sideRef}
       className={props.peeking && props.folded ? "panel side peeking" : "panel side"}
       onMouseEnter={() => setHolding(true)}
       onMouseLeave={() => setHolding(false)}

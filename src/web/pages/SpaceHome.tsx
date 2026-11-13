@@ -438,6 +438,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     if (a === "projects" && b === "projects") return from && !to ? { x: -12 } : { x: 12 };
     return { y: 4 };
   });
+  // On Meetings, another kind (All, Product reviews, Brainstorms…) fades its list in; the pills and
+  // the Start button stay put.
+  const shownKind = useRef(kind);
+  useLayoutEffect(() => {
+    if (shownKind.current === kind) return;
+    shownKind.current = kind;
+    for (const el of panelRef.current?.children ?? []) if (!el.classList.contains("sh-meet-bar")) enter(el, {}, 140);
+  }, [kind]);
   useEnterOnChange(dockRef, docked, (_, open) => (open ? { x: 12 } : null), 200);
 
   return (
