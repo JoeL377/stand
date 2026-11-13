@@ -4264,3 +4264,44 @@ a .mention { color: inherit; }
 .sketch .brain-node.root.hub { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .sketch .design .brain-zoom { position: absolute; }
 .sketch.phone .sk-canvas { margin: 6px 8px 8px; border-radius: 12px; }
+/* The card view, in step with the sketch's sheet: the same corner, and a question to Stand reads as a
+   centred conversation instead of hugging the card's left edge. */
+.topic-now { border-radius: 14px; }
+.answer-stack .ask-thread > *, .answer-stack .ask-foot { margin-inline: auto; }
+.answer-stack .ask-thread { padding-left: 8px; }
+/* In the Running list's narrow columns the hidden "Options" button no longer holds a third of an open
+   question's line: it lies over the line's end when the row is pointed at. */
+@media (hover: hover) {
+  .running-list .topic-task { position: relative; }
+  .running-list .topic-task .agent-find { position: absolute; right: 0; top: 2px; background: color-mix(in srgb, var(--accent) 24%, var(--panel-2)); box-shadow: -8px 0 8px var(--panel-2); pointer-events: none; }
+  .running-list .topic-task:hover .agent-find, .running-list .topic-task .agent-find:focus-visible { pointer-events: auto; }
+}
+/* The card view on a wide screen: the list of cards is a menu in the board's top row, not a column,
+   so the card has the full width (TopicBoard.tsx, barSlot.ts). */
+.view-bar-slot { display: inline-flex; min-width: 0; flex: 0 1 auto; }
+.card-list-toggle.in-bar { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 420px; height: 24px; min-height: 0; padding: 0 6px; border: 1px solid transparent; border-radius: 999px; background: none; box-shadow: none; color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.card-list-toggle.in-bar:hover, .card-list-toggle.in-bar.on { background: var(--hover); }
+.card-list-toggle.in-bar svg { flex: none; color: var(--muted); }
+.card-list-toggle.in-bar .card-list-toggle-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.topic-board.stack.menu-list { position: relative; }
+.topic-board.stack.menu-list > .card-list { display: none; position: absolute; z-index: 8; top: 4px; left: 12px; width: 320px; max-height: min(70%, 520px); padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35); transform: none; }
+.topic-board.stack.menu-list.list-open > .card-list { display: flex; }
+/* Chat and transcript on a wide screen: tabs first, with the fold button beside them. The item's title is
+   in the top bar already. */
+.side-top { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px 16px; }
+.side-top .side-toggle { flex: 1; min-width: 0; margin: 0; }
+.side-top .side-fold { margin: 0; flex: none; }
+.side-top .side-head-snaps { margin-top: 0; }
+.invite.quiet { border-color: transparent; padding-inline: 8px; color: var(--muted); }
+.invite.quiet:hover { color: var(--text); }
+/* The call's control bar on a wide screen: one short row, icon beside its label, so the board gets the height. */
+footer.controls .controls-group > .control:not(.mic-caret), footer.controls .controls-group > .xp > .control { flex-direction: row; gap: 7px; min-width: 0; padding: 7px 11px; font-size: 12.5px; }
+footer.controls:has(.controls-group) { padding: 4px 16px 6px; min-height: 44px; }
+footer.controls .control.pill { padding: 7px 16px; }
+/* A new chat message while the panel is folded: a small preview beside the rail, over the margin, not the board. */
+.panel.side.rail { position: relative; overflow: visible; }
+.chat-preview { position: absolute; z-index: 20; right: calc(100% + 8px); bottom: 8px; width: 300px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35); color: var(--text); font-size: 13px; line-height: 1.4; text-align: left; cursor: pointer; animation: line-in 200ms var(--ease-out, ease-out); }
+.chat-preview:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.chat-preview strong { font-size: 12px; font-weight: 600; color: var(--muted); }
+.chat-preview span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .chat-preview { animation: none; } }

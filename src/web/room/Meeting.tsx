@@ -509,8 +509,9 @@ export function Meeting(props: {
           >
             ?
           </button>
-          <button className="ghost invite" onClick={copyInvite} aria-label="Copy invite link">
-            <LinkIcon /> <span className="invite-label">{copied ? "Copied ✓" : "Copy invite link"}</span>
+          {/* Alone, inviting someone is the next thing to do. Once people are in, it is an icon. */}
+          <button className={state.participants.length > 1 && !copied ? "ghost invite quiet" : "ghost invite"} onClick={copyInvite} aria-label="Copy invite link" title="Copy invite link">
+            <LinkIcon /> {(copied || state.participants.length <= 1) && <span className="invite-label">{copied ? "Copied ✓" : "Copy invite link"}</span>}
           </button>
         </div>
       </header>
