@@ -4302,3 +4302,20 @@ footer.controls .control.pill { padding: 7px 16px; }
 .now.in-bar .task-picker:not(:has(> *)) { display: none; }
 .now.in-bar .task-picker:has(> .task-picker-menu:only-child) { position: absolute; display: block; }
 .invite-copied { white-space: nowrap; }
+
+/* ---- card updates you can see: new lines are written in, the card says "Updated" ---- */
+.typed-rest { opacity: 0; }
+.typed-caret { display: inline-block; width: 2px; height: 1em; margin: 0 1px -2px 2px; border-radius: 1px; background: var(--accent-text); animation: notes-pulse 0.8s ease-in-out infinite; }
+.topic-now { position: relative; }
+.topic-flash { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; animation: card-updated 1.8s ease-out; }
+@keyframes card-updated { from { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 7%, transparent); } }
+.topic-updating.done { color: var(--accent-text); animation: label-in 300ms var(--ease-out, ease-out); }
+.topic-updating.done .agent-mark { animation: none; }
+.topic-tab-count.bump { animation: sp-count-bump 500ms ease-out; color: var(--accent-text); }
+.topic-tasks li.topic-task { position: relative; }
+.topic-tasks li.topic-task::before { content: ""; position: absolute; left: -10px; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--ok); opacity: 0; transition: opacity 1.2s ease-out; }
+.topic-tasks li.topic-task.topic-new::before { opacity: 1; transition: none; }
+.topic-tasks li.topic-task.topic-new { animation: line-in 320ms var(--ease-out, ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .topic-flash, .topic-updating.done, .topic-tab-count.bump, .topic-tasks li.topic-task.topic-new, .typed-caret { animation: none; }
+}

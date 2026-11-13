@@ -53,7 +53,11 @@ const TOPIC_SLACK_MS = 45_000;
 /** Lines of the topic on screen shown before the older ones join "Earlier". */
 const HERE_SHOWN = 5;
 /** How long a new to-do, decision or question glows. */
-const TASK_NEW_MS = 3_000;
+const TASK_NEW_MS = 8_000;
+/** How long a card says it was just updated. */
+const UPDATED_MS = 6_000;
+/** A new line is written in over about this long, a word at a time. */
+const TYPE_MS = 1_400;
 /** How long an answered question or a checked to-do stays in place before it leaves: the
  *  question for its decision, the to-do for the Done fold. */
 const LEAVE_MS = 4_000;
@@ -756,17 +760,25 @@ function OptionsView({ card, start, acts }: { card: AgentCard; start: number; ac
 
 /** The Running list: everything the meeting has produced so far, To do, Decided and Open side by side. */
 function RunningList(props: { tasks: Tasks; acts: TaskActs; idOf: (name: string) => string; nameOf: (name: string) => string }) {
+  const updatedAt = useUpdated([...props.tasks.fresh]);
   return (
     <section className="topic-now running-list" aria-label="Running list">
+      {updatedAt && <span key={updatedAt} className="topic-flash" aria-hidden />}
       <div className="topic-now-head">
         <span className="topic-now-label">Running list</span>
         <span className="topic-mins">The whole meeting so far</span>
+        <span key={updatedAt ?? "idle"} className={updatedAt ? "topic-updating on done" : "topic-updating"} aria-hidden>
+          <span className="agent-mark">✦</span> Updated
+        </span>
       </div>
       <div className="topic-sections columns">
         {SECTIONS.map((sec) => (
           <div key={sec.kind} className={`topic-section ${sec.kind}`}>
             <span className="topic-section-label">
-              {sec.label} {props.tasks.count[sec.kind] > 0 && <span className="topic-tab-count">{props.tasks.count[sec.kind]}</span>}
+              {sec.label}{" "}
+              {props.tasks.count[sec.kind] > 0 && (
+                <span className={props.tasks.rows[sec.kind].some((r) => props.tasks.fresh.has(r.note.id)) ? "topic-tab-count bump" : "topic-tab-count"}>{props.tasks.count[sec.kind]}</span>
+              )}
             </span>
             <TaskList kind={sec.kind} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} compact />
           </div>
@@ -925,6 +937,7 @@ function Card(props: {
   const { t } = props;
   const label = props.rewoundAt ? `At ${props.rewoundAt}` : props.arrival === "new" ? "New topic" : props.arrival === "back" ? "Back to" : props.live ? "Now" : "Last";
   const marks = useChanges(t);
+  const updatedAt = useUpdated([...marks.keys(), ...props.tasks.fresh]);
   const said = splitNow(t.card.now);
   const foot = props.speaking
     ? { name: props.speaking.name, id: props.speaking.id, text: props.speaking.text, now: true }
@@ -938,14 +951,15 @@ function Card(props: {
       aria-label={props.rewoundAt ? `Topic at ${props.rewoundAt}` : "Current topic"}
       aria-busy={props.updating}
     >
+      {updatedAt && <span key={updatedAt} className="topic-flash" aria-hidden />}
       <div className="topic-now-head">
         <span key={label} className={["topic-now-label", props.live && "live", props.arrival && "arrived"].filter(Boolean).join(" ")}>
           {label}
         </span>
         {spent(t) >= 60_000 && <span className="topic-mins">{fmtDuration(spent(t))}</span>}
         <MovedBy move={props.movedBy} start={props.meetingStart} nameOf={props.nameOf} idOf={props.idOf} />
-        <span className={props.updating ? "topic-updating on" : "topic-updating"} aria-hidden>
-          <span className="agent-mark">✦</span> Updating
+        <span key={updatedAt && !props.updating ? updatedAt : "busy"} className={props.updating ? "topic-updating on" : updatedAt ? "topic-updating on done" : "topic-updating"} aria-hidden>
+          <span className="agent-mark">✦</span> {props.updating || !updatedAt ? "Updating" : "Updated"}
         </span>
         {!props.rewoundAt && <AgentStatus cards={props.acts.agent?.cards} />}
       </div>
@@ -958,7 +972,7 @@ function Card(props: {
         </span>{" "}
         {t.card.summary.map((x, i) => (
           <span key={i} className={mark(marks.get(`s${i}`))}>
-            {x}{" "}
+            <Typed text={x} on={marks.has(`s${i}`)} />{" "}
           </span>
         ))}
       </p>
@@ -993,6 +1007,62 @@ function Card(props: {
         </p>
       )}
     </section>
+  );
+}
+
+/** When the card last gained or changed a line, for UPDATED_MS after; null otherwise. A mark that
+ *  was already showing isn't a new update. */
+function useUpdated(ids: string[]): number | null {
+  const seen = useRef<Set<string>>(new Set());
+  const [at, setAt] = useState<number | null>(null);
+  const sig = [...ids].sort().join(" ");
+  useEffect(() => {
+    const added = ids.some((id) => !seen.current.has(id));
+    seen.current = new Set(ids);
+    if (added) setAt(Date.now());
+  }, [sig]);
+  useEffect(() => {
+    if (at === null) return;
+    const timer = setTimeout(() => setAt(null), UPDATED_MS);
+    return () => clearTimeout(timer);
+  }, [at]);
+  return at;
+}
+
+const STILL = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** A line Stand just wrote, written in a word at a time. The words still to come hold their
+ *  place unseen, so nothing on the card moves while it writes. */
+function Typed({ text, on }: { text: string; on: boolean }) {
+  const words = text.split(" ");
+  const [shown, setShown] = useState<number | null>(null);
+  useEffect(() => {
+    if (!on || STILL || words.length < 2) return setShown(null);
+    setShown(0);
+    const step = Math.min(90, Math.max(25, TYPE_MS / words.length));
+    const timer = setInterval(
+      () =>
+        setShown((n) => {
+          if (n === null || n + 1 >= words.length) {
+            clearInterval(timer);
+            return null;
+          }
+          return n + 1;
+        }),
+      step,
+    );
+    return () => clearInterval(timer);
+    // The mark stays on for seconds after the writing is done; only new words start it again.
+  }, [on, text]);
+  if (shown === null) return <>{text}</>;
+  return (
+    <span className="typed" aria-label={text}>
+      <span aria-hidden>{words.slice(0, shown).join(" ")}</span>
+      <span className="typed-caret" aria-hidden />
+      <span className="typed-rest" aria-hidden>
+        {(shown ? " " : "") + words.slice(shown).join(" ")}
+      </span>
+    </span>
   );
 }
 
@@ -1044,7 +1114,7 @@ function Details(props: { details: BoardDetail[]; marks?: Map<string, Mark>; idO
           )}
           <span>
             {d.kind === "position" && d.who && <strong>{first(props.nameOf(d.who))} </strong>}
-            {d.text}
+            <Typed text={d.text} on={props.marks?.get(d.id) === "new"} />
             {d.kind === "todo" && d.who && <span className="topic-owner"> · {first(props.nameOf(d.who))}</span>}
           </span>
         </li>
@@ -1089,13 +1159,12 @@ function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; tasks: Task
       <div className="topic-tabs" role="tablist" aria-label="Details">
         {TABS.map((x) => {
           const n = x.kind === "position" ? people.length : props.tasks.count[x.kind];
-          const fresh =
-            x.kind !== tab &&
-            (x.kind === "position" ? people.some((d) => props.marks.get(d.id) === "new") : props.tasks.rows[x.kind].some((r) => props.tasks.fresh.has(r.note.id)));
+          const grew = x.kind === "position" ? people.some((d) => props.marks.get(d.id) === "new") : props.tasks.rows[x.kind].some((r) => props.tasks.fresh.has(r.note.id));
+          const fresh = x.kind !== tab && grew;
           return (
             <button key={x.kind} type="button" role="tab" aria-selected={tab === x.kind} className={[tab === x.kind && "on", !n && "empty"].filter(Boolean).join(" ")} onClick={() => pick(x.kind)}>
               {x.label}
-              <span className="topic-tab-count">{n}</span>
+              <span className={grew ? "topic-tab-count bump" : "topic-tab-count"}>{n}</span>
               {fresh && <span className="topic-tab-new" aria-label="new" />}
             </button>
           );
@@ -1327,7 +1396,9 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
           {opts.r?.leaving ? "✓" : opts.r?.heard ? "✦" : MARK[props.kind]}
         </span>
       )}
-      <span className="topic-task-text">{note.text}</span>
+      <span className="topic-task-text">
+        <Typed text={note.text} on={props.tasks.fresh.has(note.id)} />
+      </span>
       {opts.r?.heard && <HeardActs id={note.id} acts={props.acts} />}
       {note.saidDone && !note.doneAt && <SaidDonePill quote={note.saidDone} onUndo={props.acts.onUndoSaid && (() => props.acts.onUndoSaid!(note.id))} />}
       {opts.r?.answers && (
