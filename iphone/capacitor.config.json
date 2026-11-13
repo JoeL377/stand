@@ -11,8 +11,5 @@
     "appendUserAgent": "StandiPhone/1",
     "limitsNavigationsToAppBoundDomains": false,
     "contentInset": "never"
-  },
-  "plugins": {
-    "StatusBar": { "overlaysWebView": false, "style": "DEFAULT" }
   }
 }

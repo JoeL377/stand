@@ -8,9 +8,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        // The band behind the status bar matches Stand's page (--bg in src/web/styles.css), light or dark.
-        window?.backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0x19 / 255, green: 0x19 / 255, blue: 0x19 / 255, alpha: 1) : .white }
-        window?.rootViewController = StandViewController()
+        window?.rootViewController = StandRootViewController(content: StandViewController())
         window?.makeKeyAndVisible()
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)

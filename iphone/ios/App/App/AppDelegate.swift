@@ -62,6 +62,47 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 }
 
+// MARK: - The screen
+
+/// Stand's page background (--bg in src/web/styles.css), light or dark.
+let standBackground = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0x19 / 255, green: 0x19 / 255, blue: 0x19 / 255, alpha: 1) : .white }
+
+/// Holds the web view below the status bar, on Stand's own background, so the band behind the status
+/// bar matches the page in light and dark. Capacitor makes the web view its controller's root view,
+/// so the web view can't be moved inside that controller; this one lays it out instead.
+class StandRootViewController: UIViewController {
+    let content: UIViewController
+
+    init(content: UIViewController) {
+        self.content = content
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = standBackground
+        addChild(content)
+        view.addSubview(content.view)
+        content.view.translatesAutoresizingMaskIntoConstraints = false
+        // Top: below the status bar. Sides and bottom: to the edges; the page pads for the home
+        // indicator itself (viewport-fit=cover).
+        NSLayoutConstraint.activate([
+            content.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            content.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            content.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        content.didMove(toParent: self)
+    }
+
+    // The status bar's style and visibility stay with the web view's controller.
+    override var childForStatusBarStyle: UIViewController? { content }
+    override var childForStatusBarHidden: UIViewController? { content }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { content.supportedInterfaceOrientations }
+}
+
 // MARK: - The web view
 
 class StandViewController: CAPBridgeViewController, WKHTTPCookieStoreObserver {
@@ -74,6 +115,10 @@ class StandViewController: CAPBridgeViewController, WKHTTPCookieStoreObserver {
 
     override func capacitorDidLoad() {
         StandViewController.current = self
+        // Before the page paints (and past its edges), show Stand's background, not white, in dark mode too.
+        webView?.isOpaque = false
+        webView?.backgroundColor = standBackground
+        webView?.scrollView.backgroundColor = standBackground
         bridge?.registerPluginInstance(StandSignIn())
         webView?.configuration.websiteDataStore.httpCookieStore.add(self)
         StandPush.shared.refresh()
