@@ -110,8 +110,8 @@ const caught = (page, text) => page.locator(".chat-caught", { hasText: text });
       await snap("bo-caught-lines", bo);
       await snap("vera-caught-lines", vera);
     });
-    check("the decision says it was added to Decided", (await caught(vera, DECISION).innerText()).includes("Added to Decided!"));
-    check("the to-do says it was added to Todo, with who took it", /Added to Todo![\s\S]*Bo Tester/.test(await caught(vera, TODO).innerText()), await caught(vera, TODO).innerText());
+    check("the decision's chip says Decided", (await caught(vera, DECISION).innerText()).includes("Decided"));
+    check("the to-do's chip says To-do, with who took it", /To-do/.test(await caught(vera, TODO).innerText()) && /Bo Tester/.test((await caught(vera, TODO).getAttribute("title")) || ""), await caught(vera, TODO).getAttribute("title"));
     check("each line shows once", (await caught(vera, DECISION).count()) === 1 && (await caught(vera, TODO).count()) === 1);
     const order = await thread(vera).evaluate((el) => [...el.querySelectorAll(".chat-msg, .chat-caught")].map((n) => (n.classList.contains("chat-caught") ? "caught" : "msg")));
     // The decision is caught after Vera's message when Stand read it before Bo wrote, and after Bo's otherwise.
@@ -163,6 +163,7 @@ const caught = (page, text) => page.locator(".chat-caught", { hasText: text });
       await snap("vera-recap", vera);
       await snap("bo-recap", bo);
     });
+    await vera.locator(".chat-recap-head").click();
     check("the recap has a summary", ((await vera.locator(".chat-recap-summary").innerText()) || "").trim().length > 0, await vera.locator(".chat-recap").innerText());
 
     // What the server kept.

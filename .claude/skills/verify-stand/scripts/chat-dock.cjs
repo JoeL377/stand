@@ -78,13 +78,16 @@ const caught = (page, text) => dock(page).locator(".chat-caught", { hasText: tex
   try {
     lastPage = vera;
     let spaceUrl;
-    await step("Vera makes a space: chat is open at the right of Tasks, with no Chat tab", async () => {
+    await step("Vera makes a space: chat starts closed, and the Chat button opens it at the right of Tasks", async () => {
       await signIn(vera, "Vera Verify", "vera@verify.test");
       await vera.getByRole("button", { name: "New space" }).first().click();
       await vera.getByPlaceholder("e.g. Checkout v2").fill(spaceName);
       await vera.getByRole("button", { name: "Create and enter" }).click();
       await vera.waitForURL(/\/s\/[a-z0-9]+$/);
       spaceUrl = vera.url();
+      await vera.getByRole("button", { name: "Chat", pressed: false }).waitFor();
+      check("the dock starts closed", (await dock(vera).count()) === 0);
+      await vera.getByRole("button", { name: "Chat", pressed: false }).click();
       await dock(vera).getByText("Nothing here yet.").waitFor();
       await snap("vera-dock-on-tasks", vera);
     });
@@ -104,6 +107,8 @@ const caught = (page, text) => dock(page).locator(".chat-caught", { hasText: tex
       await signIn(bo, "Bo Tester", "bo@verify.test");
       await bo.goto(spaceUrl);
       await bo.getByRole("tab", { name: /^Tasks/, selected: true }).waitFor();
+      // Closed until he opens it, here as in every space.
+      await bo.getByRole("button", { name: "Chat", pressed: false }).click();
       await say(bo, FROM_TASKS);
       await thread(bo).getByText(FROM_TASKS).waitFor();
     });

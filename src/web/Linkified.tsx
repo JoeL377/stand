@@ -3,6 +3,12 @@ import { MentionText } from "./Mentions.tsx";
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"']+/g;
 
+/** A link as the text shows it: without "https://" or a closing slash, and cut in the middle of a long path. */
+const shown = (url: string) => {
+  const bare = url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
+  return bare.length > 48 ? `${bare.slice(0, 30)}…${bare.slice(-14)}` : bare;
+};
+
 export function Linkified({ text }: { text: string }) {
   const parts: React.ReactNode[] = [];
   let last = 0;
@@ -12,8 +18,8 @@ export function Linkified({ text }: { text: string }) {
     const at = m.index ?? 0;
     if (at > last) parts.push(<MentionText key={`t${last}`} text={text.slice(last, at)} />);
     parts.push(
-      <a key={at} href={url} target="_blank" rel="noreferrer">
-        {url}
+      <a key={at} href={url} title={url} target="_blank" rel="noreferrer">
+        {shown(url)}
       </a>,
     );
     last = at + url.length;
