@@ -25,6 +25,16 @@ export function placeCaught(messages: ChatMessage[], caught: ChatCaught[], openS
   return out;
 }
 
+/** Agents' reports, each under the last message written before it. One from before the oldest message here is left out. */
+export function placeReports<R extends { ts: number }>(messages: ChatMessage[], reports: R[]): Map<string, R[]> {
+  const out = new Map<string, R[]>();
+  for (const r of reports) {
+    const at = messages.findLast((m) => m.ts <= r.ts);
+    if (at) out.set(at.id, [...(out.get(at.id) ?? []), r]);
+  }
+  return out;
+}
+
 /** What was caught, with newer reads of a session in place of older ones. */
 export function mergeCaught(before: ChatCaught[], fresh: ChatCaught[]): ChatCaught[] {
   const ids = new Set(fresh.map((c) => c.sessionId));

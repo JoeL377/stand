@@ -2,6 +2,7 @@
 // have read, and the space's event stream that tells open pages what changed.
 import type { Express, Request } from "express";
 import type { ChatEvent, ChatMessage, ChatThread } from "../../shared/chat.ts";
+import { chatReports } from "../chatAgent.ts";
 import { caughtIn } from "../chatCapture.ts";
 import type { Services } from "../services.ts";
 import { type Params, memberRoom, notFound, route } from "./http.ts";
@@ -36,9 +37,11 @@ export function chatRoutes(app: Express, ctx: Services) {
       const room = memberRoom(db, req, res);
       if (!room) return;
       const channel = db.spaceChannel(room.id, req.user!.id);
+      const first = page(db.channelMessages(channel.id));
       const thread: ChatThread = {
         channel,
-        ...page(db.channelMessages(channel.id)),
+        ...first,
+        reports: first.messages.length ? chatReports(db.roomUpdates(room.id, first.messages[0].ts)) : [],
         readUpTo: db.channelReadUpTo(channel.id, req.user!.id),
         reads: db.channelReads(channel.id).filter((r) => r.userId !== req.user!.id),
         people: db.roomPeople(room.id),
@@ -128,9 +131,26 @@ export function chatRoutes(app: Express, ctx: Services) {
       const was = db.chatMessage(req.params.id);
       const channel = was && db.getChannel(was.channelId);
       if (!was || !channel || !db.isMember(channel.roomId, req.user!.id) || was.deletedAt !== null) return notFound(res);
-      const text = was.text.replace(/\s+/g, " ").trim().slice(0, 300);
+      // On an answer of Stand's that suggests a next step, the to-do is that step, taken once.
+      const step = was.answer?.todo ?? null;
+      if (step && was.answer!.todoId) return res.json({ id: was.answer!.todoId, text: step });
+      const text = (step ?? was.text).replace(/\s+/g, " ").trim().slice(0, 300);
       const note = db.addTask(channel.roomId, { text, owner: null, itemId: null }, req.user!.name);
+      if (step) {
+        const message = db.setChatAnswer(was.id, { ...was.answer!, todoId: note.id });
+        if (message) spaceEvents.send(channel.roomId, { type: "message", message } satisfies ChatEvent);
+      }
       res.json({ id: note.id, text: note.text });
+    }),
+  );
+
+  // ?since=<ms>: what agents reported on to-dos since then, as the chat shows it.
+  app.get(
+    "/api/rooms/:id/chat/reports",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      res.json(chatReports(db.roomUpdates(room.id, seq(req.query.since) ?? Date.now() - 7 * 86400_000)));
     }),
   );
 

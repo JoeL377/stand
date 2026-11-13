@@ -3,7 +3,7 @@
 // here is a meeting's notes run over it: the same model call, the same merge, the same rows. While
 // people write, a run reads the session after each pause; as the session closes, one more reads it
 // whole on the tidy model, which gives each line the message it came from and the session a summary.
-import type { ChatCaught, ChatEvent, ChatMessage } from "../shared/chat.ts";
+import { type ChatCaught, type ChatEvent, type ChatMessage, STAND_AUTHOR } from "../shared/chat.ts";
 import type { Note } from "../shared/protocol.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import type { DB } from "./db.ts";
@@ -123,7 +123,7 @@ export class ChatCapture {
 
   /** What the chat tells its listener (chat.ts): a message sent, changed or deleted, a session opened or closed. */
   heard(e: ChatEvent) {
-    if (this.stopped || e.type === "notes" || e.type === "read" || e.type === "typing") return;
+    if (this.stopped || e.type === "notes" || e.type === "read" || e.type === "typing" || e.type === "answering" || e.type === "reports") return;
     if (e.type === "session") {
       // Closed: it is read once more, now.
       if (!e.open) this.state(e.channelId).runner.schedule(0);
@@ -246,7 +246,8 @@ export class ChatCapture {
     const startedAt = Date.now();
     const tidy = !at.open;
     const shown = new Set(messages.map((m) => m.id));
-    const segments = this.db.meetingSegments(sessionId).filter((s) => shown.has(s.id));
+    // What Stand answered is its own words, not the team's: nothing is caught from it.
+    const segments = this.db.meetingSegments(sessionId).filter((s) => shown.has(s.id) && s.speakerId !== STAND_AUTHOR);
     const roomId = this.db.getChannel(channelId)!.roomId;
     const before = this.db.meetingDiscussions(sessionId);
     const keys = capturedFor(this.db.meetingNotes(sessionId));

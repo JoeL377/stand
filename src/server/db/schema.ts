@@ -441,6 +441,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS chat_messages_channel ON chat_messages(channel_id, seq);
 CREATE UNIQUE INDEX IF NOT EXISTS chat_messages_external ON chat_messages(channel_id, external_id) WHERE external_id IS NOT NULL;
 -- An emoji someone answered a chat message with. One row per person, message and emoji.
+CREATE TABLE IF NOT EXISTS chat_answers (segment_id TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chat_reactions (
   segment_id TEXT NOT NULL,
   user_id TEXT NOT NULL,

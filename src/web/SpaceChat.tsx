@@ -2,12 +2,12 @@
 // kept up to date by the space's event stream; sending, editing and deleting are plain requests.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CaughtLine, ChatCaught, ChatEvent, ChatMessage, ChatThread } from "../shared/chat.ts";
+import { type CaughtLine, type ChatCaught, type ChatEvent, type ChatMessage, type ChatReport, type ChatThread, STAND_AUTHOR, STAND_NAME } from "../shared/chat.ts";
 import { Bell, BellOff, ListPlus, Reply, SmilePlus } from "lucide-react";
 import { mentionedIn } from "../shared/mentions.ts";
 import type { NotifyStatus } from "../shared/push.ts";
 import { api } from "./api.ts";
-import { mergeCaught, placeCaught } from "./chatCaught.ts";
+import { mergeCaught, placeCaught, placeReports } from "./chatCaught.ts";
 import { asMessage, restore, serial, unsaved, type PendingMessage } from "./chatPending.ts";
 import { moveRead, placeReads } from "./chatReads.ts";
 import { ChevronIcon, CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
@@ -51,11 +51,23 @@ export interface SpaceChatState {
   send: (text: string, replyTo?: string | null) => void;
   /** The other people writing in the box right now. */
   typing: string[];
+  /** The answers Stand is writing now: what it is doing, and the words so far. */
+  answering: Answering[];
   /** Says you are writing. Safe to call on every key: it goes out at most every few seconds. */
   typingNow: () => void;
   retry: (key: string) => void;
   discard: (key: string) => void;
 }
+
+/** An answer of Stand's on its way. */
+export interface Answering {
+  askId: string;
+  status: string | null;
+  text: string | null;
+  at: number;
+}
+/** An answer that never arrives stops showing as on its way after this long. */
+const ANSWERING_MAX_MS = 3 * 60_000;
 
 /** A space's chat, loaded once and then fed by the space's event stream for as long as the page is open.
  *  onMention hears each new message that tags you, as it arrives. */
@@ -65,6 +77,8 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   const [hasOlder, setHasOlder] = useState(false);
   // Who is writing, and until when to believe it.
   const [writers, setWriters] = useState<Array<{ id: string; name: string; until: number }>>([]);
+  const [answeringAll, setAnswering] = useState<Answering[]>([]);
+  const answering = useMemo(() => answeringAll.filter((a) => Date.now() - a.at < ANSWERING_MAX_MS), [answeringAll]);
   // Kept by space, so what one space didn't send never shows in another.
   const unsentKey = `stand.chatUnsent.${roomId}`;
   const [unsent, setUnsent] = useState<{ roomId: string; list: PendingMessage[] }>(() => ({ roomId, list: restore(readSession(unsentKey)) }));
@@ -96,6 +110,8 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   }, [messages, setPending]);
   const pending = useMemo(() => unsaved(unsent.roomId === roomId ? unsent.list : [], messages ?? []), [unsent, roomId, messages]);
 
+  const threadRef = useRef(thread);
+  threadRef.current = thread;
   const people = thread?.people;
   const mentionsMe = useCallback((m: ChatMessage) => !m.deletedAt && m.authorId !== me && !!people && m.text.includes("@") && mentionedIn(m.text, people).includes(me), [people, me]);
   // The stream outlives a render: it reads these as they are now.
@@ -110,7 +126,7 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
         const at = t.messages.findIndex((x) => x.id === m.id);
         const messages = at >= 0 ? t.messages.map((x) => (x.id === m.id ? m : x)) : [...t.messages, m].sort((a, b) => a.seq - b.seq);
         // Whoever writes in Stand's own chat has read up to what they wrote.
-        const reads = m.authorId !== me && t.channel.source === "stand" ? moveRead(t.reads, { userId: m.authorId, name: m.author, upTo: m.seq }) : t.reads;
+        const reads = m.authorId !== me && m.authorId !== STAND_AUTHOR && t.channel.source === "stand" ? moveRead(t.reads, { userId: m.authorId, name: m.author, upTo: m.seq }) : t.reads;
         return { ...t, messages, reads };
       });
     },
@@ -138,6 +154,7 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
             ...fresh,
             messages: [...t.messages.filter((m) => !ids.has(m.id) && m.seq < oldest), ...fresh.messages],
             caught: mergeCaught(t.caught, fresh.caught),
+            reports: fresh.reports,
             readUpTo: Math.max(t.readUpTo, fresh.readUpTo),
           };
         });
@@ -156,7 +173,14 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
       const e = JSON.parse(ev.data) as ChatEvent;
       if (e.type === "typing") {
         if (e.userId !== me) setWriters((w) => [...w.filter((x) => x.id !== e.userId), { id: e.userId, name: e.name, until: Date.now() + TYPING_SHOWN_MS }]);
+      } else if (e.type === "answering") {
+        setAnswering((a) => [...a.filter((x) => x.askId !== e.askId), ...(e.done ? [] : [{ askId: e.askId, status: e.status, text: e.text, at: Date.now() }])]);
+      } else if (e.type === "reports") {
+        const since = threadRef.current?.messages[0]?.ts;
+        if (since !== undefined) api.chatReports(roomId, since).then((reports) => setThread((t) => t && { ...t, reports }), () => {});
       } else if (e.type === "message") {
+        // Stand's answer has arrived: its draft goes.
+        if (e.message.authorId === STAND_AUTHOR && e.message.replyTo) setAnswering((a) => a.filter((x) => x.askId !== e.message.replyTo));
         // What they were writing has arrived.
         setWriters((w) => (w.some((x) => x.id === e.message.authorId) ? w.filter((x) => x.id !== e.message.authorId) : w));
         const h = heard.current;
@@ -261,7 +285,7 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   const fresh = thread ? thread.messages.filter((m) => m.seq > thread.readUpTo && m.authorId !== me && !m.deletedAt) : [];
   const mentions = fresh.filter(mentionsMe).length;
   const typing = useMemo(() => writers.map((w) => w.name), [writers]);
-  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload, pending, send, retry, discard, typing, typingNow };
+  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload, pending, send, retry, discard, typing, typingNow, answering };
 }
 
 const readSession = (key: string) => {
@@ -367,7 +391,8 @@ export function SpaceChat(props: {
   };
 
   const rows = useMemo(() => {
-    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; pending: PendingMessage["state"] | null; readBy: string[] }> = [];
+    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; reports: ChatReport[]; pending: PendingMessage["state"] | null; readBy: string[] }> = [];
+    const reported = placeReports(thread?.messages ?? [], thread?.reports ?? []);
     const placed = placeCaught(thread?.messages ?? [], thread?.caught ?? [], thread?.channel.openSessionId ?? null);
     const reads = placeReads(thread?.messages ?? [], thread?.reads ?? []);
     const states = new Map(chat.pending.map((p) => [p.key, p.state]));
@@ -379,7 +404,7 @@ export function SpaceChat(props: {
       const fresh = !marked && newFrom !== null && newFrom > 0 && m.seq > newFrom && m.authorId !== me.id;
       if (fresh) marked = true;
       // What Stand put under the last message breaks the block: the next one starts under its name again.
-      const broken = !!prev && (placed.lines.has(prev.id) || placed.recaps.has(prev.id));
+      const broken = !!prev && (placed.lines.has(prev.id) || placed.recaps.has(prev.id) || reported.has(prev.id));
       out.push({
         m,
         day,
@@ -387,13 +412,14 @@ export function SpaceChat(props: {
         head: !!day || fresh || broken || !prev || prev.authorId !== m.authorId || m.ts - prev.ts > BLOCK_MS,
         caught: placed.lines.get(m.id) ?? [],
         recap: placed.recaps.get(m.id) ?? null,
+        reports: reported.get(m.id) ?? [],
         pending: (m.sessionId === "" && m.key && states.get(m.key)) || null,
         readBy: reads.get(m.id) ?? [],
       });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread?.messages, thread?.caught, thread?.reads, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
+  }, [thread?.messages, thread?.caught, thread?.reports, thread?.reads, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
 
   // The newest message stays in view, unless you scrolled up to read older ones. The thread scrolls
   // on a wide screen and the page on a phone, so both are kept.
@@ -412,7 +438,7 @@ export function SpaceChat(props: {
     if (!el || !stick.current) return;
     el.scrollTop = el.scrollHeight;
     if (el.scrollHeight <= el.clientHeight) window.scrollTo(0, document.documentElement.scrollHeight);
-  }, [rows]);
+  }, [rows, chat.answering]);
 
   const older = async () => {
     const el = scroller.current;
@@ -464,7 +490,7 @@ export function SpaceChat(props: {
             Nothing here yet.
           </p>
         )}
-        {rows.map(({ m, day, head, fresh, caught, recap, pending, readBy }) => (
+        {rows.map(({ m, day, head, fresh, caught, recap, reports, pending, readBy }, i) => (
           <MessageRow
             key={m.id}
             pending={pending}
@@ -474,6 +500,8 @@ export function SpaceChat(props: {
             m={m}
             name={shortName(m.author)}
             meId={me.id}
+            // An answer right under what it answers needs no quote.
+            showQuote={!!m.replyTo && rows[i - 1]?.m.id !== m.replyTo}
             quoted={m.replyTo ? (byId.get(m.replyTo) ?? null) : null}
             quotedName={m.replyTo && byId.get(m.replyTo) ? shortName(byId.get(m.replyTo)!.author) : null}
             onShowQuoted={showMessage}
@@ -487,6 +515,7 @@ export function SpaceChat(props: {
             mentionsMe={chat.mentionsMe(m)}
             caught={caught}
             recap={recap}
+            reports={reports}
             onOpenTask={props.onOpenTask}
             onRemoveCaught={chat.removeCaught}
             mine={m.authorId === me.id}
@@ -496,6 +525,20 @@ export function SpaceChat(props: {
             onEdit={(on) => setEditing(on ? m.id : null)}
             onChanged={chat.apply}
           />
+        ))}
+        {chat.answering.map((a) => (
+          <div key={a.askId} className="chat-msg head answering" role="status">
+            <div className="chat-msg-side">
+              <Avatar id={STAND_NAME} name={STAND_NAME} size={24} />
+            </div>
+            <div className="chat-msg-body">
+              <div className="chat-msg-head">
+                <span className="chat-msg-who">{STAND_NAME}</span>
+                {a.status && <span className="chat-answering-status">{a.status}</span>}
+              </div>
+              {a.text && <p className="chat-msg-text">{a.text}</p>}
+            </div>
+          </div>
         ))}
       </div>
       {below.length > 0 && (
@@ -514,7 +557,7 @@ export function SpaceChat(props: {
         focusKey={replyingTo}
         name={props.name}
         roomId={roomId}
-        people={thread.people.filter((p) => p.id !== me.id)}
+        people={[{ id: STAND_AUTHOR, name: STAND_NAME }, ...thread.people.filter((p) => p.id !== me.id)]}
         replying={replying && !replying.deletedAt ? { name: shortName(replying.author), text: replying.text } : null}
         onCancelReply={() => setReplyingTo(null)}
         onTyping={chat.typingNow}
@@ -534,6 +577,7 @@ function MessageRow(props: {
   name: string;
   meId: string;
   /** The message this one answers, when it is on the page. */
+  showQuote: boolean;
   quoted: ChatMessage | null;
   quotedName: string | null;
   onShowQuoted: (seq: number) => void;
@@ -550,6 +594,7 @@ function MessageRow(props: {
   mentionsMe: boolean;
   caught: CaughtLine[];
   recap: ChatCaught | null;
+  reports: ChatReport[];
   onOpenTask?: (id: string) => void;
   onRemoveCaught: (line: CaughtLine) => Promise<void>;
   mine: boolean;
@@ -623,7 +668,7 @@ function MessageRow(props: {
               </span>
             </div>
           )}
-          {m.replyTo && !m.deletedAt && (
+          {props.showQuote && !m.deletedAt && (
             <button type="button" className="chat-quote" disabled={!props.quoted} onClick={() => props.quoted && props.onShowQuoted(props.quoted.seq)}>
               {props.quoted ? (
                 <>
@@ -675,6 +720,7 @@ function MessageRow(props: {
               {m.editedAt && <span className="chat-msg-edited"> (edited)</span>}
             </p>
           )}
+          {!m.deletedAt && m.answer && <AnswerFoot m={m} onTodo={toTodo} onOpenTask={props.onOpenTask} />}
           {!m.deletedAt && m.reactions.length > 0 && (
             <div className="chat-reacts">
               {m.reactions.map((r) => {
@@ -719,9 +765,11 @@ function MessageRow(props: {
                 <button className="icon-btn" aria-label="Reply" title="Reply" onClick={props.onReply}>
                   <Reply size={15} />
                 </button>
-                <button className="icon-btn" aria-label="Make a to-do" title="Make a to-do" onClick={toTodo}>
-                  <ListPlus size={15} />
-                </button>
+                {!m.answer && (
+                  <button className="icon-btn" aria-label="Make a to-do" title="Make a to-do" onClick={toTodo}>
+                    <ListPlus size={15} />
+                  </button>
+                )}
               </>
             )}
             {mine && !choosing && (
@@ -744,9 +792,63 @@ function MessageRow(props: {
           ))}
         </div>
       )}
+      {props.reports.length > 0 && (
+        <div className="chat-caughts">
+          {props.reports.map((r) => (
+            <div key={r.id} className={`chat-caught report ${r.status}`}>
+              <button type="button" className="chat-caught-open" title={`${r.by}: ${r.text}`} onClick={() => props.onOpenTask?.(r.taskId)}>
+                <span className="chat-caught-label">{REPORT_LABEL[r.status]}</span>
+                <span className="chat-caught-text">{r.task || r.text}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {props.recap && <SessionRecap caught={props.recap} />}
       {props.readBy.length > 0 && <ReadMarks names={props.readBy} />}
     </>
+  );
+}
+
+const REPORT_LABEL: Record<ChatReport["status"], string> = { ready: "Ready", done: "Done", blocked: "Blocked", needs_decision: "Needs you" };
+
+/** Under an answer of Stand's: what it leaned on, and the next step it suggests. */
+function AnswerFoot({ m, onTodo, onOpenTask }: { m: ChatMessage; onTodo: () => void; onOpenTask?: (id: string) => void }) {
+  const a = m.answer!;
+  if (!a.sources.length && !a.fromSpace.length && !a.todo) return null;
+  return (
+    <div className="chat-answer-foot">
+      {a.fromSpace.map((f, i) => (
+        <p key={i} className="chat-answer-line">
+          <span className="chat-answer-label">{new Date(f.when).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+          <span>{f.text}</span>
+        </p>
+      ))}
+      {a.sources.length > 0 && (
+        <p className="chat-answer-line">
+          {a.sources.map((s) => (
+            <a key={s.url} href={s.url} target="_blank" rel="noreferrer" title={s.url}>
+              {s.title}
+            </a>
+          ))}
+        </p>
+      )}
+      {a.todo && (
+        <p className="chat-answer-line">
+          <span className="chat-caught-label">To-do</span>
+          <span>{a.todo}</span>
+          {a.todoId ? (
+            <button type="button" className="link" onClick={() => onOpenTask?.(a.todoId!)}>
+              Open
+            </button>
+          ) : (
+            <button type="button" className="link" onClick={onTodo}>
+              Add
+            </button>
+          )}
+        </p>
+      )}
+    </div>
   );
 }
 

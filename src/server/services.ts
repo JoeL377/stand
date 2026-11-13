@@ -6,6 +6,7 @@ import type { Note } from "../shared/protocol.ts";
 import { agentApi } from "./agents.ts";
 import { buildBrief } from "./brief.ts";
 import { Chat } from "./chat.ts";
+import { ChatAsks } from "./chatAgent.ts";
 import { ChatCapture } from "./chatCapture.ts";
 import { capabilities, config } from "./config.ts";
 import { type DB, type OpenMeeting, openDb } from "./db.ts";
@@ -278,15 +279,26 @@ export function startServices() {
     : null;
   // Notifications on the iPhone app for new chat messages (push.ts).
   const push = new Push(db, config.apns);
+  let asks: ChatAsks | null = null;
   const chat = new Chat(
     db,
     (roomId, e) => {
       spaceEvents.send(roomId, e);
       capture?.heard(e);
       push.heard(roomId, e);
+      asks?.heard(roomId, e);
     },
     { quietMs: config.chatQuietMs ?? undefined },
   );
+  // Stand answers in the chat when someone tags it (chatAgent.ts).
+  asks = new ChatAsks(db, chat, agent, (roomId, e) => spaceEvents.send(roomId, e));
+  // An agent's report on a to-do shows in the chat as one line: the open pages read the reports again.
+  const addUpdate = db.addUpdate.bind(db);
+  db.addUpdate = (u) => {
+    const update = addUpdate(u);
+    if (update.client && update.noteId) spaceEvents.send(update.roomId, { type: "reports" });
+    return update;
+  };
   chat.start();
   capture?.start();
 

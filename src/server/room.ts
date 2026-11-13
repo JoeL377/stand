@@ -31,7 +31,8 @@ import { finishBrainstorm, othersOfMeeting, promptOf, resumeBrainstorm, toBrains
 import { sessionBackground } from "./designSession.ts";
 import { SKETCH_LOOK_BACK_MS, SketchKeeper, askSketch, saveSketchSpecs } from "./sketch.ts";
 import { PilotSeat } from "./pilot.ts";
-import { sourceDigest, repoTools } from "./sources.ts";
+import { readSpaceHistory } from "./chatAgent.ts";
+import { repoTools } from "./sources.ts";
 import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, draftOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
@@ -2076,20 +2077,7 @@ export class RoomSession implements SpeechSink {
 
   /** What the space already has, for ✦ Stand to read: newest first. */
   private spaceHistory(): SpaceHistory {
-    const room = this.db.getRoom(this.roomId);
-    return {
-      name: this.roomName,
-      purpose: room?.purpose ?? "",
-      decisions: this.db.spaceNotes(this.roomId, "decision", 40).map((n) => ({ text: n.text, ts: n.ts })),
-      tasks: this.db
-        .openActions(this.roomId)
-        .reverse()
-        .slice(0, 40)
-        .map((n) => ({ text: n.text, owner: n.owner, ts: n.ts })),
-      questions: this.db.spaceNotes(this.roomId, "question", 40).map((n) => ({ text: n.text, ts: n.ts })),
-      notes: this.db.spaceJots(this.roomId, 0, 40).map((j) => ({ text: j.text, by: j.by, ts: j.ts })),
-      repo: sourceDigest(this.db.raw, this.roomId),
-    };
+    return readSpaceHistory(this.db, this.roomId, this.roomName);
   }
 
   /** Someone's Ask Stand button came up (or was held too long, or they left): once the last words

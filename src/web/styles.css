@@ -3645,6 +3645,19 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .chat-react { display: inline-flex; align-items: center; gap: 4px; height: 22px; min-height: 0; padding: 0 7px; border: 1px solid var(--line); border-radius: 11px; background: none; box-shadow: none; font: inherit; font-size: 12px; color: var(--muted); cursor: pointer; }
 .chat-react:hover { background: var(--hover); }
 .chat-react.on { border-color: var(--accent); color: var(--accent-text); }
+/* Stand's answer on its way, and what comes under a finished one: plain small lines. */
+.chat-answering-status { font-size: 12px; color: var(--muted); }
+.chat-answering-status::after { content: "…"; }
+.chat-msg.answering .chat-msg-text { color: var(--muted); }
+.chat-answer-foot { display: flex; flex-direction: column; gap: 0; margin: 2px 0; font-size: 12px; color: var(--muted); min-width: 0; }
+.chat-answer-line { display: flex; align-items: baseline; gap: 6px; margin: 0; min-width: 0; line-height: 20px; }
+.chat-answer-line > span:not(.chat-caught-label):not(.chat-answer-label) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-answer-line a { min-width: 0; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); text-decoration: underline; }
+.chat-answer-line a:hover { color: var(--text); }
+.chat-answer-line .link { flex: none; font-size: inherit; }
+.chat-answer-label { flex: none; font-weight: 500; }
+.chat-caught.report.blocked .chat-caught-label, .chat-caught.report.needs_decision .chat-caught-label { color: var(--warn-text); }
+.chat-caught.report.done .chat-caught-label, .chat-caught.report.ready .chat-caught-label { color: var(--ok-text); }
 .chat-typing { flex: none; margin: 0; padding: 0 8px 4px 42px; font-size: 12px; color: var(--muted); }
 .chat-typing::after { content: "…"; }
 .chat-replying { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; padding: 0 4px 0 12px; font-size: 12px; color: var(--muted); }

@@ -215,7 +215,7 @@ export interface Agent {
    *  without a model. */
   findOptions?(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
   /** ✦ Stand's answer to a question someone asked it on the call (push-to-talk or @stand). Left out without a model. */
-  answer?(prompt: string, onDraft?: OnDraft, repo?: RepoTools | null): Promise<{ answer: Answer | null; model: string; usage: RunUsage }>;
+  answer?(prompt: string, onDraft?: OnDraft, repo?: RepoTools | null, system?: string): Promise<{ answer: Answer | null; model: string; usage: RunUsage }>;
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
   settleSpace(space: { name: string; purpose: string }, notes: SettleInput[]): Promise<SettleRow[] | null>;
@@ -1054,8 +1054,8 @@ When a capture fits the slide it is already under, answer with that slide. When 
     return this.searchRun("options", OptionsAnswerSchema, OPTIONS_SYSTEM, prompt, onDraft);
   }
 
-  async answer(prompt: string, onDraft?: OnDraft, repo?: RepoTools | null): Promise<{ answer: Answer | null; model: string; usage: RunUsage }> {
-    return this.searchRun("answer", AnswerSchema, ANSWER_SYSTEM, prompt, onDraft, repo ?? null);
+  async answer(prompt: string, onDraft?: OnDraft, repo?: RepoTools | null, system?: string): Promise<{ answer: Answer | null; model: string; usage: RunUsage }> {
+    return this.searchRun("answer", AnswerSchema, system ?? ANSWER_SYSTEM, prompt, onDraft, repo ?? null);
   }
 
   /** One ✦ Stand run that may search the web twice, with what it cost. With a space's repo it can also search

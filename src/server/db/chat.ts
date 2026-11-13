@@ -1,6 +1,6 @@
 // Chat (chat.ts): channels, the sessions in them, and what chat keeps about a message beside its segment.
 import type { DatabaseSync } from "node:sqlite";
-import type { Channel, ChatMessage, ChatReaction, ChatRead, ChatSession } from "../../shared/chat.ts";
+import { type Channel, type ChatAnswer, type ChatMessage, type ChatReaction, type ChatRead, type ChatSession, STAND_AUTHOR } from "../../shared/chat.ts";
 import { newId } from "../ids.ts";
 import type { Row } from "./rows.ts";
 
@@ -69,9 +69,16 @@ export function chatStore(db: DatabaseSync) {
   };
   const toMessage = (r: Row): ChatMessage => {
     const m = rowMessage(r);
-    return m.deletedAt === null ? { ...m, reactions: reactionsOf(m.id) } : m;
+    if (m.deletedAt !== null) return m;
+    const answer = m.authorId === STAND_AUTHOR ? (db.prepare("SELECT json FROM chat_answers WHERE segment_id = ?").get(m.id) as Row | undefined) : undefined;
+    return { ...m, reactions: reactionsOf(m.id), ...(answer ? { answer: JSON.parse(answer.json as string) as ChatAnswer } : {}) };
   };
   return {
+    /** What comes with an answer of Stand's. */
+    setChatAnswer(id: string, answer: ChatAnswer): ChatMessage | null {
+      db.prepare("INSERT INTO chat_answers (segment_id, json) VALUES (?, ?) ON CONFLICT(segment_id) DO UPDATE SET json = excluded.json").run(id, JSON.stringify(answer));
+      return this.chatMessage(id);
+    },
     /** Puts this person's emoji on a message, or takes it off when it is there already. */
     toggleChatReaction(id: string, userId: string, emoji: string, at: number): ChatMessage | null {
       const had = db.prepare("DELETE FROM chat_reactions WHERE segment_id = ? AND user_id = ? AND emoji = ?").run(id, userId, emoji).changes;
