@@ -1,4 +1,5 @@
 import { usePersonColors } from "../PersonColors.tsx";
+import { Avatar } from "../Avatar.tsx";
 import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
 import { ProjectPresentation } from "./ProjectPresentation.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
@@ -14,7 +15,7 @@ import { api } from "../api.ts";
 import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
 import type { Interim } from "./useRoomSocket.ts";
-import { initials, keyOf } from "../util.ts";
+import { initials, keyOf, fmtTime } from "../util.ts";
 import { Slide } from "../slides.tsx";
 import { CameraIcon } from "../icons.tsx";
 import { SnapGallery, SnapNotSaved, removeSnap, takeSnap, type Snapped } from "../Snaps.tsx";
@@ -746,21 +747,12 @@ function usePageShown() {
   return shown;
 }
 
-export function Avatar({ id, name, picture, size = 44 }: { id: string; name: string; picture?: string | null; size?: number }) {
-  const colorFor = usePersonColors();
-  return picture ? (
-    <img className="avatar" src={picture} alt="" style={{ width: size, height: size }} referrerPolicy="no-referrer" />
-  ) : (
-    <div className="avatar" style={{ background: colorFor(id), width: size, height: size, fontSize: Math.max(11, size * 0.36) }}>
-      {initials(name)}
-    </div>
-  );
-}
+export { Avatar };
 
 /** "Joe 2:44": who took a snap and when, for its tab. */
 function snapLabel(snap: Snap, me: string) {
   const who = snap.takenById === me ? "You" : snap.takenBy.split(" ")[0];
-  return `${who} ${new Date(snap.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/i, "")}`;
+  return `${who} ${fmtTime(snap.ts).replace(/\s?[AP]M$/i, "")}`;
 }
 
 /** A snap in its own tab: big on the main screen, with who took it and the agent's caption. */
@@ -772,7 +764,7 @@ function SnapTab({ snap, me }: { snap: Snap; me: string }) {
       <figcaption>
         <CameraIcon />
         <span className="stage-snap-who">
-          {who} snapped this at {new Date(snap.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+          {who} snapped this at {fmtTime(snap.ts)}
         </span>
         {snap.caption && (
           <span className="stage-snap-cap" title={snap.caption}>

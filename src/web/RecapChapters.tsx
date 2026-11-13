@@ -9,7 +9,7 @@ import type { MeetingChapter } from "../shared/chapters.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { SnapFigures } from "./Snaps.tsx";
 import { DecidedIcon, InfoIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
-import { fmtDate, fmtTime, initials, itemLabel } from "./util.ts";
+import { fmtDate, fmtTime, initials, itemLabel, fmtDay } from "./util.ts";
 import type { Item } from "../shared/protocol.ts";
 import { Linkified } from "./Linkified.tsx";
 
@@ -101,7 +101,7 @@ export function ChapterChip({ c, i, startedAt, at, crux, onPick }: { c: MeetingC
  *  the chapter in the pop-up, and a click opens the recap at that chapter. */
 export function FromChip({ from }: { from: NoteFrom }) {
   const c = from.chapter;
-  const day = new Date(from.startedAt).toLocaleDateString([], { month: "short", day: "numeric" });
+  const day = fmtDay(from.startedAt);
   // Added by hand: no meeting to open, so the pill only says who added it and when.
   if (from.addedBy)
     return (

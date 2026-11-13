@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { BookOpen, Keyboard, LogOut, MessageCircle, Monitor, Moon, Settings, Sun, type LucideIcon } from "lucide-react";
 import { useAuth } from "./auth.tsx";
-import { Avatar } from "./room/Stage.tsx";
+import { Avatar } from "./Avatar.tsx";
 import { meetingShortcuts, pageShortcuts, type Shortcut } from "./shortcuts.ts";
 import { savedTheme, setTheme, type Theme } from "./theme.ts";
 import { useDismiss } from "./useDismiss.ts";

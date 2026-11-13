@@ -8,7 +8,7 @@ import { Image as ImageIcon, List as ListIcon, Square, Type as WordsIcon } from 
 import { UNTITLED_DESIGN, type BrainstormSummary, type BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
-import { brainstormHref } from "../pages/BrainstormPage.tsx";
+import { brainstormHref } from "../pages/brainstormHref.ts";
 import { errorToast } from "../Toasts.tsx";
 import { BarSlot } from "./barSlot.ts";
 import { SketchBoard, StyleChip, shownSubjects, subjectCount, type SketchActs, type SketchAs } from "./Sketch.tsx";

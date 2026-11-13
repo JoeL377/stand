@@ -80,6 +80,39 @@ async function call<T>(method: string, url: string, body?: unknown, timeoutMs = 
   return data as T;
 }
 
+// What the pages read over and over: a space, its feed, the list of spaces. A page asks again every
+// 20 seconds and each time its window comes forward, and most of those answers say nothing new.
+// The answer that is word for word the last one comes back as the very same object, so React sees
+// no change and draws nothing. The last answer is also kept for the visit, so going back to a space
+// shows it at once while the fresh one is on its way.
+const kept = new Map<string, { text: string; data: unknown; at: number }>();
+const KEPT_MAX = 24;
+async function reread<T>(url: string): Promise<T> {
+  const res = await request(url);
+  const text = await res.text();
+  if (res.status === 401) location.reload();
+  let was = kept.get(url);
+  if (res.ok && was?.text === text) {
+    was.at = Date.now();
+    return was.data as T;
+  }
+  let data: { error?: string } = {};
+  try {
+    data = JSON.parse(text);
+  } catch {}
+  if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+  kept.delete(url);
+  kept.set(url, (was = { text, data, at: Date.now() }));
+  if (kept.size > KEPT_MAX) kept.delete(kept.keys().next().value!);
+  return data as T;
+}
+const warming = new Set<string>();
+const last = <T>(url: string) => (kept.get(url)?.data as T | undefined) ?? null;
+const SPACES = "/api/spaces";
+const roomUrl = (id: string) => `/api/rooms/${id}`;
+const feedUrl = (id: string) => `/api/rooms/${id}/feed`;
+const membersUrl = (id: string) => `/api/rooms/${id}/members`;
+
 export interface RoomInfo {
   id: string;
   name: string;
@@ -119,17 +152,32 @@ export const api = {
   me: () => call<User>("GET", "/api/auth/me"),
   devSignIn: (name: string, email: string) => call<User>("POST", "/api/auth/dev", { name, email }),
   // In the iPhone app, its phone stops getting notifications for whoever signs out.
-  signOut: () => call<{ ok: true }>("POST", "/api/auth/logout", { pushToken: phoneApp()?.pushToken }),
+  signOut: () => call<{ ok: true }>("POST", "/api/auth/logout", { pushToken: phoneApp()?.pushToken }).finally(() => kept.clear()),
   createRoom: (name: string, purpose = "") => call<{ id: string; name: string }>("POST", "/api/rooms", { name, purpose }),
-  spaces: () => call<SpaceSummary[]>("GET", "/api/spaces"),
+  spaces: () => reread<SpaceSummary[]>(SPACES),
+  /** What was last read, if anything was in this visit: shown at once while the fresh answer comes. */
+  last: {
+    spaces: () => last<SpaceSummary[]>(SPACES),
+    room: (id: string) => last<RoomInfo>(roomUrl(id)),
+    feed: (id: string) => last<SpaceFeed>(feedUrl(id)),
+    members: (id: string) => last<SpaceMembers>(membersUrl(id)),
+  },
+  /** Reads a space ahead of the click that opens it, unless it was read in the last few seconds. */
+  warm: (id: string) => {
+    for (const url of [roomUrl(id), feedUrl(id)]) {
+      if (Date.now() - (kept.get(url)?.at ?? 0) < 10_000 || warming.has(url)) continue;
+      warming.add(url);
+      void reread(url).catch(() => {}).finally(() => warming.delete(url));
+    }
+  },
   updateSpace: (id: string, patch: { name?: string; purpose?: string; synthesisInstructions?: string }) =>
     call<{ id: string; name: string; purpose: string; synthesisInstructions: string }>("PATCH", `/api/rooms/${id}`, patch),
-  members: (roomId: string) => call<SpaceMembers>("GET", `/api/rooms/${roomId}/members`),
+  members: (roomId: string) => reread<SpaceMembers>(membersUrl(roomId)),
   setAdmin: (roomId: string, userId: string, admin: boolean) => call<SpaceMembers>("PUT", `/api/rooms/${roomId}/members/${userId}`, { admin }),
   /** What Stand spent for the space over the last `days` days, by day in this browser's time. */
   spaceCost: (roomId: string, days: number) => call<SpaceCost>("GET", `/api/rooms/${roomId}/cost?days=${days}&tz=${-new Date().getTimezoneOffset()}`),
-  room: (id: string) => call<RoomInfo>("GET", `/api/rooms/${id}`),
-  feed: (id: string) => call<SpaceFeed>("GET", `/api/rooms/${id}/feed`),
+  room: (id: string) => reread<RoomInfo>(roomUrl(id)),
+  feed: (id: string) => reread<SpaceFeed>(feedUrl(id)),
   updateSnap: (id: string, patch: { itemId?: string | null; line?: string | null }) => call<Snap>("PATCH", `/api/snaps/${id}`, patch),
   updateJot: (id: string, patch: { itemId?: string | null; text?: string }) => call<Jot>("PATCH", `/api/jots/${id}`, patch),
   /** Archives a row off the space page ("todo:<id>", see server/archive.ts), or restores it. */

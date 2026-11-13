@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
-import { Avatar } from "../room/Stage.tsx";
-import { fmtDuration } from "../util.ts";
+import { Avatar } from "../Avatar.tsx";
+import { fmtDuration, fmtDay } from "../util.ts";
 import { SpacesShell, joinHref, spaceHref, useNewSpace } from "./SpacesShell.tsx";
 
 type Filter = "all" | "live" | "decide";
@@ -20,7 +20,7 @@ export { spaceHref };
 /** Home: find one of your spaces and go in. Spaces are invite only, so these are
  *  the ones you created or opened from a link. Creating and managing sit in the sidebar. */
 export function Home() {
-  const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
+  const [spaces, setSpaces] = useState<SpaceSummary[] | null>(() => api.last.spaces());
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -256,7 +256,7 @@ function ago(ts: number): string {
   const d = Math.round(h / 24);
   if (d === 1) return "yesterday";
   if (d < 7) return `${d} days ago`;
-  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+  return fmtDay(ts);
 }
 
 const SearchIcon = () => (

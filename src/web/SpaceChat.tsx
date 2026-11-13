@@ -1,7 +1,7 @@
 // The space's chat: what people write to each other between meetings. The thread is read here and
 // kept up to date by the space's event stream; sending, editing and deleting are plain requests.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type CaughtLine, type ChatCall, type ChatCaught, type ChatEvent, type ChatMessage, type ChatReport, type ChatThread, STAND_AUTHOR, STAND_NAME } from "../shared/chat.ts";
 import { Bell, BellOff, ListPlus, Reply, SmilePlus } from "lucide-react";
 import { mentionedIn } from "../shared/mentions.ts";
@@ -13,9 +13,9 @@ import { moveRead, placeReads } from "./chatReads.ts";
 import { ChevronIcon, CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
 import { Linkified } from "./Linkified.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
-import { Avatar } from "./room/Stage.tsx";
+import { Avatar } from "./Avatar.tsx";
 import { errorToast, toast } from "./Toasts.tsx";
-import { fmtTime } from "./util.ts";
+import { fmtTime, fmtDay, fmtFull } from "./util.ts";
 
 const TEXT_MAX = 4000;
 /** "Maya is typing" stays this long after their last key, and their page says so this often. */
@@ -286,7 +286,12 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   const fresh = thread ? thread.messages.filter((m) => m.seq > thread.readUpTo && m.authorId !== me && !m.deletedAt) : [];
   const mentions = fresh.filter(mentionsMe).length;
   const typing = useMemo(() => writers.map((w) => w.name), [writers]);
-  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload, pending, send, retry, discard, typing, typingNow, answering };
+  const unread = fresh.length;
+  // The same object until something in it changes, so the thread isn't drawn again when the page around it is.
+  return useMemo(
+    () => ({ thread, error, unread, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload, pending, send, retry, discard, typing, typingNow, answering }),
+    [thread, error, unread, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload, pending, send, retry, discard, typing, typingNow, answering],
+  );
 }
 
 const readSession = (key: string) => {
@@ -303,8 +308,13 @@ const dayLabel = (ts: number) => {
   const days = Math.round((new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 86_400_000);
   if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
-  return d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+  return (d.getFullYear() === today.getFullYear() ? LONG_DAY : LONG_DAY_YEAR).format(d);
 };
+// Made once: a thread asks for a day label twice per message.
+const LONG_DAY = new Intl.DateTimeFormat([], { weekday: "long", month: "short", day: "numeric" });
+const LONG_DAY_YEAR = new Intl.DateTimeFormat([], { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+/** One empty list for every row with nothing under it, so a row with nothing new is the same row. */
+const NONE: never[] = [];
 
 const first = (name: string) => name.trim().split(/\s+/)[0] || name;
 /** "4:46", without AM or PM: the day line above says which day, and the full time is the title. */
@@ -312,7 +322,10 @@ const shortTime = (ts: number) => fmtTime(ts).replace(/\s?[AP]M$/i, "");
 
 const newKey = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
-export function SpaceChat(props: {
+/** Drawn again only when the thread or what it was given changes, not each time the page around it is. */
+export const SpaceChat = memo(SpaceChatThread);
+
+function SpaceChatThread(props: {
   roomId: string;
   me: { id: string; name: string };
   chat: SpaceChatState;
@@ -412,12 +425,12 @@ export function SpaceChat(props: {
         day,
         fresh,
         head: !!day || fresh || broken || !prev || prev.authorId !== m.authorId || m.ts - prev.ts > BLOCK_MS,
-        caught: placed.lines.get(m.id) ?? [],
+        caught: placed.lines.get(m.id) ?? NONE,
         recap: placed.recaps.get(m.id) ?? null,
-        reports: reported.get(m.id) ?? [],
-        calls: called.get(m.id) ?? [],
+        reports: reported.get(m.id) ?? NONE,
+        calls: called.get(m.id) ?? NONE,
         pending: (m.sessionId === "" && m.key && states.get(m.key)) || null,
-        readBy: reads.get(m.id) ?? [],
+        readBy: reads.get(m.id) ?? NONE,
       });
     }
     return out;
@@ -442,6 +455,20 @@ export function SpaceChat(props: {
     el.scrollTop = el.scrollHeight;
     if (el.scrollHeight <= el.clientHeight) window.scrollTo(0, document.documentElement.scrollHeight);
   }, [rows, chat.answering]);
+
+  // One function each for every row, reading what is current when it runs: a row whose message
+  // hasn't changed is then left alone when another message arrives or someone starts typing.
+  const now = useRef({ chat, showMessage });
+  now.current = { chat, showMessage };
+  const onRetry = useCallback((m: ChatMessage) => void (m.key && now.current.chat.retry(m.key)), []);
+  const onDiscard = useCallback((m: ChatMessage) => void (m.key && now.current.chat.discard(m.key)), []);
+  const onReply = useCallback((m: ChatMessage) => {
+    setReplyingTo(m.id);
+    setPicked(null);
+  }, []);
+  const onPick = useCallback((m: ChatMessage) => setPicked((v) => (v === m.id ? null : m.id)), []);
+  const onEdit = useCallback((m: ChatMessage, on: boolean) => setEditing(on ? m.id : null), []);
+  const onShowQuoted = useCallback((seq: number) => now.current.showMessage(seq), []);
 
   const older = async () => {
     const el = scroller.current;
@@ -498,8 +525,8 @@ export function SpaceChat(props: {
             key={m.id}
             pending={pending}
             readBy={readBy}
-            onRetry={() => m.key && chat.retry(m.key)}
-            onDiscard={() => m.key && chat.discard(m.key)}
+            onRetry={onRetry}
+            onDiscard={onDiscard}
             m={m}
             name={shortName(m.author)}
             meId={me.id}
@@ -507,11 +534,8 @@ export function SpaceChat(props: {
             showQuote={!!m.replyTo && rows[i - 1]?.m.id !== m.replyTo}
             quoted={m.replyTo ? (byId.get(m.replyTo) ?? null) : null}
             quotedName={m.replyTo && byId.get(m.replyTo) ? shortName(byId.get(m.replyTo)!.author) : null}
-            onShowQuoted={showMessage}
-            onReply={() => {
-              setReplyingTo(m.id);
-              setPicked(null);
-            }}
+            onShowQuoted={onShowQuoted}
+            onReply={onReply}
             day={day}
             head={head}
             fresh={fresh}
@@ -525,8 +549,8 @@ export function SpaceChat(props: {
             mine={m.authorId === me.id}
             editing={editing === m.id}
             picked={picked === m.id}
-            onPick={() => setPicked((v) => (v === m.id ? null : m.id))}
-            onEdit={(on) => setEditing(on ? m.id : null)}
+            onPick={onPick}
+            onEdit={onEdit}
             onChanged={chat.apply}
           />
         ))}
@@ -575,7 +599,9 @@ export function SpaceChat(props: {
   );
 }
 
-function MessageRow(props: {
+const MessageRow = memo(MessageRowView);
+
+function MessageRowView(props: {
   m: ChatMessage;
   /** The author's name as the thread shows it. */
   name: string;
@@ -585,13 +611,13 @@ function MessageRow(props: {
   quoted: ChatMessage | null;
   quotedName: string | null;
   onShowQuoted: (seq: number) => void;
-  onReply: () => void;
+  onReply: (m: ChatMessage) => void;
   /** Not saved yet: on its way, or failed and waiting for Retry. */
   pending: PendingMessage["state"] | null;
   /** The other people whose reading stops at this message. */
   readBy: string[];
-  onRetry: () => void;
-  onDiscard: () => void;
+  onRetry: (m: ChatMessage) => void;
+  onDiscard: (m: ChatMessage) => void;
   day: string | null;
   head: boolean;
   fresh: boolean;
@@ -605,8 +631,8 @@ function MessageRow(props: {
   mine: boolean;
   editing: boolean;
   picked: boolean;
-  onPick: () => void;
-  onEdit: (on: boolean) => void;
+  onPick: (m: ChatMessage) => void;
+  onEdit: (m: ChatMessage, on: boolean) => void;
   onChanged: (m: ChatMessage) => void;
 }) {
   const { m, mine } = props;
@@ -630,11 +656,11 @@ function MessageRow(props: {
 
   const save = async () => {
     const text = draft.trim();
-    if (!text || text === m.text) return props.onEdit(false);
+    if (!text || text === m.text) return props.onEdit(m, false);
     setSaving(true);
     try {
       props.onChanged(await api.editChat(m.id, text));
-      props.onEdit(false);
+      props.onEdit(m, false);
     } catch (err) {
       errorToast("Couldn't save the change")(err);
     } finally {
@@ -656,7 +682,7 @@ function MessageRow(props: {
       <div
         className={`chat-msg${props.head ? " head" : ""}${m.deletedAt ? " deleted" : ""}${props.mentionsMe ? " mentions-you" : ""}${props.pending ? ` ${props.pending === "failed" ? "failed" : "pending"}` : ""}${props.picked ? " picked" : ""}`}
         data-seq={props.pending ? undefined : m.seq}
-        onClick={!props.pending && !m.deletedAt && !props.editing ? (e) => !(e.target as HTMLElement).closest("a, button, textarea") && props.onPick() : undefined}
+        onClick={!props.pending && !m.deletedAt && !props.editing ? (e) => !(e.target as HTMLElement).closest("a, button, textarea") && props.onPick(m) : undefined}
         onMouseLeave={() => setChoosing(false)}
       >
         <div className="chat-msg-side">
@@ -668,7 +694,7 @@ function MessageRow(props: {
               <span className="chat-msg-who" title={m.author}>
                 {props.name}
               </span>
-              <span className="chat-msg-at" title={new Date(m.ts).toLocaleString()}>
+              <span className="chat-msg-at" title={fmtFull(m.ts)}>
                 {shortTime(m.ts)}
               </span>
             </div>
@@ -703,7 +729,7 @@ function MessageRow(props: {
                 readOnly={saving}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") props.onEdit(false);
+                  if (e.key === "Escape") props.onEdit(m, false);
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     void save();
@@ -711,7 +737,7 @@ function MessageRow(props: {
                 }}
               />
               <span className="chat-edit-foot">
-                <button type="button" className="link" onClick={() => props.onEdit(false)}>
+                <button type="button" className="link" onClick={() => props.onEdit(m, false)}>
                   Cancel
                 </button>
                 <button type="submit" disabled={saving || !draft.trim()}>
@@ -744,11 +770,11 @@ function MessageRow(props: {
           {props.pending === "failed" && (
             <p className="chat-msg-unsent" role="status">
               Not sent.{" "}
-              <button type="button" className="link" onClick={props.onRetry}>
+              <button type="button" className="link" onClick={() => props.onRetry(m)}>
                 Retry
               </button>{" "}
               ·{" "}
-              <button type="button" className="link" onClick={props.onDiscard}>
+              <button type="button" className="link" onClick={() => props.onDiscard(m)}>
                 Delete
               </button>
             </p>
@@ -767,7 +793,7 @@ function MessageRow(props: {
                 <button className="icon-btn" aria-label="React" title="React" onClick={() => setChoosing(true)}>
                   <SmilePlus size={15} />
                 </button>
-                <button className="icon-btn" aria-label="Reply" title="Reply" onClick={props.onReply}>
+                <button className="icon-btn" aria-label="Reply" title="Reply" onClick={() => props.onReply(m)}>
                   <Reply size={15} />
                 </button>
                 {!m.answer && (
@@ -779,7 +805,7 @@ function MessageRow(props: {
             )}
             {mine && !choosing && (
               <>
-            <button className="icon-btn" aria-label="Change your message" title="Change" onClick={() => props.onEdit(true)}>
+            <button className="icon-btn" aria-label="Change your message" title="Change" onClick={() => props.onEdit(m, true)}>
               <EditIcon />
             </button>
             <button className="icon-btn" aria-label="Delete your message" title="Delete" onClick={remove}>
@@ -836,7 +862,7 @@ function AnswerFoot({ m, onTodo, onOpenTask }: { m: ChatMessage; onTodo: () => v
     <div className="chat-answer-foot">
       {a.fromSpace.map((f, i) => (
         <p key={i} className="chat-answer-line">
-          <span className="chat-answer-label">{new Date(f.when).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+          <span className="chat-answer-label">{fmtDay(f.when)}</span>
           <span>{f.text}</span>
         </p>
       ))}

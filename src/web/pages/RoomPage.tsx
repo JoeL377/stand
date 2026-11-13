@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import type { Capabilities } from "../../shared/protocol.ts";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
-import { Meeting } from "../room/Meeting.tsx";
+import { Meeting } from "../later.tsx";
 import { SpaceHome } from "./SpaceHome.tsx";
 
 export function RoomPage() {
@@ -14,7 +14,8 @@ export function RoomPage() {
 
 function SpacePage({ roomId }: { roomId: string }) {
   const { user, caps } = useAuth();
-  const [room, setRoom] = useState<RoomInfo | null>(null);
+  // A space seen earlier in this visit shows at once as it was, and catches up when the fresh read lands.
+  const [room, setRoom] = useState<RoomInfo | null>(() => api.last.room(roomId));
   const [error, setError] = useState<string | null>(null);
   const [joined, setJoined] = useState(false);
   // Coming in from a phone's join sheet with the mic off.

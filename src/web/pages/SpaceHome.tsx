@@ -4,7 +4,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 // (to-dos, decisions, open questions and the suggested agenda). Start talking, on the Meetings tab, turns it into the
 // meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, QuestionSweep, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
@@ -21,15 +21,15 @@ import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
 import { FromChip, QuoteMark } from "../RecapChapters.tsx";
 import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, GripIcon, LinkIcon, MicIcon, PinIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
-import { Avatar } from "../room/Stage.tsx";
+import { Avatar } from "../Avatar.tsx";
 import { removeSnap } from "../Snaps.tsx";
 import { AnswerForm, SweepPop, answeredToast } from "../Questions.tsx";
 import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { usePhone } from "../phone.ts";
-import { fmtDate, fmtTime } from "../util.ts";
+import { fmtDate, fmtTime, fmtDay } from "../util.ts";
 import { ModeNote } from "./RoomPage.tsx";
-import { brainstormHref } from "./BrainstormPage.tsx";
+import { brainstormHref } from "./brainstormHref.ts";
 import { VerdictCounts, designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { ShotZoom } from "../room/ReviewStage.tsx";
@@ -50,8 +50,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const { room, reload } = props;
   const colorFor = useColorRegistry(room.id, room.people.map((p) => ({ id: p.name, name: p.name })));
   const { user, caps } = useAuth();
-  const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null);
-  const [feed, setFeed] = useState<SpaceFeed | null>(null);
+  // What this visit last read shows at once; the fresh read replaces it when it differs.
+  const [spaces, setSpaces] = useState<SpaceSummary[] | null>(() => api.last.spaces());
+  const [feed, setFeed] = useState<SpaceFeed | null>(() => api.last.feed(room.id));
   const [error, setError] = useState<string | null>(null);
   // On a wide screen chat is a column beside every tab (the dock); on a narrower one it is a tab.
   const wide = useWide();
@@ -87,9 +88,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // The task open in the drawer, in the URL so a link can open it.
   const [params, setParams] = useSearchParams();
   const openTask = params.get("task");
-  const showTask = useCallback((id: string) => setParams((prev) => {
+  // The same function for the life of the page (the router's setter changes with every URL), so the chat
+  // thread, which is given it, isn't drawn again each time a project opens.
+  const setParamsNow = useRef(setParams);
+  setParamsNow.current = setParams;
+  const showTask = useCallback((id: string) => setParamsNow.current((prev) => {
     const next = new URLSearchParams(prev); next.set("task", id); next.delete("view"); return next;
-  }), [setParams]);
+  }), []);
   const closeTask = useCallback(() => setParams((prev) => {
     const next = new URLSearchParams(prev); next.delete("task"); next.delete("view"); return next;
   }, { replace: true }), [setParams]);
@@ -183,8 +188,19 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     };
   }, [chat.unread, chat.mentions]);
 
+  // "3 min ago" keeps moving while the page sits open: a refresh that brings nothing new no longer
+  // draws the page, so this does, once a minute.
+  const [, minute] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => minute((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const opened = useRef(false);
   const load = useCallback(() => {
-    reload();
+    // The page that put this one up read the space a moment ago: the first load doesn't read it twice.
+    if (opened.current) reload();
+    opened.current = true;
     api.feed(room.id).then(
       (f) => {
         setFeed(f);
@@ -303,10 +319,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const talk = () => (phone && live && !wrapping ? setPrejoin(true) : props.onJoin());
   const members = spaces?.find((s) => s.id === room.id)?.people ?? [];
   // The people of the space with their pictures, for the faces on a project's card.
-  const [pictured, setPictured] = useState<Array<{ name: string; picture: string | null }>>([]);
+  const [crew, setCrew] = useState(() => api.last.members(room.id));
   useEffect(() => {
-    api.members(room.id).then((m) => setPictured(m.members.map(({ name, picture }) => ({ name, picture }))), () => {});
+    api.members(room.id).then(setCrew, () => {});
   }, [room.id]);
+  const pictured = useMemo(() => (crew?.members ?? []).map(({ name, picture }) => ({ name, picture })), [crew]);
   const faces = live && room.people.length ? room.people : members.map((name) => ({ name, picture: null }));
 
   const copy = () => {
@@ -612,7 +629,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                   {/* A phone has room for a short day only. */}
                   <h3>
                     <span className="sh-day-long">{d.label}</span>
-                    <span className="sh-day-short">{d.label === "Today" ? d.label : new Date(d.entries[0].at).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                    <span className="sh-day-short">{d.label === "Today" ? d.label : fmtDay(d.entries[0].at)}</span>
                   </h3>
                   <ul className="sh-rows">
                     {d.entries.map((e) =>
@@ -1569,7 +1586,7 @@ function TasksTab(props: {
     <>
       {deck && (
         <button type="button" className="sh-done-since" onClick={() => setShowDeck(true)} title="See the pages the next meeting opens on">
-          <strong>Done since {new Date(deck.sinceStartedAt).toLocaleDateString([], { month: "short", day: "numeric" })}</strong>
+          <strong>Done since {fmtDay(deck.sinceStartedAt)}</strong>
           {deck.summary && <span className="sh-done-since-summary">{deck.summary}</span>}
           <span className="count">{deck.closed}</span>
           <ChevronIcon />
@@ -2318,7 +2335,7 @@ function KindRow(props: { to: string; name: string; at: number | null; children:
 }
 
 /** The next product review's slides, and the button that starts the call on the first one. */
-const reviewDay = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" }) : "");
+const reviewDay = (ts: number | null) => (ts ? fmtDay(ts) : "");
 
 function ReviewPop(props: { roomId: string; review: ReviewView; reviews: ReviewSummary[]; onStart: () => Promise<void>; onRemove: (slideId: string) => void; onClose: () => void }) {
   const { review } = props;
@@ -2616,7 +2633,7 @@ function MaybeReplaced(props: { by: ReplacedBy; onAnswer: (replaced: boolean) =>
 
 /** On a decision a later meeting reversed: what it was replaced with, and when. */
 function ReplacedChip({ by }: { by: NonNullable<SpaceFeed["decided"][number]["replacedBy"]> }) {
-  const day = new Date(by.startedAt).toLocaleDateString([], { month: "short", day: "numeric" });
+  const day = fmtDay(by.startedAt);
   return (
     <span className="rc-pill-wrap">
       <Link className="rc-pill sh-replaced" to={`/meetings/${by.meetingId}`} aria-label={`Replaced on ${day}: ${by.text}`}>
