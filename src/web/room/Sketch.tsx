@@ -6,6 +6,7 @@
 
 import { BrainWords } from "./BrainWords.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useUpdated } from "./written.tsx";
 import { ChevronDown, Share2, Workflow } from "lucide-react";
 import {
   UNTITLED_DESIGN,
@@ -301,6 +302,9 @@ export function SketchBoard(props: {
     const t = setTimeout(() => setTold((x) => [...x, why.id]), 20_000);
     return () => clearTimeout(t);
   }, [why?.id]);
+  // When Stand adds to the subject on screen, the row says so and the sheet's edge lights once.
+  const mainIds = main.s.style === "diagram" ? (main.s.diagram?.boxes ?? []).map((x) => x.id) : viewOf(b, main.s, main.i).nodes.map((n) => n.id);
+  const updatedAt = useUpdated(live ? mainIds : [], main.s.id);
   // The last change can be taken back until it goes stale.
   const [, tick] = useState(0);
   const undo =
@@ -359,6 +363,14 @@ export function SketchBoard(props: {
       {props.lead}
       {menu}
       <span className="rp-grow" />
+      {updatedAt && (
+        <span key={updatedAt} className="topic-updating on done sk-updated" role="status">
+          <span className="agent-mark" aria-hidden>
+            ✦
+          </span>{" "}
+          Updated
+        </span>
+      )}
       {kinds}
       {props.tail}
     </div>
@@ -525,7 +537,10 @@ export function SketchBoard(props: {
       {pills}
       <div className="sk-body">
         <section className="sk-main" aria-label={main.s.title}>
-          <div className="sk-canvas">{draw(main)}</div>
+          <div className="sk-canvas">
+            {draw(main)}
+            {updatedAt && <span key={updatedAt} className="topic-flash" aria-hidden />}
+          </div>
         </section>
       </div>
       {dock}

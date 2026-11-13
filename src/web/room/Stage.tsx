@@ -453,7 +453,7 @@ export function Stage(props: {
 
   const nowRow = (
       <div className={nowSlot ? "now in-bar" : "now"}>
-        {canSteer && <TaskPicker roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { if (send({ type: "task.present", taskId: task.id })) pickTab(null); }} />}
+        {canSteer && <TaskPicker bare={!!nowSlot} roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { if (send({ type: "task.present", taskId: task.id })) pickTab(null); }} />}
         <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && keyOf(focusItem) !== focusItem?.title && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}

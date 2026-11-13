@@ -4346,3 +4346,113 @@ footer.controls .control.pill { padding: 7px 16px; }
 .chat-preview strong { font-size: 12px; font-weight: 600; color: var(--muted); }
 .chat-preview span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .chat-preview { animation: none; } }
+
+/* ---- call top bar: what's on, how long, who's here; the rest under More ---- */
+.topbar-logo { display: inline-flex; }
+.top-more-btn { width: 28px; height: 28px; padding: 0; border-radius: 50%; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.top-more-btn:hover, .top-more-btn[aria-expanded="true"] { color: var(--text); }
+.top-more-menu { width: 250px; }
+.top-more-name { padding: 7px 10px 5px; font-size: 12px; font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-more-note { margin: 4px 0 0; padding: 8px 10px 6px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); line-height: 1.45; }
+.top-more-note span { color: var(--text); font-variant-numeric: tabular-nums; }
+.top-more-note ul { margin: 4px 0 0; padding-left: 16px; font-size: 11.5px; }
+.now.in-bar { padding-left: 2px; }
+.now.in-bar .task-picker:not(:has(> *)) { display: none; }
+.now.in-bar .task-picker:has(> .task-picker-menu:only-child) { position: absolute; display: block; }
+.invite-copied { white-space: nowrap; }
+
+/* ---- card updates you can see: new lines are written in, the card says "Updated" ---- */
+.typed-rest { opacity: 0; }
+.typed-caret { display: inline-block; width: 2px; height: 1em; margin: 0 1px -2px 2px; border-radius: 1px; background: var(--accent-text); animation: notes-pulse 0.8s ease-in-out infinite; }
+.topic-now { position: relative; }
+.topic-flash { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; animation: card-updated 1.8s ease-out; }
+@keyframes card-updated { from { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 7%, transparent); } }
+.topic-updating.done { color: var(--accent-text); animation: label-in 300ms var(--ease-out, ease-out); }
+.topic-updating.done .agent-mark { animation: none; }
+.topic-tab-count.bump { animation: sp-count-bump 500ms ease-out; color: var(--accent-text); }
+.topic-tasks li.topic-task { position: relative; }
+.topic-tasks li.topic-task::before { content: ""; position: absolute; left: -10px; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--ok); opacity: 0; transition: opacity 1.2s ease-out; }
+.topic-tasks li.topic-task.topic-new::before { opacity: 1; transition: none; }
+.topic-tasks li.topic-task.topic-new { animation: line-in 320ms var(--ease-out, ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .topic-flash, .topic-updating.done, .topic-tab-count.bump, .topic-tasks li.topic-task.topic-new, .typed-caret { animation: none; }
+}
+
+/* ---- topic card: one reading column on top, the four parts side by side under it ---- */
+.topic-now { gap: 0; padding: 26px 32px 18px; border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); }
+.topic-now > .topic-now-head { min-height: 20px; margin-bottom: 10px; }
+.topic-now > .topic-now-title { font-size: 26px; line-height: 1.2; letter-spacing: -0.015em; max-width: 34ch; }
+.topic-now > .topic-summary { margin-top: 12px; font-size: 16.5px; line-height: 1.55; max-width: 68ch; color: color-mix(in srgb, var(--text) 82%, transparent); }
+.topic-now > .topic-tabs-wrap, .topic-now > .topic-cols, .topic-now > .topic-sections { margin-top: 24px; }
+.topic-now > .topic-moving { margin-top: 16px; }
+.topic-now > .topic-remark { margin-top: auto; padding-top: 12px; }
+.topic-now > .topic-moving + .topic-remark { margin-top: 12px; }
+.topic-cols { display: grid; grid-template-columns: 1.25fr repeat(3, minmax(0, 1fr)); gap: 0; padding-top: 18px; padding-bottom: 20px; border-top: 1px solid var(--line); }
+.topic-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 0 18px; border-left: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.topic-col:first-child { padding-left: 0; border-left: 0; }
+.topic-col:last-child { padding-right: 0; }
+.topic-col .topic-section-label { display: flex; align-items: center; gap: 6px; }
+.topic-col .topic-section-label .topic-tab-count { margin-left: 0; }
+.topic-col.decided .topic-section-label { color: var(--ok-text); }
+.topic-col.todo .topic-section-label { color: var(--accent-text); }
+.topic-col.open .topic-section-label { color: var(--warn-text); }
+.topic-col .topic-details { grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: 14.5px; line-height: 1.4; }
+.topic-col .topic-tasks { font-size: 14.5px; line-height: 1.4; }
+.topic-col .topic-tasks.compact li.topic-task .topic-dot { display: inline-grid; }
+.topic-col .topic-section-empty { font-size: 14px; }
+.running-list > .topic-sections { padding-top: 18px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) { .topic-now { padding: 18px 16px 14px; } .topic-now > .topic-now-title { font-size: 21px; } }
+
+/* ---- card lists are plain bullets: the section's label already says what a line is ---- */
+.topic-now .topic-tasks li.topic-task:not(.heard):not(.leaving) > .topic-note-mark { align-self: flex-start; display: inline-flex; align-items: center; justify-content: center; height: 20px; font-size: 0; }
+.topic-now .topic-tasks li.topic-task:not(.heard):not(.leaving) > .topic-note-mark::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--muted) 75%, transparent); }
+/* An open to-do is a bullet until the pointer is on its line; then it is the box to tick. */
+@media (hover: hover) {
+  .topic-now .topic-check:not([aria-pressed="true"]) { border-color: transparent; transition: border-color 120ms; }
+  .topic-now .topic-check:not([aria-pressed="true"])::before { content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: color-mix(in srgb, var(--muted) 75%, transparent); transition: opacity 120ms; }
+  .topic-now li.topic-task:hover .topic-check:not([aria-pressed="true"]):not(:disabled), .topic-now .topic-check:not([aria-pressed="true"]):focus-visible { border-color: color-mix(in srgb, var(--text) 45%, transparent); }
+  .topic-now li.topic-task:hover .topic-check:not([aria-pressed="true"]):not(:disabled)::before, .topic-now .topic-check:not([aria-pressed="true"]):focus-visible::before { opacity: 0; }
+}
+
+/* ---- card lists: every mark, box and face sits centred on its line's first row ---- */
+.topic-now .topic-tasks li.topic-task { align-items: flex-start; gap: 8px; }
+.topic-now .topic-tasks li.topic-task > .topic-note-mark { flex: none; width: 15px; height: 1.4em; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.topic-now .topic-tasks li.topic-task:not(.heard):not(.leaving) > .topic-note-mark { position: relative; height: 1.4em; font-size: inherit; color: transparent; overflow: hidden; }
+.topic-now .topic-tasks li.topic-task:not(.heard):not(.leaving) > .topic-note-mark::before { position: absolute; left: 50%; top: 50%; margin: -2.5px 0 0 -2.5px; }
+.topic-now .topic-tasks li.topic-task > .topic-check { top: 0; margin-top: calc((1.4em - 15px) / 2); }
+/* A face's own type is small, so its offset is in px: an 18px face on a 20px row. */
+.topic-now .topic-tasks li.topic-task .topic-dot { align-self: flex-start; margin-top: 1px; }
+.topic-now .topic-tasks li.topic-task > .topic-task-at, .topic-now .topic-tasks li.topic-task > .topic-task-answers { align-self: flex-start; margin-top: 2px; line-height: 16px; }
+.topic-now .topic-tasks li.topic-task > .topic-task-remove { align-self: flex-start; height: 20px; display: inline-flex; align-items: center; }
+.topic-now .topic-details li { align-items: flex-start; gap: 10px; }
+.topic-now .topic-details li > .topic-dot { margin-top: 0; }
+.topic-now .topic-details li > .topic-note-mark { height: 1.4em; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.topic-now .topic-section-label { display: flex; align-items: center; gap: 6px; line-height: 16px; }
+.topic-now .topic-section-label .topic-tab-count { margin-left: 0; line-height: 16px; }
+/* In a column the hover tools lie over the line's end, so they never narrow the text. */
+.topic-col .topic-task > .topic-task-remove { position: absolute; right: -14px; top: 0; }
+@media (hover: hover) {
+  .topic-col .topic-task .agent-find { position: absolute; right: 0; top: 1px; background: color-mix(in srgb, var(--accent) 24%, var(--panel-2)); box-shadow: -8px 0 8px var(--panel-2); pointer-events: none; }
+  .topic-col .topic-task:hover .agent-find, .topic-col .topic-task .agent-find:focus-visible { pointer-events: auto; }
+}
+.topic-now-head .topic-updating { line-height: 16px; }
+.topic-remark > .topic-dot { flex: none; }
+
+/* ---- sketch updates you can see: new circles and boxes are written in, their line draws ---- */
+.sk-bar .sk-updated { flex: none; margin-left: 0; font-size: 11px; white-space: nowrap; }
+.sk-bar .sk-updated + .sk-kinds, .sk-bar .sk-updated ~ .view-as-wrap { margin-left: 0; }
+.sk-canvas > .topic-flash { z-index: 4; }
+.brain-lines line.fresh { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 1; animation: brain-draw 700ms ease-out; }
+@keyframes brain-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.design-box.fresh { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); animation: design-in 420ms var(--ease-out, ease-out); }
+.design-box { transition: box-shadow 0.6s ease-out, border-color 0.6s ease-out; }
+@keyframes design-in { from { opacity: 0; scale: 0.9; } }
+@media (prefers-reduced-motion: reduce) { .brain-lines line.fresh, .design-box.fresh { animation: none; } }
+
+/* A new circle that landed outside a zoomed-in view: one pill, a click goes to it. */
+.brain-new-pill { all: unset; box-sizing: border-box; position: absolute; left: 50%; bottom: 12px; translate: -50% 0; z-index: 4; display: inline-flex; align-items: center; gap: 6px; max-width: min(360px, calc(100% - 180px)); height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line)); background: var(--panel); box-shadow: 0 2px 10px rgb(0 0 0 / 0.25); font-size: 12.5px; font-weight: 500; cursor: pointer; animation: chat-jump-in 220ms var(--ease-out, ease-out); }
+.brain-new-pill:hover { background: var(--hover); }
+.brain-new-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.brain-new-pill .agent-mark { color: var(--accent-text); }
+.brain-new-what { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+@media (prefers-reduced-motion: reduce) { .brain-new-pill { animation: none; } }
