@@ -3595,21 +3595,24 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .chat-thread > :first-child { margin-top: auto; }
 .chat-older { align-self: center; margin-bottom: 8px; font-size: 13px; }
 .chat-empty { margin-bottom: 8px; }
-.chat-day { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; font-size: 12px; color: var(--muted); }
-.chat-day::before, .chat-day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.chat-day.new { margin: 8px 0 2px; color: var(--accent); }
-.chat-day.new::before, .chat-day.new::after { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+/* One quiet line for a new day; the same line says "New" where your unread ones start. */
+.chat-day { display: flex; align-items: center; gap: 10px; margin: 18px 8px 2px; font-size: 11px; font-weight: 500; color: var(--muted); }
+.chat-day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.chat-day.new { color: var(--accent-text); }
+.chat-day.new::after { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .chat-msg { position: relative; display: flex; gap: 10px; padding: 1px 8px; border-radius: 8px; }
-.chat-msg.head { margin-top: 8px; padding-top: 4px; }
+.chat-msg.head { margin-top: 12px; padding-top: 3px; }
+.chat-msg-side .avatar { margin-top: 2px; font-size: 9px !important; box-shadow: none; }
 .chat-msg:hover, .chat-msg:focus-within { background: var(--hover); }
-.chat-msg-side { flex: none; width: 28px; display: flex; justify-content: center; }
+.chat-msg-side { flex: none; width: 24px; display: flex; justify-content: center; }
 .chat-msg-time { visibility: hidden; font-size: 10px; line-height: 21px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .chat-msg:hover .chat-msg-time { visibility: visible; }
 .chat-msg-body { flex: 1; min-width: 0; }
 .chat-msg-head { display: flex; align-items: baseline; gap: 8px; }
-.chat-msg-who { font-size: 14px; font-weight: 600; }
-.chat-msg-at { font-size: 11px; color: var(--muted); }
-.chat-msg-text { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-msg-head { line-height: 1.3; }
+.chat-msg-who { font-size: 13px; font-weight: 600; color: var(--text); }
+.chat-msg-at { font-size: 11px; color: var(--muted); opacity: 0.8; font-variant-numeric: tabular-nums; }
+.chat-msg-text { margin: 0; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-msg-text a { color: var(--accent); }
 .chat-msg-edited { font-size: 11px; color: var(--muted); }
 .chat-msg.deleted .chat-msg-text { color: var(--muted); font-style: italic; }
@@ -3627,46 +3630,46 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .chat-edit-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; font-size: 13px; }
 .chat-edit-foot button[type="submit"] { height: 28px; padding: 0 12px; font-size: 13px; }
 /* What Stand caught from the talk: one chip each, under the message it came from, in the Tasks tab's colours. */
-.chat-caughts { display: flex; flex-wrap: wrap; gap: 4px 5px; margin: 3px 8px 4px 46px; min-width: 0; }
-.chat-caught { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; height: 22px; padding: 0 3px 0 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); font-size: 12px; }
-.chat-caught-open { display: inline-flex; align-items: center; gap: 5px; min-width: 0; height: 100%; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; color: var(--text); text-align: left; }
+.chat-caughts { display: flex; flex-direction: column; align-items: flex-start; gap: 0; margin: 2px 8px 2px 42px; min-width: 0; }
+.chat-caught { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 20px; font-size: 12px; }
+.chat-caught-open { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; color: var(--muted); text-align: left; }
 button.chat-caught-open { cursor: pointer; }
-button.chat-caught-open:hover .chat-caught-text { text-decoration: underline; }
-.chat-caught .agent-mark { flex: none; font-size: 11px; color: var(--accent); }
-.chat-caught-label { flex: none; font-weight: 600; color: var(--accent-text); }
+button.chat-caught-open:hover .chat-caught-text { color: var(--text); text-decoration: underline; }
+.chat-caught-label { flex: none; font-weight: 500; color: var(--accent-text); }
+.chat-caught-label .agent-mark { font-size: 10px; }
 .chat-caught.decision .chat-caught-label { color: var(--ok-text); }
 .chat-caught.question .chat-caught-label { color: var(--warn-text); }
 .chat-caught-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-caught.closed .chat-caught-text { color: var(--muted); text-decoration: line-through; }
+.chat-caught.closed .chat-caught-text { text-decoration: line-through; opacity: 0.7; }
 .chat-caught .avatar { flex: none; font-size: 7px !important; box-shadow: none; }
 .chat-caught-remove { flex: none; width: 16px; height: 16px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: none; box-shadow: none; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; opacity: 0; }
 .chat-caught-remove:hover { background: var(--hover); color: var(--text); }
 .chat-caught:hover .chat-caught-remove, .chat-caught:focus-within .chat-caught-remove { opacity: 1; }
 /* A closed stretch of chat ends with one line: what it was about and what came of it. It opens to the summary. */
-.chat-recap { margin: 4px 8px 2px 46px; font-size: 12px; min-width: 0; }
-.chat-recap-head { display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; min-height: 0; height: 22px; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; color: var(--muted); text-align: left; cursor: pointer; }
+.chat-recap { margin: 2px 8px 0 42px; font-size: 12px; min-width: 0; }
+.chat-recap-head { display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; min-height: 0; height: 20px; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; color: var(--muted); text-align: left; cursor: pointer; }
 .chat-recap-head:disabled { cursor: default; opacity: 1; }
-.chat-recap-head .agent-mark { flex: none; font-size: 11px; color: var(--accent); }
+.chat-recap-head .agent-mark { flex: none; font-size: 10px; color: var(--muted); }
 .chat-recap-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--text); }
 .chat-recap-n { flex: none; white-space: nowrap; }
-.chat-recap-head svg { flex: none; margin-left: auto; transition: transform var(--dur-ui) var(--ease-out); }
+.chat-recap-head svg { flex: none; opacity: 0.6; transition: transform var(--dur-ui) var(--ease-out); }
 .chat-recap.open .chat-recap-head svg { transform: rotate(90deg); }
-.chat-recap-summary { margin: 2px 0 4px 16px; font-size: 13px; line-height: 1.5; color: var(--text); }
-.chat-recap-topics { margin: 4px 0 4px 16px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.chat-recap-summary { margin: 2px 0 4px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.chat-recap-topics { margin: 4px 0 4px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .chat-recap-topics li { padding: 1px 8px; border-radius: 999px; font-size: 12px; color: var(--muted); background: var(--hover); }
-.chat-reads { display: flex; justify-content: flex-end; gap: 3px; margin: 3px 8px 0; }
+.chat-reads { display: flex; justify-content: flex-end; gap: 3px; margin: 2px 8px 0; opacity: 0.75; }
 .chat-reads .avatar { flex: none; font-size: 8px !important; box-shadow: none; }
 .chat-compose { flex: none; position: relative; }
 .chat-compose .mention-box textarea { display: block; min-height: 42px; max-height: 180px; padding: 10px 46px 10px 12px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 12px; resize: none; field-sizing: content; }
 .chat-compose .chat-send { right: 8px; bottom: 8px; width: 26px; height: 26px; min-height: 0; }
-.chat-compose .chat-send:disabled { background: var(--line); color: var(--muted); cursor: default; }
 .sp-side-text.unread { font-weight: 600; color: var(--side-strong); }
 /* A touch screen has no hover: a tap on a message of yours brings up its tools, and a tap on a chip its cross. */
 @media (hover: none) {
   .chat-msg:hover .chat-msg-tools, .chat-msg:focus-within .chat-msg-tools { display: none; }
   .chat-msg.picked .chat-msg-tools { display: inline-flex; }
   .chat-msg.picked { background: var(--hover); }
-  .chat-caught-remove { opacity: 1; }
+  /* Taking a caught line off is a desktop job: a phone reads. */
+  .chat-caught-remove { display: none; }
 }
 /* On a phone the page scrolls, not the thread, and the box to write in stays at the foot of the screen. */
 @media (max-width: 760px) {
@@ -3776,7 +3779,7 @@ a .mention { color: inherit; }
 
 /* The chat dock (SpaceHome.tsx): on a wide screen, chat is a column at the right of the space page,
    beside every tab. The page's own lists scroll in the column to its left. */
-.sh-dock { flex: none; width: 360px; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 16px 16px; border-left: 1px solid var(--line); box-sizing: border-box; background: var(--bg); }
+.sh-dock { flex: none; width: 360px; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 12px 14px 14px; border-left: 1px solid var(--line); box-sizing: border-box; background: var(--bg); }
 .sh-dock-head { flex: none; display: flex; align-items: center; gap: 8px; height: 32px; color: var(--muted); }
 .sh-dock-head strong { font-size: 14px; font-weight: 600; color: var(--text); }
 .sh-dock-head .icon-btn { margin-left: auto; margin-right: -6px; display: grid; place-items: center; }
@@ -3788,7 +3791,7 @@ a .mention { color: inherit; }
 .chat-bell.muted { color: var(--muted); }
 .sh-dock .space-chat { max-width: none; }
 .sh-dock .chat-msg { padding: 1px 4px; }
-.sh-dock .chat-caughts, .sh-dock .chat-recap { margin-left: 42px; margin-right: 4px; }
+.sh-dock .chat-caughts, .sh-dock .chat-recap { margin-left: 38px; margin-right: 4px; }
 .sh-dock .chat-reads { margin-right: 4px; }
 .sh-chat-toggle.on { border-color: var(--text); }
 /* With room for both, the task drawer opens to the left of the dock, so chat stays in view. */

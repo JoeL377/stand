@@ -130,8 +130,8 @@ const thread = (page) => page.locator(".chat-thread");
       await box(vera).press("Shift+Enter");
       await box(vera).pressSequentially(two);
       await box(vera).press("Enter");
-      await thread(vera).getByRole("link", { name: "https://example.test/copy" }).waitFor();
-      await thread(bo).getByRole("link", { name: "https://example.test/copy" }).waitFor({ timeout: 5000 });
+      await thread(vera).getByRole("link", { name: "example.test/copy" }).waitFor();
+      await thread(bo).getByRole("link", { name: "example.test/copy" }).waitFor({ timeout: 5000 });
     });
 
     await step("Vera changes her message, and Bo sees the change", async () => {

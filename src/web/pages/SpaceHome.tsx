@@ -754,7 +754,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
       {docked && (
         <aside className="sh-dock" aria-label="Chat">
           <div className="sh-dock-head">
-            <ChatIcon size={14} />
             <strong>Chat</strong>
             <ChatNotifyBell roomId={room.id} />
             <button className="icon-btn" aria-label="Close chat" title={`Close chat (${CHAT_SHORTCUT})`} onClick={() => showDock(false)}>

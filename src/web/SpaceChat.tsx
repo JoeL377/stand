@@ -13,7 +13,6 @@ import { moveRead, placeReads } from "./chatReads.ts";
 import { ChevronIcon, CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
 import { Linkified } from "./Linkified.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
-import { usePersonColors } from "./PersonColors.tsx";
 import { Avatar } from "./room/Stage.tsx";
 import { errorToast } from "./Toasts.tsx";
 import { fmtTime } from "./util.ts";
@@ -252,6 +251,10 @@ const dayLabel = (ts: number) => {
   return d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 };
 
+const first = (name: string) => name.trim().split(/\s+/)[0] || name;
+/** "4:46", without AM or PM: the day line above says which day, and the full time is the title. */
+const shortTime = (ts: number) => fmtTime(ts).replace(/\s?[AP]M$/i, "");
+
 const newKey = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
 export function SpaceChat(props: {
@@ -312,6 +315,13 @@ export function SpaceChat(props: {
     if (!el || el.scrollHeight <= el.clientHeight) window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
     follow(true);
   };
+
+  // A first name reads faster than a full one; two people who share it keep their full names.
+  const shortName = useMemo(() => {
+    const firsts = new Map<string, number>();
+    for (const p of thread?.people ?? []) firsts.set(first(p.name), (firsts.get(first(p.name)) ?? 0) + 1);
+    return (name: string) => ((firsts.get(first(name)) ?? 0) > 1 ? name : first(name));
+  }, [thread?.people]);
 
   const rows = useMemo(() => {
     const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; pending: PendingMessage["state"] | null; readBy: string[] }> = [];
@@ -419,6 +429,7 @@ export function SpaceChat(props: {
             onRetry={() => m.key && chat.retry(m.key)}
             onDiscard={() => m.key && chat.discard(m.key)}
             m={m}
+            name={shortName(m.author)}
             day={day}
             head={head}
             fresh={fresh}
@@ -458,6 +469,8 @@ export function SpaceChat(props: {
 
 function MessageRow(props: {
   m: ChatMessage;
+  /** The author's name as the thread shows it. */
+  name: string;
   /** Not saved yet: on its way, or failed and waiting for Retry. */
   pending: PendingMessage["state"] | null;
   /** The other people whose reading stops at this message. */
@@ -480,7 +493,6 @@ function MessageRow(props: {
   onChanged: (m: ChatMessage) => void;
 }) {
   const { m, mine } = props;
-  const colorFor = usePersonColors();
   const [draft, setDraft] = useState(m.text);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -508,14 +520,9 @@ function MessageRow(props: {
 
   return (
     <>
-      {props.day && (
-        <div className="chat-day" role="separator">
-          <span>{props.day}</span>
-        </div>
-      )}
-      {props.fresh && (
-        <div className="chat-day new" role="separator">
-          <span>New</span>
+      {(props.day || props.fresh) && (
+        <div className={props.fresh ? "chat-day new" : "chat-day"} role="separator">
+          <span>{[props.day, props.fresh && "New"].filter(Boolean).join(" · ")}</span>
         </div>
       )}
       <div
@@ -524,15 +531,17 @@ function MessageRow(props: {
         onClick={mine && !props.editing ? (e) => !(e.target as HTMLElement).closest("a, button, textarea") && props.onPick() : undefined}
       >
         <div className="chat-msg-side">
-          {props.head ? <Avatar id={m.author} name={m.author} size={28} /> : <span className="chat-msg-time">{fmtTime(m.ts).replace(/\s?[AP]M$/i, "")}</span>}
+          {props.head ? <Avatar id={m.author} name={m.author} size={24} /> : <span className="chat-msg-time">{shortTime(m.ts)}</span>}
         </div>
         <div className="chat-msg-body">
           {props.head && (
             <div className="chat-msg-head">
-              <span className="chat-msg-who" style={{ color: colorFor(m.author) }}>
-                {m.author}
+              <span className="chat-msg-who" title={m.author}>
+                {props.name}
               </span>
-              <span className="chat-msg-at">{fmtTime(m.ts)}</span>
+              <span className="chat-msg-at" title={new Date(m.ts).toLocaleString()}>
+                {shortTime(m.ts)}
+              </span>
             </div>
           )}
           {m.deletedAt ? (
@@ -647,10 +656,12 @@ function CaughtRow(props: { line: CaughtLine; onOpen?: (id: string) => void; onR
   const said = `${CAUGHT_LABEL[line.kind]}: ${line.text}${line.owner ? ` · ${line.owner}` : ""}`;
   const inner = (
     <>
-      <span className="agent-mark" aria-hidden>
-        ✦
-      </span>
-      <strong className="chat-caught-label">{CAUGHT_LABEL[line.kind]}</strong>
+      <strong className="chat-caught-label">
+        <span className="agent-mark" aria-hidden>
+          ✦{" "}
+        </span>
+        {CAUGHT_LABEL[line.kind]}
+      </strong>
       <span className="chat-caught-text">{line.text}</span>
     </>
   );
@@ -755,9 +766,11 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
           }
         }}
       />
-      <button type="submit" className="chat-send" aria-label="Send" disabled={!text.trim()}>
-        <SendIcon />
-      </button>
+      {text.trim() && (
+        <button type="submit" className="chat-send" aria-label="Send">
+          <SendIcon />
+        </button>
+      )}
     </form>
   );
 }
