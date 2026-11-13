@@ -1600,6 +1600,12 @@ function TasksTab(props: {
             <>
               {pills}
               {sweepButton}
+              {/* Adding a project is offered beside the tabs, in view however long the list of projects is. */}
+              {!plain && viewing === null && !props.mine && !onlyPinned && (
+                <button type="button" className="rp-pill pj-add-pill" aria-pressed={adding} onClick={() => setAdding(true)} title="New project">
+                  + Project
+                </button>
+              )}
               {canSort && <TaskMenu sort={sort} onSort={pickSort} />}
             </>,
             props.toolsIn,
@@ -1765,9 +1771,9 @@ function TasksTab(props: {
                 />
               </section>
             )}
-            {!grid && !adding && !onlyPinned && !props.mine && addProject}
+            {!grid && !props.toolsIn && !adding && !onlyPinned && !props.mine && addProject}
           </div>
-          {grid && !adding && !onlyPinned && !props.mine && addProject}
+          {grid && !props.toolsIn && !adding && !onlyPinned && !props.mine && addProject}
         </>
       )}
       {done.length > 0 && plain && (
