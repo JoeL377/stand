@@ -322,6 +322,12 @@ finishReview(db, room.id, reviewCall.id, reviewStarted + 18 * MIN);
     node("d4", null, "Bring them back", "Recover people who leave partway.", sam, "And what about the ones who leave, can we get them back?"),
     node("i9", "d4", "Save the cart by email", "Ask for an email first and send the cart back to them.", sam, "If we get the email first we can send them their cart.", { caught: [{ id: "bc3", kind: "decision", text: "Email comes first on the form", owner: null, done: false }] }),
     node("i10", "d4", "Remember the address", "Keep what a guest typed on this device for next time.", priya, "At least remember what they typed if they come back on the same phone."),
+    // The talk moved on to another subject, so it got a centre of its own on the same map.
+    node("d5", null, "Who pays for it", "Whether shoppers or Acme carry the cost of shipping.", leo, "Wait, separate thing, who's paying for shipping on these?", { cluster: "Shipping costs" }),
+    node("i11", "d5", "Free over 40 dollars", "Free shipping once a basket passes 40 dollars.", maya, "Free over forty is what everyone else does."),
+    node("i12", "d5", "Flat 3 dollar fee", "One flat fee whatever the basket.", leo, "Or just a flat three dollars, done."),
+    node("d6", null, "Carriers", "Which carriers to offer at checkout.", sam, "We only offer one carrier right now.", { cluster: "Shipping costs" }),
+    node("i13", "d6", "Add a cheaper carrier", "A slower, cheaper option beside the default.", sam, "Add a cheaper slow one."),
   ]);
   db.endMeeting(call.id, "The team brainstormed ways to get more shoppers through guest checkout.", null, at + 22 * MIN, []);
   finishBrainstorm(db, room.id, call.id, at + 22 * MIN);

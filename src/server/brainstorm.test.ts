@@ -27,16 +27,16 @@ test("the map grows from the talk: directions off the centre, ideas under them, 
   const model = scripted([
     {
       add: [
-        { under: "root", label: "Onboarding.", detail: "Ways to get a new team going.", by: "Huy Ngo", line: 2 },
-        { under: "new1", label: "Welcome video", detail: "A short video on first sign-in.", by: "Huy", line: 2 },
-        { under: "d9", label: "Lost idea", detail: "Names a direction that isn't there.", by: null, line: 2 },
+        { cluster: null, under: "root", label: "Onboarding.", detail: "Ways to get a new team going.", by: "Huy Ngo", line: 2 },
+        { cluster: null, under: "new1", label: "Welcome video", detail: "A short video on first sign-in.", by: "Huy", line: 2 },
+        { cluster: null, under: "d9", label: "Lost idea", detail: "Names a direction that isn't there.", by: null, line: 2 },
       ],
     },
     {
       add: [
-        { under: "root", label: "Onboarding", detail: "Same direction again.", by: "Joe", line: 1 },
-        { under: "d1", label: "A welcome video", detail: "Said again in other words.", by: "Joe", line: 1 },
-        { under: "d1", label: "Sample space", detail: "Start every team with a filled-in space.", by: "Joe", line: 1 },
+        { cluster: null, under: "root", label: "Onboarding", detail: "Same direction again.", by: "Joe", line: 1 },
+        { cluster: null, under: "d1", label: "A welcome video", detail: "Said again in other words.", by: "Joe", line: 1 },
+        { cluster: null, under: "d1", label: "Sample space", detail: "Start every team with a filled-in space.", by: "Joe", line: 1 },
       ],
       extend: [{ id: "i1", point: "Keep it under a minute", by: "Joe", line: 1 }],
       caught: [{ id: "i2", item: "li_1" }, { id: "i2", item: "li_404" }],
@@ -75,9 +75,9 @@ test("the map grows from the talk: directions off the centre, ideas under them, 
 
 test("a circle someone took off stays off, and a model that can't answer changes nothing", async () => {
   const model = scripted([
-    { add: [{ under: "root", label: "Pricing", detail: "Charge differently.", by: "Joe", line: 1 }, { under: "new1", label: "Free for small teams", detail: "No charge under five people.", by: "Joe", line: 1 }] },
+    { add: [{ cluster: null, under: "root", label: "Pricing", detail: "Charge differently.", by: "Joe", line: 1 }, { cluster: null, under: "new1", label: "Free for small teams", detail: "No charge under five people.", by: "Joe", line: 1 }] },
     null,
-    { add: [{ under: "root", label: "Pricing", detail: "Again.", by: "Huy", line: 1 }, { under: "new1", label: "Annual discount", detail: "Cheaper by the year.", by: "Huy", line: 1 }] },
+    { add: [{ cluster: null, under: "root", label: "Pricing", detail: "Again.", by: "Huy", line: 1 }, { cluster: null, under: "new1", label: "Annual discount", detail: "Cheaper by the year.", by: "Huy", line: 1 }] },
   ]);
   const map = new MapKeeper(model, "Growth", T0);
   const talk = [seg(1, "Joe", "free for small teams")];
@@ -97,7 +97,7 @@ test("a circle someone took off stays off, and a model that can't answer changes
 });
 
 test("a line out of the map's scope is never read, and never waits as unread", async () => {
-  const model = scripted([{ add: [{ under: "root", label: "Onboarding", detail: "Ways to get a new team going.", by: "Huy", line: 1 }] }]);
+  const model = scripted([{ add: [{ cluster: null, under: "root", label: "Onboarding", detail: "Ways to get a new team going.", by: "Huy", line: 1 }] }]);
   const slide = (n: number, who: string, text: string): Segment => ({ ...seg(n, who, text), itemId: "slide" });
   const map = new MapKeeper(model, "Week one", T0, null, (s) => s.itemId !== "slide");
   const talk = [slide(1, "Joe", "on this slide the button is blue"), seg(2, "Huy", "onboarding could start from a sample space")];
@@ -193,4 +193,43 @@ test("an old database gets the columns a topic's map keeps", () => {
   migrate(raw);
   const cols = (raw.prepare("PRAGMA table_info(brainstorms)").all() as Array<{ name: string }>).map((c) => c.name);
   assert.ok(cols.includes("thread_id") && cols.includes("spans_json"));
+});
+
+test("talk that moves to a separate subject starts a cluster of its own on the same map, and coming back reuses it", async () => {
+  const model = scripted([
+    { add: [{ cluster: null, under: "root", label: "TSMC relationship", detail: "Their supplier may put others first.", by: "Huy", line: 1 }] },
+    {
+      add: [
+        { cluster: "Credit card churning", under: "root", label: "How many cards", detail: "Who holds how many cards.", by: "Andy", line: 1 },
+        { cluster: null, under: "new1", label: "Seven plus cards", detail: "Andy has seven or more.", by: "Andy", line: 1 },
+        // The centre's own name is the centre, not a cluster.
+        { cluster: "Jensen's downfall", under: "root", label: "Finding a new CEO", detail: "Who could follow him.", by: "Janesh", line: 1 },
+      ],
+    },
+    { add: [{ cluster: "credit card churning", under: "root", label: "Credit score caps", detail: "Too few cards may cap a score.", by: "Janesh", line: 1 }] },
+    {
+      add: [
+        ["Bitcoin", "Price this week"],
+        ["Work pull request", "Approve from a phone"],
+        ["Weekend weather", "Rain on Saturday"],
+      ].map(([cluster, label]) => ({ cluster: cluster!, under: "root", label: label!, detail: "x", by: null, line: 1 })),
+    },
+  ]);
+  const map = new MapKeeper(model, "Jensen's downfall", T0);
+  map.topicNow = () => "Credit cards";
+  await map.run([seg(1, "Huy", "TSMC is at stake")], ["Huy"], [], T0, T0 + 2_000);
+  assert.match(model.asked[0]!, /The board's current topic: Credit cards/);
+  await map.run([seg(1, "Huy", "TSMC is at stake"), seg(2, "Andy", "I have seven credit cards")], ["Huy", "Andy"], [], T0, T0 + 3_000);
+  const dirs = () => map.all().filter((n) => !n.parent);
+  assert.deepEqual(dirs().map((d) => [d.label, d.cluster ?? null]), [["TSMC relationship", null], ["How many cards", "Credit card churning"], ["Finding a new CEO", null]]);
+  assert.equal(map.all().find((n) => n.label === "Seven plus cards")!.parent, "d2", "an idea goes under its direction, whatever the cluster");
+
+  await map.run([seg(3, "Janesh", "my score is capped")], ["Janesh"], [], T0, T0 + 4_000);
+  assert.match(model.asked[2]!, /Cluster "Credit card churning":\n- \[d2\] How many cards/, "the next pass sees the cluster");
+  assert.equal(dirs().at(-1)!.cluster, "Credit card churning", "the same subject again is the same cluster");
+
+  await map.run([seg(4, "Joe", "and other things")], ["Joe"], [], T0, T0 + 5_000);
+  const clusters = new Set(dirs().map((d) => d.cluster).filter(Boolean));
+  assert.equal(clusters.size, 3, "a map holds at most three clusters besides its centre; more lands on the centre");
+  assert.equal(dirs().at(-1)!.cluster, undefined);
 });

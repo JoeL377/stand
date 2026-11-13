@@ -19,6 +19,8 @@ export const MAP_MAX_WAIT_MS = 12_000;
 const MAP_WINDOW_MS = 2 * 60_000;
 const CATCH_UP_STEPS = 20;
 export const MAX_DIRECTIONS = 8;
+/** Separate subjects a map holds besides its centre, each with its own centre and directions. */
+export const MAX_CLUSTERS = 3;
 export const MAX_IDEAS = 12;
 const MAX_POINTS = 8;
 export const PROMPT_MAX = 160;
@@ -30,6 +32,10 @@ export const MapAnswerSchema = z.object({
     .array(
       z.object({
         under: z.string().describe('"root" for a new direction, or the id of the direction this idea belongs to (d1, d2…)'),
+        cluster: z
+          .string()
+          .nullable()
+          .describe("Only for a new direction: null when it is an angle on the centre. When the talk has moved to a separate subject that doesn't answer the centre, the name of that subject's cluster: one already on the map, or a new one, at most 5 words"),
         label: z.string().describe("What goes in the circle: at most 5 words, plain, no full stop"),
         detail: z.string().describe("One sentence saying what the idea is, in the speaker's terms"),
         by: z.string().nullable().describe("First name of who raised it; null if unclear"),
@@ -58,7 +64,7 @@ export const MAP_SYSTEM = `You draw the map on the middle screen of a live team 
 Each time you get the map so far, with ids, and the last couple of minutes of transcript. Lines marked NEW are the ones you haven't seen yet. Return only what the NEW lines add; everything you don't name stays as it is. Often the answer is empty.
 
 - A direction (under "root") is a distinct angle on the centre that the talk has opened: an area, an approach, a kind of answer. Add one when someone raises an idea that fits no direction on the map, and name it for the angle, not for that one idea ("Onboarding", not "Add a welcome video"). Then add the idea under it. At most ${MAX_DIRECTIONS} directions: once they are there, put new ideas under the closest one.
-- The talk can move on from the centre. When you are told it is now on another topic, that topic is a direction of its own: open one named for it (unless the map has one for it already) and put what is said about it there, even when it doesn't answer the centre. Never drop ideas because they are off the centre.
+- The talk can move on to a separate subject that doesn't answer the centre at all (from a company's future to credit cards, say). That subject is a cluster of its own, with its own centre: add its directions with cluster set to the subject's name, and its ideas under them, as you would for the centre. When the talk comes back to a cluster already on the map, use its name again. A new angle on the centre is a direction, not a cluster; most talk stays on the centre. You may be told the board's current topic: a sign of where the talk is, not a reason on its own to start a cluster. Never drop what is said because it is off the centre.
 - An idea (under a direction) is something specific someone proposes, suggests or wonders about that answers the centre. Add it once it has actually been stated, not while the speaker is still finding the words. Not agreement, not small talk, not logistics, not a restatement of something on the map.
 - Before adding, check the map: when a circle already says it in other words, don't add it. When the NEW talk builds on an existing circle (a reason for it, a variation, a concern about it), use extend on that circle instead.
 - Labels are what people will read at a glance: at most 5 words, concrete, in the team's own words. The detail is one plain sentence.
@@ -104,7 +110,17 @@ export class MapKeeper {
     }
   }
 
-  /** The topic the call is on now, when it can move away from the centre (a topic's map). */
+  /** The cluster a new direction goes in: one on the map by the same name, or a new one while there
+   *  is room. null is the centre. */
+  private clusterFor(raw: string | null | undefined): string | null {
+    const name = clip((raw ?? "").replace(/\s+/g, " ").trim().replace(/\.$/, ""), 48);
+    if (!name || similar(name, this.prompt)) return null;
+    const had = clustersOf(this.nodes).find((c) => c.toLowerCase() === name.toLowerCase() || similar(c, name));
+    if (had) return had;
+    return clustersOf(this.nodes).length >= MAX_CLUSTERS ? null : name;
+  }
+
+  /** The topic the call is on now, from the board. */
   topicNow: (() => string | null) | null = null;
 
   all(): BrainNode[] {
@@ -136,10 +152,15 @@ export class MapKeeper {
     const live = this.nodes.filter((n) => !n.removed);
     const linked = new Set(this.nodes.flatMap((n) => n.caught.map((c) => c.id)));
     const line = (n: BrainNode) => `[${n.id}] ${n.label}${n.by ? ` (${n.by})` : ""}: ${n.detail ?? ""}${n.points.length ? ` (+ ${n.points.map((p) => p.text).join("; ")})` : ""}`;
+    const branch = (d: BrainNode) => [`- ${line(d)}`, ...live.filter((n) => n.parent === d.id).map((i) => `  - ${line(i)}`)].join("\n");
+    const dirs = live.filter((n) => !n.parent);
+    const clusters = clustersOf(this.nodes);
     const map =
-      live
-        .filter((n) => !n.parent)
-        .map((d) => [`- ${line(d)}`, ...live.filter((n) => n.parent === d.id).map((i) => `  - ${line(i)}`)].join("\n"))
+      [
+        dirs.filter((d) => !d.cluster).map(branch).join("\n"),
+        ...clusters.map((c) => `Cluster "${c}":\n${dirs.filter((d) => d.cluster === c).map(branch).join("\n") || "(empty)"}`),
+      ]
+        .filter(Boolean)
         .join("\n") || "(empty)";
     const off = this.nodes.filter((n) => n.removed).map((n) => `- ${n.label}`);
     const open = caught.filter((c) => !linked.has(c.id));
@@ -149,7 +170,7 @@ export class MapKeeper {
     const now_ = this.topicNow?.() ?? null;
     const moved = now_ && !similar(now_, this.prompt) ? now_ : null;
     const a = await this.model.brainstormMap(
-      [`The centre of the map: ${this.prompt}`, moved ? `The talk is now on another topic: ${moved}` : "", `People: ${people.join(", ")}`].filter(Boolean).join("\n"),
+      [`The centre of the map: ${this.prompt}`, moved ? `The board's current topic: ${moved}` : "", `People: ${people.join(", ")}`].filter(Boolean).join("\n"),
       [
         `Map so far:\n${map}`,
         off.length ? `Taken off by the team, never add these again:\n${off.join("\n")}` : "",
@@ -174,11 +195,13 @@ export class MapKeeper {
       if (root) {
         // A direction someone took off, or one already there, isn't added again; its ideas still find it.
         const same = this.nodes.find((n) => !n.parent && similar(n.label, label));
-        if (same || this.nodes.filter((n) => !n.parent && !n.removed).length >= MAX_DIRECTIONS) {
+        const cluster = this.clusterFor(x.cluster);
+        if (same || this.nodes.filter((n) => !n.parent && !n.removed && (n.cluster ?? null) === cluster).length >= MAX_DIRECTIONS) {
           fresh.push(same && !same.removed ? same.id : "");
           continue;
         }
         const d: BrainNode = { id: `d${++this.nd}`, parent: null, label, detail: clip(x.detail.trim(), 240) || null, by: first(x.by), ts: seg.ts, quote: quote(seg), points: [], caught: [] };
+        if (cluster) d.cluster = cluster;
         this.nodes.push(d);
         fresh.push(d.id);
         changed = true;
@@ -221,6 +244,9 @@ export class MapKeeper {
     return changed;
   }
 }
+
+/** The separate subjects a map holds besides its centre, in the order they came up. */
+export const clustersOf = (nodes: BrainNode[]): string[] => [...new Set(nodes.filter((n) => !n.parent && !n.removed && n.cluster).map((n) => n.cluster!))];
 
 /** One map pass over a long stretch no pass has read, a window at a time, so the model never gets
  *  more than MAP_WINDOW_MS of new talk at once. `onStep` follows each step that changed the map. */
