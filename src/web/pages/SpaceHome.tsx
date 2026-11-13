@@ -1370,7 +1370,8 @@ function TasksTab(props: {
             </button>
             <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} label />
           </RowMore>
-          {n.kind === "action" ? (
+          {/* On Mine every row is yours, so your own face says nothing there; someone else's still shows. */}
+          {props.mine && isMine(n) ? null : n.kind === "action" ? (
             <OwnerPicker note={n} roomId={props.roomId} people={props.people} me={props.me} onSaved={props.reload}>
               {face(n)}
             </OwnerPicker>
