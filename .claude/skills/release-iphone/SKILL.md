@@ -13,10 +13,10 @@ On a Mac with Xcode, signed in to the team's Apple account in Xcode (Settings > 
 
 ## Steps
 
-1. Use a clean checkout of `main` on the Mac (the team keeps one at `~/Projects/stand-iphone`): `git fetch origin main && git checkout main && git pull`. Don't release from a branch unless asked to.
+1. Use a clean checkout of `main` on the Mac (the team keeps one at `~/Projects/stand-iphone`): `git fetch origin main && git checkout main && git pull`. Don't release from a branch unless asked to. Opening the project in Xcode often rewrites `iphone/ios/App/App.xcodeproj/project.pbxproj` (it moves the `DEVELOPMENT_TEAM` line); that edit is harmless, so drop it with `git checkout -- iphone/ios/App/App.xcodeproj/project.pbxproj` if it blocks the pull. Don't `git stash -u`: `iphone/build/` is ignored and safe to leave.
 2. Check what changed since the last release: `git log --oneline $(git describe --tags --match 'iphone-*' --abbrev=0 2>/dev/null || echo HEAD~20)..HEAD -- iphone/`.
-3. Dry run first if the native code changed: `npm --prefix iphone run release -- --no-upload`. It builds, signs and checks the push entitlement, and leaves `iphone/build/export/App.ipa`.
-4. Release: `npm --prefix iphone run release`. Add `VERSION=1.1` in front to change the version people see. The build number is the time, so it always goes up.
+3. Dry run first if the native code changed: `npm --prefix iphone run release -- --no-upload`. It takes about half a minute. It archives, signs for the App Store with export options set to `destination: export` (nothing leaves the Mac), and leaves `iphone/build/export/App.ipa`. At the end it prints the push entitlement (it must say `aps-environment production` or the script fails), the signing identity (`Apple Distribution: ... (DV9FSZ65K2)`) and the version and build number inside the app.
+4. Release: `npm --prefix iphone run release`. Add `VERSION=1.1` in front to change the version people see (otherwise it's the project's `MARKETING_VERSION`, now 1.0). The build number is the time to the minute (YYYYMMDDHHMM), so it goes up between runs, though two runs in the same minute share a number. If the export or upload fails, the script stops with an error and the full log is in `iphone/build/export.log`.
 5. Tag it so the next release knows where this one was: `git tag iphone-<build number> && git push origin iphone-<build number>`.
 6. Tell the person: the build number, that Apple takes 10 to 20 minutes to process it, and that internal testers get it straight away while external testers wait for Apple's beta review only when the version number changed (new builds of an approved version usually pass without one).
 
@@ -29,5 +29,6 @@ Uploading puts a build in front of the team's testers. Do it only when the perso
 - **"No Accounts" / "No signing certificate"**: Xcode isn't signed in on this Mac. The person opens Xcode > Settings > Accounts and signs in. Never ask for the password in chat.
 - **Agreement errors ("PLA Update available")**: the person accepts the new agreement at developer.apple.com/account.
 - **A keychain prompt on the Mac**: the person clicks Always Allow.
-- **"The bundle version must be higher"**: the clock-based build number went backwards; run again with `BUILD=<higher number>`.
+- **"The bundle version must be higher"**: a build with that number already went up (two uploads in the same minute) or the clock went backwards; wait a minute or run again with `BUILD=<higher number>`.
+- **Anything else at the signing step**: read `iphone/build/export.log`; Xcode's own distribution logs are in the `.xcdistributionlogs` folder it names there.
 - **Product > Archive in Xcode fails with "no devices"**: expected until an iPhone is registered to the team. This script doesn't need one; see the comment at the top of `iphone/scripts/release.sh`.

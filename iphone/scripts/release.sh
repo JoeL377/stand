@@ -36,7 +36,7 @@ echo "==> Archiving"
 xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" \
   CURRENT_PROJECT_VERSION="$BUILD" ${VERSION:+MARKETING_VERSION="$VERSION"} \
-  CODE_SIGNING_ALLOWED=NO archive | grep -E "error|warning: .*(AppDelegate|SceneDelegate)|ARCHIVE (SUCCEEDED|FAILED)" || true
+  CODE_SIGNING_ALLOWED=NO archive | grep -E "(^|[^-])error:|warning: .*(AppDelegate|SceneDelegate)|ARCHIVE (SUCCEEDED|FAILED)" || true
 [ -d "$ARCHIVE/Products/Applications/App.app" ] || { echo "The archive failed. Run the xcodebuild line above without the grep to see why." >&2; exit 1; }
 
 # What the App Store build is entitled to: Apple push on the real servers.
@@ -78,8 +78,11 @@ cat > "$OPTS" <<PLIST
 PLIST
 
 echo "==> $([ "$UPLOAD" = 1 ] && echo "Signing and uploading to App Store Connect" || echo "Signing (no upload)")"
+LOG="$OUT/export.log"
 xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$EXPORT" \
-  -exportOptionsPlist "$OPTS" -allowProvisioningUpdates | grep -E "error|EXPORT (SUCCEEDED|FAILED)|Upload|upload" || true
+  -exportOptionsPlist "$OPTS" -allowProvisioningUpdates > "$LOG" 2>&1 || true
+grep -E "(^|[^-])error:|EXPORT (SUCCEEDED|FAILED)|Upload|upload" "$LOG" || true
+grep -q "EXPORT SUCCEEDED" "$LOG" || { echo "Signing$([ "$UPLOAD" = 1 ] && echo " or uploading") failed; the full log is $LOG." >&2; exit 1; }
 
 if [ "$UPLOAD" = 1 ]; then
   echo "==> Sent build $BUILD. Apple processes it for 10 to 20 minutes, then TestFlight offers it to testers."
@@ -87,6 +90,11 @@ else
   [ -f "$EXPORT/App.ipa" ] || { echo "The export failed." >&2; exit 1; }
   # Proof the signed app can take push notifications.
   rm -rf "$OUT/check" && mkdir -p "$OUT/check" && unzip -q "$EXPORT/App.ipa" -d "$OUT/check"
-  codesign -d --entitlements - "$OUT/check/Payload/App.app" 2>/dev/null | grep -A1 "aps-environment" || { echo "The signed app has no push entitlement." >&2; exit 1; }
+  APP="$OUT/check/Payload/App.app"
+  APS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null | plutil -extract aps-environment raw -o - - 2>/dev/null || true)"
+  [ "$APS" = production ] || { echo "The signed app's push entitlement is '${APS:-missing}', not production." >&2; exit 1; }
+  echo "    aps-environment $APS"
+  echo "    $(codesign -dv --verbose=2 "$APP" 2>&1 | grep -m1 '^Authority=' | cut -d= -f2)"
+  echo "    version $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Info.plist"), build $(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Info.plist")"
   echo "==> Built $EXPORT/App.ipa (build $BUILD), not uploaded."
 fi
