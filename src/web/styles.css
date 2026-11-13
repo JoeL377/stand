@@ -4132,3 +4132,28 @@ a .mention { color: inherit; }
 /* The diagram's own switches (Context, Text) float over its corner on a sketch, so they take no row. */
 .sketch .design.bare .design-top { position: absolute; z-index: 4; top: 8px; right: 12px; padding: 0; }
 .sk-bar .sk-title { margin-left: 0; }
+/* The sketch's one row: Card and Sketch, the subject on screen with its menu, the counts, List and Stop. */
+.sk-bar.view-bar { gap: 8px; }
+.sk-subject-wrap { min-width: 0; }
+.sk-subject-wrap .sk-subject { max-width: 100%; min-width: 0; cursor: pointer; }
+.sk-subject-wrap .sk-subject:disabled { cursor: default; }
+.sk-subject-wrap .sk-subject > span[dir] { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sk-subject svg { flex: none; }
+.sk-menu .sk-menu-row { flex-direction: row; align-items: center; gap: 8px; text-decoration: none; color: var(--text); padding: 7px 10px; border-radius: 7px; font-size: 13px; box-sizing: border-box; cursor: pointer; }
+.sk-menu a.sk-menu-row:hover { background: var(--hover); }
+.sk-menu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sk-menu .sk-menu-row.on .sk-menu-name { font-weight: 600; }
+.sk-menu-line { display: block; height: 1px; margin: 4px 6px; background: var(--line); }
+.view-flip { flex: none; }
+.sk-bar.view-bar { flex-wrap: nowrap; position: relative; }
+.sk-bar.view-bar > .bp-views, .sk-bar.view-bar > .view-stop-btn { flex: none; }
+.sk-bar .sk-subject-wrap { flex: 0 1 auto; }
+.sk-bar .sk-subject { white-space: nowrap; }
+@media (max-width: 720px) {
+  .sk-bar .sk-subject-wrap { position: static; }
+  .sk-bar .sk-subject-wrap .sk-menu { top: 100%; margin-top: 4px; left: 10px; right: 10px; width: auto; }
+  .sk-bar .sk-kinds { display: none; }
+  .sk-bar .sk-subject > .count, .sk-bar .sk-subject > svg:first-child, .sk-bar > .rp-grow { display: none; }
+  .sk-bar .sk-subject-wrap { flex: 1 1 0; }
+  .sk-bar .sk-subject { width: 100%; justify-content: space-between; }
+}

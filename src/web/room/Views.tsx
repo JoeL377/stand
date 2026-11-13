@@ -51,53 +51,39 @@ export function ViewPane(props: {
   const as = picked ?? (props.phone ? "list" : "picture");
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
   const view = props.tabs ? props.view : "card";
+  const pills = (
+    <span className="bp-views" role="group" aria-label="View">
+      {PILLS.map((p) => (
+        <button key={p.key} type="button" className={`rp-pill${view === p.key ? " on" : ""}`} aria-pressed={view === p.key} onClick={() => props.onView(p.key)}>
+          {p.label}
+          {p.key === "sketch" && live && view !== "sketch" && <i className="view-dot" title="Stand is sketching" aria-label="Stand is sketching" />}
+        </button>
+      ))}
+    </span>
+  );
+  // While the sketch shows, its one row carries these too (Sketch.tsx), so the board has no row of its own.
+  const sketching = view === "sketch" && !!live;
+  const switches = (
+    <>
+      <button type="button" className="rp-pill view-flip" aria-label={as === "list" ? "Show the picture" : "Show as a list"} title={as === "list" ? "See it drawn" : "Read it as a list"} onClick={() => setPicked(as === "list" ? "picture" : "list")}>
+        {as === "list" ? <ImageIcon size={13} aria-hidden /> : <ListIcon size={13} aria-hidden />}
+        {!props.phone && (as === "list" ? "Picture" : "List")}
+      </button>
+      {props.onStop && (
+        <button type="button" className="rp-pill view-stop-btn" onClick={props.onStop} title="The sketch is kept on its page, and each diagram as a draft spec on a to-do. The call goes on.">
+          <Square size={10} aria-hidden />
+          Stop
+        </button>
+      )}
+    </>
+  );
   return (
     <div className="view-pane">
-      {props.tabs && (
-        <div className="view-bar">
-          <span className="bp-views" role="group" aria-label="View">
-            {PILLS.map((p) => (
-              <button key={p.key} type="button" className={`rp-pill${view === p.key ? " on" : ""}`} aria-pressed={view === p.key} onClick={() => props.onView(p.key)}>
-                {p.label}
-                {p.key === "sketch" && live && view !== "sketch" && <i className="view-dot" title="Stand is sketching" aria-label="Stand is sketching" />}
-              </button>
-            ))}
-          </span>
-          {view === "sketch" && live && !props.phone && (
-            <span className="bp-views view-as" role="group" aria-label="Show the sketch as">
-              <button type="button" className={`rp-pill${as === "picture" ? " on" : ""}`} aria-pressed={as === "picture"} onClick={() => setPicked("picture")}>
-                Picture
-              </button>
-              <button type="button" className={`rp-pill${as === "list" ? " on" : ""}`} aria-pressed={as === "list"} onClick={() => setPicked("list")}>
-                List
-              </button>
-            </span>
-          )}
-          <span className="rp-grow" />
-          {/* A phone has room for one switch: it names the other way to see the sketch. */}
-          {view === "sketch" && live && props.phone && (
-            <button type="button" className="rp-pill view-flip" onClick={() => setPicked(as === "list" ? "picture" : "list")} title={as === "list" ? "See it drawn" : "Read it as a list"}>
-              {as === "list" ? <ImageIcon size={13} aria-hidden /> : <ListIcon size={13} aria-hidden />}
-              {as === "list" ? "Picture" : "List"}
-            </button>
-          )}
-          {props.onStop && view === "sketch" && live && (
-            <button type="button" className="rp-pill view-stop-btn" onClick={props.onStop} title="The sketch is kept on its page, and each diagram as a draft spec on a to-do. The call goes on.">
-              <Square size={10} aria-hidden />
-              {props.phone ? "Stop" : "Stop drawing"}
-            </button>
-          )}
-          {view === "sketch" && live && !props.phone && (
-            <a className="link muted view-stop" href={brainstormHref(props.roomId, live.id)} target="_blank" rel="noreferrer">
-              Open its page
-            </a>
-          )}
-        </div>
-      )}
+      {props.tabs && !sketching && <div className="view-bar">{pills}</div>}
       {view !== "sketch" ? (
         props.card
       ) : live ? (
-        <SketchBoard brainstorm={live} acts={props.acts} phone={props.phone} as={as} subject={props.subject} onSubject={props.onSubject} heard={props.heard} />
+        <SketchBoard brainstorm={live} acts={props.acts} phone={props.phone} as={as} subject={props.subject} onSubject={props.onSubject} heard={props.heard} lead={props.tabs ? pills : undefined} tail={switches} pageHref={brainstormHref(props.roomId, live.id)} />
       ) : props.stopped ? (
         <WrapUp sketch={props.stopped} roomId={props.roomId} onClose={props.onWrapUpClose} onAgain={props.onStart} />
       ) : (
