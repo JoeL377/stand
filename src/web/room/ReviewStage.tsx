@@ -65,7 +65,7 @@ export function ReviewStage(props: {
   }, [open]);
   const [zoomed, setZoomed] = useState(false);
   useEffect(() => setZoomed(false), [item.id]);
-  // A capture that just arrived shows over the foot of the picture for a few seconds, so people
+  // A capture that just arrived shows over the foot of the picture for a quarter of a minute, so people
   // see Stand heard it without looking away from the slide. Not the ones already there on arrival.
   // A line is known by what it says, not its id: a notes run can hand the same line back under a new one.
   const seen = useRef<{ item: string; said: Set<string> } | null>(null);
@@ -277,7 +277,8 @@ export function ReviewStage(props: {
 }
 
 const saidKey = (n: Note) => `${n.kind}:${n.text.trim().toLowerCase()}`;
-const LANDED_MS = 4500;
+// Long enough to read a line and say "did you see that?" (joe, 13 Nov: 4.5s was gone before anyone could look).
+const LANDED_MS = 15_000;
 const LANDED_MAX = 3;
 
 /** What was caught on a slide, opened when its outcome is set: the outcome, then every line by kind. */
