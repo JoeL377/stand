@@ -1126,6 +1126,8 @@ function Details(props: { details: BoardDetail[]; marks?: Map<string, Mark>; idO
 const TABS = [{ kind: "position", label: "People" }, ...SECTIONS] as const;
 type Tab = (typeof TABS)[number]["kind"];
 const TAB_KEY = "stand.boardTab";
+/** The card is this wide before its parts sit side by side instead of behind tabs. */
+const COLS_MIN_PX = 860;
 
 /** Under the summary: one tab per part of the card, each with its count, so only one list is
  *  on screen at a time. A tab that got a new line has a green dot until it's opened or the mark
@@ -1154,8 +1156,40 @@ function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; tasks: Task
     return () => window.removeEventListener(SHOW_CARD, show);
   }, []);
   const people = props.t.card.details.filter((d) => d.kind === "position");
+  // With room for it, every part shows side by side and nothing hides behind a tab.
+  const wrap = useRef<HTMLDivElement>(null);
+  const [cols, setCols] = useState(false);
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setCols(e.contentRect.width >= COLS_MIN_PX));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  if (cols)
+    return (
+      <div className="topic-cols" ref={wrap}>
+        {TABS.map((x) => {
+          const n = x.kind === "position" ? people.length : props.tasks.count[x.kind];
+          const grew = x.kind === "position" ? people.some((d) => props.marks.get(d.id) === "new") : props.tasks.rows[x.kind].some((r) => props.tasks.fresh.has(r.note.id));
+          return (
+            <section key={x.kind} className={`topic-col ${x.kind}`} aria-label={x.label}>
+              <span className="topic-section-label">
+                {x.label}
+                {n > 0 && <span className={grew ? "topic-tab-count bump" : "topic-tab-count"}>{n}</span>}
+              </span>
+              {x.kind === "position" ? (
+                people.length ? <Details details={people} marks={props.marks} idOf={props.idOf} nameOf={props.nameOf} /> : <span className="topic-section-empty">–</span>
+              ) : (
+                <TaskList kind={x.kind} tasks={props.tasks} acts={props.acts} idOf={props.idOf} nameOf={props.nameOf} compact />
+              )}
+            </section>
+          );
+        })}
+      </div>
+    );
   return (
-    <div className="topic-tabs-wrap">
+    <div className="topic-tabs-wrap" ref={wrap}>
       <div className="topic-tabs" role="tablist" aria-label="Details">
         {TABS.map((x) => {
           const n = x.kind === "position" ? people.length : props.tasks.count[x.kind];
