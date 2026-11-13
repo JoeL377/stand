@@ -2232,7 +2232,7 @@ a.sh-pill:hover { text-decoration: none; }
 .td-foot { margin-top: 20px; }
 
 /* ---- space page: one page, a tab per kind of thing ---- */
-.sh-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.sh-tabs { position: relative; display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .sh-tab { flex: none; display: flex; align-items: center; gap: 6px; height: auto; min-height: 0; margin-bottom: -1px; padding: 8px 10px 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; font-size: 14px; color: var(--muted); cursor: pointer; }
 .sh-tab:hover { color: var(--text); }
 .sh-tab.on { color: var(--text); border-bottom-color: var(--accent); }
@@ -4807,3 +4807,25 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
 .pj-ghost .sh-project-form input { grid-column: 1 / -1; justify-self: stretch; height: 32px; }
 .pj-ghost .sh-project-form input:first-child { font-size: 15px; font-weight: 600; }
 .pj-ghost .sh-project-form .error { grid-column: 1 / -1; }
+
+/* ---- Moving around: tabs, projects, spaces, the drawer, the chat column and sheets (motion.ts) ----
+   Short, eased out, opacity and transform only, and nothing for those who ask for less motion.
+   Lists and data that change on their own don't move here. */
+/* One line under the space's tabs, slid and stretched to the picked one. Until it is placed, each
+   tab draws its own, so the first paint already shows which is picked. */
+.sh-tabs::after { content: ""; position: absolute; left: 0; bottom: 0; width: 1px; height: 2px; background: var(--accent); transform-origin: 0 0; transform: translateX(var(--ink-x, 0)) scaleX(var(--ink-w, 0)); opacity: 0; pointer-events: none; }
+.sh-tabs.inked::after { opacity: 1; }
+.sh-tabs.inked .sh-tab.on { border-bottom-color: transparent; }
+.sh-tabs.ink-glide::after { transition: transform 200ms var(--ease-out); }
+/* Inside a project the trail's name steps in beside "Projects". */
+.sh-crumb { animation: crumb-in 180ms var(--ease-out); }
+@keyframes crumb-in { from { opacity: 0; transform: translateX(-4px); } }
+/* The join sheet on a phone rises from the foot over a dimming page. */
+.sheet-backdrop { animation: fade-in 200ms var(--ease-out); }
+.sh-prejoin { animation: sheet-up 220ms var(--ease-out); }
+@keyframes sheet-up { from { opacity: 0; transform: translateY(24px); } }
+.phone-sheet { animation: sheet-up 200ms var(--ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .sh-tabs.ink-glide::after { transition: none; }
+  .sh-crumb, .sheet-backdrop, .sh-prejoin, .phone-sheet { animation: none; }
+}
