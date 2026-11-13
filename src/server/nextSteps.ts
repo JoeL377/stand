@@ -2,10 +2,13 @@
 // out loud that they want a brainstorm, a design session or a review, Stand puts one small card up:
 // "Open a map for this?". Anyone can take it or wave it off, and nothing switches by itself.
 //
-// Two signals, both plain words matched on the lines as they are transcribed, with no model call:
-// someone asks for it ("let's brainstorm on…"), or the talk of the last few minutes sounds like one
-// (several people throwing out ideas; someone walking through how parts connect). The second is a
-// guess, so it is slower to speak, says "Sounds like", and only ever offers a map or a diagram.
+// Two signals. Someone asks for it ("let's brainstorm on…"): plain words matched on the lines as they
+// are transcribed, with no model call. Or the talk of the last few minutes sounds like one (people
+// working through an open question; someone walking through how parts connect): the notes run says so
+// as it reads the talk anyway (llm.ts, sounds_like), and a count of telltale phrases is kept beside it
+// for when the notes are behind. The second is a guess, so it is slower to speak, says "Sounds like",
+// only ever offers a map or a diagram, and stays quiet while a map or a diagram is already drawing.
+// Both speak anywhere in a call, on a review's slide too.
 //
 // A map or a diagram is drawn as a view beside the board. A review needs prepared slides or specs, so a
 // review that was asked for is kept for the recap ("Suggested next") unless someone waves it off.
@@ -13,6 +16,8 @@ import type { NextKind, NextStep } from "../shared/protocol.ts";
 
 /** How long a card stays up before it counts as missed. */
 export const NEXT_SHOWN_MS = 60_000;
+/** A card is up at least this long before another takes its place, so people get to answer it. */
+export const NEXT_MIN_MS = 15_000;
 /** After a card of one kind was waved off, that kind stays quiet this long. */
 export const NEXT_QUIET_MS = 5 * 60_000;
 const TOPIC_MAX = 80;

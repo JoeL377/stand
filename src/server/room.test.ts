@@ -1829,7 +1829,83 @@ test("Stand offers a map by itself when two people trade ideas, says it guessed,
   await session.end();
 });
 
-test("during a review Stand answers an ask and never guesses; a map asked for on a slide is of that slide and reads its talk", async () => {
+test("the notes run says the talk sounds like a brainstorm and Stand offers a map, on a review's slide too, but not while a map or a diagram is drawing", async () => {
+  const { startBrainstorm } = await import("./brainstorm.ts");
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  let sounds: "map" | "diagram" | null = "map";
+  let asked: number | undefined;
+  const base = new HeuristicAgent();
+  const agent = Object.assign(new HeuristicAgent(), {
+    async notesFor(item: Item | null, segments: Segment[], _e?: unknown, _c?: unknown, _x?: unknown, options?: { recentFrom?: number }) {
+      asked = options?.recentFrom;
+      return { ...(await base.notesFor(item, segments)), soundsLike: sounds };
+    },
+  });
+  const session = new RoomSession(db, agent, room, () => {});
+  const notes = (itemId: string | null) => (session as unknown as { runNotes(id: string | null): Promise<unknown> }).runNotes(itemId);
+  addSlide(db, room.id, { title: "Your own agent", summary: "", addedBy: "x" });
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  await join(session, { id: "u2", name: "Andy" });
+  // The 13 Nov call: an open question worked through in words no phrase list would catch.
+  session.addSpeech("u2", "Andy", "But then why do we even need Ask Stand at that point? Ideally we shouldn't have both.", Date.now());
+  session.addSpeech("u1", "Joe", "I think it's fine to have both. We need to figure out what this does that Ask Stand can't.", Date.now());
+  assert.equal(session.state().next, null, "the phrase count hears nothing in it");
+  await notes(null);
+  assert.equal(asked, 1, "the run is told where the last few minutes start");
+  const card = session.state().next!;
+  assert.deepEqual([card.kind, card.topic, card.guessed, card.state], ["map", "", true, "offered"]);
+  // The next runs say it again: the card that is up stays, and after it Stand stays quiet for a while.
+  await notes(null);
+  assert.equal(session.state().next?.id, card.id);
+  await say(joe, { type: "next.take", id: card.id });
+  await notes(null);
+  assert.equal(session.state().next, null, "said once in a while, not on every run");
+  // On a review's slide a design talk gets a diagram offered, of the slide.
+  sounds = "diagram";
+  const started = startReview(db, room.id);
+  session.itemsChanged();
+  await say(joe, { type: "focus", itemId: started.firstItemId });
+  session.addSpeech("u1", "Joe", "So your agent joins over MCP, reads the transcript and posts a card to the board.", Date.now());
+  await notes(started.firstItemId);
+  const onSlide = session.state().next!;
+  assert.deepEqual([onSlide.kind, onSlide.topic, onSlide.guessed], ["diagram", "Your own agent", true]);
+  await say(joe, { type: "next.wave", id: onSlide.id });
+  // A map is drawing: Stand guesses nothing more, of either kind.
+  (session as unknown as { nextGuessed: Map<string, number> }).nextGuessed.clear();
+  (session as unknown as { nextWaved: Map<string, number> }).nextWaved.clear();
+  startBrainstorm(db, room.id, "Your own agent", "Joe");
+  session.brainstormChanged();
+  session.addSpeech("u1", "Joe", "And the card goes to everyone in the call.", Date.now());
+  await notes(started.firstItemId);
+  assert.equal(session.state().next, null, "nothing is guessed while a map is on");
+  await session.end();
+});
+
+test("a card is up at least 15 seconds before an ask for something else takes its place", async (t) => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  await join(session, { id: "u1", name: "Joe" });
+  await join(session, { id: "u2", name: "Huy" });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  session.addSpeech("u1", "Joe", "Let's start a brainstorm on the Discord integration", Date.now());
+  const card = session.state().next!;
+  assert.equal(card.kind, "map");
+  t.mock.timers.tick(3_000);
+  session.addSpeech("u2", "Huy", "and after that we need a design review on the projects migration", Date.now());
+  assert.equal(session.state().next?.id, card.id, "the first card keeps its place");
+  t.mock.timers.tick(11_000);
+  assert.equal(session.state().next?.id, card.id, "still up at 14 seconds");
+  t.mock.timers.tick(1_000);
+  const review = session.state().next!;
+  assert.deepEqual([review.kind, review.topic], ["design-review", "The projects migration"]);
+  assert.equal(db.meetingNext(session.meetingId).find((n) => n.id === card.id)?.state, "missed");
+  t.mock.timers.reset();
+  await session.end();
+});
+
+test("during a review Stand guesses and answers an ask like anywhere else; a map offered on a slide is of that slide and reads its talk", async () => {
   const { startBrainstorm } = await import("./brainstorm.ts");
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
@@ -1847,12 +1923,13 @@ test("during a review Stand answers an ask and never guesses; a map asked for on
   const started = startReview(db, room.id);
   session.itemsChanged();
   await say(joe, { type: "focus", itemId: started.firstItemId });
-  // Ideas traded on a slide: outside a review this is a guessed card.
+  // Ideas traded on a slide: Stand guesses there as anywhere else, and the card is of the slide.
   session.addSpeech("u1", "Joe", "What if the picker remembers the last mic?", Date.now());
   session.addSpeech("u2", "Huy", "Or we could show a level meter.", Date.now());
   session.addSpeech("u1", "Joe", "Another idea, maybe we test the mic first.", Date.now());
-  assert.equal(session.state().next, null, "no unprompted card on a slide");
-  // Someone asks, naming nothing: the card is of the slide.
+  const guess = session.state().next!;
+  assert.deepEqual([guess.kind, guess.topic, guess.guessed], ["map", "Mic picker", true]);
+  // Someone asks, naming nothing: the guess gives way to the ask, still of the slide.
   session.addSpeech("u2", "Huy", "Hold on, let's brainstorm", Date.now());
   const card = session.state().next!;
   assert.deepEqual([card.kind, card.topic, card.guessed], ["map", "Mic picker", undefined]);

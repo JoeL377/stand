@@ -36,6 +36,9 @@ export interface ItemNotesDraft {
     /** The key of a settled topic from earlier in this meeting that the talk went back to. */
     picksUp?: string | null;
   }>;
+  /** What the last few minutes of the talk sound like to the run, when it sounds like one: people working
+   *  through an open question together (a map would help) or how parts connect (a diagram). */
+  soundsLike?: "map" | "diagram" | null;
 }
 
 /** A topic from earlier in this meeting that has gone quiet (see settle.ts): the model sees it
@@ -59,6 +62,9 @@ export interface NotesOptions {
   lineNumbers?: number[];
   /** The topics the last run put the lines in, by those numbers, so this run keeps them. */
   lastTopics?: Array<{ topic: string; lines: number[] }>;
+  /** The number of the first line said in the last few minutes: the run says what the talk from there on
+   *  sounds like (ItemNotesDraft.soundsLike). Not given: it isn't asked. */
+  recentFrom?: number;
 }
 
 /** Discussions of the same item in earlier meetings, so a new one can link back. */
@@ -376,6 +382,11 @@ const SaidSchema = z
   })
   .nullable();
 
+/** What the most recent talk sounds like (nextSteps.ts offers a map or a diagram from it). */
+const SoundsLike = z
+  .enum(["brainstorm", "design", "neither"])
+  .describe("What the most recent few minutes of talk sound like. brainstorm: people working through an open question together. design: working out how the parts of something connect. neither: anything else, and whenever unsure.");
+
 /** Notes as the model writes them. With quotes, each position and decision also points at the words it came from. */
 function notesSchema(quotes: boolean) {
   const positionSaid = quotes
@@ -426,6 +437,8 @@ function notesSchema(quotes: boolean) {
     answered_questions: z
       .array(z.string())
       .describe("Keys (Q1, Q2...) of already-captured open questions the talk has now answered or settled. Leave them out of the discussions."),
+    // Asked of the run during the call only; the run as the meeting ends has nobody left to offer anything to.
+    ...(quotes ? {} : { sounds_like: SoundsLike }),
   });
 }
 const NotesSchema = notesSchema(false);
@@ -693,7 +706,7 @@ export class ClaudeAgent implements Agent {
     earlier: EarlierDiscussion[] = [],
     captured: CapturedNote[] = [],
     context: NotesContext = {},
-    { settled = [], tidy = false, lineNumbers, lastTopics = [] }: NotesOptions = {},
+    { settled = [], tidy = false, lineNumbers, lastTopics = [], recentFrom }: NotesOptions = {},
   ): Promise<ItemNotesDraft> {
     if (!segments.length) return { notes: [], discussions: [] };
     const classic = !config.notesStableLayout;
@@ -756,7 +769,7 @@ ${quiet ? "What was said since, while this item was in focus" : "What was said w
 
 What was said while this item was in focus (speech transcript and in-room chat, in order, numbered through the item; in a long meeting, lines of topics that went quiet are left out):`,
         numbered,
-        `${lastRun}${classic ? "" : quiet}${already}${shown}${asked(context.instructions)}`,
+        `${lastRun}${classic ? "" : quiet}${already}${shown}${asked(context.instructions)}${!tidy && recentFrom ? `\n\nThe most recent few minutes of talk are lines ${recentFrom} and after.` : ""}`,
       ),
       `You take notes in a team meeting. You are given what was said while one agenda item (a ticket, task or slide) was in focus.
 
@@ -773,6 +786,12 @@ In a long meeting, topics that went quiet are listed as settled, with their keys
 A long topic that is still going is listed with its key too, with where it stood before the lines below. Carry it on: give its key in picks_up, its new lines in turns, its positions in full, and its decisions, action items and open questions in full, earlier ones included.
 
 Do not invent anything that was not said. Speech-to-text errors are possible; read through them. Keep each line short.${
+        tidy
+          ? ""
+          : `
+
+Last, in sounds_like, say what the most recent few minutes of talk sound like, going by how people are talking rather than by any phrase. "brainstorm": two or more people are working through an open question together, putting forward options, ideas, alternatives or differing views on what to do or build or how to think about something, and it is not settled yet. "design": people are working out how the parts of a system, a flow or a process connect: what talks to what, what happens in which order, where things live. "neither": status updates, a walkthrough or demo of something finished, one person explaining, logistics, small talk, or a question that got a quick answer. When it could be either, pick the one most of the talk is; when unsure, say "neither".`
+      }${
         tidy
           ? `
 
@@ -822,8 +841,10 @@ This is the record people will read after the meeting, and a position put in oth
         })),
       );
     });
+    const sounds = tidy ? null : (out as { sounds_like?: z.infer<typeof SoundsLike> }).sounds_like;
     return {
       notes,
+      ...(sounds === "brainstorm" ? { soundsLike: "map" as const } : sounds === "design" ? { soundsLike: "diagram" as const } : {}),
       answered: out.answered_questions ?? [],
       discussions: out.discussions.map((d) => ({
         topic: d.topic.trim().slice(0, 120),

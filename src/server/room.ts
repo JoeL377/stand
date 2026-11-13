@@ -5,6 +5,7 @@ import fs from "node:fs";
 import type { WebSocket } from "ws";
 import type {
   User,
+  NextKind,
   NextStep,
   BrainCaught,
   AgentCard,
@@ -44,7 +45,7 @@ import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
 import { applyMerges, mergePrompt, planMerge, stickyMerges, type TopicMerge } from "./topicMerge.ts";
 import { newId } from "./ids.ts";
-import { NEXT_QUIET_MS, NEXT_SHOWN_MS, SOUNDS_QUIET_MS, SOUNDS_WINDOW_MS, heardIntent, isReviewKind, soundsLike, type Said } from "./nextSteps.ts";
+import { NEXT_MIN_MS, NEXT_QUIET_MS, NEXT_SHOWN_MS, SOUNDS_QUIET_MS, SOUNDS_WINDOW_MS, heardIntent, isReviewKind, soundsLike, type Said } from "./nextSteps.ts";
 import { finishIdeaReview } from "./ideaReview.ts";
 import { finishReview, isReviewDeck, refileReview, reviewView, setOutcome } from "./reviews.ts";
 import { DesignReviewError, authorMay, designReviewSummary, finishDesignReview, setDesignOutcome, startDesignReview, whenBriefed, writeBackReview } from "./designReviews.ts";
@@ -250,6 +251,9 @@ export class RoomSession implements SpeechSink {
   /** The next steps people asked for out loud in this call (nextSteps.ts); the one offered is on a card. */
   private nextSteps: NextStep[] = [];
   private nextTimer: NodeJS.Timeout | null = null;
+  /** When the card that is up went up, and an ask for another kind waiting for its first seconds to pass. */
+  private nextShownAt = 0;
+  private nextWaiting: NodeJS.Timeout | null = null;
   private nextHeard: { segmentId: string; upTo: number } | null = null;
   /** When each kind was last waved off: Stand stays quiet about it for a while. */
   private nextWaved = new Map<string, number>();
@@ -448,18 +452,37 @@ export class RoomSession implements SpeechSink {
    *  both are the call's talk. Nothing starts until a person takes the card. */
   private checkNext(seg: Segment, added = seg.text) {
     if (this.ended || this.demoRunning) return;
-    // During a review Stand only answers an ask: it never guesses there, so nothing interrupts a slide unasked.
-    const reviewing = this.inReview();
-    if (!reviewing) this.nextRecent = [...this.nextRecent.filter((l) => seg.ts - l.ts <= SOUNDS_WINDOW_MS), { speaker: seg.speakerName, text: added, ts: seg.ts }];
+    this.nextRecent = [...this.nextRecent.filter((l) => seg.ts - l.ts <= SOUNDS_WINDOW_MS), { speaker: seg.speakerName, text: added, ts: seg.ts }];
     // One thought arrives in fragments joined into one line: read its tail, past what was already heard in it.
     const from = Math.max(this.nextHeard?.segmentId === seg.id ? this.nextHeard.upTo : 0, seg.text.length - 320);
     const asked = heardIntent(seg.text.slice(from));
-    if (asked) this.nextHeard = { segmentId: seg.id, upTo: seg.text.length };
-    // Nobody asked: what the last few minutes sound like, said at most once in a while for each kind.
-    const sounds = asked || reviewing || this.offered() ? null : soundsLike(this.nextRecent, seg.ts);
-    const guessed = !!sounds && seg.ts - (this.nextGuessed.get(sounds) ?? 0) >= SOUNDS_QUIET_MS;
-    const heard = asked ?? (guessed ? { kind: sounds!, topic: null } : null);
-    if (!heard) return;
+    if (asked) {
+      this.nextHeard = { segmentId: seg.id, upTo: seg.text.length };
+      return this.offerNext(asked, seg, true);
+    }
+    // Nobody asked: what the last few minutes sound like, going by the phrases in them.
+    const sounds = soundsLike(this.nextRecent, seg.ts);
+    if (sounds) this.offerNext({ kind: sounds, topic: null }, seg, false);
+  }
+
+  /** The notes run read the last few minutes of an item's talk as a brainstorm or a design talk
+   *  (llm.ts, sounds_like): offer the map or the diagram, if that talk is still what the call is on. */
+  private soundsNext(kind: "map" | "diagram", itemId: string | null, last: Segment | undefined) {
+    if (this.ended || this.demoRunning || !last || (this.focusItemId ?? null) !== itemId) return;
+    if (Date.now() - last.ts > SOUNDS_WINDOW_MS) return;
+    this.offerNext({ kind, topic: null }, last, false);
+  }
+
+  /** Puts the card up, anywhere in the call: on the board, beside a share, on a review's slide.
+   *  `asked`: a person said it; otherwise it is Stand's guess, which is said at most once in a while
+   *  for each kind and never while a map or a diagram is already drawing. */
+  private offerNext(heard: { kind: NextKind; topic: string | null }, seg: Segment, asked: boolean) {
+    if (this.ended) return;
+    if (!asked) {
+      if (this.brain || this.offered()) return;
+      if (seg.ts - (this.nextGuessed.get(heard.kind) ?? 0) < SOUNDS_QUIET_MS) return;
+    }
+    const reviewing = this.inReview();
     // That kind is already drawing.
     const open = this.brain ? (this.brain.map instanceof DiagramKeeper ? "diagram" : "map") : null;
     if (open === heard.kind) return;
@@ -469,15 +492,26 @@ export class RoomSession implements SpeechSink {
     if (before) {
       // A card of that kind is up already; one Stand guessed gives way to a person asking.
       if (before.kind === heard.kind && !(before.guessed && asked)) return;
+      // Another kind: the card that is up keeps its first seconds, so people get to answer it. The ask waits.
+      const wait = before.kind === heard.kind ? 0 : this.nextShownAt + NEXT_MIN_MS - Date.now();
+      if (wait > 0) {
+        if (this.nextWaiting) clearTimeout(this.nextWaiting);
+        this.nextWaiting = setTimeout(() => {
+          this.nextWaiting = null;
+          this.offerNext(heard, seg, asked);
+        }, wait);
+        return;
+      }
       before.state = "missed";
     }
-    // Asked for on a review slide with nothing named: it is of what the slide is about. Another review
+    // On a review slide with nothing named: it is of what the slide is about. Another review
     // can't start while this one runs, so that one is only kept for the recap.
     const slide = reviewing && !isReviewKind(heard.kind) && !heard.topic ? (this.db.getItem(this.focusItemId ?? "")?.title ?? null) : null;
     const ready = reviewing ? 0 : heard.kind === "product-review" ? (reviewView(this.db, this.roomId)?.slides.length ?? 0) : heard.kind === "design-review" ? (designReviewSummary(this.db, this.roomId)?.specs ?? 0) : 0;
     const step: NextStep = { id: newId(8), kind: heard.kind, topic: heard.topic ?? slide ?? "", by: seg.speakerName, ts: seg.ts, segmentId: seg.id, state: "offered", ...(isReviewKind(heard.kind) ? { ready } : {}), ...(asked ? {} : { guessed: true }) };
     if (!asked) this.nextGuessed.set(heard.kind, seg.ts);
     this.nextSteps.push(step);
+    this.nextShownAt = Date.now();
     if (this.nextTimer) clearTimeout(this.nextTimer);
     this.nextTimer = setTimeout(() => step.state === "offered" && this.settleNext(step, "missed"), NEXT_SHOWN_MS);
     this.db.saveMeetingNext(this.meetingId, this.nextSteps);
@@ -2290,19 +2324,17 @@ export class RoomSession implements SpeechSink {
           .filter((p) => p.itemId === itemId && p.caption)
           .map((p) => ({ at: p.ts, by: p.source === "agent" ? "Stand agent" : p.takenBy, caption: p.caption! }));
         const instructions = this.db.getRoom(this.roomId)?.synthesisInstructions || undefined;
+        // The first line of the last few minutes, for what that talk sounds like (nextSteps.ts).
+        const recent = window.findIndex((s) => startedAt - s.ts <= SOUNDS_WINDOW_MS);
+        const recentFrom = tidy || recent < 0 ? undefined : lineNumbers[recent];
+        let draft: ItemNotesDraft | null = null;
         // Nothing said since every topic settled: the notes stand as they are.
         notes =
           !window.length && settled.length
             ? current
-            : this.saveNotes(
-                itemId,
-                await this.agent.notesFor(item, window, earlier, keys, { instructions, screens }, { settled: topics, tidy, lineNumbers, lastTopics }),
-                segments,
-                window,
-                settled,
-                folded,
-                keys,
-              );
+            : this.saveNotes(itemId, (draft = await this.agent.notesFor(item, window, earlier, keys, { instructions, screens }, { settled: topics, tidy, lineNumbers, lastTopics, recentFrom })), segments, window, settled, folded, keys);
+        // The run also says what the last few minutes sound like: Stand may offer a map or a diagram.
+        if (!tidy && draft?.soundsLike) this.soundsNext(draft.soundsLike, itemId, window.at(-1));
         if (segments.length) this.notesReadUpTo.set(itemId, segments[segments.length - 1].ts);
         if (!tidy) this.scheduleMerge();
         console.log(
@@ -2519,6 +2551,7 @@ export class RoomSession implements SpeechSink {
     this.endingSince = Date.now();
     if (this.emptyTimer) clearTimeout(this.emptyTimer);
     if (this.hostAwayTimer) clearTimeout(this.hostAwayTimer);
+    if (this.nextWaiting) clearTimeout(this.nextWaiting);
     if (this.nextTimer) clearTimeout(this.nextTimer);
     if (this.pilotTimer) clearTimeout(this.pilotTimer);
     for (const t of this.noteTimers.values()) clearTimeout(t);
