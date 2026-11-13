@@ -562,7 +562,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               )}
               {!kind && days.map((d) => (
                 <div key={d.label} className="sh-day">
-                  <h3>{d.label}</h3>
+                  {/* A phone has room for a short day only. */}
+                  <h3>
+                    <span className="sh-day-long">{d.label}</span>
+                    <span className="sh-day-short">{d.label === "Today" ? d.label : new Date(d.entries[0].at).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                  </h3>
                   <ul className="sh-rows">
                     {d.entries.map((e) =>
                       e.kind === "snap" ? (
