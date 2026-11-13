@@ -3367,25 +3367,8 @@ button.ds-q:focus-visible { outline: 2px solid var(--accent); }
 .view-maps li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13px; }
 .view-maps a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .view-maps .muted { flex: none; font-size: 12px; }
-/* The brainstorm as words (room/BrainWords.tsx): a cloud, bigger the more the talk made of a word. */
-.brain-words { flex: 1; min-width: 0; min-height: 0; width: 100%; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 48px 24px 24px; background: var(--bg); color: var(--text); }
-.brain-words-empty { margin: auto; }
-.brain-cloud { margin: auto 0; max-width: 860px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 16px; line-height: 1.15; }
-.brain-word { all: unset; cursor: pointer; font-weight: 600; letter-spacing: -0.01em; padding: 2px 6px; border-radius: 8px; color: var(--text); transition: opacity 120ms ease-out, background 120ms ease-out; }
-.brain-word:hover { background: var(--hover); }
-.brain-word:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.brain-word.on { background: var(--accent-soft); color: var(--accent); }
-.brain-word.dim { opacity: 0.35; }
-.brain-word-ideas { width: 100%; max-width: 560px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left; }
-.brain-word-ideas h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
-.brain-word-ideas ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.brain-word-ideas li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.brain-word-idea { display: flex; flex-direction: column; min-width: 0; }
-.brain-word-idea .muted { font-size: 11.5px; }
 @media (max-width: 760px) {
   .view-bar { padding: 6px 10px 0; }
-  .brain-words { padding: 44px 12px 16px; }
-  .brain-cloud { gap: 2px 10px; zoom: 0.72; }
 }
 /* A brainstorm's ideas as a list (pages/BrainIdeas.tsx). */
 .bi { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 40px; }
@@ -4095,3 +4078,172 @@ a .mention { color: inherit; }
   .sh-panel.decisions .rc-points li:not(:hover):not(:focus-within) .pt-quiet { display: none; }
   .sh-panel .sh-rows li:not(:hover):not(:focus-within) .sh-pill.none:not([aria-expanded="true"]) { opacity: 0; }
 }
+
+/* The sketch (room/Sketch.tsx): the one board a call draws on. A bar of subject pills and kind counts,
+   the subject the talk is on filling the canvas, the others small at the side. */
+.sketch { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+.sk-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 16px 0; min-width: 0; }
+.sk-subjects { display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.sk-subject { flex: none; max-width: 240px; cursor: pointer; }
+.sk-subject > span[dir] { overflow: hidden; text-overflow: ellipsis; }
+.sk-subject .count { color: var(--muted); font-weight: 500; }
+.sk-subject.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.sk-live { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.sk-kinds { flex: none; display: flex; gap: 6px; }
+.sk-body { flex: 1; min-height: 0; display: flex; }
+.sk-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.sk-canvas { flex: 1; min-height: 0; display: flex; position: relative; }
+.sk-title { all: unset; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; cursor: text; border-radius: 6px; padding: 1px 4px; margin-left: -4px; }
+.sk-title:not(:disabled):hover { background: var(--hover); }
+.sk-title:focus-visible { outline: 2px solid var(--accent); }
+.sk-title-edit input { font: inherit; font-size: 14px; font-weight: 600; width: min(360px, 50vw); padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.sk-chip-wrap { position: relative; flex: none; display: inline-flex; }
+.sk-chip { all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.sk-chip.plain { cursor: default; color: var(--muted); }
+.sk-chip:not(.plain):hover, .sk-chip.on { background: var(--panel-2); }
+.sk-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sk-menu { position: absolute; z-index: 8; top: 30px; left: 0; width: 250px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35); }
+.sk-menu button { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 1px; padding: 7px 10px; border-radius: 7px; font-size: 13px; }
+.sk-menu button:hover, .sk-menu button:focus-visible { background: var(--hover); }
+.sk-menu button.on strong::after { content: " ✓"; color: var(--accent-text); }
+.sk-menu .muted { font-size: 12px; }
+/* Stand's one line about the sketch (an offer to redraw, the last change with Undo, why it chose a diagram): bottom middle, where its suggestions sit. */
+.sk-dock { position: absolute; z-index: 6; left: 50%; bottom: 14px; translate: -50% 0; width: max-content; max-width: min(720px, calc(100% - 28px)); display: flex; pointer-events: none; }
+.sk-note { gap: 10px; padding: 7px 12px; border-radius: 12px; font-size: 13.5px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.5), inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.sk-note:has(.next-do) { padding-left: 7px; }
+.sk-note .next-do { flex: none; padding: 6px 14px; border-radius: 9px; font-size: 13.5px; font-weight: 600; }
+.sk-note .link { flex: none; font-size: 13px; white-space: nowrap; }
+.screen:has(.sk-dock) > .next-dock { bottom: 62px; }
+.sk-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; }
+.sk-empty p { margin: 0; max-width: 440px; }
+.sk-empty-head { font-size: 15px; font-weight: 600; }
+.sk-pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); opacity: 0.55; }
+.sk-pulse.busy { animation: sk-pulse 1.2s ease-in-out infinite; }
+@keyframes sk-pulse { 50% { opacity: 1; transform: scale(1.35); } }
+@media (prefers-reduced-motion: reduce) { .sk-pulse.busy { animation: none; } }
+.sk-heard { display: flex; align-items: center; gap: 8px; margin-top: 10px !important; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); font-size: 12.5px; color: var(--muted); max-width: min(560px, 100%) !important; }
+.sk-heard > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Fixing a circle or a box, at the foot of its card. */
+.brain-card footer.sk-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.sk-edit .sk-remove { margin-left: auto; color: var(--danger, #b42318); }
+.sk-edit form { flex: 1; display: flex; gap: 6px; }
+.sk-edit input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.sk-edit form button { font-size: 12.5px; padding: 4px 12px; }
+.sk-edit.moving .rp-pill { cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.design-box.dim { opacity: 0.35; }
+.design.bare .design-top:empty { display: none; }
+/* The sketch as a list: every subject a section, a map as directions and ideas, a diagram as numbered parts. */
+.sk-list { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 20px 80px; display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 820px; margin: 0 auto; box-sizing: border-box; text-align: left; }
+.sk-list-subject > header { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+.sk-list-subject h3 { margin: 0; font-size: 16px; font-weight: 600; min-width: 0; }
+.sk-list .brain-outline { display: flex; flex-direction: column; gap: 14px; padding: 0; overflow: visible; }
+.sk-list .brain-outline section { padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); }
+.sk-list .brain-outline h4 { margin: 0 0 4px; font-size: 14px; }
+.sk-list ul, .sk-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.sk-list li { display: flex; flex-direction: column; gap: 1px; font-size: 14px; }
+.sk-list li.dim { opacity: 0.35; }
+.sk-list li.new strong::after { content: "new"; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 10.5px; font-weight: 600; }
+.sk-list .brain-outline-idea { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.sk-list .brain-outline-idea strong { font-weight: 500; }
+.sk-list .brain-outline-idea .muted, .sk-list .brain-outline-detail, .sk-leads { font-size: 12.5px; }
+.sk-list .brain-outline-mark { display: inline-flex; align-items: center; gap: 3px; font-style: normal; font-size: 12px; color: var(--muted); }
+.sk-list .brain-outline-mark svg { width: 13px; height: 13px; }
+.sk-steps li { flex-direction: row; gap: 10px; align-items: baseline; }
+.sk-n { flex: none; width: 20px; height: 20px; display: inline-grid; place-items: center; border-radius: 50%; background: var(--panel-2); color: var(--muted); font-style: normal; font-size: 11.5px; font-weight: 600; }
+.sk-step { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sk-list .sk-empty { padding: 40px 0; }
+/* What was kept when a sketch stops, and the next step for each subject. */
+.sk-wrap-card { width: min(560px, 100%); display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-align: left; }
+.sk-wrap-card > header, .sk-wrap-row, .sk-wrap-card > footer { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sk-wrap-card > header { font-size: 14px; }
+.sk-wrap-row { font-size: 13.5px; }
+.sk-wrap-row .muted { flex: none; font-size: 12.5px; }
+.sk-wrap-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.sk-wrap-card > footer { flex-wrap: wrap; gap: 8px 14px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; }
+.sk-wrap-card > footer .primary { padding: 6px 14px; font-size: 13px; }
+/* A phone: one row for the sketch (how it is drawn, the subjects, the counts), one subject at a time. */
+.sk-chip.compact { gap: 3px; padding: 0 7px; }
+.view-flip { cursor: pointer; }
+.sketch.phone .design-text { display: none; }
+.sketch.phone .design-top:not(:has(.design-context:not(.design-text))) { display: none; }
+@media (max-width: 760px) {
+  .sk-bar { padding: 6px 10px 0; gap: 6px; }
+  .sk-list { padding: 10px 14px 80px; }
+  .sk-kinds .brain-kind-pill { padding: 0 8px; }
+  .sk-menu { width: min(250px, calc(100vw - 24px)); }
+  .sk-note { font-size: 13px; }
+  .sk-note .nudge-text { white-space: normal; }
+}
+/* Stop drawing is a button, in the colour of ending something, so it is found at a glance. */
+.view-stop-btn { flex: none; cursor: pointer; color: var(--danger, #e5484d); border-color: color-mix(in srgb, var(--danger, #e5484d) 55%, var(--line)); background: color-mix(in srgb, var(--danger, #e5484d) 10%, var(--panel)); font-weight: 600; }
+.view-stop-btn svg { fill: currentColor; }
+.view-stop-btn:hover { background: color-mix(in srgb, var(--danger, #e5484d) 20%, var(--panel)); }
+/* The diagram's own switches (Context, Text) float over its corner on a sketch, so they take no row. */
+.sketch .design.bare .design-top { position: absolute; z-index: 4; top: 8px; right: 12px; padding: 0; }
+.sk-bar .sk-title { margin-left: 0; }
+/* The sketch's one row: Card and Sketch, the subject on screen with its menu, the counts, List and Stop. */
+.sk-bar.view-bar { gap: 8px; }
+.sk-subject-wrap { min-width: 0; }
+.sk-subject-wrap .sk-subject { max-width: 100%; min-width: 0; cursor: pointer; }
+.sk-subject-wrap .sk-subject:disabled { cursor: default; }
+.sk-subject-wrap .sk-subject > span[dir] { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sk-subject svg { flex: none; }
+.sk-menu .sk-menu-row { flex-direction: row; align-items: center; gap: 8px; text-decoration: none; color: var(--text); padding: 7px 10px; border-radius: 7px; font-size: 13px; box-sizing: border-box; cursor: pointer; }
+.sk-menu a.sk-menu-row:hover { background: var(--hover); }
+.sk-menu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sk-menu .sk-menu-row.on .sk-menu-name { font-weight: 600; }
+.sk-menu-line { display: block; height: 1px; margin: 4px 6px; background: var(--line); }
+.view-flip { flex: none; }
+.sk-bar.view-bar { flex-wrap: nowrap; position: relative; }
+.sk-bar.view-bar > .bp-views, .sk-bar.view-bar > .view-stop-btn { flex: none; }
+.sk-bar .sk-subject-wrap { flex: 0 1 auto; }
+.sk-bar .sk-subject { white-space: nowrap; }
+@media (max-width: 720px) {
+  .sk-bar .sk-subject-wrap { position: static; }
+  .sk-bar .sk-subject-wrap .sk-menu { top: 100%; margin-top: 4px; left: 10px; right: 10px; width: auto; }
+  .sk-bar .sk-kinds { display: none; }
+  .sk-bar .sk-subject > .count, .sk-bar .sk-subject > svg:first-child, .sk-bar > .rp-grow { display: none; }
+  .sk-bar .sk-subject-wrap { flex: 1 1 0; }
+  .sk-bar .sk-subject { width: 100%; justify-content: space-between; }
+}
+/* The sketch as words (room/BrainWords.tsx): a cloud, bigger the more the talk made of a word. */
+.brain-words { flex: 1; min-width: 0; min-height: 0; width: 100%; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 48px 24px 24px; background: var(--bg); color: var(--text); }
+.brain-words-empty { margin: auto; }
+.brain-cloud { margin: auto 0; max-width: 860px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 16px; line-height: 1.15; }
+.brain-word { all: unset; cursor: pointer; font-weight: 600; letter-spacing: -0.01em; padding: 2px 6px; border-radius: 8px; color: var(--text); transition: opacity 120ms ease-out, background 120ms ease-out; }
+.brain-word:hover { background: var(--hover); }
+.brain-word:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.brain-word.on { background: var(--accent-soft); color: var(--accent); }
+.brain-word.dim { opacity: 0.35; }
+.brain-word-ideas { width: 100%; max-width: 560px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left; }
+.brain-word-ideas h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.brain-word-ideas ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.brain-word-ideas li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.brain-word-idea { display: flex; flex-direction: column; min-width: 0; }
+.brain-word-idea .muted { font-size: 11.5px; }
+@media (max-width: 760px) {
+  .brain-words { padding: 44px 12px 16px; }
+  .brain-cloud { gap: 2px 10px; zoom: 0.72; }
+  .sketch .brain-words { padding-top: 20px; }
+}
+.sketch .brain-words { padding-top: 24px; }
+.view-as-wrap .sk-menu { left: auto; right: 0; width: 170px; }
+.sk-bar .view-as-wrap { margin-left: auto; }
+/* A quiet row: the subject is plain text and the reading an icon. Only the board's pills and Stop keep a shape. */
+.sk-bar .sk-subject { border-color: transparent; background: none; padding: 0 6px; font-size: 13px; font-weight: 600; }
+.sk-bar .sk-subject:hover:not(:disabled), .sk-bar .sk-subject.on { background: var(--hover); border-color: transparent; box-shadow: none; }
+.sk-bar .sk-subject > .count, .sk-bar .sk-subject > svg:first-child { display: none; }
+.sk-bar .sk-subject > svg:last-child { color: var(--muted); }
+.sk-bar .view-flip { border-color: transparent; background: none; padding: 0; width: 26px; justify-content: center; color: var(--muted); }
+.sk-bar .view-flip:hover, .sk-bar .view-flip.on { background: var(--hover); color: var(--text); }
+@media (max-width: 760px) { .sk-bar .sk-subject { justify-content: flex-start; } }
+/* The sketch's board is a surface of its own: a framed sheet with a faint grid, so the drawing has
+   edges and the row above reads as its toolbar. The map's centre is quiet: the row already names it. */
+.sketch .sk-canvas { margin: 8px 12px 10px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); }
+.sketch .sk-canvas .brain { background: radial-gradient(circle, color-mix(in srgb, var(--text) 10%, transparent) 1px, transparent 1.3px) 0 0 / 22px 22px, color-mix(in srgb, var(--panel) 55%, var(--bg)); }
+.sketch .sk-canvas .design .react-flow { background: none; }
+.sketch .brain-node.root { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); color: var(--text); border: 1.5px solid color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: none; min-height: 60px; font-size: 15px; }
+.sketch .brain-node.root.busy { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+.sketch .brain-node.root.hub { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.sketch .design .brain-zoom { position: absolute; }
+.sketch.phone .sk-canvas { margin: 6px 8px 8px; border-radius: 12px; }

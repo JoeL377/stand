@@ -184,7 +184,18 @@ export const KINDS: Array<{ kind: BrainCaught["kind"]; Icon: typeof TodoIcon; on
   { kind: "question", Icon: QuestionIcon, one: "open question", many: "Open questions" },
 ];
 
-export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: string) => void; className?: string }) {
+export function BrainMap(props: {
+  brainstorm: BrainstormView;
+  onRemove?: (id: string) => void;
+  /** On a sketch: a circle can be renamed, and moved under another direction or to another subject. */
+  onRename?: (id: string, label: string) => void;
+  onMove?: (id: string, to: string) => void;
+  /** The other subjects a direction can move to. */
+  moveTo?: Array<{ id: string; label: string }>;
+  /** The kind picked outside the map (a sketch has one filter for all its subjects); the map's own pills step aside. */
+  only?: BrainCaught["kind"] | null;
+  className?: string;
+}) {
   const { brainstorm } = props;
   const nodes = brainstorm.nodes;
   const box = useRef<HTMLDivElement>(null);
@@ -323,7 +334,9 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
   const ideas = nodes.filter((n) => n.parent);
   const cx = cw / 2;
   const cy = ch / 2;
-  const [only, setOnly] = useState<BrainCaught["kind"] | null>(null);
+  const [own, setOnly] = useState<BrainCaught["kind"] | null>(null);
+  const outside = props.only !== undefined;
+  const only = outside ? props.only! : own;
   const pick = (id: string) => setOpenId((cur) => (cur === id ? null : id));
   // What came out of a circle: the to-dos, decisions and open questions caught while it was talked about.
   const totals = KINDS.map((k) => ({ ...k, n: new Set(nodes.flatMap((n) => n.caught.filter((c) => c.kind === k.kind).map((c) => c.id))).size })).filter((k) => k.n > 0);
@@ -351,7 +364,7 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
           See it all
         </button>
       )}
-      {totals.length > 0 && (
+      {!outside && totals.length > 0 && (
         <div className="brain-kinds" role="group" aria-label="Show one kind" onClick={(e) => e.stopPropagation()}>
           {totals.map(({ kind, Icon, many, n }) => (
             <button key={kind} type="button" className={`brain-kind-pill ${kind}${only === kind ? " on" : ""}`} aria-pressed={only === kind} onClick={() => setOnly(only === kind ? null : kind)}>
@@ -457,6 +470,9 @@ export function BrainMap(props: { brainstorm: BrainstormView; onRemove?: (id: st
           onPick={setOpenId}
           onClose={() => setOpenId(null)}
           onRemove={props.onRemove && brainstorm.status === "live" ? () => (props.onRemove!(open.id), setOpenId(null)) : undefined}
+          onRename={props.onRename && brainstorm.status === "live" ? (label) => props.onRename!(open.id, label) : undefined}
+          onMove={props.onMove && brainstorm.status === "live" ? (to) => (props.onMove!(open.id, to), setOpenId(null)) : undefined}
+          moveTo={open.parent ? dirs.filter((d) => d.id !== open.parent).map((d) => ({ id: d.id, label: d.label })) : (props.moveTo ?? [])}
         />
       )}
     </div>
@@ -519,7 +535,7 @@ export function Face({ name }: { name: string }) {
   );
 }
 
-function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas: BrainNode[]; onMap: (id: string) => boolean; side: "left" | "right"; onPick: (id: string) => void; onClose: () => void; onRemove?: () => void }) {
+function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas: BrainNode[]; onMap: (id: string) => boolean; side: "left" | "right"; onPick: (id: string) => void; onClose: () => void; onRemove?: () => void; onRename?: (label: string) => void; onMove?: (to: string) => void; moveTo?: Array<{ id: string; label: string }> }) {
   const { node } = props;
   const hidden = props.ideas.filter((i) => !props.onMap(i.id));
   return (
@@ -577,13 +593,75 @@ function BrainDetails(props: { node: BrainNode; parent: BrainNode | null; ideas:
             </section>
           ),
       )}
-      {props.onRemove && (
-        <footer>
-          <button type="button" className="link muted" onClick={props.onRemove} title="Stand got this one wrong. It won't come back.">
-            Take off the map
-          </button>
-        </footer>
+      {props.onRename ? (
+        <EditRow name={node.label} onRename={props.onRename} onMove={props.onMove} moveTo={props.moveTo} onRemove={props.onRemove} />
+      ) : (
+        props.onRemove && (
+          <footer>
+            <button type="button" className="link muted" onClick={props.onRemove} title="Stand got this one wrong. It won't come back.">
+              Take off the map
+            </button>
+          </footer>
+        )
       )}
     </aside>
+  );
+}
+
+/** Fixing what Stand drew, at the foot of a circle's or a box's card: one click each, for everyone, and Undo follows on the board. */
+export function EditRow(props: { name: string; onRename?: (label: string) => void; onMove?: (to: string) => void; moveTo?: Array<{ id: string; label: string }>; onRemove?: () => void }) {
+  const [mode, setMode] = useState<"rename" | "move" | null>(null);
+  const [text, setText] = useState(props.name);
+  useEffect(() => (setMode(null), setText(props.name)), [props.name]);
+  if (mode === "rename") {
+    const save = () => {
+      const t = text.trim();
+      if (t && t !== props.name) props.onRename!(t);
+      setMode(null);
+    };
+    return (
+      <footer className="sk-edit">
+        <form onSubmit={(e) => (e.preventDefault(), save())}>
+          <input autoFocus value={text} maxLength={80} aria-label="New name" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setMode(null))} />
+          <button type="submit" className="primary">
+            Save
+          </button>
+        </form>
+      </footer>
+    );
+  }
+  if (mode === "move") {
+    return (
+      <footer className="sk-edit moving">
+        <span className="muted">Move to</span>
+        {props.moveTo!.map((m) => (
+          <button key={m.id} type="button" className="rp-pill" dir="auto" onClick={() => props.onMove!(m.id)}>
+            {m.label}
+          </button>
+        ))}
+        <button type="button" className="link muted" onClick={() => setMode(null)}>
+          Cancel
+        </button>
+      </footer>
+    );
+  }
+  return (
+    <footer className="sk-edit">
+      {props.onRename && (
+        <button type="button" className="link" onClick={() => setMode("rename")}>
+          Rename
+        </button>
+      )}
+      {props.onMove && (props.moveTo?.length ?? 0) > 0 && (
+        <button type="button" className="link" onClick={() => setMode("move")}>
+          Move to…
+        </button>
+      )}
+      {props.onRemove && (
+        <button type="button" className="link sk-remove" onClick={props.onRemove} title="It won't come back unless someone says it again">
+          Remove
+        </button>
+      )}
+    </footer>
   );
 }

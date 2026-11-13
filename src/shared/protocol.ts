@@ -373,6 +373,38 @@ export interface DesignDiagram {
   groups?: DesignGroup[];
 }
 
+/** How a subject of a sketch is drawn: ideas around a question, or parts and how they connect. */
+export type SketchStyle = "map" | "diagram";
+
+/** One subject on a call's sketch (server/sketch.ts): what the talk was about for a while, drawn as a
+ *  map or as a diagram. The first is the sentence the sketch started from; the talk adds the rest. */
+export interface SketchSubject {
+  /** s0 for the one the sketch started from, then s1, s2… */
+  id: string;
+  title: string;
+  style: SketchStyle;
+  /** Its diagram. Kept while it is drawn as a map, so drawing it back is at once. */
+  diagram?: DesignDiagram;
+  /** Why Stand drew a subject the talk moved to as a diagram, said once. */
+  why?: "steps" | null;
+  /** A diagram's draft spec, once the sketch stopped: the to-do it is saved on. */
+  taskId?: string | null;
+}
+
+/** A change to a sketch that can be taken back for a little while. */
+export interface SketchUndo {
+  text: string;
+  /** First name of who made it. */
+  by: string | null;
+  at: number;
+}
+
+/** The circles of one subject of a sketch: the map's own centre, or one of the subjects the talk moved to. */
+export const subjectNodes = (nodes: BrainNode[], subject: { title: string }, first: boolean): BrainNode[] => {
+  const dirs = new Set(nodes.filter((n) => !n.parent && (first ? !n.cluster : n.cluster === subject.title)).map((n) => n.id));
+  return nodes.filter((n) => dirs.has(n.id) || (n.parent !== null && dirs.has(n.parent)));
+};
+
 /** A brainstorm: one sentence in the middle and the map the talk drew around it. */
 export interface BrainstormView {
   id: string;
@@ -407,6 +439,15 @@ export interface BrainstormView {
   /** How the last pass went in the call: it added something, found nothing to add, or couldn't get
    *  an answer from the model (people see that, so a blank diagram isn't mistaken for a quiet one). */
   heard?: "drew" | "nothing" | "failed";
+  /** What it holds, as a sketch: every subject the talk was on, each drawn as a map or a diagram.
+   *  Always there; a map from before sketches has its centre and its clusters, all as maps. */
+  subjects?: SketchSubject[];
+  /** The subject the talk is on now. */
+  liveSubject?: string;
+  /** Stand's offer to draw a subject the other way, because of how the talk on it sounds. */
+  offer?: { subject: string; style: SketchStyle } | null;
+  /** The last change someone made by hand or by asking Stand, while it can be taken back. */
+  undo?: SketchUndo | null;
 }
 
 export interface BrainstormSummary {
@@ -420,6 +461,8 @@ export interface BrainstormSummary {
   ideas: number;
   /** Set when it is a design session: what its diagram holds. */
   design?: { boxes: number; arrows: number };
+  /** Its subjects, as a sketch: each one's title, how it is drawn and how much it holds. */
+  subjects?: Array<{ id: string; title: string; style: SketchStyle; count: number; taskId?: string | null }>;
 }
 
 /** A line on the board's running list (server/liveList.ts), in the shape of a note so the board's
@@ -972,14 +1015,16 @@ export interface HostView {
   taskMode?: "brief" | "spec";
   tab: "main" | "board";
   /** Which view of the board is up beside the call: the card, the map, its words or the diagram. */
-  pane?: "card" | "map" | "words" | "diagram";
+  pane?: "card" | "sketch" | "map" | "words" | "diagram";
+  /** The subject of the sketch the presenter is looking at; left out: the one the talk is on. */
+  subject?: string;
   /** Which picture of the review slide in focus is up, from 0. */
   shot?: number;
   /** A chapter (or the Kickoff, id "kickoff") as it stood at `at`; live: the thread on screen when it was opened. */
   rewind: { id: string; key: string; at: number; live: string | null; page?: number } | null;
 }
 
-export type PresentingWhat = "product review" | "design review" | "idea review" | "map" | "diagram" | "screen";
+export type PresentingWhat = "product review" | "design review" | "idea review" | "sketch" | "map" | "diagram" | "screen";
 
 export interface Presenter {
   id: string;
@@ -1120,8 +1165,18 @@ export type ClientMessage = (
   /** Draw the map of the board's topic now, or continue it (anyone in the call). */
   | { type: "view.open" }
   /** Keep or drop something on a design session's diagram, by its id (anyone in the call). Drop also takes a kept one off. */
-  | { type: "design.keep"; id: string }
-  | { type: "design.drop"; id: string }
+  | { type: "design.keep"; id: string; subject?: string }
+  | { type: "design.drop"; id: string; subject?: string }
+  /** Draw one subject of the sketch the other way: as a map, or as a diagram (anyone in the call). */
+  | { type: "sketch.style"; subject: string; style: SketchStyle }
+  /** Fix one thing on the sketch by hand (anyone in the call). `id` is a circle, a box or an arrow of
+   *  that subject, or the subject's own id to rename it. move: a circle goes under another direction
+   *  (`to` its id), or a direction to another subject (`to` that subject's id). */
+  | { type: "sketch.edit"; subject: string; id: string; op: "rename" | "remove" | "move"; label?: string; to?: string }
+  /** Take back the last change made by hand or by asking Stand. */
+  | { type: "sketch.undo" }
+  /** Answer Stand's offer to draw a subject the other way. */
+  | { type: "sketch.offer"; take: boolean }
   | { type: "note.add"; itemId: string | null; kind: "action" | "decision" | "question"; text: string; owner?: string | null }
   | { type: "demo.play" }
   /** Anyone: ask ✦ Stand for options on an open question on the board's list. */
@@ -1224,7 +1279,7 @@ export type ServerMessage =
   /** The board's running list, after every change. Null when there's no model to keep one: the tabs read the live notes. */
   | { type: "list"; items: ListNote[] | null }
   /** `others`: the other maps and diagrams of this call, oldest first. */
-  | { type: "brainstorm"; brainstorm: BrainstormView | null; others: BrainstormSummary[] }
+  | { type: "brainstorm"; brainstorm: BrainstormView | null; others: BrainstormSummary[]; /** The sketch that just stopped in this call, for its closing card. */ stopped?: BrainstormView | null }
   /** What ✦ Stand, the meeting's own agent, has put on the board so far (meetingAgent.ts). */
   | { type: "agent"; cards: AgentCard[] }
   /** Who pilots ✦ Stand, and who's asking to (server/pilot.ts), after every change. */

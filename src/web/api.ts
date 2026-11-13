@@ -156,6 +156,8 @@ export const api = {
   /** With `design` it starts a design session: what to start from (pasted notes or a diagram) and the to-do its draft spec goes on. */
   startBrainstorm: (roomId: string, prompt: string, design?: { seed: string; taskId: string | null }) =>
     call<{ brainstorm: BrainstormView }>("POST", `/api/rooms/${roomId}/brainstorm/start`, { prompt, design }),
+  /** Opens the call's sketch (the one already on, if one is). `style` is how its first subject is drawn to begin with. */
+  startSketch: (roomId: string, prompt: string, style?: "map" | "diagram") => call<{ brainstorm: BrainstormView }>("POST", `/api/rooms/${roomId}/brainstorm/start`, { prompt, sketch: true, style }),
   brainstorm: (roomId: string, id: string) =>
     call<{ roomName: string; brainstorm: BrainstormView; brainstorms: BrainstormSummary[] }>("GET", `/api/rooms/${roomId}/brainstorms/${encodeURIComponent(id)}`),
   /** Sets up the idea review of a brainstorm, or rebuilds the one waiting. */

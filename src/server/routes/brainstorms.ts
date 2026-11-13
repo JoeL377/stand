@@ -35,17 +35,28 @@ export function brainstormRoutes(app: Express, ctx: Services) {
           if (pasted && !diagram.boxes.length) diagram = parseSeed(pasted);
           design = { diagram, seed: seed || null, taskId: task?.id ?? null };
         }
+        // A sketch (sketch.ts) can open with nothing typed: the talk names it. `style` is how its first
+        // subject is drawn to begin with, when whoever opened it knows; a map otherwise.
+        const sketch = req.body?.sketch === true;
+        if (!design && req.body?.style === "diagram") design = { diagram: { boxes: [], arrows: [] }, seed: null, taskId: null };
         const s = sessions.get(room.id);
-        const text = promptOf(prompt, !!design);
+        const text = promptOf(prompt, !!design || sketch);
         const live = db.brainstormLive(room.id);
-        // Another one is drawing in the call: it stops first, so it is kept as it would be by Stop drawing.
+        // One is already on in the call. Opening the sketch again is the same sketch; only one started
+        // from notes, a diagram or a to-do takes its place, and then it stops first, so it is kept as
+        // it would be by Stop drawing.
+        const fromSomething = !!design && (!!design.seed || !!design.taskId || design.diagram.boxes.length > 0);
+        if (s && live && !fromSomething) {
+          s.present(req.user!.id, "sketch");
+          return void res.json({ brainstorm: toBrainstormView(live) });
+        }
         if (s && text && live && !(live.prompt === text && (live.kind === "design") === !!design)) await s.stopView();
-        const b = startBrainstorm(db, room.id, prompt, req.user!.name, Date.now(), design);
+        const b = startBrainstorm(db, room.id, text, req.user!.name, Date.now(), design);
         if (s) {
           s.itemsChanged();
           s.brainstormChanged();
           // Whoever starts it in the call presents it: everyone's board goes to it.
-          s.present(req.user!.id, design ? "diagram" : "map");
+          s.present(req.user!.id, "sketch");
         }
         res.json({ brainstorm: toBrainstormView(b) });
       } catch (err) {

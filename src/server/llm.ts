@@ -1484,6 +1484,52 @@ const DECISION = /\b(let'?s go with|we('| wi)ll go with|decided|decision|agreed|
 const ACTION = /\b(i'?ll|i will|can you|could you|will you|action item|todo|to-do|follow up|take that|on it|by (monday|tuesday|wednesday|thursday|friday|tomorrow|eod|end of day))\b/i;
 
 export class HeuristicAgent implements Agent {
+  /** Demo mode's stand-in for the map's pass, enough to see a sketch fill in without a model:
+   *  "On pricing, what if we add a student discount" is an idea under a direction, "what if we…" alone
+   *  goes under the last direction, and "Switching to how refunds work" moves the talk to a subject
+   *  of its own (parts, when it is about how something works). */
+  async brainstormMap(_context: string, talk: string): Promise<MapAnswer | null> {
+    const out: MapAnswer = { add: [], extend: [], caught: [] };
+    const cap = (x: string) => x.trim().replace(/[.!?]+$/, "").replace(/^./, (c) => c.toUpperCase());
+    const short = (x: string) => cap(x.split(/\s+/).slice(0, 5).join(" "));
+    /** Directions on the map or added here, by cluster and lower-case label. */
+    const dirs = new Map<string, string>();
+    let cluster: string | null = null;
+    for (const l of talk.split("\n")) {
+      const hub = /^Cluster "(.+)":$/.exec(l);
+      if (hub) cluster = hub[1];
+      const d = /^- \[(d\d+)\] (.+?)(?: \([^)]*\))?:/.exec(l);
+      if (d) dirs.set(`${cluster ?? ""}|${d[2].toLowerCase()}`, d[1]);
+    }
+    cluster = null;
+    let last: string | null = null;
+    let shape: string | null = null;
+    for (const m of talk.matchAll(/^(NEW )?\[(\d+)\] \[[\d:]+\] ([^:]+): (.+)$/gm)) {
+      const fresh = !!m[1];
+      const line = Number(m[2]);
+      const by = m[3].replace(/ \(chat\)$/, "").split(" ")[0];
+      const moved = /\b(?:switching to|moving on to|different subject[:,]?|let'?s talk about)\s+(.+)$/i.exec(m[4]);
+      if (moved) {
+        cluster = short(moved[1]);
+        shape = /\bhow\b.*\b(?:works?|flows?|connects?)\b|\bsteps?\b|\bflow\b/i.test(moved[1]) ? "parts" : "ideas";
+        last = null;
+        continue;
+      }
+      const idea = /\b(?:on|for) ([\w' -]{2,30}?), (?:what if|how about|we could|maybe)(?: we| you)? (.+)$/i.exec(m[4]) ?? /\b()(?:what if|how about|we could also|we could|maybe we|idea:)(?: we| you)? (.+)$/i.exec(m[4]);
+      if (!idea) continue;
+      const name: string = idea[1] ? cap(idea[1]) : (last ?? "Ideas");
+      const key = `${cluster ?? ""}|${name.toLowerCase()}`;
+      last = name;
+      if (!fresh) continue;
+      if (!dirs.has(key)) {
+        out.add.push({ under: "root", cluster, label: name, detail: `Ideas about ${name.toLowerCase()}.`, by, line, shape: cluster ? shape : null });
+        dirs.set(key, `new${out.add.filter((x) => x.under === "root").length}`);
+      }
+      out.add.push({ under: dirs.get(key)!, cluster: null, label: short(idea[2]), detail: cap(idea[2]) + ".", by, line });
+    }
+    return out;
+  }
+
   /** Demo mode's stand-in for a design session's pass: a NEW line that says "a task belongs to a
    *  project" suggests those two boxes and that arrow. Enough to see suggestions without a model. */
   async designDiagram(_context: string, talk: string): Promise<DiagramAnswer | null> {

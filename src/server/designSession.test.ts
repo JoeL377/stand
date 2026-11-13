@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { BrainCaught, Segment } from "../shared/protocol.ts";
 import { brainstormsOf, finishBrainstorm, startBrainstorm, toBrainstormView } from "./brainstorm.ts";
 import { openDb } from "./db.ts";
-import { type DiagramAnswer, DiagramKeeper, MAX_WAITING, UNTITLED, diagramMermaid, draftSpec, isDiagramText, mermaidIn, parseSeed, saveDraftSpec, seedFromAnswer } from "./designSession.ts";
+import { type DiagramAnswer, DiagramKeeper, MAX_AT_ONCE, UNTITLED, diagramMermaid, draftSpec, isDiagramText, mermaidIn, parseSeed, saveDraftSpec, seedFromAnswer } from "./designSession.ts";
 
 const T0 = 1_700_000_000_000;
 const seg = (n: number, speakerName: string, text: string): Segment => ({ id: `s${n}`, meetingId: "m", itemId: null, speakerId: speakerName, speakerName, kind: "speech", text, ts: T0 + n * 1000 }) as Segment;
@@ -28,7 +28,7 @@ test("a starting diagram is read as typed: boxes, arrows, and a mermaid flowchar
   assert.deepEqual([fromModel.boxes.map((b) => b.label), fromModel.arrows.map((a) => [a.from, a.to, a.label])], [["Idea", "Spec"], [["b1", "b2", "turns into"]]]);
 });
 
-test("what Stand hears is a suggestion until someone keeps it, and a dropped one never comes back", async () => {
+test("what Stand hears joins the diagram at once, and what someone takes off never comes back", async () => {
   const answers: DiagramAnswer[] = [];
   const asked: string[] = [];
   const model = { designDiagram: async (_c: string, talk: string) => (asked.push(talk), answers.shift() ?? none) };
@@ -47,18 +47,16 @@ test("what Stand hears is a suggestion until someone keeps it, and a dropped one
   });
   assert.equal(await k.run(talk, ["Joe Liang", "Janesh"], caught, T0, T0 + 5000), true);
   let d = k.all();
-  // "task" is already there, so it isn't suggested again; its arrow finds the Task that is there and
+  // "task" is already there, so it isn't added again; its arrow finds the Task that is there and
   // that pair is already joined.
-  assert.deepEqual(d.boxes.map((b) => [b.id, b.label, !!b.suggested, b.by]), [["b1", "Task", false, null], ["b2", "Project", false, null], ["b3", "Idea", true, "Janesh"]]);
-  assert.deepEqual(d.arrows.map((a) => [a.id, a.from, a.to, a.label, !!a.suggested]), [["a1", "b1", "b2", "Belongs to", true], ["a2", "b3", "b1", "becomes", true]]);
+  assert.deepEqual(d.boxes.map((b) => [b.id, b.label, !!b.suggested, b.by]), [["b1", "Task", false, null], ["b2", "Project", false, null], ["b3", "Idea", false, "Janesh"]]);
+  assert.deepEqual(d.arrows.map((a) => [a.id, a.from, a.to, a.label, !!a.suggested]), [["a1", "b1", "b2", "Belongs to", false], ["a2", "b3", "b1", "becomes", false]]);
   assert.deepEqual(d.boxes[0].points.map((p) => p.text), ["Has exactly one project"]);
   assert.deepEqual(d.boxes[0].caught.map((c) => c.id), ["li_1"]);
   assert.equal(d.boxes[2].quote?.speaker, "Janesh");
   assert.match(asked[0], /NEW \[1\].*belong to one project/);
 
-  // Keeping an arrow keeps the suggested box at its end. Nothing new: no pass.
-  assert.equal(k.keep("a2"), true);
-  assert.deepEqual([k.all().boxes[2].suggested, k.all().arrows[1].suggested], [undefined, undefined]);
+  // Nothing waits to be kept. Nothing new: no pass.
   assert.equal(k.keep("a2"), false);
   assert.equal(await k.run(talk, ["Joe Liang"], caught, T0, T0 + 6000), false);
 
@@ -77,11 +75,12 @@ test("what Stand hears is a suggestion until someone keeps it, and a dropped one
   await k.run(talk, ["Janesh"], caught, T0, T0 + 13000);
   assert.deepEqual(k.all().boxes.filter((b) => !b.removed).map((b) => b.label), ["Task", "Project", "Idea"]);
 
-  // The board stays calm: past a handful waiting, new suggestions are left out.
-  answers.push({ ...none, boxes: Array.from({ length: MAX_WAITING + 4 }, (_, i) => ({ label: `Zq${i} thing${i}`, detail: `Part number ${i}.`, kind: "thing" as const, group: null, by: null, line: 1 })) });
+  // The board stays calm: one pass adds a handful of boxes at most.
+  const had = k.all().boxes.filter((b) => !b.removed).length;
+  answers.push({ ...none, boxes: Array.from({ length: MAX_AT_ONCE + 4 }, (_, i) => ({ label: `Zq${i} thing${i}`, detail: `Part number ${i}.`, kind: "thing" as const, group: null, by: null, line: 1 })) });
   talk.push(seg(20, "Joe Liang", "Lots of things."));
   await k.run(talk, ["Joe Liang"], caught, T0, T0 + 21000);
-  assert.equal(k.all().boxes.filter((b) => b.suggested && !b.removed).length, MAX_WAITING);
+  assert.equal(k.all().boxes.filter((b) => !b.removed).length - had, MAX_AT_ONCE);
 
   // A restarted server carries on: ids continue and talk it has read isn't read again.
   const again = new DiagramKeeper(model, "Stand's primitives", T0, JSON.parse(JSON.stringify(k.all())));
@@ -131,7 +130,7 @@ test("the session ends as a draft spec on its to-do, and its page shows the diag
   assert.equal(db.notePlan(taskId)?.text, spec);
   assert.equal(db.notePlan(taskId)?.by, "Stand");
   assert.equal(db.getBrainstorm(done.id)?.taskId, taskId);
-  assert.match(db.noteUpdates(taskId).at(-1)!.text, /Draft spec from the design session/);
+  assert.match(db.noteUpdates(taskId).at(-1)!.text, /Draft spec from the sketch of/);
   // A session that named its to-do saves there, as a new version; one with nothing kept saves nothing.
   const next = finishBrainstorm(db, room.id, m.id) ?? startBrainstorm(db, room.id, "Round two", "Joe Liang", T0 + 200, { diagram, seed: null, taskId });
   assert.equal(saveDraftSpec(db, { ...next, meetingId: m.id }, []), taskId);
@@ -139,7 +138,7 @@ test("the session ends as a draft spec on its to-do, and its page shows the diag
   assert.equal(saveDraftSpec(db, { ...next, diagram: { boxes: [diagram.boxes[2]], arrows: [] } }, []), null);
 });
 
-test("kinds and groups: read from a starting diagram, suggested by a pass, and written back as mermaid", async () => {
+test("kinds and groups: read from a starting diagram, added by a pass, and written back as mermaid", async () => {
   const d = parseSeed(
     ["Host (person): whoever runs the call", "## Capture: what the call hears", "Transcript (store): every line said", "Notes pass (service): files lines under items", "## Review", "Recap (screen): what people read after", "Verdict (decision)", "Transcript -> Notes pass: feeds", "Notes pass -> Recap: fills"].join("\n"),
     T0,
@@ -171,7 +170,7 @@ test("kinds and groups: read from a starting diagram, suggested by a pass, and w
   assert.match(context, /Groups so far:\n- Capture: what the call hears\n- Review/);
   const all = k.all();
   const by = (label: string) => all.boxes.find((b) => b.label === label)!;
-  assert.deepEqual([by("Digest").kind, by("Digest").group, by("Digest").suggested], ["screen", "g2", true]);
+  assert.deepEqual([by("Digest").kind, by("Digest").group, by("Digest").suggested], ["screen", "g2", undefined]);
   // The host had no group and joins Review; the transcript stays where the room saw it.
   assert.deepEqual([by("Host").group, by("Transcript").group], ["g2", "g1"]);
   assert.deepEqual(all.groups?.find((g) => g.label === "Plumbing"), { id: "g3", label: "Plumbing", detail: "Under the hood" });

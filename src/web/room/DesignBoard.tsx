@@ -2,19 +2,19 @@
 // labelled arrows for how they relate. A box has a kind (a person, a screen, a data store…) that
 // gives it a mark and a shape, and boxes that belong together sit in a group with a caption. Each
 // box shows its one line description, and what was said about it as notes under it; the Text pill
-// hides both. What Stand heard shows dashed, with Keep and Drop, and joins the diagram only when
-// someone keeps it. A click on a box or an arrow opens what's behind it, on your screen only.
+// hides both. What Stand hears joins the diagram at once (one from before that rule may still show
+// dashed, with Keep and Drop). A click on a box or an arrow opens what's behind it, on your screen only.
 // Context a session was given (MCP start_design_session) sits behind a Context button. In the call
 // it grows as the team talks; on the session's page it is the record.
 //
 // React Flow draws it (pan, pinch, the boxes as components) and ELK places it (designLayout.ts).
 
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import { BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, useViewport, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { AppWindow, CircleArrowRight, Database, FileText, Server, Split, Target, TriangleAlert, User } from "lucide-react";
-import type { BrainstormView, DesignArrow, DesignBox, DesignGroup, DesignKind } from "../../shared/protocol.ts";
-import { CaughtMarks, Face, KINDS, clock } from "./BrainMap.tsx";
+import type { BrainCaught, BrainstormView, DesignArrow, DesignBox, DesignGroup, DesignKind } from "../../shared/protocol.ts";
+import { CaughtMarks, EditRow, Face, KINDS, clock } from "./BrainMap.tsx";
 import { Markdown } from "../Markdown.tsx";
 import { NOTES_SHOWN, fitView, layoutDiagram, type Laid } from "./designLayout.ts";
 
@@ -33,7 +33,7 @@ const SORT: Record<DesignKind, { label: string; Icon: typeof User | null }> = {
 };
 
 /** What the boxes and arrows need from the board. */
-const Board = createContext<{ text: boolean; openId: string | null; pick: (id: string) => void; onKeep?: (id: string) => void; onDrop?: (id: string) => void }>({ text: true, openId: null, pick: () => {} });
+const Board = createContext<{ text: boolean; only?: BrainCaught["kind"] | null; openId: string | null; pick: (id: string) => void; onKeep?: (id: string) => void; onDrop?: (id: string) => void }>({ text: true, openId: null, pick: () => {} });
 
 type BoxNodeT = Node<{ box: DesignBox; body: number }, "box">;
 type GroupNodeT = Node<{ group: DesignGroup }, "frame">;
@@ -51,7 +51,7 @@ function BoxNode({ data }: NodeProps<BoxNodeT>) {
       <div
         role="button"
         tabIndex={0}
-        className={`design-box kind-${box.kind ?? "thing"}${box.suggested ? " suggested" : ""}${board.openId === box.id ? " on" : ""}`}
+        className={`design-box kind-${box.kind ?? "thing"}${box.suggested ? " suggested" : ""}${board.openId === box.id ? " on" : ""}${board.only && !box.caught.some((c) => c.kind === board.only) ? " dim" : ""}`}
         style={{ height: body }}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), board.pick(box.id))}
       >
@@ -155,15 +155,41 @@ const nodeTypes = { box: BoxNode, frame: GroupNode };
 const edgeTypes = { rel: RelEdge };
 
 /** Brings the whole diagram back into view when it is laid out again or the board changes size. */
-function Fit({ laid, size, tall }: { laid: Laid; size: { w: number; h: number }; tall: boolean }) {
+function Fit({ laid, size, tall, inset = 0 }: { laid: Laid; size: { w: number; h: number }; tall: boolean; inset?: number }) {
   const flow = useReactFlow();
   const first = useRef(true);
   useEffect(() => {
     if (!size.w || !size.h) return;
-    void flow.setViewport(fitView(laid, size, tall), { duration: first.current ? 0 : 300 });
+    void flow.setViewport(fitInside(laid, size, tall, inset), { duration: first.current ? 0 : 300 });
     first.current = false;
   }, [laid, size.w, size.h, tall]);
   return null;
+}
+
+/** The fit, with room left around the drawing so it does not touch the board's edge. */
+function fitInside(laid: Laid, size: { w: number; h: number }, tall: boolean, inset: number) {
+  if (!inset) return fitView(laid, size, tall);
+  const v = fitView(laid, { w: Math.max(1, size.w - inset * 2), h: Math.max(1, size.h - inset * 2) }, tall);
+  return { ...v, x: v.x + inset, y: v.y + inset };
+}
+
+/** The same zoom control as the map's: out, the size (a click fits it all), in. */
+function Zoom({ laid, size, tall, inset }: { laid: Laid; size: { w: number; h: number }; tall: boolean; inset: number }) {
+  const flow = useReactFlow();
+  const { zoom } = useViewport();
+  return (
+    <div className="brain-zoom" role="group" aria-label="Zoom" onClick={(e) => e.stopPropagation()}>
+      <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => void flow.zoomOut({ duration: 200 })}>
+        −
+      </button>
+      <button type="button" className="brain-zoom-pct" title="See it all" onClick={() => void flow.setViewport(fitInside(laid, size, tall, inset), { duration: 300 })}>
+        {Math.round(zoom * 100)}%
+      </button>
+      <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => void flow.zoomIn({ duration: 200 })}>
+        +
+      </button>
+    </div>
+  );
 }
 
 const TEXT_KEY = "stand.design.text";
@@ -176,7 +202,18 @@ const savedText = (): boolean | null => {
   }
 };
 
-export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: string) => void; onDrop?: (id: string) => void; className?: string }) {
+export function DesignBoard(props: {
+  brainstorm: BrainstormView;
+  onKeep?: (id: string) => void;
+  onDrop?: (id: string) => void;
+  /** On a sketch: a box or an arrow can be renamed. */
+  onRename?: (id: string, label: string) => void;
+  /** On a sketch the subject's name and the listening mark sit above the board, so the board leaves them out. */
+  bare?: boolean;
+  /** The kind picked on the sketch: boxes that caught none of it dim. */
+  only?: BrainCaught["kind"] | null;
+  className?: string;
+}) {
   const { brainstorm } = props;
   const design = brainstorm.design ?? { boxes: [], arrows: [] };
   const { boxes, arrows } = design;
@@ -194,8 +231,9 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
   }, []);
   const tall = size.w > 0 && size.w < 620;
   // Descriptions and notes show unless you turned them off; a phone starts without them.
+  // The sketch has no switch for it: wide shows them, narrow does not.
   const [textPick, setTextPick] = useState<boolean | null>(savedText);
-  const text = textPick ?? !tall;
+  const text = props.bare ? !tall : (textPick ?? !tall);
   const hasText = boxes.some((b) => b.detail || b.points.length) || groups.some((g) => g.detail);
   const setText = (v: boolean) => {
     setTextPick(v);
@@ -260,27 +298,31 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
     });
   }, [laid, brainstorm.design]);
   const openAt = laid?.boxes.find((p) => p.box.id === openId)?.x ?? laid?.arrows.find((p) => p.arrow.id === openId)?.x ?? 0;
-  const view = laid && size.w ? fitView(laid, size, tall) : null;
-  const board = useMemo(() => ({ text, openId, pick, onKeep: props.onKeep, onDrop: props.onDrop }), [text, openId, props.onKeep, props.onDrop]);
+  // On the sketch the drawing keeps a margin from the board's edge.
+  const inset = props.bare ? (tall ? 12 : 40) : 0;
+  const view = laid && size.w ? fitInside(laid, size, tall, inset) : null;
+  const board = useMemo(() => ({ text, only: props.only, openId, pick, onKeep: props.onKeep, onDrop: props.onDrop }), [text, props.only, openId, props.onKeep, props.onDrop]);
 
   return (
-    <div className={`brain design${tall ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} onClick={() => (setOpenId(null), setShowContext(false))}>
+    <div className={`brain design${tall ? " narrow" : ""}${props.bare ? " bare" : ""}${props.className ? ` ${props.className}` : ""}`} onClick={() => (setOpenId(null), setShowContext(false))}>
       <div className="design-top">
-        <span className="design-what" dir="auto" title={brainstorm.prompt}>
-          {brainstorm.prompt}
-        </span>
+        {!props.bare && (
+          <span className="design-what" dir="auto" title={brainstorm.prompt}>
+            {brainstorm.prompt}
+          </span>
+        )}
         {context.length > 0 && (
           <button type="button" className={`design-context${showContext ? " on" : ""}`} onClick={(e) => (e.stopPropagation(), setOpenId(null), setShowContext((v) => !v))}>
             Context <i>{context.length}</i>
           </button>
         )}
-        {hasText && (
+        {hasText && !props.bare && (
           <button type="button" className={`design-context design-text${text ? " on" : ""}`} aria-pressed={text} title={text ? "Hide descriptions and notes" : "Show descriptions and notes"} onClick={(e) => (e.stopPropagation(), setText(!text))}>
             Text
           </button>
         )}
         {waiting > 0 && <span className="design-waiting">{waiting} {live ? "suggested" : "left as suggestions"}</span>}
-        {brainstorm.busy ? (
+        {props.bare ? null : brainstorm.busy ? (
           <span className="design-busy">Listening…</span>
         ) : (
           live && brainstorm.heard === "failed" && <span className="design-busy trouble">Stand couldn't read the talk just now</span>
@@ -295,7 +337,7 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
                 ? "Stand couldn't read the talk just now. It tries again as you talk."
                 : brainstorm.heard === "nothing"
                   ? "Stand is listening, and hasn't heard the parts of a design yet. Say what the parts are and how they connect."
-                  : "Start talking it through. What Stand hears shows here as suggestions, and joins the diagram when someone keeps it."}
+                  : "Start talking it through. What Stand hears joins the diagram as you go."}
           </p>
         ) : (
           laid && (
@@ -327,8 +369,9 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
                   onNodeClick={(e, n) => n.type === "box" && (e.stopPropagation(), pick(n.id))}
                   aria-label="Design diagram"
                 >
-                  <Fit laid={laid} size={size} tall={tall} />
-                  {!tall && <Controls showInteractive={false} position="bottom-left" fitViewOptions={{ padding: 0.04, maxZoom: 1.15 }} />}
+                  <Fit laid={laid} size={size} tall={tall} inset={inset} />
+                  {props.bare && !tall && <Zoom laid={laid} size={size} tall={tall} inset={inset} />}
+                  {!props.bare && !tall && <Controls showInteractive={false} position="bottom-left" fitViewOptions={{ padding: 0.04, maxZoom: 1.15 }} />}
                 </ReactFlow>
               </ReactFlowProvider>
             </Board.Provider>
@@ -384,7 +427,9 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
               <Said quote={openArrow!.quote} />
             </>
           )}
-          {props.onKeep && (
+          {props.onRename && live && !(openBox ?? openArrow)!.suggested ? (
+            <EditRow name={(openBox ?? openArrow)!.label ?? ""} onRename={(label) => props.onRename!(openId!, label)} onRemove={() => (props.onDrop?.(openId!), setOpenId(null))} />
+          ) : props.onKeep && (
             <footer className="design-foot">
               {(openBox ?? openArrow)!.suggested && (
                 <button type="button" className="primary" onClick={() => props.onKeep!(openId!)}>

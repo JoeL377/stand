@@ -9,7 +9,7 @@
 // the map is never regrouped or dropped by a later pass, so what people are looking at stays put;
 // only a person takes one off. Two levels, never deeper: a deeper tree is unreadable on a call.
 import { z } from "zod";
-import { UNTITLED_DESIGN, type BrainCaught, type BrainNode, type BrainstormSummary, type BrainstormView, type DesignContext, type DesignDiagram, type Segment } from "../shared/protocol.ts";
+import { UNTITLED_DESIGN, subjectNodes, type BrainCaught, type BrainNode, type BrainstormSummary, type BrainstormView, type DesignContext, type DesignDiagram, type Segment, type SketchStyle, type SketchSubject } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 import { reviewedIdeas } from "./ideaReview.ts";
 import { similar } from "./notesMerge.ts";
@@ -40,6 +40,12 @@ export const MapAnswerSchema = z.object({
         detail: z.string().describe("One sentence saying what the idea is, in the speaker's terms"),
         by: z.string().nullable().describe("First name of who raised it; null if unclear"),
         line: z.number().int().describe("The NEW line it comes from"),
+        // A plain string, not an enum: one odd value would fail the whole pass.
+        shape: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('Only with a new cluster: "parts" when the talk on that subject is people working out how the parts of something connect or the steps something goes through, "ideas" when they are putting forward ideas or options. null when unsure, and for everything else'),
       }),
     )
     .describe("Only what the NEW lines add that the map doesn't already have. A direction is listed before the ideas under it; an idea may name a direction added in this same answer by its position: new1 for the first new direction, new2 for the second"),
@@ -64,7 +70,7 @@ export const MAP_SYSTEM = `You draw the map on the middle screen of a live team 
 Each time you get the map so far, with ids, and the last couple of minutes of transcript. Lines marked NEW are the ones you haven't seen yet. Return only what the NEW lines add; everything you don't name stays as it is. Often the answer is empty.
 
 - A direction (under "root") is a distinct angle on the centre that the talk has opened: an area, an approach, a kind of answer. Add one when someone raises an idea that fits no direction on the map, and name it for the angle, not for that one idea ("Onboarding", not "Add a welcome video"). Then add the idea under it. At most ${MAX_DIRECTIONS} directions: once they are there, put new ideas under the closest one.
-- The talk can move on to a separate subject that doesn't answer the centre at all (from a company's future to credit cards, say). That subject is a cluster of its own, with its own centre: add its directions with cluster set to the subject's name, and its ideas under them, as you would for the centre. When the talk comes back to a cluster already on the map, use its name again. A new angle on the centre is a direction, not a cluster; most talk stays on the centre. You may be told the board's current topic: a sign of where the talk is, not a reason on its own to start a cluster. Never drop what is said because it is off the centre.
+- The talk can move on to a separate subject that doesn't answer the centre at all (from a company's future to credit cards, say). That subject is a cluster of its own, with its own centre: add its directions with cluster set to the subject's name, and its ideas under them, as you would for the centre. When the talk comes back to a cluster already on the map, use its name again. A new angle on the centre is a direction, not a cluster; most talk stays on the centre. With a new cluster, say in shape what the talk on it is like: "parts" when people are working out how the parts of something connect or what happens in which order, "ideas" when they are putting forward ideas or options, null when you can't tell yet. You may be told the board's current topic: a sign of where the talk is, not a reason on its own to start a cluster. Never drop what is said because it is off the centre.
 - An idea (under a direction) is something specific someone proposes, suggests or wonders about that answers the centre. Add it once it has actually been stated, not while the speaker is still finding the words. Not agreement, not small talk, not logistics, not a restatement of something on the map.
 - Before adding, check the map: when a circle already says it in other words, don't add it. When the NEW talk builds on an existing circle (a reason for it, a variation, a concern about it), use extend on that circle instead.
 - Labels are what people will read at a glance: at most 5 words, concrete, in the team's own words. The detail is one plain sentence.
@@ -93,7 +99,7 @@ export class MapKeeper {
 
   constructor(
     private model: MapModel,
-    readonly prompt: string,
+    public prompt: string,
     /** Talk before this isn't the brainstorm's. */
     private readonly since: number,
     saved?: BrainNode[] | null,
@@ -123,8 +129,87 @@ export class MapKeeper {
   /** The topic the call is on now, from the board. */
   topicNow: (() => string | null) | null = null;
 
+  /** What the talk on a cluster sounded like when it began, by the cluster's name: "parts" or "ideas". */
+  readonly shapes = new Map<string, string>();
+
+  /** Someone renamed a circle. */
+  rename(id: string, label: string): string | null {
+    const n = this.nodes.find((x) => x.id === id && !x.removed);
+    const text = clip(label.replace(/\s+/g, " ").trim().replace(/\.$/, ""), 48);
+    if (!n || !text || text === n.label) return null;
+    const was = n.label;
+    n.label = text;
+    return was;
+  }
+
+  /** A separate subject got another name: its directions go with it. */
+  renameCluster(from: string, to: string): boolean {
+    const text = clip(to.replace(/\s+/g, " ").trim().replace(/\.$/, ""), 48);
+    if (!text || text === from || clustersOf(this.nodes).some((c) => c.toLowerCase() === text.toLowerCase())) return false;
+    let changed = false;
+    for (const n of this.nodes) if (n.cluster === from) ((n.cluster = text), (changed = true));
+    if (changed && this.shapes.has(from)) (this.shapes.set(text, this.shapes.get(from)!), this.shapes.delete(from));
+    return changed;
+  }
+
+  /** Someone moved a circle: an idea under another direction, or a direction to another subject
+   *  (`cluster`: that subject's name, null for the centre). Returns where it was, to move it back. */
+  move(id: string, to: { parent: string } | { cluster: string | null }): { parent: string } | { cluster: string | null } | null {
+    const n = this.nodes.find((x) => x.id === id && !x.removed);
+    if (!n) return null;
+    if ("parent" in to) {
+      const d = this.nodes.find((x) => x.id === to.parent && !x.parent && !x.removed);
+      if (!n.parent || !d || d.id === n.parent) return null;
+      const was = { parent: n.parent };
+      n.parent = d.id;
+      return was;
+    }
+    if (n.parent || (n.cluster ?? null) === to.cluster) return null;
+    const was = { cluster: n.cluster ?? null };
+    if (to.cluster) n.cluster = to.cluster;
+    else delete n.cluster;
+    return was;
+  }
+
+  /** Someone added a circle by hand or by asking Stand: an idea under a direction, or a direction
+   *  (`under` null) in a subject. */
+  add(label: string, under: string | null, cluster: string | null, by: string | null, now: number): BrainNode | null {
+    const text = clip(label.replace(/\s+/g, " ").trim().replace(/\.$/, ""), 48);
+    if (!text) return null;
+    if (under) {
+      const d = this.nodes.find((x) => x.id === under && !x.parent && !x.removed);
+      if (!d) return null;
+      const n: BrainNode = { id: `i${++this.ni}`, parent: d.id, label: text, detail: null, by: first(by), ts: now, quote: null, points: [], caught: [] };
+      this.nodes.push(n);
+      return n;
+    }
+    const n: BrainNode = { id: `d${++this.nd}`, parent: null, label: text, detail: null, by: first(by), ts: now, quote: null, points: [], caught: [] };
+    if (cluster) n.cluster = cluster;
+    this.nodes.push(n);
+    return n;
+  }
+
+  /** A map that started with no sentence takes a cluster's name as its centre: that cluster's
+   *  directions hang off the centre from then on. */
+  adopt(cluster: string) {
+    for (const n of this.nodes) if (n.cluster === cluster) delete n.cluster;
+    this.prompt = cluster;
+  }
+
+  /** Puts back what remove took off: the circle, and for a direction the ideas that went with it. */
+  restore(ids: string[]): boolean {
+    let changed = false;
+    for (const n of this.nodes) if (ids.includes(n.id) && n.removed) (delete n.removed, (changed = true));
+    return changed;
+  }
+
   all(): BrainNode[] {
     return this.nodes;
+  }
+
+  /** The time of the last line a pass has read. */
+  get readTo() {
+    return this.lastLook;
   }
 
   unreadSince(segments: Segment[]): number | null {
@@ -134,11 +219,17 @@ export class MapKeeper {
   /** Someone took a circle off: Stand got it wrong. Its words stay so a later pass doesn't add it
    *  again. A direction takes its ideas with it. */
   remove(id: string): boolean {
+    return this.take(id).length > 0;
+  }
+
+  /** remove, saying what went: the circle and, for a direction, its ideas. */
+  take(id: string): string[] {
     const n = this.nodes.find((x) => x.id === id && !x.removed);
-    if (!n) return false;
+    if (!n) return [];
+    const gone = [n.id];
     n.removed = true;
-    for (const c of this.nodes) if (c.parent === id) c.removed = true;
-    return true;
+    for (const c of this.nodes) if (c.parent === id && !c.removed) ((c.removed = true), gone.push(c.id));
+    return gone;
   }
 
   /** One pass over the talk up to `now`. `caught` is the meeting's to-dos, decisions and open
@@ -170,7 +261,7 @@ export class MapKeeper {
     const now_ = this.topicNow?.() ?? null;
     const moved = now_ && !similar(now_, this.prompt) ? now_ : null;
     const a = await this.model.brainstormMap(
-      [`The centre of the map: ${this.prompt}`, moved ? `The board's current topic: ${moved}` : "", `People: ${people.join(", ")}`].filter(Boolean).join("\n"),
+      [`The centre of the map: ${this.prompt === UNTITLED_DESIGN ? "(not named yet: put every direction in a cluster named for what the talk is about, and that name becomes the centre)" : this.prompt}`, moved ? `The board's current topic: ${moved}` : "", `People: ${people.join(", ")}`].filter(Boolean).join("\n"),
       [
         `Map so far:\n${map}`,
         off.length ? `Taken off by the team, never add these again:\n${off.join("\n")}` : "",
@@ -202,6 +293,8 @@ export class MapKeeper {
         }
         const d: BrainNode = { id: `d${++this.nd}`, parent: null, label, detail: clip(x.detail.trim(), 240) || null, by: first(x.by), ts: seg.ts, quote: quote(seg), points: [], caught: [] };
         if (cluster) d.cluster = cluster;
+        const shape = x.shape?.trim().toLowerCase();
+        if (cluster && shape && !this.shapes.has(cluster) && !clustersOf(this.nodes).includes(cluster)) this.shapes.set(cluster, shape);
         this.nodes.push(d);
         fresh.push(d.id);
         changed = true;
@@ -301,7 +394,62 @@ export interface BrainstormRow {
   threadId: string | null;
   /** The stretches of the meeting a topic's map read, as of when it last parked, stopped or ended. */
   spans: Array<[number, number]> | null;
+  /** What it holds as a sketch (sketch.ts): its subjects and how each is drawn. Null on one from
+   *  before sketches, which is read as one (sketchOf). */
+  sketch: SketchState | null;
 }
+
+/** One subject of a sketch, as kept. The first one's diagram is the row's own (`diagram`). */
+export interface SubjectRow {
+  id: string;
+  title: string;
+  style: SketchStyle;
+  diagram: DesignDiagram | null;
+  why?: "steps" | null;
+  taskId?: string | null;
+}
+
+export interface SketchState {
+  subjects: SubjectRow[];
+  /** The subject the talk was last on. */
+  live: string;
+  /** When the talk went to which subject, oldest first: a line belongs to the subject of the last mark before it. */
+  marks: Array<{ from: number; subject: string }>;
+}
+
+/** Any brainstorm row read as a sketch: its first subject is the sentence it started from (a diagram
+ *  for a design session, else a map), and every separate subject on its map is one more. */
+export function sketchOf(b: Pick<BrainstormRow, "prompt" | "kind" | "diagram" | "nodes" | "sketch" | "taskId">): SketchState {
+  const kept = b.sketch;
+  const subjects: SubjectRow[] = kept
+    ? kept.subjects.map((s, i) => (i === 0 ? { ...s, title: b.prompt, diagram: b.diagram ?? s.diagram ?? null, taskId: b.taskId ?? s.taskId ?? null } : { ...s }))
+    : [{ id: "s0", title: b.prompt, style: b.kind === "design" ? "diagram" : "map", diagram: b.diagram, taskId: b.taskId }];
+  let n = Math.max(0, ...subjects.map((s) => Number(s.id.slice(1)) || 0));
+  for (const c of clustersOf(b.nodes)) if (!subjects.some((s, i) => i > 0 && s.title === c)) subjects.push({ id: `s${++n}`, title: c, style: "map", diagram: null });
+  const live = kept && subjects.some((s) => s.id === kept.live) ? kept.live : "s0";
+  return { subjects, live, marks: kept?.marks ?? [] };
+}
+
+/** The circles of the subjects drawn as maps. A subject drawn as a diagram keeps its circles too (so
+ *  it can be redrawn at once), but they are not ideas anyone saw. */
+export function mapNodesOf(b: Pick<BrainstormRow, "prompt" | "kind" | "diagram" | "nodes" | "sketch" | "taskId">): BrainNode[] {
+  const subjects = sketchOf(b).subjects;
+  const hidden = new Set<string>();
+  subjects.forEach((s, i) => {
+    if (s.style === "diagram") for (const n of subjectNodes(b.nodes, s, i === 0)) hidden.add(n.id);
+  });
+  return hidden.size ? b.nodes.filter((n) => !hidden.has(n.id)) : b.nodes;
+}
+
+/** How much a subject holds, as it is drawn: ideas on a map, parts on a diagram. */
+export function subjectCount(s: SubjectRow, nodes: BrainNode[], first: boolean): number {
+  if (s.style === "diagram") return s.diagram ? shownDiagram(s.diagram).boxes.length : 0;
+  return subjectNodes(nodes.filter((n) => !n.removed), s, first).filter((n) => n.parent).length;
+}
+
+/** A sketch's subjects as people see them. */
+export const subjectsView = (sk: SketchState): SketchSubject[] =>
+  sk.subjects.map((s) => ({ id: s.id, title: s.title, style: s.style, ...(s.diagram ? { diagram: shownDiagram(s.diagram) } : {}), ...(s.why ? { why: s.why } : {}), ...(s.taskId ? { taskId: s.taskId } : {}) }));
 
 /** A diagram as people see it: without what was dropped. */
 export const shownDiagram = (d: DesignDiagram): DesignDiagram => {
@@ -327,10 +475,11 @@ export const toBrainstormView = (b: BrainstormRow, busy = false): BrainstormView
   ...(b.starred.length ? { starred: b.starred.filter((id) => b.nodes.some((n) => n.id === id && !n.removed)) } : {}),
   ...(b.kind === "design" ? { design: shownDiagram(b.diagram ?? { boxes: [], arrows: [] }), taskId: b.taskId, ...(b.context.length ? { context: b.context } : {}) } : {}),
   ...(busy ? { busy } : {}),
+  ...((sk) => ({ subjects: subjectsView(sk), liveSubject: sk.live }))(sketchOf(b)),
 });
 
 const summaryOf = (b: BrainstormRow): BrainstormSummary => {
-  const live = b.nodes.filter((n) => !n.removed);
+  const live = mapNodesOf(b).filter((n) => !n.removed);
   const d = b.kind === "design" ? shownDiagram(b.diagram ?? { boxes: [], arrows: [] }) : null;
   return {
     id: b.id,
@@ -342,6 +491,7 @@ const summaryOf = (b: BrainstormRow): BrainstormSummary => {
     directions: live.filter((n) => !n.parent).length,
     ideas: live.filter((n) => n.parent).length,
     ...(d ? { design: { boxes: d.boxes.filter((x) => !x.suggested).length, arrows: d.arrows.filter((x) => !x.suggested).length } } : {}),
+    subjects: sketchOf(b).subjects.map((s, i) => ({ id: s.id, title: s.title, style: s.style, count: subjectCount(s, b.nodes, i === 0), ...(s.taskId ? { taskId: s.taskId } : {}) })),
   };
 };
 

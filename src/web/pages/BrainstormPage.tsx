@@ -1,4 +1,4 @@
-// A brainstorm's own page: the sentence it started from and the map the talk drew around it.
+// A sketch's own page: its subjects, each as the map or the diagram the talk drew of it.
 // It stays here after the call, so anyone can come back, click through the circles and send the link.
 
 import { useEffect, useState } from "react";
@@ -7,9 +7,8 @@ import { usePhone } from "../phone.ts";
 import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
-import { BrainMap } from "../room/BrainMap.tsx";
-import { BrainWords } from "../room/BrainWords.tsx";
-import { DesignBoard } from "../room/DesignBoard.tsx";
+import { subjectNodes } from "../../shared/protocol.ts";
+import { SketchBoard, subjectsOf } from "../room/Sketch.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { BrainIdeas } from "./BrainIdeas.tsx";
 import { errorToast } from "../Toasts.tsx";
@@ -30,9 +29,8 @@ export function BrainstormPage() {
   const [settingUp, setSettingUp] = useState(false);
   // A phone opens on the list of ideas: the map fits the whole picture into the screen's width.
   const phone = usePhone();
-  const view = params.get("view") ?? (phone ? "ideas" : "map");
-  const ideas = view === "ideas";
-  const words = view === "words";
+  const view = params.get("view") ?? (phone ? "list" : "picture");
+  const [subject, setSubject] = useState<string | null>(null);
   useEffect(() => {
     setData(null);
     setFailed(false);
@@ -42,7 +40,7 @@ export function BrainstormPage() {
   if (failed) {
     return (
       <div className="rp rp-empty">
-        <p>This brainstorm isn't here, or isn't yours to see.</p>
+        <p>This sketch isn't here, or isn't yours to see.</p>
         <Link to={spaceHref(roomId)}>← Back to the space</Link>
       </div>
     );
@@ -50,6 +48,16 @@ export function BrainstormPage() {
   if (!data) return <div className="rp rp-empty muted">Loading…</div>;
   const b = data.brainstorm;
   const live = b.status === "live";
+  // The ideas are the circles of the subjects drawn as maps; a diagram's parts are not ideas.
+  const subjects = subjectsOf(b);
+  const hidden = new Set(subjects.flatMap((s, i) => (s.style === "diagram" ? subjectNodes(b.nodes, s, i === 0).map((n) => n.id) : [])));
+  const maps = { ...b, nodes: b.nodes.filter((n) => !hidden.has(n.id)) };
+  const hasIdeas = maps.nodes.some((n) => n.parent);
+  const ideas = view === "ideas" && hasIdeas;
+  const words = view === "words";
+  const list = !ideas && !words && (view === "list" || view === "map");
+  const parts = subjects.reduce((n, s) => n + (s.style === "diagram" ? (s.diagram?.boxes.filter((x) => !x.suggested).length ?? 0) : 0), 0);
+  const count = [hasIdeas ? brainCount({ directions: maps.nodes.filter((n) => !n.parent).length, ideas: maps.nodes.filter((n) => n.parent).length }) : "", parts ? `${parts} part${parts === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
   const star = (idea: string, on: boolean) => {
     // Shown at once; the server's answer is what stays.
     setData({ ...data, brainstorm: { ...b, starred: on ? [...(b.starred ?? []), idea] : (b.starred ?? []).filter((x) => x !== idea) } });
@@ -64,26 +72,27 @@ export function BrainstormPage() {
         <Link className="rp-back" to={spaceHref(roomId)}>
           ← {data.roomName}
         </Link>
-        <strong>{b.design ? "Design session" : "Brainstorm"}</strong>
-        <BrainstormPicker roomId={roomId} current={b} all={data.brainstorms.filter((x) => !x.design === !b.design)} />
-        <span className="muted bp-count">
-          {b.design ? designCount({ boxes: b.design.boxes.filter((x) => !x.suggested).length, arrows: b.design.arrows.filter((x) => !x.suggested).length }) : brainCount({ directions: b.nodes.filter((n) => !n.parent).length, ideas: b.nodes.filter((n) => n.parent).length })}
-        </span>
-        {!b.design && (
-          <span className="bp-views" role="group" aria-label="View">
-            <button type="button" className={`rp-pill${ideas || words ? "" : " on"}`} aria-pressed={!ideas && !words} onClick={() => setParams(phone ? { view: "map" } : {}, { replace: true })}>
-              Map
-            </button>
-            <button type="button" className={`rp-pill${words ? " on" : ""}`} aria-pressed={words} onClick={() => setParams({ view: "words" }, { replace: true })}>
-              Words
-            </button>
-            <button type="button" className={`rp-pill${ideas ? " on" : ""}`} aria-pressed={ideas} onClick={() => setParams({ view: "ideas" }, { replace: true })}>
+        <strong>Sketch</strong>
+        <BrainstormPicker roomId={roomId} current={b} all={data.brainstorms} />
+        <span className="muted bp-count">{count}</span>
+        <span className="bp-views" role="group" aria-label="View">
+          <button type="button" className={`rp-pill${!ideas && !list && !words ? " on" : ""}`} aria-pressed={!ideas && !list && !words} onClick={() => setParams(phone ? { view: "picture" } : {}, { replace: true })}>
+            Picture
+          </button>
+          <button type="button" className={`rp-pill${list ? " on" : ""}`} aria-pressed={list} onClick={() => setParams(phone ? {} : { view: "list" }, { replace: true })}>
+            List
+          </button>
+          <button type="button" className={`rp-pill${words ? " on" : ""}`} aria-pressed={words} onClick={() => setParams({ view: "words" }, { replace: true })} title="The words the talk kept coming back to">
+            Words
+          </button>
+          {hasIdeas && (
+            <button type="button" className={`rp-pill${ideas ? " on" : ""}`} aria-pressed={ideas} onClick={() => setParams({ view: "ideas" }, { replace: true })} title="Star the ideas worth coming back to">
               Ideas
             </button>
-          </span>
-        )}
+          )}
+        </span>
         <span className="rp-grow" />
-        {!b.design && !live && b.nodes.some((n) => n.parent) && (
+        {!live && hasIdeas && (
           <button
             type="button"
             className="rp-link"
@@ -107,7 +116,7 @@ export function BrainstormPage() {
         )}
         {live ? (
           <Link className="rp-link" to={joinHref(roomId)}>
-            {b.design ? "Join the session" : "Join the brainstorm"}
+            Join the call
           </Link>
         ) : (
           b.meetingId && (
@@ -117,7 +126,11 @@ export function BrainstormPage() {
           )
         )}
       </header>
-      {b.design ? <DesignBoard brainstorm={b} className="bp-map" /> : ideas ? <BrainIdeas brainstorm={b} onStar={star} /> : words ? <BrainWords brainstorm={b} className="bp-map" /> : <BrainMap brainstorm={b} className="bp-map" />}
+      {ideas ? (
+        <BrainIdeas brainstorm={maps} onStar={star} />
+      ) : (
+        <SketchBoard brainstorm={b} phone={phone} as={words ? "words" : list ? "list" : "picture"} subject={subject} onSubject={setSubject} className="bp-map" />
+      )}
     </div>
   );
 }

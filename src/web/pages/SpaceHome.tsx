@@ -293,7 +293,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         : (feed?.ideaReviews ?? []).some((r) => r.status === "live")
           ? "Idea review on now"
           : (feed?.brainstorms ?? []).some((b) => b.status === "live")
-            ? "Brainstorm on now"
+            ? "Sketching now"
             : "Talking now";
   const talk = () => (phone && live && !wrapping ? setPrejoin(true) : props.onJoin());
   const members = spaces?.find((s) => s.id === room.id)?.people ?? [];

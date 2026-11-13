@@ -11,7 +11,7 @@
 
 import { IDEA_OUTCOMES } from "../shared/protocol.ts";
 import type { BrainNode, BrainstormView, IdeaOutcome, IdeaReviewSummary, ReviewView } from "../shared/protocol.ts";
-import type { BrainstormRow } from "./brainstorm.ts";
+import { mapNodesOf, type BrainstormRow } from "./brainstorm.ts";
 import type { DB, IdeaSlideSaved, ReviewRow } from "./db.ts";
 import { newId } from "./ids.ts";
 import { REVIEW_NAME_MAX, REVIEW_TITLE_MAX, ReviewError, contentOf, toView } from "./reviews.ts";
@@ -39,7 +39,7 @@ export function setUpIdeaReview(db: DB, roomId: string, brainstormId: string, by
   const b = db.getBrainstorm(brainstormId);
   if (!b || b.roomId !== roomId || b.kind !== "map") throw new ReviewError("That brainstorm isn't in this space.");
   const wanted = only?.map((x) => x.trim().toLowerCase()).filter(Boolean);
-  const all = ideasInOrder(b).filter((n) => !wanted?.length || wanted.includes(n.id.toLowerCase()) || wanted.includes(n.label.toLowerCase()));
+  const all = ideasInOrder({ ...b, nodes: mapNodesOf(b) }).filter((n) => !wanted?.length || wanted.includes(n.id.toLowerCase()) || wanted.includes(n.label.toLowerCase()));
   if (!all.length) throw new ReviewError(wanted?.length ? "None of those ideas are on this brainstorm's map." : "This brainstorm has no ideas on its map yet.");
   const ideas = all.slice(0, IDEA_SLIDES_MAX);
   const mine = db.ideaReviewsOf(b.id);

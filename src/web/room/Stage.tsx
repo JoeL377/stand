@@ -6,10 +6,9 @@ import { ReviewStage } from "./ReviewStage.tsx";
 import { DesignStage } from "./DesignStage.tsx";
 import { specAuthor } from "../../shared/designReview.ts";
 import { NextCard } from "./NextCard.tsx";
-import { ViewPane, type ViewTab } from "./Views.tsx";
+import { ViewPane, viewOf, type ViewTab } from "./Views.tsx";
 import { runningExperience } from "./Experiences.tsx";
 import { mayTakeOver, presentingLine } from "./presenter.ts";
-import { BrainstormPop, DesignSessionPop } from "../pages/SpaceHome.tsx";
 import { api } from "../api.ts";
 import type { AgentCard, Board, BrainstormSummary, BrainstormView, ClientMessage, HostView, Item, ListNote, Note, Participant, RoomState, Segment, Snap } from "../../shared/protocol.ts";
 import type { RemoteScreen } from "./useMedia.ts";
@@ -52,6 +51,8 @@ export function Stage(props: {
   brainstorm?: BrainstormView | null;
   /** The other maps and diagrams of this call, oldest first. */
   brainstorms?: BrainstormSummary[];
+  sketchStopped?: BrainstormView | null;
+  onSketchStoppedClose?: () => void;
   /** What ✦ Stand has put on the board (server/meetingAgent.ts); null when the server runs no agent. */
   agentCards: AgentCard[] | null;
   notes: Note[];
@@ -174,8 +175,10 @@ export function Stage(props: {
   const taskId = focusItem?.taskId ?? null;
   useEffect(() => setMyTaskMode("brief"), [taskId]);
   const [own, setOwn] = useState(false);
-  // Beside the card, the map, its words or the diagram drawing in the call: the presenter's, until you pick your own.
+  // Beside the card, the sketch drawing in the call: the presenter's, until you pick your own.
   const [view, setView] = useState<ViewTab>("card");
+  // The subject of the sketch on this screen; null follows the talk.
+  const [subject, setSubject] = useState<string | null>(null);
   // The slot the top bar keeps for what's being discussed; none on a phone, where the bar is full.
   const [nowSlot, setNowSlot] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
@@ -187,11 +190,16 @@ export function Stage(props: {
   }, []);
   const following = !amLeader && !!leader && !own;
   useEffect(() => {
-    if (following && hostView?.pane) setView(hostView.pane);
-  }, [following, hostView?.pane]);
+    if (following && hostView?.pane) setView(viewOf(hostView.pane));
+    if (following) setSubject(hostView?.subject ?? null);
+  }, [following, hostView?.pane, hostView?.subject]);
   const pickView = (v: ViewTab) => {
     setView(v);
-    if (following && v !== hostView?.pane) setOwn(true);
+    if (following && v !== viewOf(hostView?.pane)) setOwn(true);
+  };
+  const pickSubject = (id: string | null) => {
+    setSubject(id);
+    if (following && id !== (hostView?.subject ?? null)) setOwn(true);
   };
   const tab = following ? (hostView?.tab === "board" ? "board" : null) : ownTab;
   const pickTab = (t: string | null) => {
@@ -218,9 +226,9 @@ export function Stage(props: {
   useEffect(() => {
     if (!amLeader) setMyShot(hostView?.shot ?? 0);
   }, [amLeader, hostView?.shot]);
-  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), ...(design && { taskMode: mySpec ? ("spec" as const) : ("brief" as const) }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind, pane: view };
+  const myView: HostView = { ...(taskId && { taskMode: myTaskMode }), ...(design && { taskMode: mySpec ? ("spec" as const) : ("brief" as const) }), tab: middleTaken && tab === "board" ? "board" : "main", ...(reviewUp && myShot > 0 && { shot: myShot }), rewind: myRewind, pane: view, ...(view === "sketch" && subject && { subject }) };
   const sameView = (a: HostView | null, b: HostView) =>
-    (a?.tab ?? "main") === b.tab && (a?.pane ?? "card") === (b.pane ?? "card") && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
+    (a?.tab ?? "main") === b.tab && viewOf(a?.pane) === viewOf(b.pane) && (a?.subject ?? null) === (b.subject ?? null) && JSON.stringify(a?.rewind ?? null) === JSON.stringify(b.rewind);
   const hostKey = JSON.stringify(hostView);
   useEffect(() => {
     if (own && sameView(hostView, myView)) setOwn(false);
@@ -393,73 +401,53 @@ export function Stage(props: {
       }
     />
   );
-  const [drawPop, setDrawPop] = useState<"map" | "diagram" | null>(null);
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
   const steady = !props.offline && !props.ending;
-  const draw = (what: "map" | "diagram") => () => {
-    if (!mayTakeOver(state, props.participantId)) return;
-    const other = what === "map" ? live?.design : live && !live.design;
-    if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return;
-    setDrawPop(what);
-  };
   const thread = props.board?.threads.find((t) => t.id === props.board?.currentId);
-  const open = () => {
-    if (!mayTakeOver(state, props.participantId)) return;
-    if (live?.design && !confirm("Draw the map of this topic? The diagram stops, and is kept.")) return;
-    send({ type: "view.open" });
-  };
-  const startDraw = async (what: "map" | "diagram", start: () => Promise<unknown>) => {
+  // Opening the sketch: Stand draws from the last two minutes on. A topic that was said names its first
+  // subject, else the board's topic does, else the talk will. `style` is what the talk sounded like.
+  const startSketch = async (topic: string, style?: "map" | "diagram"): Promise<boolean> => {
+    if (!live && !mayTakeOver(state, props.participantId)) return false;
     try {
-      await start();
-      setView(what);
-      setDrawPop(null);
-    } catch (err) {
-      errorToast(`Couldn't start the ${what}`)(err);
-    }
-  };
-  // Taking Stand's card draws the same way the pills do: a topic that was said starts its own map or
-  // diagram, a map with none is the map of the board's topic, and with no topic at all the pop asks.
-  const drawNext = async (what: "map" | "diagram", topic: string): Promise<boolean> => {
-    if (!mayTakeOver(state, props.participantId)) return false;
-    const other = what === "map" ? live?.design : live && !live.design;
-    if (other && !confirm(`Draw a ${what}? The ${what === "map" ? "diagram" : "map"} stops, and is kept.`)) return false;
-    if (what === "map" && !topic) {
-      if (!thread) return setDrawPop("map"), true;
-      send({ type: "view.open" });
-      setView("map");
-      return true;
-    }
-    try {
-      await api.startBrainstorm(state.roomId, topic, what === "diagram" ? { seed: "", taskId: null } : undefined);
-      setView(what);
-      // A slide, a share or a to-do has the middle: the one who took the card goes to the board's tab to see it drawn.
+      await api.startSketch(state.roomId, topic || thread?.title || "", style);
+      setView("sketch");
+      setSubject(null);
+      // A slide, a share or a to-do has the middle: whoever opened it goes to the board's tab to see it drawn.
       if (middleTaken) pickTab("board");
       return true;
     } catch (err) {
-      errorToast(`Couldn't start the ${what}`)(err);
+      errorToast("Couldn't open the sketch")(err);
       return false;
     }
   };
+  const acts = {
+    style: (s: string, style: "map" | "diagram") => void send({ type: "sketch.style", subject: s, style }),
+    edit: (s: string, id: string, op: "rename" | "remove" | "move", arg?: { label?: string; to?: string }) => void send({ type: "sketch.edit", subject: s, id, op, ...arg }),
+    undo: () => void send({ type: "sketch.undo" }),
+    offer: (take: boolean) => void send({ type: "sketch.offer", take }),
+    keep: (s: string, id: string) => void send({ type: "design.keep", id, subject: s }),
+  };
+  const lastSaid = props.segments.at(-1);
   // The board: the middle screen, or a tab of its own while a share or a deck has it.
   const board = (
     <ViewPane
       view={view}
       onView={pickView}
-      // During a review the board is the card only, unless a map or a diagram someone asked for there is drawing.
-      tabs={(!runningExperience(state.items) || !!live) && (!props.phone || !!props.phoneViews || !!live || view !== "card" || (props.brainstorms ?? []).length > 0)}
+      // During a review the board is the card only, unless a sketch someone asked for there is drawing.
+      tabs={(!runningExperience(state.items) || !!live || !!props.sketchStopped) && (!props.phone || !!props.phoneViews || !!live || view !== "card" || (props.brainstorms ?? []).length > 0)}
       phone={props.phone}
       card={card}
       brainstorm={props.brainstorm}
+      stopped={props.sketchStopped}
+      onWrapUpClose={props.onSketchStoppedClose}
       others={props.brainstorms ?? []}
       roomId={state.roomId}
-      topic={thread ? { id: thread.id, title: thread.title } : null}
-      onRemove={steady ? (id) => send({ type: "brainstorm.remove", id }) : undefined}
-      onKeep={steady ? (id) => send({ type: "design.keep", id }) : undefined}
-      onDrop={steady ? (id) => send({ type: "design.drop", id }) : undefined}
-      onDraw={steady ? draw("map") : undefined}
-      onDrawDiagram={steady ? draw("diagram") : undefined}
-      onOpen={steady ? open : undefined}
+      acts={steady ? acts : undefined}
+      onStart={steady ? () => void startSketch("") : undefined}
       onStop={steady ? () => send({ type: "view.stop" }) : undefined}
+      subject={subject}
+      onSubject={pickSubject}
+      heard={lastSaid ? { speaker: lastSaid.speakerName, text: lastSaid.text } : null}
     />
   );
 
@@ -499,7 +487,7 @@ export function Stage(props: {
                 title="The board, just for you; the share keeps going"
               >
                 Board
-                {!boardOpen && live && <i className="view-dot" title={`A ${live.design ? "diagram" : "map"} is being drawn`} aria-label={`A ${live.design ? "diagram" : "map"} is being drawn`} />}
+                {!boardOpen && live && <i className="view-dot" title="Stand is sketching" aria-label="Stand is sketching" />}
                 {!boardOpen && <AgentTabMark cards={props.agentCards} unseen={notice.unseen} />}
               </button>
             )}
@@ -554,7 +542,7 @@ export function Stage(props: {
       </div>
   );
 
-  const nextCard = state.next && !props.ending ? <NextCard key={state.next.id} next={state.next} roomId={state.roomId} offline={props.offline} send={send} onDraw={drawNext} /> : null;
+  const nextCard = state.next && !props.ending ? <NextCard key={state.next.id} next={state.next} roomId={state.roomId} offline={props.offline} send={send} onDraw={(what, topic) => startSketch(topic, what)} /> : null;
   const saidNotice = noticeOn && !props.covered ? <SaidNotice key={noticeOn.id} card={noticeOn} more={notice.more} onOpen={() => openSaid(noticeOn.id)} onClose={notice.close} /> : null;
   const dock = nextCard || saidNotice ? (
     <>
@@ -731,10 +719,6 @@ export function Stage(props: {
       </div>
       {/* A phone's sheet covers the stage: the notice is one line over it, as Stand's suggestion is (Meeting.tsx). */}
       {noticeOn && props.covered && <SaidNotice key={noticeOn.id} line card={noticeOn} more={notice.more} onOpen={() => openSaid(noticeOn.id)} onClose={notice.close} />}
-      {drawPop === "map" && <BrainstormPop onClose={() => setDrawPop(null)} onStart={(prompt) => startDraw("map", () => api.startBrainstorm(state.roomId, prompt))} />}
-      {drawPop === "diagram" && (
-        <DesignSessionPop todos={[]} onClose={() => setDrawPop(null)} onStart={(prompt, seed, taskId) => startDraw("diagram", () => api.startBrainstorm(state.roomId, prompt, { seed, taskId }))} />
-      )}
 
     </main>
   );

@@ -11,9 +11,8 @@ const first = (name: string) => name.trim().split(/\s+/)[0];
 
 /** The card's question in one line, for where there is no room for the card (a phone's other tabs). */
 export function nextAsk(next: NextStep): string {
-  const on = next.topic ? ` ${next.kind === "map" || next.kind === "diagram" ? "of" : "on"} ${next.topic}` : "";
-  if (next.kind === "map") return `Draw a map${on || " of this"}?`;
-  if (next.kind === "diagram") return `Draw a diagram${on || " of this"}?`;
+  const on = next.topic ? ` on ${next.topic}` : "";
+  if (next.kind === "map" || next.kind === "diagram") return `Sketch ${next.topic || "this"}?`;
   return `${next.kind === "design-review" ? "Design review" : "Product review"}${on}?`;
 }
 
@@ -22,13 +21,13 @@ export function NextCard(props: {
   roomId: string;
   offline?: boolean;
   send: (m: ClientMessage) => boolean;
-  /** Draws the map or the diagram the usual way (Stage.tsx); resolves false when it didn't start. */
+  /** Opens the sketch the usual way (Stage.tsx), drawn first as what the talk sounded like; resolves false when it didn't start. */
   onDraw: (what: "map" | "diagram", topic: string) => Promise<boolean>;
 }) {
   const { next, send } = props;
   const [busy, setBusy] = useState(false);
   const review = next.kind === "design-review" || next.kind === "product-review";
-  const what = next.kind === "map" ? "a map" : next.kind === "diagram" ? "a diagram" : next.kind === "design-review" ? "Design review" : "Product review";
+  const what = next.kind === "map" || next.kind === "diagram" ? "the sketch" : next.kind === "design-review" ? "Design review" : "Product review";
   const ready = next.ready ?? 0;
   const waiting = next.kind === "design-review" ? `${ready} ${ready === 1 ? "spec" : "specs"} waiting` : `${ready} ${ready === 1 ? "slide" : "slides"} waiting`;
   const take = async () => {
@@ -60,16 +59,16 @@ export function NextCard(props: {
           {busy ? "Starting…" : "Start now"}
         </button>
       ) : (
-        <button className="primary next-do" onClick={() => void take()} disabled={props.offline || busy} title={review ? "Keeps it in the recap as a suggested next step" : "Draws it beside the board. Nothing else in the call moves."}>
-          {review ? "Add to recap" : busy ? "Drawing…" : next.kind === "map" ? "Draw map" : "Draw diagram"}
+        <button className="primary next-do" onClick={() => void take()} disabled={props.offline || busy} title={review ? "Keeps it in the recap as a suggested next step" : "Stand draws it beside the board, starting from the last two minutes. Nothing else in the call moves."}>
+          {review ? "Add to recap" : busy ? "Opening…" : "Open Sketch"}
         </button>
       )}
       <span className="agent-mark" aria-hidden>
         ✦
       </span>
       <span className="nudge-text">
-        {next.guessed ? `Sounds like a ${next.kind === "map" ? "brainstorm" : "design"}. ` : ""}
-        {review ? `${what}${next.topic ? " on " : ""}` : `Draw ${what} ${next.topic ? "of " : "of this"}`}
+        {next.guessed ? `Sounds like ${next.kind === "map" ? "a brainstorm" : "you're working out how something works"}. ` : ""}
+        {review ? `${what}${next.topic ? " on " : ""}` : next.topic ? "Sketch " : "Sketch this"}
         {next.topic && <strong dir="auto">{next.topic}</strong>}?{review && ready > 0 && <span className="muted"> · {waiting}</span>}
       </span>
       {review && ready > 0 && (
