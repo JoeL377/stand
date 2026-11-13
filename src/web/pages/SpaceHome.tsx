@@ -561,7 +561,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                 </ul>
               )}
               {!kind && days.map((d) => (
-                <div key={d.label} className="sh-day">
+                <div key={d.label} className={d.label === "Today" ? "sh-day today" : "sh-day"}>
                   {/* A phone has room for a short day only. */}
                   <h3>
                     <span className="sh-day-long">{d.label}</span>

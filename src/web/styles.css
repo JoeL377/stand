@@ -2283,15 +2283,23 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .sh-panel.meetings .sh-counts .sh-count { font-weight: 400; }
 /* The day sits beside its first row, not on a line of its own. */
 .sh-panel.meetings .sh-day { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: start; }
-.sh-panel.meetings .sh-day + .sh-day { margin-top: 0; }
+/* Days are groups: a hairline and a little air between them, rows close together inside one. */
+.sh-panel.meetings .sh-day + .sh-day { margin-top: 6px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.sh-panel.meetings .sh-day.today h3 { color: var(--text); }
 .sh-panel.meetings .sh-day h3 { margin: 0; height: 44px; display: flex; align-items: center; white-space: nowrap; }
 .sh-day-short { display: none; }
 /* On a wide screen the time of day shows only on the row pointed at. */
 @media (min-width: 761px) {
-  .sh-panel.meetings .sh-day .sh-time { order: 1; width: auto; opacity: 0; }
+  .sh-panel.meetings .sh-day .sh-row { min-height: 38px; }
+  .sh-panel.meetings .sh-day h3 { height: 38px; }
+  /* A meeting reads across like a table row: kind, length, what came out of it, each in its own
+     column close to the name. Only the time and the page it left behind sit at the far end. */
+  .sh-panel.meetings .sh-day .sh-row-link .sh-row-text { order: 0; flex: none; gap: 0; }
+  .sh-panel.meetings .sh-day .sh-row-link .sh-who { flex: 0 0 124px; }
+  .sh-panel.meetings .sh-day .sh-row-link .sh-len { flex: 0 0 60px; text-align: right; font-variant-numeric: tabular-nums; }
+  .sh-panel.meetings .sh-day .sh-counts { order: 1; margin-left: 22px; }
+  .sh-panel.meetings .sh-day .sh-time { order: 2; width: auto; margin-left: auto; opacity: 0; }
   .sh-panel.meetings .sh-day .sh-row:hover .sh-time, .sh-panel.meetings .sh-day .sh-row:focus-within .sh-time { opacity: 1; }
-  .sh-panel.meetings .sh-day .sh-row-text { order: 0; }
-  .sh-panel.meetings .sh-day .sh-counts { order: 2; }
   .sh-panel.meetings > .sh-rows .sh-time { width: 80px; }
 }
 /* A phone: a short day, tighter columns, and a note is its words only (its item is on a bigger screen). */
