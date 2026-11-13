@@ -24,7 +24,7 @@ All native code is in `ios/App/App/AppDelegate.swift`.
 In Xcode: pick the App target, check Signing uses team DV9FSZ65K2, plug in an iPhone and press Run.
 A build from Xcode gets push through Apple's test servers ("sandbox"); TestFlight builds use the real ones.
 
-To send it to TestFlight: Product > Archive, then Distribute App > App Store Connect.
+To send it to TestFlight: `npm --prefix iphone run release` from the repo root (`iphone/scripts/release.sh`; add `-- --no-upload` to only build). Claude can do it with the `release-iphone` skill.
 
 ## What the server needs (Railway variables)
 
