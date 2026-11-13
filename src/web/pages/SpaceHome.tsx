@@ -933,6 +933,7 @@ function ItemPill(props: {
   );
 }
 
+/** No mark of its own: every meeting row would carry the same one. Its name says what kind it was. */
 function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; kind?: { name: string; open: string; to: string }; onArchive: () => void }) {
   const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -945,9 +946,6 @@ function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; 
   return (
     <li className="sh-row">
       <Link to={`/meetings/${m.id}`} className="sh-row-link" title={m.summary ?? undefined}>
-        <span className="sh-icon" aria-hidden>
-          <MicIcon />
-        </span>
         <span className="sh-row-text">
           <span className="sh-who">{kind?.name ?? "Meeting"}</span>
           <span className="sh-what muted">{minutes} min</span>
@@ -1977,9 +1975,6 @@ function KindRow(props: { to: string; name: string; at: number | null; children:
   return (
     <li className="sh-row">
       <Link to={props.to} className="sh-row-link">
-        <span className="sh-icon" aria-hidden>
-          <MicIcon />
-        </span>
         <span className="sh-row-text">
           <span className="sh-who">{props.name}</span>
           {props.children}
