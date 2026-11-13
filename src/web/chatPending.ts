@@ -8,6 +8,8 @@ export interface PendingMessage {
   text: string;
   ts: number;
   state: "sending" | "failed";
+  /** The message it answers. */
+  replyTo?: string | null;
 }
 
 /** The ones not saved yet: a saved message with the same key, from the send's answer or the stream, takes its place. */
@@ -32,9 +34,9 @@ export function asMessage(p: PendingMessage, me: { id: string; name: string }, c
     author: me.name,
     text: p.text,
     ts: p.ts,
-    replyTo: null,
+    replyTo: p.replyTo ?? null,
     editedAt: null,
-    deletedAt: null,
+    deletedAt: null, reactions: [],
     key: p.key,
   };
 }
@@ -55,7 +57,9 @@ export function restore(raw: string | null): PendingMessage[] {
     const list: unknown = JSON.parse(raw ?? "[]");
     if (!Array.isArray(list)) return [];
     return list.flatMap((p) =>
-      p && typeof p.key === "string" && typeof p.text === "string" && typeof p.ts === "number" ? [{ key: p.key, text: p.text, ts: p.ts, state: "failed" as const }] : [],
+      p && typeof p.key === "string" && typeof p.text === "string" && typeof p.ts === "number"
+        ? [{ key: p.key, text: p.text, ts: p.ts, state: "failed" as const, replyTo: typeof p.replyTo === "string" ? p.replyTo : null }]
+        : [],
     );
   } catch {
     return [];

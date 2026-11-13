@@ -23,6 +23,41 @@ export interface ChatSession {
   messages: number;
 }
 
+/** Who Stand's own answers in the chat are by: an author under the space chat's source, which no account has. */
+export const STAND_AUTHOR = "stand:agent";
+export const STAND_NAME = "Stand";
+
+/** What comes with an answer of Stand's: what it leaned on, and a next step anyone can take. */
+export interface ChatAnswer {
+  sources: Array<{ url: string; title: string }>;
+  /** Lines from the space's history that bear on the question. */
+  fromSpace: Array<{ text: string; when: number }>;
+  /** A next step it suggests, and the to-do it became once someone took it. */
+  todo: string | null;
+  todoId: string | null;
+}
+
+/** An agent's report on a to-do, as the chat shows it: one line where it happened. */
+export interface ChatReport {
+  id: string;
+  ts: number;
+  /** "Joe via Claude Code". */
+  by: string;
+  status: "ready" | "done" | "blocked" | "needs_decision";
+  taskId: string;
+  task: string;
+  text: string;
+}
+
+/** A call in the space where people wrote in its chat, as the space's chat shows it: one line that opens the call's recap. */
+export interface ChatCall {
+  /** The meeting. */
+  id: string;
+  /** When it ended. */
+  ts: number;
+  messages: number;
+}
+
 export interface ChatMessage {
   /** Its place in the order of everything sent to Stand's chat; grows with each message. */
   seq: number;
@@ -39,8 +74,18 @@ export interface ChatMessage {
   replyTo: string | null;
   editedAt: number | null;
   deletedAt: number | null;
+  /** What people answered it with, in the order each emoji was first used. */
+  reactions: ChatReaction[];
+  /** Only on an answer of Stand's. */
+  answer?: ChatAnswer | null;
   /** The key its author's page sent it with, so that page knows it as the one it showed before it was saved. */
   key: string | null;
+}
+
+/** One emoji on a message, and who put it there. */
+export interface ChatReaction {
+  emoji: string;
+  by: Array<{ id: string; name: string }>;
 }
 
 /** What the chat tells whoever listens (the space's event stream). */
@@ -50,7 +95,13 @@ export type ChatEvent =
   /** What Stand caught from a session changed: read it again. */
   | { type: "notes"; channelId: string; sessionId: string }
   /** Someone read further. Sending says the same of a message's author, so it has no event of its own. */
-  | ({ type: "read"; channelId: string } & ChatRead);
+  | ({ type: "read"; channelId: string } & ChatRead)
+  /** Someone is writing in the box. Nothing is kept: it fades by itself a few seconds later. */
+  | { type: "typing"; channelId: string; userId: string; name: string }
+  /** Stand is answering the message `askId`: what it is doing and the words so far. Not kept; `done` ends it. */
+  | { type: "answering"; channelId: string; askId: string; status: string | null; text: string | null; done?: boolean }
+  /** An agent reported on a to-do: the reports are read again. */
+  | { type: "reports" };
 
 /** How far someone has read a channel. */
 export interface ChatRead {
@@ -97,4 +148,8 @@ export interface ChatThread {
   reads: ChatRead[];
   /** The space's people, to tag with @. */
   people: Array<{ id: string; name: string }>;
+  /** What agents reported on to-dos since the oldest message here, oldest first. */
+  reports: ChatReport[];
+  /** The calls since the oldest message here that had chat of their own, oldest first. */
+  calls: ChatCall[];
 }

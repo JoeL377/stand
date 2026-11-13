@@ -168,7 +168,7 @@ async function tool(name, args) {
       // The side panel is a rail while the board has the room, or open on the Chat tab after a message.
       const rail = page.getByRole("button", { name: /^Transcript/ });
       if (await rail.count()) await rail.first().click();
-      else await page.getByRole("tab", { name: /^Transcript/ }).click();
+      else await page.getByRole("tab", { name: /^All/ }).click();
       const row = page.locator(".capture-agent", { hasText: "said in the call" });
       await row.first().waitFor({ timeout: 10_000 });
       await row.first().scrollIntoViewIfNeeded();

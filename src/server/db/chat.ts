@@ -1,6 +1,6 @@
 // Chat (chat.ts): channels, the sessions in them, and what chat keeps about a message beside its segment.
 import type { DatabaseSync } from "node:sqlite";
-import type { Channel, ChatMessage, ChatRead, ChatSession } from "../../shared/chat.ts";
+import { type Channel, type ChatAnswer, type ChatCall, type ChatMessage, type ChatReaction, type ChatRead, type ChatSession, STAND_AUTHOR } from "../../shared/chat.ts";
 import { newId } from "../ids.ts";
 import type { Row } from "./rows.ts";
 
@@ -36,7 +36,7 @@ const sendKey = (r: Row) => {
   return ext?.startsWith(own) ? ext.slice(own.length) : null;
 };
 
-const toMessage = (r: Row): ChatMessage => ({
+const rowMessage = (r: Row): ChatMessage => ({
   seq: r.seq as number,
   id: r.id as string,
   channelId: r.channel_id as string,
@@ -48,11 +48,56 @@ const toMessage = (r: Row): ChatMessage => ({
   replyTo: (r.reply_to as string) ?? null,
   editedAt: (r.edited_at as number) ?? null,
   deletedAt: (r.deleted_at as number) ?? null,
+  reactions: [],
   key: sendKey(r),
 });
 
 export function chatStore(db: DatabaseSync) {
+  /** Each message with the emoji on it. A deleted message shows none. */
+  const reactionsOf = (id: string): ChatReaction[] => {
+    const rows = db
+      .prepare("SELECT x.emoji, x.user_id, u.name FROM chat_reactions x JOIN users u ON u.id = x.user_id WHERE x.segment_id = ? ORDER BY x.ts, x.rowid")
+      .all(id) as Row[];
+    const out: ChatReaction[] = [];
+    for (const r of rows) {
+      const emoji = r.emoji as string;
+      let one = out.find((x) => x.emoji === emoji);
+      if (!one) out.push((one = { emoji, by: [] }));
+      one.by.push({ id: r.user_id as string, name: r.name as string });
+    }
+    return out;
+  };
+  const toMessage = (r: Row): ChatMessage => {
+    const m = rowMessage(r);
+    if (m.deletedAt !== null) return m;
+    const answer = m.authorId === STAND_AUTHOR ? (db.prepare("SELECT json FROM chat_answers WHERE segment_id = ?").get(m.id) as Row | undefined) : undefined;
+    return { ...m, reactions: reactionsOf(m.id), ...(answer ? { answer: JSON.parse(answer.json as string) as ChatAnswer } : {}) };
+  };
   return {
+    /** The space's finished calls since a time in which someone wrote in the call's chat, oldest first. */
+    callsWithChat(roomId: string, since: number): ChatCall[] {
+      return (
+        db
+          .prepare(
+            `SELECT m.id, m.ended_at, (SELECT COUNT(*) FROM segments s WHERE s.meeting_id = m.id AND s.kind = 'chat') AS n FROM meetings m
+             WHERE m.room_id = ? AND m.kind IS NULL AND m.ended_at IS NOT NULL AND m.ended_at >= ? ORDER BY m.ended_at LIMIT 50`,
+          )
+          .all(roomId, since) as Row[]
+      )
+        .filter((r) => (r.n as number) > 0)
+        .map((r) => ({ id: r.id as string, ts: r.ended_at as number, messages: r.n as number }));
+    },
+    /** What comes with an answer of Stand's. */
+    setChatAnswer(id: string, answer: ChatAnswer): ChatMessage | null {
+      db.prepare("INSERT INTO chat_answers (segment_id, json) VALUES (?, ?) ON CONFLICT(segment_id) DO UPDATE SET json = excluded.json").run(id, JSON.stringify(answer));
+      return this.chatMessage(id);
+    },
+    /** Puts this person's emoji on a message, or takes it off when it is there already. */
+    toggleChatReaction(id: string, userId: string, emoji: string, at: number): ChatMessage | null {
+      const had = db.prepare("DELETE FROM chat_reactions WHERE segment_id = ? AND user_id = ? AND emoji = ?").run(id, userId, emoji).changes;
+      if (!had) db.prepare("INSERT INTO chat_reactions (segment_id, user_id, emoji, ts) VALUES (?, ?, ?, ?)").run(id, userId, emoji, at);
+      return this.chatMessage(id);
+    },
     /** The space's own chat, made the first time someone asks for it. */
     spaceChannel(roomId: string, by: string): Channel {
       const r = db.prepare("SELECT * FROM channels WHERE room_id = ? AND source = 'stand' ORDER BY created_at, rowid LIMIT 1").get(roomId) as Row | undefined;

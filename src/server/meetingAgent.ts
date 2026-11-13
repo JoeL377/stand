@@ -198,11 +198,20 @@ export function typedAsk(text: string): string | null {
 }
 
 /** The prompt for one answer. `earlier`: the answers it may follow up on, oldest first. */
-export function answerPrompt(question: string, by: string, talk: Segment[], now: number, history: SpaceHistory, earlier: Array<{ by: string; question: string; answer: string }> = []): string {
+export function answerPrompt(
+  question: string,
+  by: string,
+  talk: Segment[],
+  now: number,
+  history: SpaceHistory,
+  earlier: Array<{ by: string; question: string; answer: string }> = [],
+  /** Asked in the space's chat, not on a call: `talk` is the chat's last messages, whenever they were written. */
+  inChat = false,
+): string {
   const lines = keyed(history);
   const recent = talk
-    .filter((s) => s.ts >= now - TALK_MS && s.ts <= now)
-    .map((s) => `${s.speakerName}${s.kind === "chat" ? " (chat)" : ""}: ${s.text}`)
+    .filter((s) => inChat || (s.ts >= now - TALK_MS && s.ts <= now))
+    .map((s) => `${s.speakerName}${s.kind === "chat" && !inChat ? " (chat)" : ""}: ${s.text}`)
     .join("\n");
   const before = earlier.map((e) => `${e.by} asked: ${e.question}\nYou answered: ${e.answer}`).join("\n\n");
   return `Space: ${history.name}${history.purpose ? `\nWhat it's for: ${clip(history.purpose, 500)}` : ""}
@@ -210,7 +219,7 @@ Today: ${day(now)}
 ${before ? `\nWhat you were asked just before, and answered:\n${before}\n` : ""}
 ${by} asks you: ${question}
 
-The last few minutes of the call:
+${inChat ? "The chat before the question, oldest first" : "The last few minutes of the call"}:
 ${recent || "(nothing yet)"}
 
 The space's history, newest first:

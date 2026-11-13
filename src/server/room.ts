@@ -31,7 +31,8 @@ import { finishBrainstorm, othersOfMeeting, promptOf, resumeBrainstorm, toBrains
 import { sessionBackground } from "./designSession.ts";
 import { SKETCH_LOOK_BACK_MS, SketchKeeper, askSketch, saveSketchSpecs } from "./sketch.ts";
 import { PilotSeat } from "./pilot.ts";
-import { sourceDigest, repoTools } from "./sources.ts";
+import { readSpaceHistory } from "./chatAgent.ts";
+import { repoTools } from "./sources.ts";
 import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, draftOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
@@ -1307,8 +1308,9 @@ export class RoomSession implements SpeechSink {
         this.addSegment(conn.participantId, conn.name, "chat", text, Date.now());
         // "@stand add a step…" while a sketch is on changes the sketch; anything else to Stand is a question.
         if (this.sketchAsk(text, conn.name)) break;
+        // Anyone writes to Stand in the chat; the pilot's seat only guards asking out loud and on a card.
         const q = typedAsk(text);
-        if (q) this.askTyped(ws, conn, q);
+        if (q) this.askTyped(ws, conn, q, null, true);
         break;
       }
       case "agent.ask.text": {
@@ -2076,20 +2078,7 @@ export class RoomSession implements SpeechSink {
 
   /** What the space already has, for Stand to read: newest first. */
   private spaceHistory(): SpaceHistory {
-    const room = this.db.getRoom(this.roomId);
-    return {
-      name: this.roomName,
-      purpose: room?.purpose ?? "",
-      decisions: this.db.spaceNotes(this.roomId, "decision", 40).map((n) => ({ text: n.text, ts: n.ts })),
-      tasks: this.db
-        .openActions(this.roomId)
-        .reverse()
-        .slice(0, 40)
-        .map((n) => ({ text: n.text, owner: n.owner, ts: n.ts })),
-      questions: this.db.spaceNotes(this.roomId, "question", 40).map((n) => ({ text: n.text, ts: n.ts })),
-      notes: this.db.spaceJots(this.roomId, 0, 40).map((j) => ({ text: j.text, by: j.by, ts: j.ts })),
-      repo: sourceDigest(this.db.raw, this.roomId),
-    };
+    return readSpaceHistory(this.db, this.roomId, this.roomName);
   }
 
   /** Someone's Ask Stand button came up (or was held too long, or they left): once the last words
@@ -2114,10 +2103,10 @@ export class RoomSession implements SpeechSink {
 
   /** A question typed to Stand: on an answer card's box (follows: the answer it follows up, null for a
    *  new card), or to @stand in the chat (follows left out). Only the pilot asks. */
-  private askTyped(ws: WebSocket, conn: { participantId: string; name: string }, q: string, follows?: string | null) {
+  private askTyped(ws: WebSocket, conn: { participantId: string; name: string }, q: string, follows?: string | null, inChat = false) {
     if (!this.agentCards || !this.agent.answer || this.ended) return;
     if (!this.agentCards.canRun()) return this.send(ws, { type: "error", message: "Stand has answered as many times as it can in one meeting." });
-    if (!this.pilotUse(ws, conn)) return;
+    if (!inChat && !this.pilotUse(ws, conn)) return;
     const card = this.agentCards.ask(conn.name, conn.participantId, q, Date.now(), follows);
     this.agentChanged();
     void this.runAnswer(card.id);

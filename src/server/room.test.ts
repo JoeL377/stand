@@ -1271,8 +1271,11 @@ test("Pilot: only the pilot asks Stand; a typed follow-up lands on its card; ask
   await say(andy, { type: "agent.ask.text", text: "New question", follows: null });
   assert.equal(cardsOf(joe).at(-1)?.by, "Andy");
   assert.equal(cardsOf(joe).at(-1)?.follows, null);
+  // In the chat anyone writes to Stand, whoever pilots; the seat stays where it was.
   await say(joe, { type: "chat", text: "@stand one more" });
-  assert.equal(cardsOf(joe).at(-1)?.by, "Andy");
+  assert.equal(cardsOf(joe).at(-1)?.by, "Joe");
+  const still = pilotOf(joe);
+  assert.equal(still?.type === "pilot" && still.pilot.name, "Andy");
   await session.end();
 });
 

@@ -246,3 +246,46 @@ test("what Stand caught from chat comes with the thread; anyone in the space rem
     await close();
   }
 });
+
+test("anyone in the space puts an emoji on a message and takes it off, answers one, says they're typing, and makes one a to-do", async () => {
+  const { db, joe, huy, eve, room, as, stream, close } = await setup();
+  const [j, h, e] = [as(joe), as(huy), as(eve)];
+  try {
+    const first = (await j<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "Ship the pricing page on Friday" })).body;
+    assert.deepEqual(first.reactions, []);
+
+    const s = await stream(joe);
+    const up = await h<ChatMessage>("POST", `/api/chat/messages/${first.id}/reactions`, { emoji: "👍" });
+    assert.equal(up.status, 200);
+    assert.deepEqual(up.body.reactions, [{ emoji: "👍", by: [{ id: huy.id, name: "Huy Ngo" }] }]);
+    const heard = await s.next();
+    assert.ok(heard.type === "message" && heard.message.reactions.length === 1);
+    await j("POST", `/api/chat/messages/${first.id}/reactions`, { emoji: "👍" });
+    assert.deepEqual((await j<ChatThread>("GET", `/api/rooms/${room.id}/chat`)).body.messages[0].reactions[0].by.map((p) => p.name), ["Huy Ngo", "Joe Liang"]);
+    // The same emoji again takes yours off.
+    const off = await h<ChatMessage>("POST", `/api/chat/messages/${first.id}/reactions`, { emoji: "👍" });
+    assert.deepEqual(off.body.reactions[0].by.map((p) => p.name), ["Joe Liang"]);
+    assert.equal((await h("POST", `/api/chat/messages/${first.id}/reactions`, { emoji: "nice" })).status, 400);
+    assert.equal((await e("POST", `/api/chat/messages/${first.id}/reactions`, { emoji: "👍" })).status, 404);
+    await s.next();
+    await s.next();
+
+    const answer = (await h<ChatMessage>("POST", `/api/rooms/${room.id}/chat/messages`, { text: "On it", replyTo: first.id })).body;
+    assert.equal(answer.replyTo, first.id);
+    await s.next();
+
+    assert.equal((await h("POST", `/api/rooms/${room.id}/chat/typing`)).status, 200);
+    const typing = await s.next();
+    assert.deepEqual([typing.type, typing.type === "typing" && typing.name], ["typing", "Huy Ngo"]);
+    assert.equal((await e("POST", `/api/rooms/${room.id}/chat/typing`)).status, 404);
+    s.close();
+
+    const todo = await h<{ id: string; text: string }>("POST", `/api/chat/messages/${first.id}/todo`);
+    assert.equal(todo.status, 200);
+    assert.equal(todo.body.text, "Ship the pricing page on Friday");
+    assert.equal((await e("POST", `/api/chat/messages/${first.id}/todo`)).status, 404);
+    void db;
+  } finally {
+    await close();
+  }
+});

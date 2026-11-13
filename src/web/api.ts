@@ -1,6 +1,6 @@
 import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
-import type { ChatCaught, ChatMessage, ChatSession, ChatThread } from "../shared/chat.ts";
+import type { ChatCaught, ChatMessage, ChatReport, ChatSession, ChatThread } from "../shared/chat.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type { Project } from "../shared/projects.ts";
 import type { ChatNotify, NotifyStatus } from "../shared/push.ts";
@@ -221,6 +221,11 @@ export const api = {
     call<{ messages: ChatMessage[]; sessions: ChatSession[]; caught: ChatCaught[] }>("GET", `/api/channels/${channelId}/messages?${page.after !== undefined ? `after=${page.after}` : `before=${page.before ?? ""}`}`),
   /** key: sent again with the same one, a message is saved once. */
   sendChat: (roomId: string, body: { text: string; key: string; replyTo?: string }) => call<ChatMessage>("POST", `/api/rooms/${roomId}/chat/messages`, body),
+  /** Your emoji on a message, or off it when it is there already. */
+  reactChat: (id: string, emoji: string) => call<ChatMessage>("POST", `/api/chat/messages/${id}/reactions`, { emoji }),
+  chatReports: (roomId: string, since: number) => call<ChatReport[]>("GET", `/api/rooms/${roomId}/chat/reports?since=${since}`),
+  chatTyping: (roomId: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/chat/typing`),
+  chatToTodo: (id: string) => call<{ id: string; text: string }>("POST", `/api/chat/messages/${id}/todo`),
   editChat: (id: string, text: string) => call<ChatMessage>("PATCH", `/api/chat/messages/${id}`, { text }),
   deleteChat: (id: string) => call<ChatMessage>("DELETE", `/api/chat/messages/${id}`),
   /** What Stand caught from one session of chat. */

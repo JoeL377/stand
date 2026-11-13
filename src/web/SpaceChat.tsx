@@ -2,22 +2,27 @@
 // kept up to date by the space's event stream; sending, editing and deleting are plain requests.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CaughtLine, ChatCaught, ChatEvent, ChatMessage, ChatThread } from "../shared/chat.ts";
-import { Bell, BellOff } from "lucide-react";
+import { type CaughtLine, type ChatCall, type ChatCaught, type ChatEvent, type ChatMessage, type ChatReport, type ChatThread, STAND_AUTHOR, STAND_NAME } from "../shared/chat.ts";
+import { Bell, BellOff, ListPlus, Reply, SmilePlus } from "lucide-react";
 import { mentionedIn } from "../shared/mentions.ts";
 import type { NotifyStatus } from "../shared/push.ts";
 import { api } from "./api.ts";
-import { mergeCaught, placeCaught } from "./chatCaught.ts";
+import { mergeCaught, placeCaught, placeReports } from "./chatCaught.ts";
 import { asMessage, restore, serial, unsaved, type PendingMessage } from "./chatPending.ts";
 import { moveRead, placeReads } from "./chatReads.ts";
 import { ChevronIcon, CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
 import { Linkified } from "./Linkified.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
 import { Avatar } from "./room/Stage.tsx";
-import { errorToast } from "./Toasts.tsx";
+import { errorToast, toast } from "./Toasts.tsx";
 import { fmtTime } from "./util.ts";
 
 const TEXT_MAX = 4000;
+/** "Maya is typing" stays this long after their last key, and their page says so this often. */
+const TYPING_SHOWN_MS = 5000;
+const TYPING_EVERY_MS = 3000;
+/** The emoji one click away. */
+const QUICK = ["👍", "✅", "👀", "❤️", "😂", "🎉", "🙏"];
 /** One page of messages, as the server gives them. A page this full may have older ones before it. */
 const PAGE = 100;
 /** Messages by one person this close together read as one block, under one name. */
@@ -43,10 +48,26 @@ export interface SpaceChatState {
   /** What you sent that isn't saved yet, oldest first: sending, or failed and waiting for Retry. */
   pending: PendingMessage[];
   /** Shows the message at once and sends it. Sends go out one at a time, in order. */
-  send: (text: string) => void;
+  send: (text: string, replyTo?: string | null) => void;
+  /** The other people writing in the box right now. */
+  typing: string[];
+  /** The answers Stand is writing now: what it is doing, and the words so far. */
+  answering: Answering[];
+  /** Says you are writing. Safe to call on every key: it goes out at most every few seconds. */
+  typingNow: () => void;
   retry: (key: string) => void;
   discard: (key: string) => void;
 }
+
+/** An answer of Stand's on its way. */
+export interface Answering {
+  askId: string;
+  status: string | null;
+  text: string | null;
+  at: number;
+}
+/** An answer that never arrives stops showing as on its way after this long. */
+const ANSWERING_MAX_MS = 3 * 60_000;
 
 /** A space's chat, loaded once and then fed by the space's event stream for as long as the page is open.
  *  onMention hears each new message that tags you, as it arrives. */
@@ -54,6 +75,10 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   const [thread, setThread] = useState<ChatThread | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasOlder, setHasOlder] = useState(false);
+  // Who is writing, and until when to believe it.
+  const [writers, setWriters] = useState<Array<{ id: string; name: string; until: number }>>([]);
+  const [answeringAll, setAnswering] = useState<Answering[]>([]);
+  const answering = useMemo(() => answeringAll.filter((a) => Date.now() - a.at < ANSWERING_MAX_MS), [answeringAll]);
   // Kept by space, so what one space didn't send never shows in another.
   const unsentKey = `stand.chatUnsent.${roomId}`;
   const [unsent, setUnsent] = useState<{ roomId: string; list: PendingMessage[] }>(() => ({ roomId, list: restore(readSession(unsentKey)) }));
@@ -85,6 +110,8 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   }, [messages, setPending]);
   const pending = useMemo(() => unsaved(unsent.roomId === roomId ? unsent.list : [], messages ?? []), [unsent, roomId, messages]);
 
+  const threadRef = useRef(thread);
+  threadRef.current = thread;
   const people = thread?.people;
   const mentionsMe = useCallback((m: ChatMessage) => !m.deletedAt && m.authorId !== me && !!people && m.text.includes("@") && mentionedIn(m.text, people).includes(me), [people, me]);
   // The stream outlives a render: it reads these as they are now.
@@ -99,7 +126,7 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
         const at = t.messages.findIndex((x) => x.id === m.id);
         const messages = at >= 0 ? t.messages.map((x) => (x.id === m.id ? m : x)) : [...t.messages, m].sort((a, b) => a.seq - b.seq);
         // Whoever writes in Stand's own chat has read up to what they wrote.
-        const reads = m.authorId !== me && t.channel.source === "stand" ? moveRead(t.reads, { userId: m.authorId, name: m.author, upTo: m.seq }) : t.reads;
+        const reads = m.authorId !== me && m.authorId !== STAND_AUTHOR && t.channel.source === "stand" ? moveRead(t.reads, { userId: m.authorId, name: m.author, upTo: m.seq }) : t.reads;
         return { ...t, messages, reads };
       });
     },
@@ -127,6 +154,8 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
             ...fresh,
             messages: [...t.messages.filter((m) => !ids.has(m.id) && m.seq < oldest), ...fresh.messages],
             caught: mergeCaught(t.caught, fresh.caught),
+            reports: fresh.reports,
+            calls: fresh.calls,
             readUpTo: Math.max(t.readUpTo, fresh.readUpTo),
           };
         });
@@ -143,7 +172,18 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
     let dropped = false;
     stream.onmessage = (ev) => {
       const e = JSON.parse(ev.data) as ChatEvent;
-      if (e.type === "message") {
+      if (e.type === "typing") {
+        if (e.userId !== me) setWriters((w) => [...w.filter((x) => x.id !== e.userId), { id: e.userId, name: e.name, until: Date.now() + TYPING_SHOWN_MS }]);
+      } else if (e.type === "answering") {
+        setAnswering((a) => [...a.filter((x) => x.askId !== e.askId), ...(e.done ? [] : [{ askId: e.askId, status: e.status, text: e.text, at: Date.now() }])]);
+      } else if (e.type === "reports") {
+        const since = threadRef.current?.messages[0]?.ts;
+        if (since !== undefined) api.chatReports(roomId, since).then((reports) => setThread((t) => t && { ...t, reports }), () => {});
+      } else if (e.type === "message") {
+        // Stand's answer has arrived: its draft goes.
+        if (e.message.authorId === STAND_AUTHOR && e.message.replyTo) setAnswering((a) => a.filter((x) => x.askId !== e.message.replyTo));
+        // What they were writing has arrived.
+        setWriters((w) => (w.some((x) => x.id === e.message.authorId) ? w.filter((x) => x.id !== e.message.authorId) : w));
         const h = heard.current;
         // Only a message seen for the first time: an edit that adds you doesn't call out again.
         if (!h.known.has(e.message.id) && h.mentionsMe(e.message)) h.onMention?.(e.message);
@@ -199,20 +239,34 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
     api.readChat(channelId, last).catch(() => {});
   }, [channelId, last, readUpTo]);
 
+  // A writer who stopped drops off when their time is up.
+  useEffect(() => {
+    if (!writers.length) return;
+    const t = setTimeout(() => setWriters((w) => w.filter((x) => x.until > Date.now())), Math.max(200, Math.min(...writers.map((x) => x.until)) - Date.now()));
+    return () => clearTimeout(t);
+  }, [writers]);
+  const lastTyping = useRef(0);
+  const typingNow = useCallback(() => {
+    if (Date.now() - lastTyping.current < TYPING_EVERY_MS) return;
+    lastTyping.current = Date.now();
+    api.chatTyping(roomId).catch(() => {});
+  }, [roomId]);
+
   const queue = useRef(serial());
   const post = useCallback(
-    (key: string, text: string) => {
-      void queue.current(() => api.sendChat(roomId, { text, key })).then(apply, () =>
+    (key: string, text: string, replyTo?: string | null) => {
+      void queue.current(() => api.sendChat(roomId, { text, key, replyTo: replyTo ?? undefined })).then(apply, () =>
         setPending((list) => list.map((p) => (p.key === key ? { ...p, state: "failed" as const } : p))),
       );
     },
     [roomId, apply, setPending],
   );
   const send = useCallback(
-    (text: string) => {
+    (text: string, replyTo?: string | null) => {
       const key = newKey();
-      setPending((list) => [...list, { key, text, ts: Date.now(), state: "sending" }]);
-      post(key, text);
+      setPending((list) => [...list, { key, text, ts: Date.now(), state: "sending", replyTo: replyTo ?? null }]);
+      lastTyping.current = 0;
+      post(key, text, replyTo);
     },
     [post, setPending],
   );
@@ -222,7 +276,7 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
       if (!p || p.state !== "failed") return;
       setPending((list) => list.map((x) => (x.key === key ? { ...x, state: "sending" as const } : x)));
       // The same key: if the first try was saved after all, the server gives that message back.
-      post(key, p.text);
+      post(key, p.text, p.replyTo);
     },
     [pending, post, setPending],
   );
@@ -231,7 +285,8 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
   for (const m of thread?.messages ?? []) heard.current.known.add(m.id);
   const fresh = thread ? thread.messages.filter((m) => m.seq > thread.readUpTo && m.authorId !== me && !m.deletedAt) : [];
   const mentions = fresh.filter(mentionsMe).length;
-  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload, pending, send, retry, discard };
+  const typing = useMemo(() => writers.map((w) => w.name), [writers]);
+  return { thread, error, unread: fresh.length, mentions, mentionsMe, hasOlder, loadOlder, markRead, apply, removeCaught, reload, pending, send, retry, discard, typing, typingNow, answering };
 }
 
 const readSession = (key: string) => {
@@ -276,6 +331,8 @@ export function SpaceChat(props: {
   const [editing, setEditing] = useState<string | null>(null);
   // On a touch screen a message of yours shows its tools once you tap it.
   const [picked, setPicked] = useState<string | null>(null);
+  // The message the next one answers, shown above the box until it is sent or dropped.
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   // The newest message you had in view when you scrolled up from the foot; null while you're at it.
   const [awayAt, setAwayAt] = useState<number | null>(null);
@@ -323,8 +380,21 @@ export function SpaceChat(props: {
     return (name: string) => ((firsts.get(first(name)) ?? 0) > 1 ? name : first(name));
   }, [thread?.people]);
 
+  const byId = useMemo(() => new Map((thread?.messages ?? []).map((m) => [m.id, m])), [thread?.messages]);
+  const replying = replyingTo ? (byId.get(replyingTo) ?? null) : null;
+  // A quote takes you to the message it answers, when that one is on the page.
+  const showMessage = (seq: number) => {
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1600);
+  };
+
   const rows = useMemo(() => {
-    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; pending: PendingMessage["state"] | null; readBy: string[] }> = [];
+    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; reports: ChatReport[]; calls: ChatCall[]; pending: PendingMessage["state"] | null; readBy: string[] }> = [];
+    const called = placeReports(thread?.messages ?? [], thread?.calls ?? []);
+    const reported = placeReports(thread?.messages ?? [], thread?.reports ?? []);
     const placed = placeCaught(thread?.messages ?? [], thread?.caught ?? [], thread?.channel.openSessionId ?? null);
     const reads = placeReads(thread?.messages ?? [], thread?.reads ?? []);
     const states = new Map(chat.pending.map((p) => [p.key, p.state]));
@@ -336,7 +406,7 @@ export function SpaceChat(props: {
       const fresh = !marked && newFrom !== null && newFrom > 0 && m.seq > newFrom && m.authorId !== me.id;
       if (fresh) marked = true;
       // What Stand put under the last message breaks the block: the next one starts under its name again.
-      const broken = !!prev && (placed.lines.has(prev.id) || placed.recaps.has(prev.id));
+      const broken = !!prev && (placed.lines.has(prev.id) || placed.recaps.has(prev.id) || reported.has(prev.id) || called.has(prev.id));
       out.push({
         m,
         day,
@@ -344,13 +414,15 @@ export function SpaceChat(props: {
         head: !!day || fresh || broken || !prev || prev.authorId !== m.authorId || m.ts - prev.ts > BLOCK_MS,
         caught: placed.lines.get(m.id) ?? [],
         recap: placed.recaps.get(m.id) ?? null,
+        reports: reported.get(m.id) ?? [],
+        calls: called.get(m.id) ?? [],
         pending: (m.sessionId === "" && m.key && states.get(m.key)) || null,
         readBy: reads.get(m.id) ?? [],
       });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread?.messages, thread?.caught, thread?.reads, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
+  }, [thread?.messages, thread?.caught, thread?.reports, thread?.calls, thread?.reads, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
 
   // The newest message stays in view, unless you scrolled up to read older ones. The thread scrolls
   // on a wide screen and the page on a phone, so both are kept.
@@ -369,7 +441,7 @@ export function SpaceChat(props: {
     if (!el || !stick.current) return;
     el.scrollTop = el.scrollHeight;
     if (el.scrollHeight <= el.clientHeight) window.scrollTo(0, document.documentElement.scrollHeight);
-  }, [rows]);
+  }, [rows, chat.answering]);
 
   const older = async () => {
     const el = scroller.current;
@@ -421,7 +493,7 @@ export function SpaceChat(props: {
             Nothing here yet.
           </p>
         )}
-        {rows.map(({ m, day, head, fresh, caught, recap, pending, readBy }) => (
+        {rows.map(({ m, day, head, fresh, caught, recap, reports, calls, pending, readBy }, i) => (
           <MessageRow
             key={m.id}
             pending={pending}
@@ -430,12 +502,24 @@ export function SpaceChat(props: {
             onDiscard={() => m.key && chat.discard(m.key)}
             m={m}
             name={shortName(m.author)}
+            meId={me.id}
+            // An answer right under what it answers needs no quote.
+            showQuote={!!m.replyTo && rows[i - 1]?.m.id !== m.replyTo}
+            quoted={m.replyTo ? (byId.get(m.replyTo) ?? null) : null}
+            quotedName={m.replyTo && byId.get(m.replyTo) ? shortName(byId.get(m.replyTo)!.author) : null}
+            onShowQuoted={showMessage}
+            onReply={() => {
+              setReplyingTo(m.id);
+              setPicked(null);
+            }}
             day={day}
             head={head}
             fresh={fresh}
             mentionsMe={chat.mentionsMe(m)}
             caught={caught}
             recap={recap}
+            reports={reports}
+            calls={calls}
             onOpenTask={props.onOpenTask}
             onRemoveCaught={chat.removeCaught}
             mine={m.authorId === me.id}
@@ -446,6 +530,20 @@ export function SpaceChat(props: {
             onChanged={chat.apply}
           />
         ))}
+        {chat.answering.map((a) => (
+          <div key={a.askId} className="chat-msg head answering" role="status">
+            <div className="chat-msg-side">
+              <Avatar id={STAND_NAME} name={STAND_NAME} size={24} />
+            </div>
+            <div className="chat-msg-body">
+              <div className="chat-msg-head">
+                <span className="chat-msg-who">{STAND_NAME}</span>
+                {a.status && <span className="chat-answering-status">{a.status}</span>}
+              </div>
+              {a.text && <p className="chat-msg-text">{a.text}</p>}
+            </div>
+          </div>
+        ))}
       </div>
       {below.length > 0 && (
         <button type="button" className={belowMentions ? "chat-jump mention" : "chat-jump"} onClick={toFoot}>
@@ -453,14 +551,24 @@ export function SpaceChat(props: {
           {belowMentions ? `${belowMentions === 1 ? "A new message mentions" : `${belowMentions} new messages mention`} you` : `${below.length} new ${below.length === 1 ? "message" : "messages"}`}
         </button>
       )}
+      {chat.typing.length > 0 && (
+        <p className="chat-typing" role="status">
+          {typingLine(chat.typing.map(shortName))}
+        </p>
+      )}
       <Composer
         focus={props.focus}
+        focusKey={replyingTo}
         name={props.name}
         roomId={roomId}
-        people={thread.people.filter((p) => p.id !== me.id)}
+        people={[{ id: STAND_AUTHOR, name: STAND_NAME }, ...thread.people.filter((p) => p.id !== me.id)]}
+        replying={replying && !replying.deletedAt ? { name: shortName(replying.author), text: replying.text } : null}
+        onCancelReply={() => setReplyingTo(null)}
+        onTyping={chat.typingNow}
         onSend={(text) => {
           follow(true);
-          chat.send(text);
+          chat.send(text, replying && !replying.deletedAt ? replying.id : undefined);
+          setReplyingTo(null);
         }}
       />
     </div>
@@ -471,6 +579,13 @@ function MessageRow(props: {
   m: ChatMessage;
   /** The author's name as the thread shows it. */
   name: string;
+  meId: string;
+  /** The message this one answers, when it is on the page. */
+  showQuote: boolean;
+  quoted: ChatMessage | null;
+  quotedName: string | null;
+  onShowQuoted: (seq: number) => void;
+  onReply: () => void;
   /** Not saved yet: on its way, or failed and waiting for Retry. */
   pending: PendingMessage["state"] | null;
   /** The other people whose reading stops at this message. */
@@ -483,6 +598,8 @@ function MessageRow(props: {
   mentionsMe: boolean;
   caught: CaughtLine[];
   recap: ChatCaught | null;
+  reports: ChatReport[];
+  calls: ChatCall[];
   onOpenTask?: (id: string) => void;
   onRemoveCaught: (line: CaughtLine) => Promise<void>;
   mine: boolean;
@@ -495,6 +612,17 @@ function MessageRow(props: {
   const { m, mine } = props;
   const [draft, setDraft] = useState(m.text);
   const [saving, setSaving] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const react = (emoji: string) => {
+    setChoosing(false);
+    api.reactChat(m.id, emoji).then(props.onChanged, errorToast("Couldn't add the reaction"));
+  };
+  const toTodo = () => {
+    api.chatToTodo(m.id).then((t) => {
+      const open = props.onOpenTask;
+      toast({ text: "Added to Tasks", ...(open ? { action: { label: "Open", run: () => open(t.id) } } : {}) });
+    }, errorToast("Couldn't make the to-do"));
+  };
   useEffect(() => {
     if (props.editing) setDraft(m.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -528,7 +656,8 @@ function MessageRow(props: {
       <div
         className={`chat-msg${props.head ? " head" : ""}${m.deletedAt ? " deleted" : ""}${props.mentionsMe ? " mentions-you" : ""}${props.pending ? ` ${props.pending === "failed" ? "failed" : "pending"}` : ""}${props.picked ? " picked" : ""}`}
         data-seq={props.pending ? undefined : m.seq}
-        onClick={mine && !props.editing ? (e) => !(e.target as HTMLElement).closest("a, button, textarea") && props.onPick() : undefined}
+        onClick={!props.pending && !m.deletedAt && !props.editing ? (e) => !(e.target as HTMLElement).closest("a, button, textarea") && props.onPick() : undefined}
+        onMouseLeave={() => setChoosing(false)}
       >
         <div className="chat-msg-side">
           {props.head ? <Avatar id={m.author} name={m.author} size={24} /> : <span className="chat-msg-time">{shortTime(m.ts)}</span>}
@@ -543,6 +672,18 @@ function MessageRow(props: {
                 {shortTime(m.ts)}
               </span>
             </div>
+          )}
+          {props.showQuote && !m.deletedAt && (
+            <button type="button" className="chat-quote" disabled={!props.quoted} onClick={() => props.quoted && props.onShowQuoted(props.quoted.seq)}>
+              {props.quoted ? (
+                <>
+                  <b>{props.quotedName}</b>
+                  <span>{props.quoted.deletedAt ? "Message deleted" : props.quoted.text}</span>
+                </>
+              ) : (
+                <span>An earlier message</span>
+              )}
+            </button>
           )}
           {m.deletedAt ? (
             <p className="chat-msg-text">Message deleted</p>
@@ -584,6 +725,21 @@ function MessageRow(props: {
               {m.editedAt && <span className="chat-msg-edited"> (edited)</span>}
             </p>
           )}
+          {!m.deletedAt && m.answer && <AnswerFoot m={m} onTodo={toTodo} onOpenTask={props.onOpenTask} />}
+          {!m.deletedAt && m.reactions.length > 0 && (
+            <div className="chat-reacts">
+              {m.reactions.map((r) => {
+                const on = r.by.some((p) => p.id === props.meId);
+                return (
+                  <button key={r.emoji} type="button" className={on ? "chat-react on" : "chat-react"} aria-pressed={on} title={r.by.map((p) => p.name).join(", ")} onClick={() => react(r.emoji)}>
+                    <span aria-hidden>{r.emoji}</span>
+                    <span className="sr-only">{r.emoji} </span>
+                    {r.by.length}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {props.pending === "sending" && <span className="sr-only">Sending</span>}
           {props.pending === "failed" && (
             <p className="chat-msg-unsent" role="status">
@@ -598,14 +754,39 @@ function MessageRow(props: {
             </p>
           )}
         </div>
-        {mine && !props.pending && !m.deletedAt && !props.editing && (
-          <span className="chat-msg-tools">
+        {!props.pending && !m.deletedAt && !props.editing && (
+          <span className={choosing ? "chat-msg-tools choosing" : "chat-msg-tools"}>
+            {choosing ? (
+              QUICK.map((e) => (
+                <button key={e} className="icon-btn chat-emoji" aria-label={`React with ${e}`} onClick={() => react(e)}>
+                  {e}
+                </button>
+              ))
+            ) : (
+              <>
+                <button className="icon-btn" aria-label="React" title="React" onClick={() => setChoosing(true)}>
+                  <SmilePlus size={15} />
+                </button>
+                <button className="icon-btn" aria-label="Reply" title="Reply" onClick={props.onReply}>
+                  <Reply size={15} />
+                </button>
+                {!m.answer && (
+                  <button className="icon-btn" aria-label="Make a to-do" title="Make a to-do" onClick={toTodo}>
+                    <ListPlus size={15} />
+                  </button>
+                )}
+              </>
+            )}
+            {mine && !choosing && (
+              <>
             <button className="icon-btn" aria-label="Change your message" title="Change" onClick={() => props.onEdit(true)}>
               <EditIcon />
             </button>
             <button className="icon-btn" aria-label="Delete your message" title="Delete" onClick={remove}>
               <TrashIcon />
             </button>
+              </>
+            )}
           </span>
         )}
       </div>
@@ -616,10 +797,82 @@ function MessageRow(props: {
           ))}
         </div>
       )}
+      {props.reports.length > 0 && (
+        <div className="chat-caughts">
+          {props.reports.map((r) => (
+            <div key={r.id} className={`chat-caught report ${r.status}`}>
+              <button type="button" className="chat-caught-open" title={`${r.by}: ${r.text}`} onClick={() => props.onOpenTask?.(r.taskId)}>
+                <span className="chat-caught-label">{REPORT_LABEL[r.status]}</span>
+                <span className="chat-caught-text">{r.task || r.text}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {props.recap && <SessionRecap caught={props.recap} />}
+      {props.calls.map((c) => (
+        <div key={c.id} className="chat-recap">
+          <a className="chat-recap-head" href={`/meetings/${c.id}`} title="Open the call's recap, with its chat">
+            <strong>Call</strong>
+            <span>
+              · {c.messages} {c.messages === 1 ? "message" : "messages"} in its chat · {shortTime(c.ts)}
+            </span>
+            <ChevronIcon />
+          </a>
+        </div>
+      ))}
       {props.readBy.length > 0 && <ReadMarks names={props.readBy} />}
     </>
   );
+}
+
+const REPORT_LABEL: Record<ChatReport["status"], string> = { ready: "Ready", done: "Done", blocked: "Blocked", needs_decision: "Needs you" };
+
+/** Under an answer of Stand's: what it leaned on, and the next step it suggests. */
+function AnswerFoot({ m, onTodo, onOpenTask }: { m: ChatMessage; onTodo: () => void; onOpenTask?: (id: string) => void }) {
+  const a = m.answer!;
+  if (!a.sources.length && !a.fromSpace.length && !a.todo) return null;
+  return (
+    <div className="chat-answer-foot">
+      {a.fromSpace.map((f, i) => (
+        <p key={i} className="chat-answer-line">
+          <span className="chat-answer-label">{new Date(f.when).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+          <span>{f.text}</span>
+        </p>
+      ))}
+      {a.sources.length > 0 && (
+        <p className="chat-answer-line">
+          {a.sources.map((s) => (
+            <a key={s.url} href={s.url} target="_blank" rel="noreferrer" title={s.url}>
+              {s.title}
+            </a>
+          ))}
+        </p>
+      )}
+      {a.todo && (
+        <p className="chat-answer-line">
+          <span className="chat-caught-label">To-do</span>
+          <span>{a.todo}</span>
+          {a.todoId ? (
+            <button type="button" className="link" onClick={() => onOpenTask?.(a.todoId!)}>
+              Open
+            </button>
+          ) : (
+            <button type="button" className="link" onClick={onTodo}>
+              Add
+            </button>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** "Maya is typing", for one, two or a crowd. */
+export function typingLine(names: string[]): string {
+  if (names.length === 1) return `${names[0]} is typing`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing`;
+  return "Several people are typing";
 }
 
 /** Who has read up to a message and no further, as small faces at its right. */
@@ -708,12 +961,23 @@ function SessionRecap({ caught }: { caught: ChatCaught }) {
 }
 
 /** The box at the foot of the thread. Enter sends, and Shift+Enter makes a new line. */
-function Composer(props: { roomId: string; people: Array<{ id: string; name: string }>; onSend: (text: string) => void; focus?: number; name?: string }) {
+function Composer(props: {
+  roomId: string;
+  people: Array<{ id: string; name: string }>;
+  onSend: (text: string) => void;
+  focus?: number;
+  /** Changes when the box should take the keys again, as when a reply starts. */
+  focusKey?: string | null;
+  name?: string;
+  replying?: { name: string; text: string } | null;
+  onCancelReply?: () => void;
+  onTyping?: () => void;
+}) {
   const draftKey = `stand.chatDraft.${props.roomId}`;
   const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
-    if (props.focus) form.current?.querySelector("textarea")?.focus();
-  }, [props.focus]);
+    if (props.focus || props.focusKey) form.current?.querySelector("textarea")?.focus();
+  }, [props.focus, props.focusKey]);
   const [text, setText] = useState(() => {
     try {
       return sessionStorage.getItem(draftKey) ?? "";
@@ -722,6 +986,7 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
     }
   });
   const keep = (value: string) => {
+    if (value.trim() && value !== text) props.onTyping?.();
     setText(value);
     try {
       sessionStorage.setItem(draftKey, value);
@@ -743,6 +1008,16 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
         send();
       }}
     >
+      {props.replying && (
+        <p className="chat-replying">
+          <span>
+            Replying to <b>{props.replying.name}</b> {props.replying.text}
+          </span>
+          <button type="button" className="icon-btn" aria-label="Don't reply" title="Don't reply" onClick={props.onCancelReply}>
+            <CloseIcon />
+          </button>
+        </p>
+      )}
       <MentionTextarea
         aria-label="Write to the space"
         placeholder={props.name ? `Message ${props.name}` : "Message the space"}
@@ -752,6 +1027,7 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
         people={props.people}
         onChange={keep}
         onKeyDown={(e) => {
+          if (e.key === "Escape" && props.replying) props.onCancelReply?.();
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             send();
