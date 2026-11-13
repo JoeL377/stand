@@ -4626,3 +4626,14 @@ footer.controls .control.pill { padding: 7px 16px; }
 .sh-panel.tasks .pj-ready::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .sh-panel.tasks .pj-meter > span { background: var(--muted); }
 .sh-tab.tasks svg, .sh-tab.decisions svg { color: inherit; }
+
+/* An owner on the Projects and Tasks tabs is their first name in quiet text, not initials in a circle. */
+.rc-name { flex: none; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.owner-btn:hover .rc-name, .owner-btn:focus-visible .rc-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.pj-faces { width: auto; gap: 4px; }
+.pj-line.card .pj-faces { padding-left: 0; }
+
+/* A project's sections are labelled by kind: its icon, its name, and a quiet count. */
+.pj-state > .sh-group { display: flex; align-items: center; gap: 6px; color: var(--text); font-weight: 600; }
+.pj-state > .sh-group > svg { flex: none; color: var(--muted); }
+.pj-state > .sh-group > span { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }

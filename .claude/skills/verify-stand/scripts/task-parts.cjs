@@ -70,7 +70,7 @@ const INVITE = "Invite support to the next review";
         part: li.classList.contains("part"),
         count: li.querySelector(".task-parts")?.textContent ?? null,
         partOf: li.querySelector(".task-part-of")?.textContent ?? null,
-        owner: li.querySelector(".rc-face")?.getAttribute("title") ?? null,
+        owner: li.querySelector(".rc-name, .rc-face")?.getAttribute("title") ?? null,
       })),
     );
   const sections = () => rowsIn(".sh-panel .sh-project");

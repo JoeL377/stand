@@ -18,7 +18,7 @@ import { useWork } from "../WorkLog.tsx";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
-import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
+import { FromChip, QuoteMark } from "../RecapChapters.tsx";
 import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, GripIcon, LinkIcon, MicIcon, PinIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
@@ -1216,9 +1216,12 @@ function TasksTab(props: {
     );
   const notSaid = (n: Note) => void api.setTask(props.roomId, n.id, { saidDone: false }).then(props.reload, errorToast("Couldn't change it"));
 
+  /** Who owns a row, as their first name in quiet text: a name reads faster than initials. */
   const face = (n: TaskNote) =>
     n.owner ? (
-      <Face name={n.owner} color={colorFor(n.owner)} title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`} />
+      <span className="rc-name" title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`}>
+        {firstName(n.owner)}
+      </span>
     ) : (
       <span className="rc-face none" title={n.kind === "question" ? "Anyone" : "Unassigned"}>
         ?
@@ -1369,7 +1372,8 @@ function TasksTab(props: {
       .map(([label, fs]) => (
         <div key={label} className={`sh-task-group pj-state ${label.split(" ")[0].toLowerCase()}`}>
           <p className="sh-group">
-            {label} · {fs.length}
+            {label === "To-dos" ? <TodoIcon size={13} /> : <QuestionIcon size={13} />}
+            {label} <span>{fs.length}</span>
           </p>
           {label === "To-dos"
             ? list(fs.flatMap((f) => [f.note, ...f.parts]), false, section, new Set(fs.flatMap((f) => f.parts.map((p) => p.id))))
@@ -1377,15 +1381,18 @@ function TasksTab(props: {
         </div>
       ));
   };
-  /** Who has a project's open work, as a short stack of faces; the counts are in each face's tooltip. */
+  /** Who has a project's open work, by first name; the counts are in each name's tooltip. */
   const ownerFaces = (notes: TaskNote[]) => {
     const groups = ownerGroups(notes).filter((g) => g.key);
     return (
       <span className="pj-faces">
-        {groups.slice(0, 4).map((g) => (
-          <Face key={g.key} name={g.notes[0].owner!} color={colorFor(g.notes[0].owner!)} size={18} title={`${g.key === me ? "You" : g.key} · ${g.notes.length}`} />
+        {groups.slice(0, 3).map((g, i) => (
+          <span key={g.key} className="rc-name" title={`${g.key === me ? "You" : g.key} · ${g.notes.length}`}>
+            {firstName(g.notes[0].owner!)}
+            {i < Math.min(groups.length, 3) - 1 ? "," : ""}
+          </span>
         ))}
-        {groups.length > 4 && <span className="pj-faces-more">+{groups.length - 4}</span>}
+        {groups.length > 3 && <span className="pj-faces-more">+{groups.length - 3}</span>}
       </span>
     );
   };
@@ -1618,13 +1625,19 @@ function TasksTab(props: {
                 <aside className="pj-side">
                   {side && asked.length > 0 && (
                     <div className="sh-task-group pj-state questions">
-                      <p className="sh-group">Questions · {asked.length}</p>
+                      <p className="sh-group">
+                        <QuestionIcon size={13} />
+                        Questions <span>{asked.length}</span>
+                      </p>
                       {list(asked, false, viewing)}
                     </div>
                   )}
                   {settled.length > 0 && (
                     <div className="sh-task-group pj-state decisions">
-                      <p className="sh-group">Decisions · {settled.length}</p>
+                      <p className="sh-group">
+                        <DecidedIcon size={13} />
+                        Decisions <span>{settled.length}</span>
+                      </p>
                       <ul className="pj-decided">
                         {settled.slice(0, 5).map((n) => (
                           <li key={n.id} title={n.text}>
