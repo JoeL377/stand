@@ -15,7 +15,7 @@ import { OwnerPicker } from "../OwnerPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
 import { partsTally, stateOf, withParts } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
-import { useWork } from "../WorkLog.tsx";
+import { useWork, workKnown } from "../WorkLog.tsx";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
@@ -1202,7 +1202,16 @@ function TasksTab(props: {
   const isMine = (n: Note) => !!n.owner && firstName(n.owner) === me;
   const open = props.mine ? props.open.filter(isMine) : props.open;
   const closed = props.mine ? props.closed.filter(isMine) : props.closed;
-  const work = useWork(open.filter((n) => n.kind === "action").map((n) => n.id));
+  const workIds = open.filter((n) => n.kind === "action").map((n) => n.id);
+  const work = useWork(workIds);
+  // The cards are ordered by who is working on what, which is read after the page is up. On the first
+  // look of a visit they wait for it (under a second at most), so they are drawn once, in their final order.
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setWaited(true), 800);
+    return () => clearTimeout(t);
+  }, []);
+  const settled = waited || workKnown(workIds);
   // The comments that tag you, per task: newest first, so [0] is the latest.
   const tagged = new Map<string, TaskMention[]>();
   for (const m of props.mentions) tagged.set(m.noteId, [...(tagged.get(m.noteId) ?? []), m]);
@@ -1265,6 +1274,7 @@ function TasksTab(props: {
       .map((n) => ({ project: n.project, ts: n.ts, inProgress: stateOf(n, work[n.id]) === "doing", reportedAt: work[n.id]?.log[0]?.ts })),
   );
   const ordered = sort === "active" ? activeFirst(inView, activity) : inView;
+  const holding: React.CSSProperties | undefined = sort === "active" && !settled ? { opacity: 0 } : undefined;
   // Your pinned projects first, then the others; or the pinned ones alone.
   const sections = [...ordered.filter((p) => pins.has(p.id)), ...(onlyPinned ? [] : ordered.filter((p) => !pins.has(p.id)))];
   const firstUnpinned = pins.size > 0 ? sections.find((p) => !pins.has(p.id))?.id : undefined;
@@ -1783,8 +1793,8 @@ function TasksTab(props: {
       ) : (
         <>
           {/* A wide screen has the projects as cards, your pinned ones in a first group; a phone has rows that open in place. */}
-          {grid && pins.size > 0 && <div className="pj-grid pinned">{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
-          <div className={grid ? "pj-grid" : "pj-list"}>
+          {grid && pins.size > 0 && <div className="pj-grid pinned" style={holding}>{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
+          <div className={grid ? "pj-grid" : "pj-list"} style={holding}>
             {sections.filter((p) => !grid || !pins.has(p.id)).map(projectSection)}
             {(unassigned.length > 0 || props.loose) && !onlyPinned && (
               <section className={`sh-project unassigned`} aria-label="Unassigned">
