@@ -221,6 +221,10 @@ export const api = {
     call<{ messages: ChatMessage[]; sessions: ChatSession[]; caught: ChatCaught[] }>("GET", `/api/channels/${channelId}/messages?${page.after !== undefined ? `after=${page.after}` : `before=${page.before ?? ""}`}`),
   /** key: sent again with the same one, a message is saved once. */
   sendChat: (roomId: string, body: { text: string; key: string; replyTo?: string }) => call<ChatMessage>("POST", `/api/rooms/${roomId}/chat/messages`, body),
+  /** Your emoji on a message, or off it when it is there already. */
+  reactChat: (id: string, emoji: string) => call<ChatMessage>("POST", `/api/chat/messages/${id}/reactions`, { emoji }),
+  chatTyping: (roomId: string) => call<{ ok: true }>("POST", `/api/rooms/${roomId}/chat/typing`),
+  chatToTodo: (id: string) => call<{ id: string; text: string }>("POST", `/api/chat/messages/${id}/todo`),
   editChat: (id: string, text: string) => call<ChatMessage>("PATCH", `/api/chat/messages/${id}`, { text }),
   deleteChat: (id: string) => call<ChatMessage>("DELETE", `/api/chat/messages/${id}`),
   /** What Stand caught from one session of chat. */

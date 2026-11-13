@@ -3633,6 +3633,24 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .chat-msg-tools { position: absolute; top: -12px; right: 8px; display: none; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
 .chat-msg:hover .chat-msg-tools, .chat-msg:focus-within .chat-msg-tools { display: inline-flex; }
 .chat-msg-tools .icon-btn { width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.chat-msg-tools .chat-emoji { font-size: 15px; line-height: 1; }
+.chat-msg.flash { background: var(--hover); transition: background 0.3s; }
+/* The message this one answers: one grey line above it. */
+.chat-quote { display: flex; align-items: baseline; gap: 5px; max-width: 100%; min-width: 0; min-height: 0; height: 18px; margin: 1px 0 0; padding: 0 0 0 8px; border: 0; border-left: 2px solid var(--line); border-radius: 0; background: none; box-shadow: none; font: inherit; font-size: 12px; color: var(--muted); text-align: left; cursor: pointer; }
+.chat-quote:disabled { cursor: default; opacity: 1; }
+.chat-quote b { flex: none; font-weight: 500; }
+.chat-quote span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-quote:not(:disabled):hover span { color: var(--text); }
+.chat-reacts { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 2px; }
+.chat-react { display: inline-flex; align-items: center; gap: 4px; height: 22px; min-height: 0; padding: 0 7px; border: 1px solid var(--line); border-radius: 11px; background: none; box-shadow: none; font: inherit; font-size: 12px; color: var(--muted); cursor: pointer; }
+.chat-react:hover { background: var(--hover); }
+.chat-react.on { border-color: var(--accent); color: var(--accent-text); }
+.chat-typing { flex: none; margin: 0; padding: 0 8px 4px 42px; font-size: 12px; color: var(--muted); }
+.chat-typing::after { content: "…"; }
+.chat-replying { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; padding: 0 4px 0 12px; font-size: 12px; color: var(--muted); }
+.chat-replying span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-replying b { font-weight: 500; color: var(--text); }
+.chat-replying .icon-btn { flex: none; width: 20px; height: 20px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .chat-edit { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 4px; }
 .chat-edit textarea { display: block; width: 100%; min-height: 38px; max-height: 180px; padding: 8px 10px; font: inherit; font-size: 14px; line-height: 1.5; border-radius: 8px; resize: none; field-sizing: content; }
 .chat-edit-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; font-size: 13px; }

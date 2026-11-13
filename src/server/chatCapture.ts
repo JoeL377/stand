@@ -123,7 +123,7 @@ export class ChatCapture {
 
   /** What the chat tells its listener (chat.ts): a message sent, changed or deleted, a session opened or closed. */
   heard(e: ChatEvent) {
-    if (this.stopped || e.type === "notes" || e.type === "read") return;
+    if (this.stopped || e.type === "notes" || e.type === "read" || e.type === "typing") return;
     if (e.type === "session") {
       // Closed: it is read once more, now.
       if (!e.open) this.state(e.channelId).runner.schedule(0);

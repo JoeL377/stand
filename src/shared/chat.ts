@@ -39,8 +39,16 @@ export interface ChatMessage {
   replyTo: string | null;
   editedAt: number | null;
   deletedAt: number | null;
+  /** What people answered it with, in the order each emoji was first used. */
+  reactions: ChatReaction[];
   /** The key its author's page sent it with, so that page knows it as the one it showed before it was saved. */
   key: string | null;
+}
+
+/** One emoji on a message, and who put it there. */
+export interface ChatReaction {
+  emoji: string;
+  by: Array<{ id: string; name: string }>;
 }
 
 /** What the chat tells whoever listens (the space's event stream). */
@@ -50,7 +58,9 @@ export type ChatEvent =
   /** What Stand caught from a session changed: read it again. */
   | { type: "notes"; channelId: string; sessionId: string }
   /** Someone read further. Sending says the same of a message's author, so it has no event of its own. */
-  | ({ type: "read"; channelId: string } & ChatRead);
+  | ({ type: "read"; channelId: string } & ChatRead)
+  /** Someone is writing in the box. Nothing is kept: it fades by itself a few seconds later. */
+  | { type: "typing"; channelId: string; userId: string; name: string };
 
 /** How far someone has read a channel. */
 export interface ChatRead {

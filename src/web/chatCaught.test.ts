@@ -4,7 +4,7 @@ import type { CaughtLine, ChatCaught, ChatMessage } from "../shared/chat.ts";
 import { mergeCaught, placeCaught } from "./chatCaught.ts";
 
 const msg = (id: string, sessionId: string, ts: number): ChatMessage => ({
-  seq: ts, id, channelId: "c", sessionId, authorId: "u", author: "Joe Liang", text: id, ts, replyTo: null, editedAt: null, deletedAt: null, key: null,
+  seq: ts, id, channelId: "c", sessionId, authorId: "u", author: "Joe Liang", text: id, ts, replyTo: null, editedAt: null, deletedAt: null, reactions: [], key: null,
 });
 const line = (id: string, ts: number, messageId: string | null = null): CaughtLine => ({ id, kind: "action", text: id, owner: null, closed: false, messageId, ts });
 const caught = (sessionId: string, lines: CaughtLine[], summary: string | null = null): ChatCaught => ({ sessionId, summary, topics: summary ? [{ id: "t", topic: "Topic", outcome: "action" }] : [], lines });

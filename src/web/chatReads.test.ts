@@ -4,7 +4,7 @@ import type { ChatMessage, ChatRead } from "../shared/chat.ts";
 import { moveRead, placeReads } from "./chatReads.ts";
 
 const msg = (seq: number, authorId: string): ChatMessage => ({
-  seq, id: `m${seq}`, channelId: "c", sessionId: "s", authorId, author: authorId, text: "", ts: seq, replyTo: null, editedAt: null, deletedAt: null, key: null,
+  seq, id: `m${seq}`, channelId: "c", sessionId: "s", authorId, author: authorId, text: "", ts: seq, replyTo: null, editedAt: null, deletedAt: null, reactions: [], key: null,
 });
 const NAMES: Record<string, string> = { huy: "Huy Ngo", joe: "Joe Liang" };
 const read = (userId: string, upTo: number): ChatRead => ({ userId, name: NAMES[userId], upTo });

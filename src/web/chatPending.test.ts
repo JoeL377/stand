@@ -4,7 +4,7 @@ import type { ChatMessage } from "../shared/chat.ts";
 import { asMessage, restore, serial, unsaved, type PendingMessage } from "./chatPending.ts";
 
 const saved = (id: string, key: string | null): ChatMessage => ({
-  seq: 1, id, channelId: "c", sessionId: "s", authorId: "u", author: "Joe Liang", text: id, ts: 1, replyTo: null, editedAt: null, deletedAt: null, key,
+  seq: 1, id, channelId: "c", sessionId: "s", authorId: "u", author: "Joe Liang", text: id, ts: 1, replyTo: null, editedAt: null, deletedAt: null, reactions: [], key,
 });
 const pending = (key: string, state: PendingMessage["state"] = "sending"): PendingMessage => ({ key, text: key, ts: 5, state });
 
