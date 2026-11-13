@@ -4127,17 +4127,19 @@ a .mention { color: inherit; }
 .sk-wrap-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .sk-wrap-card > footer { flex-wrap: wrap; gap: 8px 14px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; }
 .sk-wrap-card > footer .primary { padding: 6px 14px; font-size: 13px; }
-/* A phone: one subject at a time, dots to move between them. */
-.sk-dots { flex: none; display: flex; justify-content: center; gap: 8px; padding: 6px 0 10px; }
-.sk-dots button { all: unset; width: 8px; height: 8px; border-radius: 50%; background: var(--line); cursor: pointer; }
-.sk-dots button.on { background: var(--text); }
+/* A phone: one row for the sketch (how it is drawn, the subjects, the counts), one subject at a time. */
+.sk-chip.compact { gap: 3px; padding: 0 7px; }
+.sk-one { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.sk-head[hidden] { display: none; }
+.view-flip { cursor: pointer; }
+.sketch.phone .design-text { display: none; }
+.sketch.phone .design-top:not(:has(.design-context:not(.design-text))) { display: none; }
 @media (max-width: 760px) {
   .sk-bar { padding: 6px 10px 0; gap: 6px; }
   .sk-head { padding: 8px 10px 0; }
   .sk-list { padding: 10px 14px 80px; }
   .sk-kinds .brain-kind-pill { padding: 0 8px; }
   .sk-menu { width: min(250px, calc(100vw - 24px)); }
-  .sketch.phone .sk-dock { bottom: 30px; }
   .sk-note { font-size: 13px; }
   .sk-note .nudge-text { white-space: normal; }
 }

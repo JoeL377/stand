@@ -61,7 +61,7 @@ function caughtOf(b: BrainstormView, s: SketchSubject, i: number): BrainCaught[]
   return s.style === "diagram" ? (s.diagram?.boxes ?? []).flatMap((x) => x.caught) : mapNodes(b, s, i).flatMap((n) => n.caught);
 }
 
-export function StyleChip(props: { subject: SketchSubject; onPick?: (style: SketchStyle) => void }) {
+export function StyleChip(props: { subject: SketchSubject; onPick?: (style: SketchStyle) => void; /** A phone: the mark alone. */ compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const { Icon, label } = STYLE[props.subject.style];
   useEffect(() => {
@@ -74,15 +74,15 @@ export function StyleChip(props: { subject: SketchSubject; onPick?: (style: Sket
   }, [open]);
   if (!props.onPick) {
     return (
-      <span className="sk-chip plain" title={STYLE[props.subject.style].about}>
-        <Icon size={13} aria-hidden /> {label}
+      <span className={`sk-chip plain${props.compact ? " compact" : ""}`} title={props.compact ? `Drawn as a ${label.toLowerCase()}` : STYLE[props.subject.style].about} aria-label={`Drawn as a ${label.toLowerCase()}`}>
+        <Icon size={13} aria-hidden /> {!props.compact && label}
       </span>
     );
   }
   return (
     <span className="sk-chip-wrap" onClick={(e) => e.stopPropagation()}>
-      <button type="button" className={`sk-chip${open ? " on" : ""}`} aria-haspopup="menu" aria-expanded={open} title="How this subject is drawn" onClick={() => setOpen((v) => !v)}>
-        <Icon size={13} aria-hidden /> {label} <ChevronDown size={12} aria-hidden />
+      <button type="button" className={`sk-chip${open ? " on" : ""}${props.compact ? " compact" : ""}`} aria-haspopup="menu" aria-expanded={open} title="How this subject is drawn" aria-label={`Drawn as a ${label.toLowerCase()}. Change`} onClick={() => setOpen((v) => !v)}>
+        <Icon size={13} aria-hidden /> {!props.compact && label} <ChevronDown size={12} aria-hidden />
       </button>
       {open && (
         <span className="sk-menu" role="menu">
@@ -176,8 +176,17 @@ export function SketchBoard(props: {
   }, [undo?.at]);
   const offer = live && b.offer ? (shown.find((x) => x.s.id === b.offer!.subject) ?? null) : null;
 
-  const pills = (shown.length > 1 || totals.length > 0) && (
+  // A phone keeps the sketch's own controls to this one row: how the subject on screen is drawn, then
+  // the subjects (or the one subject's name), then the counts.
+  const oneRow = !!props.phone && props.as === "picture";
+  const pills = (shown.length > 1 || totals.length > 0 || oneRow) && (
     <div className="sk-bar">
+      {oneRow && <StyleChip compact subject={main.s} onPick={acts ? (style) => acts.style(main.s.id, style) : undefined} />}
+      {oneRow && shown.length === 1 && (
+        <span className="sk-one" dir="auto">
+          {main.s.title}
+        </span>
+      )}
       {shown.length > 1 && (
         <span className="sk-subjects" role="tablist" aria-label="Subjects">
           {shown.map(({ s, i }) => {
@@ -244,7 +253,7 @@ export function SketchBoard(props: {
             <span className="agent-mark" aria-hidden>
               ✦
             </span>
-            <span className="nudge-text">New subject. Drawn as a diagram because steps were heard.</span>
+            <span className="nudge-text">New subject, drawn as a diagram.</span>
             <button type="button" className="link" disabled={!acts} onClick={() => (acts?.style(why.id, "map"), setTold((x) => [...x, why.id]))}>
               Redraw as map
             </button>
@@ -315,7 +324,7 @@ export function SketchBoard(props: {
           </aside>
         )}
         <section className="sk-main" aria-label={main.s.title}>
-          <header className="sk-head">
+          <header className="sk-head" hidden={oneRow}>
             <StyleChip subject={main.s} onPick={acts ? (style) => acts.style(main.s.id, style) : undefined} />
             {(main.s.style === "diagram" || shown.length === 1) && <SubjectTitle subject={main.s} onRename={acts ? (label) => acts.edit(main.s.id, main.s.id, "rename", { label }) : undefined} />}
             {live && main.s.id !== liveId && liveId && (
@@ -328,13 +337,6 @@ export function SketchBoard(props: {
           <div className="sk-canvas">{draw(main)}</div>
         </section>
       </div>
-      {props.phone && shown.length > 1 && (
-        <div className="sk-dots" role="tablist" aria-label="Subjects">
-          {shown.map(({ s }) => (
-            <button key={s.id} type="button" role="tab" aria-selected={s.id === mainId} aria-label={s.title} className={s.id === mainId ? "on" : ""} onClick={() => props.onSubject(s.id === liveId ? null : s.id)} />
-          ))}
-        </div>
-      )}
       {dock}
     </div>
   );

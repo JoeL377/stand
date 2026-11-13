@@ -4,6 +4,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Image as ImageIcon, List as ListIcon } from "lucide-react";
 import { UNTITLED_DESIGN, type BrainstormSummary, type BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
@@ -62,7 +63,7 @@ export function ViewPane(props: {
               </button>
             ))}
           </span>
-          {view === "sketch" && live && (
+          {view === "sketch" && live && !props.phone && (
             <span className="bp-views view-as" role="group" aria-label="Show the sketch as">
               <button type="button" className={`rp-pill${as === "picture" ? " on" : ""}`} aria-pressed={as === "picture"} onClick={() => setPicked("picture")}>
                 Picture
@@ -73,9 +74,16 @@ export function ViewPane(props: {
             </span>
           )}
           <span className="rp-grow" />
+          {/* A phone has room for one switch: it names the other way to see the sketch. */}
+          {view === "sketch" && live && props.phone && (
+            <button type="button" className="rp-pill view-flip" onClick={() => setPicked(as === "list" ? "picture" : "list")} title={as === "list" ? "See it drawn" : "Read it as a list"}>
+              {as === "list" ? <ImageIcon size={13} aria-hidden /> : <ListIcon size={13} aria-hidden />}
+              {as === "list" ? "Picture" : "List"}
+            </button>
+          )}
           {props.onStop && view === "sketch" && live && (
             <button type="button" className="link muted view-stop" onClick={props.onStop} title="The sketch is kept on its page, and each diagram as a draft spec on a to-do. The call goes on.">
-              Stop drawing
+              {props.phone ? "Stop" : "Stop drawing"}
             </button>
           )}
           {view === "sketch" && live && !props.phone && (
