@@ -13,6 +13,8 @@ import { Linkified } from "../Linkified.tsx";
 
 /** How long a chat message keeps the folded panel open. */
 const PEEK_MS = 12_000;
+/** How long a new message's preview stays beside the folded panel. */
+const PREVIEW_MS = 7_000;
 
 export function SidePanel(props: {
   state: RoomState;
@@ -95,12 +97,24 @@ export function SidePanel(props: {
   // pointer or the cursor is in it.
   const lastChats = useRef(othersChats);
   useEffect(() => {
-    if (othersChats > lastChats.current && props.folded) {
-      setTab("chat");
-      props.onPeek?.(true);
+    // Folded, a message from someone else shows as a small preview beside the rail. The panel itself
+    // stays shut, so nothing covers the board: opening it is the reader's choice.
+    if (othersChats > lastChats.current && props.folded && !props.phone) {
+      const last = chats.filter((c) => c.speakerId !== props.participantId).at(-1);
+      if (last) setPreview({ id: last.id, name: last.speakerName, text: last.text });
     }
     lastChats.current = othersChats;
   }, [othersChats]);
+  const [preview, setPreview] = useState<{ id: string; name: string; text: string } | null>(null);
+  const [previewHeld, setPreviewHeld] = useState(false);
+  useEffect(() => {
+    if (!preview || previewHeld) return;
+    const t = setTimeout(() => setPreview(null), PREVIEW_MS);
+    return () => clearTimeout(t);
+  }, [preview, previewHeld]);
+  useEffect(() => {
+    if (!shut) setPreview(null);
+  }, [shut]);
   const [holding, setHolding] = useState(false);
   useEffect(() => {
     if (!props.peeking || !props.folded || holding) return;
@@ -134,6 +148,23 @@ export function SidePanel(props: {
             </button>
           );
         })}
+        {preview && (
+          <button
+            type="button"
+            className="chat-preview"
+            aria-label={`New message from ${preview.name}. Open chat`}
+            onMouseEnter={() => setPreviewHeld(true)}
+            onMouseLeave={() => setPreviewHeld(false)}
+            onClick={() => {
+              setTab("chat");
+              setPreview(null);
+              props.onFold?.();
+            }}
+          >
+            <strong dir="auto">{preview.name}</strong>
+            <span dir="auto">{preview.text}</span>
+          </button>
+        )}
       </aside>
     );
 

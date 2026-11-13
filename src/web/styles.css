@@ -4281,3 +4281,10 @@ a .mention { color: inherit; }
 footer.controls .controls-group > .control:not(.mic-caret), footer.controls .controls-group > .xp > .control { flex-direction: row; gap: 7px; min-width: 0; padding: 7px 11px; font-size: 12.5px; }
 footer.controls:has(.controls-group) { padding: 4px 16px 6px; min-height: 44px; }
 footer.controls .control.pill { padding: 7px 16px; }
+/* A new chat message while the panel is folded: a small preview beside the rail, over the margin, not the board. */
+.panel.side.rail { position: relative; overflow: visible; }
+.chat-preview { position: absolute; z-index: 20; right: calc(100% + 8px); bottom: 8px; width: 300px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35); color: var(--text); font-size: 13px; line-height: 1.4; text-align: left; cursor: pointer; animation: line-in 200ms var(--ease-out, ease-out); }
+.chat-preview:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.chat-preview strong { font-size: 12px; font-weight: 600; color: var(--muted); }
+.chat-preview span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .chat-preview { animation: none; } }
