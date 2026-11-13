@@ -15,6 +15,7 @@ import { meetingsStore } from "./db/meetings.ts";
 import { notesStore } from "./db/notes.ts";
 import { plansStore } from "./db/plans.ts";
 import { projectsStore } from "./db/projects.ts";
+import { pushStore } from "./db/push.ts";
 import { reviewsStore } from "./db/reviews.ts";
 import { roomsStore } from "./db/rooms.ts";
 import { tokensStore } from "./db/tokens.ts";
@@ -52,6 +53,7 @@ export function openDb(file?: string) {
   const brainstorms = brainstormsStore(db);
   const reviews = reviewsStore(db);
   const chat = chatStore(db);
+  const push = pushStore(db);
   return {
     raw: db,
     tx,
@@ -70,5 +72,6 @@ export function openDb(file?: string) {
     ...reviews,
     ...updates,
     ...chat,
+    ...push,
   };
 }

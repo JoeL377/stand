@@ -99,6 +99,14 @@ export const config = {
   },
   /** Public origin, e.g. https://standup.example.com. Defaults to the request's own origin. */
   publicUrl: env("PUBLIC_URL"),
+  /** Notifications on phones and browsers (push.ts). Without both keys Stand sends none.
+   *  Make a pair with: npx web-push generate-vapid-keys. VAPID_SUBJECT is a mailto: or https: address
+   *  push services can reach the sender at; it defaults to PUBLIC_URL. */
+  vapid: {
+    publicKey: env("VAPID_PUBLIC_KEY"),
+    privateKey: env("VAPID_PRIVATE_KEY"),
+    subject: env("VAPID_SUBJECT"),
+  },
   /** Comma-separated email addresses allowed in, e.g. "ann@gmail.com,bo@acme.com". */
   allowedEmails: (env("ALLOWED_EMAILS") ?? "")
     .split(",")

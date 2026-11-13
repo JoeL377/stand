@@ -460,6 +460,24 @@ CREATE TABLE IF NOT EXISTS channel_reads (
   read_up_to INTEGER NOT NULL,
   PRIMARY KEY (channel_id, user_id)
 );
+-- A phone or browser that said yes to notifications (push.ts): where its push service takes them.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
+-- Which chat messages in a space notify someone: 'mentions' (only @mentions and replies to them).
+-- No row is every message.
+CREATE TABLE IF NOT EXISTS chat_notify (
+  room_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  level TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id)
+);
 `;
 
 /** Makes the tables a new database needs, and adds what later versions added to an older one.
