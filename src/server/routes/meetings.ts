@@ -8,6 +8,8 @@ import { ideaReviewOfMeeting } from "../ideaReview.ts";
 import { reviewOfMeeting } from "../reviews.ts";
 import { suggestedNext } from "../nextSteps.ts";
 import { meetingTimeline } from "../timeline.ts";
+import { cleanMeetingTitle, meetingKindName } from "../meetingNames.ts";
+import { forgetMeetingFrom } from "../noteFrom.ts";
 import type { Services } from "../services.ts";
 import { notFound, route } from "./http.ts";
 
@@ -21,6 +23,8 @@ export function meetingRoutes(app: Express, ctx: Services) {
       const room = db.getRoom(m.roomId)!;
       const body: MeetingRecap = {
         meetingId: m.id,
+        title: m.title,
+        kindName: meetingKindName(db, m.id),
         roomId: m.roomId,
         roomName: room.name,
         startedAt: m.startedAt,
@@ -39,6 +43,19 @@ export function meetingRoutes(app: Express, ctx: Services) {
         timeline: meetingTimeline(db, m.id),
       };
       res.json(body);
+    }),
+  );
+
+  // Names a meeting, for anyone in its space. An empty title goes back to the name its kind gives it.
+  app.put(
+    "/api/meetings/:id/title",
+    route((req, res) => {
+      const m = db.getMeeting(req.params.id);
+      if (!m || m.added || m.chat || !db.isMember(m.roomId, req.user!.id)) return notFound(res);
+      const title = cleanMeetingTitle(req.body?.title);
+      db.setMeetingTitle(m.id, title);
+      forgetMeetingFrom(m.id);
+      res.json({ title, kindName: meetingKindName(db, m.id) });
     }),
   );
 

@@ -12,6 +12,8 @@ type Meeting = {
   startedAt: number;
   endedAt: number | null;
   summary: string | null;
+  /** The name someone gave the meeting. */
+  title?: string | null;
   synthesis?: string | null;
   chapters?: ChapterRecap[];
 };
@@ -130,6 +132,8 @@ export interface MeetingBrief {
   schema: typeof BRIEF_SCHEMA;
   meeting: {
     id: string;
+    /** The name someone gave the meeting; absent when nobody named it. */
+    title?: string;
     room: { id: string; name: string };
     startedAt: string;
     endedAt: string | null;
@@ -254,6 +258,7 @@ export function buildBrief(input: {
     schema: BRIEF_SCHEMA,
     meeting: {
       id: m.id,
+      ...(m.title ? { title: m.title } : {}),
       room: { id: m.roomId, name: input.roomName },
       startedAt: iso(m.startedAt),
       endedAt: m.endedAt ? iso(m.endedAt) : null,
@@ -408,6 +413,7 @@ export function briefToMarkdown(b: MeetingBrief): string {
     "---",
     `schema: ${b.schema}`,
     `meeting_id: ${b.meeting.id}`,
+    ...(b.meeting.title ? [`title: ${JSON.stringify(b.meeting.title)}`] : []),
     `room: ${JSON.stringify(b.meeting.room.name)}`,
     `started_at: ${b.meeting.startedAt}`,
     ...(b.meeting.durationMinutes ? [`duration_minutes: ${b.meeting.durationMinutes}`] : []),
@@ -416,7 +422,7 @@ export function briefToMarkdown(b: MeetingBrief): string {
     ...(b.space.synthesisInstructions ? [`synthesis_instructions: ${JSON.stringify(b.space.synthesisInstructions)}`] : []),
     "---",
     "",
-    `# ${b.meeting.room.name} · ${date}`,
+    b.meeting.title ? `# ${b.meeting.title} · ${date}` : `# ${b.meeting.room.name} · ${date}`,
     "",
   ];
   if (b.summary) out.push(b.summary, "");

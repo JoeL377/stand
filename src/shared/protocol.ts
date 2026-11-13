@@ -723,7 +723,7 @@ export interface TaskDetail {
   note: Note;
   roomId: string;
   /** The meeting it came out of, or the stretch of chat (chat: true); null for one someone added by hand. */
-  meeting: { id: string; startedAt: number; chat?: boolean } | null;
+  meeting: { id: string; startedAt: number; chat?: boolean; title?: string } | null;
   /** Agents' work on it, with the latest plan or spec even when nothing's been reported. */
   work: ActionWork;
   waitsOn: TaskLink[];
@@ -863,6 +863,8 @@ export interface FollowUp extends Note {
  *  once: the meeting, and the chapter of it the recap files it under. */
 export interface NoteFrom {
   meetingId: string;
+  /** The name someone gave the meeting, when they named it. */
+  title?: string;
   /** When the meeting started. */
   startedAt: number;
   chapter: {
@@ -1323,6 +1325,10 @@ export interface DeckHistory {
 
 export interface MeetingRecap {
   meetingId: string;
+  /** The name someone gave the meeting; null when nobody named it. */
+  title: string | null;
+  /** The name its kind gives it ("Meeting", "Product review"), shown until someone names it. */
+  kindName: string;
   roomId: string;
   roomName: string;
   startedAt: number;
@@ -1449,6 +1455,8 @@ export interface SpaceFeed {
     startedAt: number;
     endedAt: number;
     summary: string | null;
+    /** The name someone gave it; null shows the name its kind gives it. */
+    title: string | null;
     todos: number;
     decided: number;
     open: number;

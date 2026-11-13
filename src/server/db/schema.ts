@@ -593,6 +593,8 @@ export function migrate(db: DatabaseSync) {
     );
   if (!meetingCols.includes("host_id")) db.exec("ALTER TABLE meetings ADD COLUMN host_id TEXT;");
   if (!meetingCols.includes("end_requested_at")) db.exec("ALTER TABLE meetings ADD COLUMN end_requested_at INTEGER;");
+  // A name someone gave the meeting, over the one its kind gives it ("Meeting", "Product review").
+  if (!meetingCols.includes("title")) db.exec("ALTER TABLE meetings ADD COLUMN title TEXT;");
   const snapCols = (db.prepare("PRAGMA table_info(snaps)").all() as Row[]).map((c) => c.name);
   if (!snapCols.includes("discussion_id")) db.exec("ALTER TABLE snaps ADD COLUMN discussion_id TEXT;");
   // Snaps used to need a meeting. SQLite can't loosen a column, so the table is rebuilt once,

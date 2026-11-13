@@ -8,7 +8,10 @@ import type { DB } from "./db.ts";
 
 /** A finished meeting's chapters barely change, and the space page asks every 20 seconds. */
 const KEEP_MS = 5 * 60_000;
-const cache = new Map<string, { at: number; startedAt: number; byTopic: Map<string, NonNullable<NoteFrom["chapter"]>>; added: boolean; chat: boolean }>();
+const cache = new Map<string, { at: number; startedAt: number; byTopic: Map<string, NonNullable<NoteFrom["chapter"]>>; added: boolean; chat: boolean; title: string | null }>();
+
+/** Drops what is kept of a meeting, after someone renames it. */
+export const forgetMeetingFrom = (meetingId: string) => void cache.delete(meetingId);
 
 function chaptersOf(db: DB, meetingId: string) {
   const hit = cache.get(meetingId);
@@ -23,7 +26,7 @@ function chaptersOf(db: DB, meetingId: string) {
     const chapter = { i, title: c.title, at: c.start, minutes: Math.max(1, Math.round(c.minutes)), outcome: c.outcome, crux: written.get(c.key)?.crux || null };
     for (const id of c.topicIds) byTopic.set(id, chapter);
   });
-  const entry = { at: Date.now(), startedAt: m.startedAt, byTopic, added: m.added, chat: m.chat };
+  const entry = { at: Date.now(), startedAt: m.startedAt, byTopic, added: m.added, chat: m.chat, title: m.title };
   // Only finished meetings keep: a live one's chapters move with every remark, and so do those of a
   // stretch of chat people are still writing in (which has an end from its first message).
   const session = m.chat ? db.chatSession(meetingId) : null;
@@ -38,6 +41,6 @@ export function withFrom<N extends Note>(db: DB, notes: N[]): Array<N & { from?:
     const m = chaptersOf(db, n.meetingId);
     if (!m) return n;
     if (m.added) return { ...n, from: { meetingId: n.meetingId, startedAt: m.startedAt, chapter: null, addedBy: n.editedBy ?? "someone" } };
-    return { ...n, from: { meetingId: n.meetingId, startedAt: m.startedAt, chapter: (n.discussionId && m.byTopic.get(n.discussionId)) || null, ...(m.chat ? { chat: true } : {}) } };
+    return { ...n, from: { meetingId: n.meetingId, startedAt: m.startedAt, chapter: (n.discussionId && m.byTopic.get(n.discussionId)) || null, ...(m.chat ? { chat: true } : {}), ...(m.title ? { title: m.title } : {}) } };
   });
 }

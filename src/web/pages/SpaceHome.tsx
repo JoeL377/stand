@@ -991,7 +991,7 @@ function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; 
       <Link to={`/meetings/${m.id}`} className="sh-row-link" title={m.summary ?? undefined}>
         <time className="sh-time">{fmtTime(m.endedAt)}</time>
         <span className="sh-row-text">
-          <span className="sh-who">{kind?.name ?? "Meeting"}</span>
+          <span className="sh-who sh-mname">{m.title ?? kind?.name ?? "Meeting"}</span>
           <span className="sh-what sh-len muted">{minutes} min</span>
         </span>
         <span className="sh-counts">

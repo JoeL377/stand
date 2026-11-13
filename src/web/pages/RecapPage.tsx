@@ -18,6 +18,7 @@ import { FollowUpList, itemHref, saveFollowUp, sourceLabel } from "../FollowUps.
 import { Markdown } from "../Synthesis.tsx";
 import { usePhone } from "../phone.ts";
 import { CarryIcon, DecidedIcon, InfoIcon, QuestionIcon, TodoIcon, TopicIcon } from "../NoteIcons.tsx";
+import { EditIcon } from "../icons.tsx";
 import { costLines, fmtCost, fmtDate, fmtDuration, fmtTime, keyOf } from "../util.ts";
 
 export function RecapPage() {
@@ -171,11 +172,17 @@ export function RecapPage() {
         <Link to={`/r/${data.roomId}`}>← {data.roomName}</Link>
       </nav>
       <header className="doc-head">
-        <h1>
+        <MeetingName
+          meetingId={data.meetingId}
+          title={data.title}
+          kindName={data.kindName}
+          onSaved={(title) => setData((d) => (d ? { ...d, title } : d))}
+        >
           <span className="rc-space">{data.roomName} · </span>
           {fmtDate(data.startedAt)}
-        </h1>
+        </MeetingName>
         <p className="muted rc-meta">
+          {data.title ? `${fmtDate(data.startedAt)} · ` : ""}
           {fmtTime(data.startedAt)}
           {data.endedAt ? ` · ${fmtDuration(data.endedAt - data.startedAt)}` : data.writingUp ? "" : " · in progress"}
           {data.writingUp && (
@@ -522,4 +529,59 @@ function useSectionInView(ids: string[], ready: boolean): string | null {
     return () => document.removeEventListener("scroll", pick, { capture: true });
   }, [key, ready]);
   return here;
+}
+
+/**
+ * The recap's heading: the name someone gave the meeting, or the space and the day when nobody did.
+ * Anyone in the space can click it to name the meeting (Enter saves, Escape leaves it); clearing
+ * the name gives back the space and the day here and the meeting's kind on the Meetings tab.
+ */
+function MeetingName(props: { meetingId: string; title: string | null; kindName: string; onSaved: (title: string | null) => void; children: React.ReactNode }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const start = () => {
+    setDraft(props.title ?? "");
+    setEditing(true);
+  };
+  const save = async () => {
+    setEditing(false);
+    const next = draft.replace(/\s+/g, " ").trim();
+    if (next === (props.title ?? "")) return;
+    try {
+      const out = await api.renameMeeting(props.meetingId, next);
+      props.onSaved(out.title);
+    } catch (err) {
+      errorToast("Couldn't rename the meeting")(err);
+    }
+  };
+  if (editing)
+    return (
+      <h1 className="rc-title editing">
+        <input
+          className="rc-title-input"
+          autoFocus
+          value={draft}
+          maxLength={80}
+          placeholder={props.kindName === "Meeting" ? "Name this meeting" : props.kindName}
+          aria-label="Meeting name"
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void save()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") setEditing(false);
+          }}
+        />
+      </h1>
+    );
+  return (
+    <h1 className="rc-title">
+      <button type="button" className="rc-title-btn" title="Rename" onClick={start}>
+        {props.title ?? props.children}
+        <span className="rc-title-edit" aria-hidden>
+          <EditIcon size={16} />
+        </span>
+      </button>
+    </h1>
+  );
 }

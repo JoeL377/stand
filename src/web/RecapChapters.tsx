@@ -130,6 +130,7 @@ export function FromChip({ from }: { from: NoteFrom }) {
               <span className={`rc-ch-dot ${c.outcome}`} aria-hidden />
               {o.label} · {fmtDate(from.startedAt)} · {clock(c.at - from.startedAt)} · {c.minutes} min
             </span>
+            {from.title && <span className="rc-pop-meta">In {from.title}</span>}
             {c.crux && (
               <span className="rc-pop-crux">
                 {c.crux}
@@ -137,7 +138,7 @@ export function FromChip({ from }: { from: NoteFrom }) {
             )}
           </>
         ) : (
-          <span className="rc-pop-meta">{from.chat ? "Chat" : "Meeting"} on {fmtDate(from.startedAt)}</span>
+          <span className="rc-pop-meta">{from.title ?? (from.chat ? "Chat" : "Meeting")} on {fmtDate(from.startedAt)}</span>
         )}
       </span>
     </span>

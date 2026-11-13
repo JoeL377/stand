@@ -73,7 +73,7 @@ export function taskRoutes(app: Express, ctx: Services) {
       const detail: TaskDetail = {
         note,
         roomId,
-        meeting: m && !m.added ? { id: m.id, startedAt: m.startedAt, ...(m.chat ? { chat: true } : {}) } : null,
+        meeting: m && !m.added ? { id: m.id, startedAt: m.startedAt, ...(m.chat ? { chat: true } : {}), ...(m.title ? { title: m.title } : {}) } : null,
         work: workOf(n, db.notesUpdates([n.id]), db.noteWorkShots([n.id]), true),
         waitsOn: linked(links.filter((l) => l.fromId === n.id).map((l) => l.toId)),
         blocking: linked(links.filter((l) => l.toId === n.id).map((l) => l.fromId)),

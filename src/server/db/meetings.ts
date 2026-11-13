@@ -42,6 +42,10 @@ export function meetingsStore(db: DatabaseSync) {
     meetingEnding(id: string) {
       db.prepare("UPDATE meetings SET end_requested_at = COALESCE(end_requested_at, ?) WHERE id = ?").run(Date.now(), id);
     },
+    /** Names a meeting; null or blank goes back to the name its kind gives it. */
+    setMeetingTitle(id: string, title: string | null) {
+      db.prepare("UPDATE meetings SET title = ? WHERE id = ?").run(title?.trim() || null, id);
+    },
     setMeetingHost(id: string, hostId: string | null) {
       db.prepare("UPDATE meetings SET host_id = ? WHERE id = ?").run(hostId, id);
     },
@@ -88,6 +92,8 @@ export function meetingsStore(db: DatabaseSync) {
         /** Someone ended it; until endedAt is set the recap is still being written. */
         endRequestedAt: (r.end_requested_at as number) ?? null,
         summary: (r.summary as string) ?? null,
+        /** The name someone gave it; null keeps the name its kind gives it. */
+        title: (r.title as string) ?? null,
         /** What the space's synthesis instructions asked for, as Markdown; null without instructions. */
         synthesis: (r.synthesis as string) ?? null,
         /** What the recap wrote about each chapter. */
@@ -216,7 +222,7 @@ export function meetingsStore(db: DatabaseSync) {
       return (
         db
           .prepare(
-            `SELECT m.id, m.started_at, m.ended_at, m.summary,
+            `SELECT m.id, m.started_at, m.ended_at, m.summary, m.title,
                (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'action') AS todos,
                (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'decision') AS decided,
                (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'question') AS open
@@ -230,6 +236,7 @@ export function meetingsStore(db: DatabaseSync) {
         startedAt: r.started_at as number,
         endedAt: r.ended_at as number,
         summary: (r.summary as string) ?? null,
+        title: (r.title as string) ?? null,
         todos: r.todos as number,
         decided: r.decided as number,
         open: r.open as number,
