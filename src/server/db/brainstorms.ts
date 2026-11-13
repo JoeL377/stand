@@ -1,7 +1,7 @@
 // Brainstorms and design sessions (brainstorm.ts, designSession.ts).
 import type { DatabaseSync } from "node:sqlite";
 import type { BrainNode, DesignContext, DesignDiagram } from "../../shared/protocol.ts";
-import type { BrainstormRow } from "../brainstorm.ts";
+import type { BrainstormRow, SketchState } from "../brainstorm.ts";
 import { newId } from "../ids.ts";
 import { type Row, toBrainstorm } from "./rows.ts";
 
@@ -82,6 +82,11 @@ export function brainstormsStore(db: DatabaseSync) {
     },
     saveBrainstormSpans(id: string, spans: Array<[number, number]>) {
       db.prepare("UPDATE brainstorms SET spans_json = ? WHERE id = ?").run(JSON.stringify(spans), id);
+    },
+    /** A sketch's subjects (sketch.ts). The first one's diagram is kept in diagram_json, not here. */
+    saveBrainstormSketch(id: string, sketch: SketchState) {
+      const slim = { ...sketch, subjects: sketch.subjects.map((s, i) => (i === 0 ? { ...s, diagram: null } : s)) };
+      db.prepare("UPDATE brainstorms SET sketch_json = ? WHERE id = ?").run(JSON.stringify(slim), id);
     },
     saveBrainstormMap(id: string, nodes: BrainNode[]) {
       db.prepare("UPDATE brainstorms SET map_json = ? WHERE id = ?").run(JSON.stringify(nodes), id);

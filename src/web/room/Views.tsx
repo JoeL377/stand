@@ -1,21 +1,24 @@
-// The views beside the call's board: the topic card, the map of what the talk came up with, its
-// words, or a design session's diagram. Each person picks theirs; nothing else in the call changes.
+// The views beside the call's board: the topic card, or the sketch (Sketch.tsx), the one place Stand
+// draws what the talk is working out, as a map or a diagram per subject. Each person picks theirs;
+// nothing else in the call changes.
 
-import { useState, type ReactNode } from "react";
-import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { UNTITLED_DESIGN, type BrainstormSummary, type BrainstormView } from "../../shared/protocol.ts";
+import { api } from "../api.ts";
+import { CopyForAgent } from "../CopyForAgent.tsx";
 import { brainstormHref } from "../pages/BrainstormPage.tsx";
-import { BrainMap } from "./BrainMap.tsx";
-import { BrainWords } from "./BrainWords.tsx";
-import { BrainOutline } from "./BrainOutline.tsx";
-import { DesignBoard } from "./DesignBoard.tsx";
+import { errorToast } from "../Toasts.tsx";
+import { SketchBoard, StyleChip, shownSubjects, subjectCount, type SketchActs } from "./Sketch.tsx";
 
-export type ViewTab = "card" | "map" | "words" | "diagram";
+export type ViewTab = "card" | "sketch";
+
+/** A pane from before the sketch (a presenter on an older page, a saved view) is the sketch now. */
+export const viewOf = (pane: string | undefined): ViewTab => (!pane || pane === "card" ? "card" : "sketch");
 
 const PILLS: Array<{ key: ViewTab; label: string }> = [
   { key: "card", label: "Card" },
-  { key: "map", label: "Map" },
-  { key: "words", label: "Words" },
-  { key: "diagram", label: "Diagram" },
+  { key: "sketch", label: "Sketch" },
 ];
 
 export function ViewPane(props: {
@@ -25,32 +28,28 @@ export function ViewPane(props: {
   tabs: boolean;
   card: ReactNode;
   brainstorm: BrainstormView | null | undefined;
-  /** The other maps and diagrams of this call. */
+  /** The sketch that was just stopped in this call, for its wrap-up. */
+  stopped?: BrainstormView | null;
+  onWrapUpClose?: () => void;
+  /** The other sketches of this call. */
   others: BrainstormSummary[];
   roomId: string;
-  /** The board's thread on screen: the topic a map can be drawn of. */
-  topic: { id: string; title: string } | null;
-  onRemove?: (id: string) => void;
-  onKeep?: (id: string) => void;
-  onDrop?: (id: string) => void;
-  onDraw?: () => void;
-  onDrawDiagram?: () => void;
-  onOpen?: () => void;
+  acts?: SketchActs;
+  /** Opens the sketch: Stand draws from the last two minutes on. */
+  onStart?: () => void;
   onStop?: () => void;
-  /** On a phone the map opens as a list, with the picture a tap away. */
+  /** The subject on this screen (null follows the talk), the presenter's until you pick your own. */
+  subject: string | null;
+  onSubject: (id: string | null) => void;
+  /** The last line said in the call. */
+  heard?: { speaker: string; text: string } | null;
+  /** On a phone the sketch opens as a list, with the picture a tap away. */
   phone?: boolean;
 }) {
-  const [picture, setPicture] = useState(false);
+  const [picked, setPicked] = useState<"picture" | "list" | null>(null);
+  const as = picked ?? (props.phone ? "list" : "picture");
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
-  const map = live && !live.design ? live : null;
-  const diagram = live?.design ? live : null;
   const view = props.tabs ? props.view : "card";
-  const drawing = (key: ViewTab) => (key === "map" && !!map) || (key === "diagram" && !!diagram);
-  const maps = props.others.filter((b) => !b.design);
-  const stopped = props.topic && maps.some((b) => b.threadId === props.topic!.id);
-  const stop = (what: string, kept: string) => () => {
-    if (confirm(`Stop drawing the ${what}? The call goes on, and ${kept}.`)) props.onStop?.();
-  };
   return (
     <div className="view-pane">
       {props.tabs && (
@@ -59,112 +58,148 @@ export function ViewPane(props: {
             {PILLS.map((p) => (
               <button key={p.key} type="button" className={`rp-pill${view === p.key ? " on" : ""}`} aria-pressed={view === p.key} onClick={() => props.onView(p.key)}>
                 {p.label}
-                {drawing(p.key) && view !== p.key && <i className="view-dot" title={`A ${p.key} is being drawn`} aria-label={`A ${p.key} is being drawn`} />}
+                {p.key === "sketch" && live && view !== "sketch" && <i className="view-dot" title="Stand is sketching" aria-label="Stand is sketching" />}
               </button>
             ))}
           </span>
-          {props.phone && view === "map" && map && (
-            <span className="bp-views view-as" role="group" aria-label="Show the map as">
-              <button type="button" className={`rp-pill${picture ? "" : " on"}`} aria-pressed={!picture} onClick={() => setPicture(false)}>
-                List
-              </button>
-              <button type="button" className={`rp-pill${picture ? " on" : ""}`} aria-pressed={picture} onClick={() => setPicture(true)}>
+          {view === "sketch" && live && (
+            <span className="bp-views view-as" role="group" aria-label="Show the sketch as">
+              <button type="button" className={`rp-pill${as === "picture" ? " on" : ""}`} aria-pressed={as === "picture"} onClick={() => setPicked("picture")}>
                 Picture
+              </button>
+              <button type="button" className={`rp-pill${as === "list" ? " on" : ""}`} aria-pressed={as === "list"} onClick={() => setPicked("list")}>
+                List
               </button>
             </span>
           )}
-          {props.onStop && view === "map" && map && (
-            <button type="button" className="link muted view-stop" onClick={stop("map", "the map is kept on its page")} title="The map is kept on its page. The call goes on.">
+          <span className="rp-grow" />
+          {props.onStop && view === "sketch" && live && (
+            <button type="button" className="link muted view-stop" onClick={props.onStop} title="The sketch is kept on its page, and each diagram as a draft spec on a to-do. The call goes on.">
               Stop drawing
             </button>
           )}
-          {view === "map" && map && (
-            <a className="link muted view-stop" href={brainstormHref(props.roomId, map.id)} target="_blank" rel="noreferrer">
+          {view === "sketch" && live && !props.phone && (
+            <a className="link muted view-stop" href={brainstormHref(props.roomId, live.id)} target="_blank" rel="noreferrer">
               Open its page
             </a>
           )}
-          {view === "diagram" && diagram && (
-            <span className="view-what" dir="auto" title={diagram.prompt}>
-              {diagram.prompt}
-            </span>
-          )}
-          {props.onStop && view === "diagram" && diagram && (
-            <button type="button" className="link muted view-stop" onClick={stop("diagram", "it is saved as a draft spec on a to-do")} title="The diagram is saved as a draft spec on a to-do. The call goes on.">
-              Stop drawing
+        </div>
+      )}
+      {view !== "sketch" ? (
+        props.card
+      ) : live ? (
+        <SketchBoard brainstorm={live} acts={props.acts} phone={props.phone} as={as} subject={props.subject} onSubject={props.onSubject} heard={props.heard} />
+      ) : props.stopped ? (
+        <WrapUp sketch={props.stopped} roomId={props.roomId} onClose={props.onWrapUpClose} onAgain={props.onStart} />
+      ) : (
+        <div className="view-empty">
+          <p>Nothing sketched in this call yet.</p>
+          {props.onStart && (
+            <button type="button" className="primary" onClick={props.onStart}>
+              Start sketching
             </button>
+          )}
+          <p className="muted">Stand draws what you're working out while you talk, starting from the last two minutes.</p>
+          {props.others.length > 0 && (
+            <div className="view-maps">
+              <h4>Sketched in this call</h4>
+              <ul>
+                {props.others.map((b) => (
+                  <li key={b.id}>
+                    <a href={brainstormHref(props.roomId, b.id)} target="_blank" rel="noreferrer" dir="auto">
+                      {(b.subjects?.length ? b.subjects.map((s) => s.title) : [b.prompt]).map((t) => (t === UNTITLED_DESIGN ? "This call" : t)).join(" · ")}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}
-      {view === "map" ? (
-        map ? (
-          props.phone && !picture ? <BrainOutline brainstorm={map} /> : <BrainMap brainstorm={map} onRemove={props.onRemove} />
-        ) : (
-          <div className="view-empty">
-            {props.topic ? (
+    </div>
+  );
+}
+
+/** A sketch that was just stopped: what was kept, and the next step for each subject. A map goes to
+ *  an idea review; a diagram is already a draft spec on a to-do, which an agent can take from there. */
+function WrapUp(props: { sketch: BrainstormView; roomId: string; onClose?: () => void; onAgain?: () => void }) {
+  const b = props.sketch;
+  const [busy, setBusy] = useState(false);
+  const [review, setReview] = useState<string | null>(null);
+  useEffect(() => setReview(null), [b.id]);
+  const shown = shownSubjects(b)
+    .map((x) => ({ ...x, ...subjectCount(b, x.s, x.i) }))
+    .filter((x) => x.n > 0);
+  const ideas = shown.some((x) => x.s.style === "map");
+  const setUp = async () => {
+    setBusy(true);
+    try {
+      setReview((await api.setUpIdeaReview(props.roomId, b.id)).reviewId);
+    } catch (err) {
+      errorToast("Couldn't set up the idea review")(err);
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="view-empty sk-wrap">
+      <div className="sk-wrap-card">
+        <header>
+          <span className="agent-mark" aria-hidden>
+            ✦
+          </span>
+          <strong>{shown.length ? "Sketch saved" : "Nothing was sketched"}</strong>
+          <span className="rp-grow" />
+          {props.onClose && (
+            <button type="button" className="link muted" aria-label="Close" onClick={props.onClose}>
+              ✕
+            </button>
+          )}
+        </header>
+        {shown.map(({ s, n, word }) => (
+          <div key={s.id} className="sk-wrap-row">
+            <StyleChip subject={s} />
+            <span className="sk-wrap-name" dir="auto">
+              {s.title}
+            </span>
+            <span className="muted">
+              {n} {word}
+            </span>
+            <span className="rp-grow" />
+            {s.style === "diagram" && s.taskId && (
               <>
-                <p dir="auto">{stopped ? `The map of "${props.topic.title}" is stopped.` : `No map of "${props.topic.title}" yet.`}</p>
-                {props.onOpen && (
-                  <button type="button" className="primary" onClick={props.onOpen}>
-                    {stopped ? "Continue the map of this topic" : "Draw the map of this topic"}
-                  </button>
-                )}
-                <p className="muted">Stand reads what was said on this topic, and goes on while you talk.</p>
+                <Link className="rp-pill" to={`/ref/action/${s.taskId}`} target="_blank">
+                  Draft spec
+                </Link>
+                <span title="Hand to an agent">
+                  <CopyForAgent kind="action" id={s.taskId} label />
+                </span>
               </>
+            )}
+          </div>
+        ))}
+        <footer>
+          {ideas &&
+            (review ? (
+              <Link className="rp-pill" to={`/s/${props.roomId}/review/${review}`} target="_blank">
+                Idea review is set up ↗
+              </Link>
             ) : (
-              <>
-                <p>No map in this call yet.</p>
-                {props.onDraw && (
-                  <button type="button" className="primary" onClick={props.onDraw}>
-                    Draw a map
-                  </button>
-                )}
-                <p className="muted">Stand draws what is said from here on, while you talk.</p>
-              </>
-            )}
-            {maps.length > 0 && (
-              <div className="view-maps">
-                <h4>Maps in this call</h4>
-                <ul>
-                  {maps.map((b) => (
-                    <li key={b.id}>
-                      <a href={brainstormHref(props.roomId, b.id)} target="_blank" rel="noreferrer" dir="auto">
-                        {b.prompt}
-                      </a>
-                      <span className="muted">
-                        {b.ideas} {b.ideas === 1 ? "idea" : "ideas"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )
-      ) : view === "words" ? (
-        map ? (
-          <BrainWords brainstorm={map} />
-        ) : (
-          <div className="view-empty">
-            <p className="muted">No map in this call yet, so no words either.</p>
-          </div>
-        )
-      ) : view === "diagram" ? (
-        diagram ? (
-          <DesignBoard brainstorm={diagram} onKeep={props.onKeep} onDrop={props.onDrop} />
-        ) : (
-          <div className="view-empty">
-            <p>No diagram in this call yet.</p>
-            {props.onDrawDiagram && (
-              <button type="button" className="primary" onClick={props.onDrawDiagram}>
-                Draw a diagram
+              <button type="button" className="primary" disabled={busy} onClick={() => void setUp()} title="A review with one slide per idea, the starred ones first">
+                {busy ? "Setting up…" : "Review ideas"}
               </button>
-            )}
-            <p className="muted">Stand draws the parts and how they relate from what is said, while you talk.</p>
-          </div>
-        )
-      ) : (
-        props.card
-      )}
+            ))}
+          {shown.length > 0 && (
+            <a className="link" href={brainstormHref(props.roomId, b.id)} target="_blank" rel="noreferrer">
+              Open its page
+            </a>
+          )}
+          {props.onAgain && (
+            <button type="button" className="link muted" onClick={props.onAgain}>
+              Start a new sketch
+            </button>
+          )}
+        </footer>
+      </div>
     </div>
   );
 }

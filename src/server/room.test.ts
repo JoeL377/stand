@@ -1402,8 +1402,8 @@ test("a brainstorm's map is drawn from the call's talk beside the board, and is 
   const maps = sent.flatMap((m) => (m.type === "brainstorm" ? [m.brainstorm] : []));
   assert.equal(maps.at(-1)!.nodes.length, 2);
   // Anyone takes a circle off; it leaves the map everyone sees.
-  const inner = session as unknown as { brain: { map: { remove(id: string): boolean } }; saveBrainstorm(): void };
-  assert.equal(inner.brain.map.remove("i1"), true);
+  const inner = session as unknown as { brain: { map: { map: { remove(id: string): boolean } } }; saveBrainstorm(): void };
+  assert.equal(inner.brain.map.map.remove("i1"), true);
   inner.saveBrainstorm();
   assert.deepEqual(maps.length && sent.flatMap((m) => (m.type === "brainstorm" ? [m.brainstorm] : [])).at(-1)!.nodes.map((n) => n.id), ["d1"]);
   await session.end();
@@ -1641,47 +1641,50 @@ async function onTopics() {
   return { db, room, session, joe, inner, talk, move, fresh, back, say: say_, boardAsked, mapAsked };
 }
 
-test("the map of a topic is drawn from every line of that topic, those said before it was opened too", async () => {
+test("a sketch opened on a topic is named after it, and starts with the last two minutes already drawn", async () => {
   const { db, room, session, inner, talk, move, fresh, say, mapAsked } = await onTopics();
   talk(0, "we could charge per seat", "or a free tier for small teams");
   await move(fresh("Pricing"));
-  talk(60_000, "onboarding could start with a welcome video", "or a sample space");
+  session.addSpeech("u1", "Joe", "onboarding could start with a welcome video", Date.now() - 40_000);
+  session.addSpeech("u2", "Huy", "or a sample space", Date.now() - 30_000);
   await move(fresh("Onboarding"));
   await say({ type: "view.open" });
-  const map = db.brainstormLive(room.id)!;
-  assert.deepEqual([map.prompt, map.threadId, map.meetingId, map.startedBy], ["Onboarding", "t2", session.meetingId, "Joe"]);
+  const sketch = db.brainstormLive(room.id)!;
+  assert.deepEqual([sketch.prompt, sketch.threadId, sketch.meetingId, sketch.startedBy], ["Onboarding", null, session.meetingId, "Joe"]);
   await inner.mapPasses.run();
   assert.equal(mapAsked.length, 1);
   assert.match(mapAsked[0], /The centre of the map: Onboarding/);
-  assert.match(mapAsked[0], /welcome video/);
-  assert.doesNotMatch(mapAsked[0], /charge per seat/);
+  assert.match(mapAsked[0], /welcome video/, "what was said just before it was opened is on it");
+  assert.doesNotMatch(mapAsked[0], /charge per seat/, "talk from long before is not");
   await session.end();
 });
 
-test("a topic's map keeps drawing when the board moves: the same map goes on, and a stopped map stays stopped", async () => {
-  const { db, room, session, joe, inner, talk, move, fresh, back, say, boardAsked, mapAsked } = await onTopics();
+test("a sketch keeps drawing when the board moves; once stopped it stays stopped, and opening again starts a new one", async () => {
+  const { db, room, session, joe, inner, talk, move, fresh, back, say, mapAsked } = await onTopics();
   talk(0, "we could charge per seat", "or a free tier for small teams");
   await move(fresh("Pricing"));
-  talk(60_000, "onboarding could start with a welcome video", "or a sample space");
+  session.addSpeech("u1", "Joe", "onboarding could start with a welcome video", Date.now() - 40_000);
+  session.addSpeech("u2", "Huy", "or a sample space", Date.now() - 30_000);
   await move(fresh("Onboarding"));
-  assert.ok(boardAsked.every((c) => !c.includes("is brainstorming")));
   await say({ type: "view.open" });
+  assert.equal(db.brainstormLive(room.id)?.prompt, "Onboarding");
   const id = db.brainstormLive(room.id)!.id;
   await inner.mapPasses.run();
   assert.deepEqual(db.getBrainstorm(id)!.nodes.map((n) => n.label), ["Idea 1"]);
   assert.doesNotMatch(mapAsked.at(-1)!, /board's current topic/);
 
-  // The board is told while the topic's map draws on it.
-  talk(120_000, "the video should be short", "and skippable");
+  // The board moved on, and the sketch didn't: it is still the one drawing, and nothing else started.
+  session.addSpeech("u1", "Joe", "the video should be short", Date.now() - 20_000);
+  session.addSpeech("u2", "Huy", "and skippable", Date.now() - 15_000);
   await move(back("t1", "Pricing"));
-  assert.match(boardAsked.at(-1)!, /The group is brainstorming "Onboarding". Ideas for it belong to this thread\./);
-  // The board moved on, and the map didn't: it is still the one drawing, and nothing else started.
-  assert.equal(db.brainstormLive(room.id)?.id, id, "the map goes on across topics");
+  assert.equal(db.brainstormLive(room.id)?.id, id, "the sketch goes on across topics");
   const sent = joe.got.flatMap((m) => (m.type === "brainstorm" ? [m] : [])).at(-1)!;
   assert.equal(sent.brainstorm?.id, id);
-  assert.equal(db.brainstormsOfMeeting(session.meetingId).length, 1, "no second map");
+  // Opening it again while it draws is the same sketch.
+  await say({ type: "view.open" });
+  assert.equal(db.brainstormsOfMeeting(session.meetingId).length, 1, "no second sketch");
 
-  // What is said on the new topic reaches the same map, which is told the talk moved.
+  // What is said on the new topic reaches the same sketch, which is told the talk moved.
   await new Promise((r) => setTimeout(r, 5));
   session.addSpeech("u1", "Joe", "pricing again: per seat is simpler", Date.now());
   session.addSpeech("u2", "Huy", "yes per seat", Date.now());
@@ -1691,14 +1694,17 @@ test("a topic's map keeps drawing when the board moves: the same map goes on, an
 
   await say({ type: "view.stop" });
   assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
-  talk(200_000, "onboarding once more", "the sample space");
+  const stopped = joe.got.flatMap((m) => (m.type === "brainstorm" ? [m] : [])).at(-1)!;
+  assert.deepEqual([stopped.brainstorm, stopped.stopped?.id], [null, id], "everyone gets what was kept, for the wrap-up");
+  session.addSpeech("u1", "Joe", "onboarding once more", Date.now());
+  session.addSpeech("u2", "Huy", "the sample space", Date.now());
   await move(back("t2", "Onboarding"));
-  assert.equal(db.brainstormLive(room.id), null, "a stopped map doesn't go on by itself");
+  assert.equal(db.brainstormLive(room.id), null, "a stopped sketch doesn't go on by itself");
   await say({ type: "view.open" });
-  assert.equal(db.brainstormLive(room.id)?.id, id, "opening it again goes on with the same map");
+  assert.notEqual(db.brainstormLive(room.id)?.id, id, "opening again starts a new one; the stopped one is kept as it was");
+  assert.equal(db.getBrainstorm(id)!.status, "done");
 
   await session.end();
-  assert.notEqual(db.getBrainstorm(id)!.endedAt, null);
 });
 
 test("a map started with a typed topic hears the board's topic too, so talk that moves on can start a cluster", async () => {
@@ -1742,7 +1748,7 @@ test("a diagram whose model gives no answer says so in the call, and one that he
   await session.end();
 });
 
-test("opening a topic's map while a diagram draws saves the diagram's draft spec first", async () => {
+test("opening the sketch while one draws is the same sketch: a diagram that is drawing is not stopped", async () => {
   const { startBrainstorm } = await import("./brainstorm.ts");
   const { parseSeed } = await import("./designSession.ts");
   const { db, room, session, talk, move, fresh, say } = await onTopics();
@@ -1751,10 +1757,12 @@ test("opening a topic's map while a diagram draws saves the diagram's draft spec
   talk(0, "we could charge per seat", "or a free tier for small teams");
   await move(fresh("Pricing"));
   await say({ type: "view.open" });
+  assert.equal(db.brainstormLive(room.id)?.id, diagram.id);
+  // Stop drawing saves each diagram on it as a draft spec on a to-do.
+  await say({ type: "view.stop" });
   const saved = db.getBrainstorm(diagram.id)!;
   assert.equal(saved.status, "done");
   assert.match(db.notePlan(saved.taskId!)!.text, /^# Stand's primitives\n/);
-  assert.equal(db.brainstormLive(room.id)?.prompt, "Pricing");
   await session.end();
 });
 

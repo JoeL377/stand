@@ -147,7 +147,7 @@ test("a brainstorm adds nothing to the agenda, and keeps its page after the call
   assert.equal(starIdea(db, other.id, next.id, "i1", true), null);
   assert.deepEqual(brainstormPage(db, room.id, next.id)!.starred, ["i1"]);
   assert.equal(starIdea(db, room.id, next.id, "i1", false)!.starred, undefined);
-  assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, threadId: null, directions: 1, ideas: 1 });
+  assert.deepEqual(brainstormOfMeeting(db, m.id), { id: next.id, prompt: "Pricing", status: "done", startedAt: T0 + 10, meetingId: m.id, threadId: null, directions: 1, ideas: 1, subjects: [{ id: "s0", title: "Pricing", style: "map", count: 1 }] });
 });
 
 test("a brainstorm running from before maps were views lets go of its agenda item", () => {

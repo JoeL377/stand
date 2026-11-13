@@ -20,8 +20,8 @@ export const MAX_BOXES = 24;
 export const MAX_ARROWS = 40;
 export const MAX_GROUPS = 8;
 export { UNTITLED_DESIGN as UNTITLED };
-/** Suggestions waiting on the room at once: past this the board stops being calm, so new ones wait. */
-export const MAX_WAITING = 8;
+/** Boxes one pass may add: past this the board stops being calm, so the rest wait for the next pass. */
+export const MAX_AT_ONCE = 8;
 const MAX_POINTS = 8;
 export const SEED_MAX = 20_000;
 
@@ -80,9 +80,9 @@ export type DiagramAnswer = z.infer<typeof DiagramAnswerSchema>;
 
 export const DIAGRAM_SYSTEM = `You keep the diagram on the middle screen of a live design session. The team is designing something by talking it through, and the diagram is their design so far. It can be a design of anything: a product or a system, but as often a process, a plan, a pitch, a pricing model, an event, how a team works. Take the subject as it comes and never bend it toward software. Each box is one thing in the design (for a process: a step, a role, a decision, a goal, a document; for software also a screen, a record, a service), and each arrow says in a few words how one box relates to another. Everyone looks at it while they talk, so it has to be right and it has to stay calm.
 
-What you add shows as a suggestion, dashed, until someone in the room keeps it. So suggest only what the team has actually said, and suggest little: once the diagram has a few boxes, an answer with nothing in it is the usual one.
+What you add joins the diagram at once, in front of everyone, and anyone in the room can take it off with one click. So add only what the team has actually said, and add little: once the diagram has a few boxes, an answer with nothing in it is the usual one.
 
-While the diagram is empty, don't wait for a formal design: the room opened it to see something. As soon as someone describes how things fit together, even as an example ("say a signup form feeds the CRM, and sales gets an alert"), suggest those parts and how they relate. They stay suggestions until someone keeps them, so a first draft costs nothing.
+While the diagram is empty, don't wait for a formal design: the room opened it to see something. As soon as someone describes how things fit together, even as an example ("say a signup form feeds the CRM, and sales gets an alert"), add those parts and how they relate. A first draft costs little: what is wrong comes off with a click.
 
 Each time you get the diagram so far, with ids, and the last couple of minutes of transcript. Lines marked NEW are the ones you haven't seen yet. Return only what the NEW lines add. You never rename, move or remove anything: the room does that.
 
@@ -91,8 +91,7 @@ Each time you get the diagram so far, with ids, and the last couple of minutes o
 - Every box has a kind, so the diagram is more than a wall of boxes: say what sort of thing it is, and use thing only when nothing else fits. Use screen, store and service only when the team is designing software; for anything else the other kinds are enough.
 - A group holds boxes that belong to the same area of the design (the same flow, the same side of a system, the same question). Three boxes about one area with no arrows between them should share a group. Reuse a group that is there before naming a new one, keep to a handful of groups, and never make a group for one box. place puts a box that is already on the diagram into a group; it never takes one out of the group it is in.
 - extend is for what the talk adds to a box that is there: a field it has, a rule, a limit, a concern, a decision about it.
-- Lines marked (suggested) are waiting on the room. Don't suggest them again, and don't build on them unless the talk does.
-- Things under "Dropped by the team" were refused. Never suggest them again.
+- Things under "Dropped by the team" were taken off. Never add them again.
 - A session can start with no topic. When "What the team is designing" says it isn't named yet, return topic as soon as the talk makes clear what the design is of, in the team's words; until then, and whenever the session has a topic, topic is null.
 - by is the first name of the person who said it, matched to the people in the meeting.
 - The caught list is the meeting's to-dos, decisions and open questions. When one is clearly about a box and isn't linked to it yet, link it in caught.
@@ -317,6 +316,85 @@ export class DiagramKeeper {
     return { boxes: this.boxes, arrows: this.arrows, ...(this.groups.length ? { groups: this.groups } : {}) };
   }
 
+  /** The time of the last line a pass has read. */
+  get readTo() {
+    return this.lastLook;
+  }
+
+  /** Someone renamed a box, or reworded an arrow. Returns what it said before. */
+  rename(id: string, label: string): string | null {
+    const b = this.boxes.find((x) => x.id === id && !x.removed);
+    if (b) {
+      const text = tidy(label, 48);
+      if (!text || text === b.label) return null;
+      const was = b.label;
+      b.label = text;
+      return was;
+    }
+    const a = this.arrows.find((x) => x.id === id && !x.removed);
+    const text = tidy(label, 40);
+    if (!a || text === a.label) return null;
+    const was = a.label;
+    a.label = text;
+    return was;
+  }
+
+  /** Someone added a box by hand or by asking Stand. `before` / `after`: a box it sits next to in
+   *  the flow: what led to that box leads to the new one (or the new one leads on to what that box
+   *  led to), and one arrow joins the two. Returns the box and the arrows it made or turned. */
+  add(label: string, kind: DesignKind | null, by: string | null, now: number, next?: { before?: string; after?: string }): { box: DesignBox; made: string[]; turned: Array<{ id: string; from: string; to: string }> } | null {
+    const text = tidy(label, 48);
+    if (!text || this.boxes.some((b) => !b.removed && same(b.label, text)) || this.boxes.filter((b) => !b.removed).length >= MAX_BOXES) return null;
+    const anchor = this.boxes.find((b) => b.id === (next?.before ?? next?.after) && !b.removed) ?? null;
+    const box: DesignBox = { id: `b${++this.nb}`, label: text, detail: null, by: first(by), ts: now, quote: null, points: [], caught: [] };
+    if (kind && kind !== "thing") box.kind = kind;
+    if (anchor?.group) box.group = anchor.group;
+    this.boxes.push(box);
+    const made: string[] = [];
+    const turned: Array<{ id: string; from: string; to: string }> = [];
+    if (anchor) {
+      const before = !!next?.before;
+      for (const a of this.arrows) {
+        if (a.removed) continue;
+        // In front of the anchor: what came into it comes into the new box. Behind it: what left it leaves the new box.
+        if (before && a.to === anchor.id && a.from !== anchor.id) (turned.push({ id: a.id, from: a.from, to: a.to }), (a.to = box.id));
+        else if (!before && a.from === anchor.id && a.to !== anchor.id) (turned.push({ id: a.id, from: a.from, to: a.to }), (a.from = box.id));
+      }
+      const arrow: DesignArrow = { id: `a${++this.na}`, from: before ? box.id : anchor.id, to: before ? anchor.id : box.id, label: "", by: first(by), ts: now, quote: null };
+      this.arrows.push(arrow);
+      made.push(arrow.id);
+    }
+    return { box, made, turned };
+  }
+
+  /** Takes add back. */
+  unadd(done: { box: DesignBox; made: string[]; turned: Array<{ id: string; from: string; to: string }> }) {
+    this.boxes = this.boxes.filter((b) => b.id !== done.box.id);
+    this.arrows = this.arrows.filter((a) => !done.made.includes(a.id));
+    for (const t of done.turned) {
+      const a = this.arrows.find((x) => x.id === t.id);
+      if (a) ((a.from = t.from), (a.to = t.to));
+    }
+  }
+
+  /** drop, saying what went: the box and its arrows, or the arrow. */
+  take(id: string): string[] {
+    const b = this.boxes.find((x) => x.id === id && !x.removed);
+    if (b) {
+      const gone = [b.id, ...this.arrows.filter((a) => !a.removed && (a.from === id || a.to === id)).map((a) => a.id)];
+      this.drop(id);
+      return gone;
+    }
+    return this.drop(id) ? [id] : [];
+  }
+
+  /** Puts back what take took off. */
+  restore(ids: string[]): boolean {
+    let changed = false;
+    for (const x of [...this.boxes, ...this.arrows]) if (ids.includes(x.id) && x.removed) (delete x.removed, (changed = true));
+    return changed;
+  }
+
   unreadSince(segments: Segment[]): number | null {
     return segments.find((s) => s.ts > this.lastLook && this.inScope(s))?.ts ?? null;
   }
@@ -393,7 +471,8 @@ export class DiagramKeeper {
     if (this.prompt === UNTITLED_DESIGN && topic) ((this.prompt = topic), (changed = true));
     const segOf = (n: number) => shown[Math.min(shown.length, Math.max(firstNew - from + 1, n)) - 1];
     const quote = (s: Segment) => ({ segmentId: s.id, ts: s.ts, speaker: s.speakerName, text: clip(s.text, 400) });
-    const waiting = () => this.boxes.filter((b) => b.suggested && !b.removed).length + this.arrows.filter((x) => x.suggested && !x.removed).length;
+    /** Boxes this pass has put on the diagram: no more than a few arrive at once (a long catch-up aside). */
+    let added = 0;
     /** The group of that name: one that is there, or a new one while there is room. */
     const groupOf = (raw: string | null | undefined): DesignGroup | null => {
       const label = tidy(raw ?? "", 40);
@@ -416,18 +495,19 @@ export class DiagramKeeper {
       }
       // One that is there, or that the room dropped, isn't suggested again; arrows still find the one that is there.
       const had = this.boxes.find((b) => same(b.label, label) || similar(b.label, label));
-      if (had || this.boxes.filter((b) => !b.removed).length >= MAX_BOXES || waiting() >= MAX_WAITING) {
+      if (had || this.boxes.filter((b) => !b.removed).length >= MAX_BOXES || added >= MAX_AT_ONCE) {
         fresh.push(had && !had.removed ? had.id : "");
         continue;
       }
       const seg = segOf(x.line);
-      const b: DesignBox = { id: `b${++this.nb}`, label, detail: clip(x.detail.trim(), 240) || null, by: first(x.by), ts: seg.ts, quote: quote(seg), points: [], caught: [], suggested: true };
+      const b: DesignBox = { id: `b${++this.nb}`, label, detail: clip(x.detail.trim(), 240) || null, by: first(x.by), ts: seg.ts, quote: quote(seg), points: [], caught: [] };
       const kind = x.kind?.trim().toLowerCase() as DesignKind;
       if (kind && kind !== "thing" && DESIGN_KINDS.includes(kind)) b.kind = kind;
       const g = groupOf(x.group);
       if (g) b.group = g.id;
       this.boxes.push(b);
       fresh.push(b.id);
+      added++;
       changed = true;
     }
     const end = (ref: string) => {
@@ -440,9 +520,9 @@ export class DiagramKeeper {
       if (!f || !t) continue;
       // The same pair is joined once, whichever way it was drawn or dropped.
       if (this.arrows.some((y) => (y.from === f.id && y.to === t.id) || (y.from === t.id && y.to === f.id))) continue;
-      if (this.arrows.filter((y) => !y.removed).length >= MAX_ARROWS || waiting() >= MAX_WAITING + 4) continue;
+      if (this.arrows.filter((y) => !y.removed).length >= MAX_ARROWS) continue;
       const seg = segOf(x.line);
-      this.arrows.push({ id: `a${++this.na}`, from: f.id, to: t.id, label: tidy(x.label, 40), by: first(x.by), ts: seg.ts, quote: quote(seg), suggested: true });
+      this.arrows.push({ id: `a${++this.na}`, from: f.id, to: t.id, label: tidy(x.label, 40), by: first(x.by), ts: seg.ts, quote: quote(seg) });
       changed = true;
     }
     for (const x of a.extend) {
@@ -570,17 +650,24 @@ const STAND: Actor = { kind: "stand", person: null };
  *  to save (no box was kept) or nowhere to put it. */
 export function saveDraftSpec(db: DB, b: BrainstormRow, caught: BrainCaught[]): string | null {
   if (b.kind !== "design" || !b.diagram) return null;
-  if (!shownDiagram(b.diagram).boxes.some((x) => !x.suggested)) return null;
-  let note = b.taskId ? db.getNote(b.taskId) : null;
+  const id = saveSpecOf(db, b, { prompt: b.prompt, diagram: b.diagram, taskId: b.taskId, context: b.context }, caught);
+  if (id && id !== b.taskId) db.setBrainstormTask(b.id, id);
+  return id;
+}
+
+/** One diagram of a sketch saved as a draft spec on its to-do; a diagram with no to-do gets one,
+ *  filed in the meeting the sketch ran in. Null when no box is on it, or there is nowhere to put it. */
+export function saveSpecOf(db: DB, b: BrainstormRow, of: { prompt: string; diagram: DesignDiagram; taskId: string | null; context: DesignContext[] }, caught: BrainCaught[]): string | null {
+  if (!shownDiagram(of.diagram).boxes.some((x) => !x.suggested)) return null;
+  let note = of.taskId ? db.getNote(of.taskId) : null;
   if (note && (note.roomId !== b.roomId || note.kind !== "action")) note = null;
   if (!note) {
     if (!b.meetingId) return null;
-    const made = db.addNote(b.meetingId, b.itemId, { kind: "action", text: clip(`Design: ${b.prompt}`, 200), owner: b.startedBy }, "Stand");
-    db.setBrainstormTask(b.id, made.id);
+    const made = db.addNote(b.meetingId, b.itemId, { kind: "action", text: clip(`Design: ${of.prompt}`, 200), owner: b.startedBy }, "Stand");
     note = db.getNote(made.id);
     if (!note) return null;
   }
-  const spec = draftSpec(b.prompt, b.diagram, caught, b.context);
+  const spec = draftSpec(of.prompt, of.diagram, caught, of.context);
   db.addPlan(b.roomId, note.id, spec, "Stand", STAND);
   db.addUpdate({
     roomId: b.roomId,
@@ -592,7 +679,7 @@ export function saveDraftSpec(db: DB, b: BrainstormRow, caught: BrainCaught[]): 
     client: null,
     actor: STAND,
     status: "plan",
-    text: `Draft spec from the design session "${clip(b.prompt, 100)}".`,
+    text: `Draft spec from the sketch of "${clip(of.prompt, 100)}".`,
     links: [],
   });
   planChanged(db, null, note);

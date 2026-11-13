@@ -116,6 +116,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [brainstorm, setBrainstorm] = useState<BrainstormView | null>(null);
   /** The other maps and diagrams of this call, oldest first. */
   const [brainstorms, setBrainstorms] = useState<BrainstormSummary[]>([]);
+  /** The sketch that was just stopped in this call, for its wrap-up; gone once another starts or it is closed. */
+  const [sketchStopped, setSketchStopped] = useState<BrainstormView | null>(null);
   /** What ✦ Stand has put on the board; null when the server runs no agent. */
   const [agentCards, setAgentCards] = useState<AgentCard[] | null>(null);
   /** Who pilots ✦ Stand, with its server times moved onto this computer's clock. */
@@ -230,6 +232,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
           case "brainstorm":
             setBrainstorm(msg.brainstorm);
             setBrainstorms(msg.others);
+            if (msg.brainstorm) setSketchStopped(null);
+            else if (msg.stopped) setSketchStopped(msg.stopped);
             break;
           case "agent":
             setAgentCards(msg.cards);
@@ -401,6 +405,8 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
     list,
     brainstorm,
     brainstorms,
+    sketchStopped,
+    closeSketchStopped: () => setSketchStopped(null),
     agentCards,
     pilot,
     notesBusy,

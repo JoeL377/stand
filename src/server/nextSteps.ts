@@ -110,7 +110,7 @@ export function suggestedNext(steps: NextStep[]): NextStep[] {
 /** The words on the card and in the recap. */
 export function nextLabel(s: Pick<NextStep, "kind" | "topic">): string {
   const on = s.topic ? `: ${s.topic}` : "";
-  if (s.kind === "map") return `Map${on}`;
-  if (s.kind === "diagram") return `Diagram${on}`;
+  // A map or a diagram someone asked for opens the sketch (sketch.ts), drawn that way to begin with.
+  if (s.kind === "map" || s.kind === "diagram") return `Sketch${on}`;
   return `${s.kind === "design-review" ? "Design review" : "Product review"}${on}`;
 }

@@ -2,8 +2,8 @@
 // labelled arrows for how they relate. A box has a kind (a person, a screen, a data store…) that
 // gives it a mark and a shape, and boxes that belong together sit in a group with a caption. Each
 // box shows its one line description, and what was said about it as notes under it; the Text pill
-// hides both. What Stand heard shows dashed, with Keep and Drop, and joins the diagram only when
-// someone keeps it. A click on a box or an arrow opens what's behind it, on your screen only.
+// hides both. What Stand hears joins the diagram at once (one from before that rule may still show
+// dashed, with Keep and Drop). A click on a box or an arrow opens what's behind it, on your screen only.
 // Context a session was given (MCP start_design_session) sits behind a Context button. In the call
 // it grows as the team talks; on the session's page it is the record.
 //
@@ -13,8 +13,8 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { AppWindow, CircleArrowRight, Database, FileText, Server, Split, Target, TriangleAlert, User } from "lucide-react";
-import type { BrainstormView, DesignArrow, DesignBox, DesignGroup, DesignKind } from "../../shared/protocol.ts";
-import { CaughtMarks, Face, KINDS, clock } from "./BrainMap.tsx";
+import type { BrainCaught, BrainstormView, DesignArrow, DesignBox, DesignGroup, DesignKind } from "../../shared/protocol.ts";
+import { CaughtMarks, EditRow, Face, KINDS, clock } from "./BrainMap.tsx";
 import { Markdown } from "../Markdown.tsx";
 import { NOTES_SHOWN, fitView, layoutDiagram, type Laid } from "./designLayout.ts";
 
@@ -33,7 +33,7 @@ const SORT: Record<DesignKind, { label: string; Icon: typeof User | null }> = {
 };
 
 /** What the boxes and arrows need from the board. */
-const Board = createContext<{ text: boolean; openId: string | null; pick: (id: string) => void; onKeep?: (id: string) => void; onDrop?: (id: string) => void }>({ text: true, openId: null, pick: () => {} });
+const Board = createContext<{ text: boolean; only?: BrainCaught["kind"] | null; openId: string | null; pick: (id: string) => void; onKeep?: (id: string) => void; onDrop?: (id: string) => void }>({ text: true, openId: null, pick: () => {} });
 
 type BoxNodeT = Node<{ box: DesignBox; body: number }, "box">;
 type GroupNodeT = Node<{ group: DesignGroup }, "frame">;
@@ -51,7 +51,7 @@ function BoxNode({ data }: NodeProps<BoxNodeT>) {
       <div
         role="button"
         tabIndex={0}
-        className={`design-box kind-${box.kind ?? "thing"}${box.suggested ? " suggested" : ""}${board.openId === box.id ? " on" : ""}`}
+        className={`design-box kind-${box.kind ?? "thing"}${box.suggested ? " suggested" : ""}${board.openId === box.id ? " on" : ""}${board.only && !box.caught.some((c) => c.kind === board.only) ? " dim" : ""}`}
         style={{ height: body }}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), board.pick(box.id))}
       >
@@ -176,7 +176,18 @@ const savedText = (): boolean | null => {
   }
 };
 
-export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: string) => void; onDrop?: (id: string) => void; className?: string }) {
+export function DesignBoard(props: {
+  brainstorm: BrainstormView;
+  onKeep?: (id: string) => void;
+  onDrop?: (id: string) => void;
+  /** On a sketch: a box or an arrow can be renamed. */
+  onRename?: (id: string, label: string) => void;
+  /** On a sketch the subject's name and the listening mark sit above the board, so the board leaves them out. */
+  bare?: boolean;
+  /** The kind picked on the sketch: boxes that caught none of it dim. */
+  only?: BrainCaught["kind"] | null;
+  className?: string;
+}) {
   const { brainstorm } = props;
   const design = brainstorm.design ?? { boxes: [], arrows: [] };
   const { boxes, arrows } = design;
@@ -261,14 +272,16 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
   }, [laid, brainstorm.design]);
   const openAt = laid?.boxes.find((p) => p.box.id === openId)?.x ?? laid?.arrows.find((p) => p.arrow.id === openId)?.x ?? 0;
   const view = laid && size.w ? fitView(laid, size, tall) : null;
-  const board = useMemo(() => ({ text, openId, pick, onKeep: props.onKeep, onDrop: props.onDrop }), [text, openId, props.onKeep, props.onDrop]);
+  const board = useMemo(() => ({ text, only: props.only, openId, pick, onKeep: props.onKeep, onDrop: props.onDrop }), [text, props.only, openId, props.onKeep, props.onDrop]);
 
   return (
-    <div className={`brain design${tall ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} onClick={() => (setOpenId(null), setShowContext(false))}>
+    <div className={`brain design${tall ? " narrow" : ""}${props.bare ? " bare" : ""}${props.className ? ` ${props.className}` : ""}`} onClick={() => (setOpenId(null), setShowContext(false))}>
       <div className="design-top">
-        <span className="design-what" dir="auto" title={brainstorm.prompt}>
-          {brainstorm.prompt}
-        </span>
+        {!props.bare && (
+          <span className="design-what" dir="auto" title={brainstorm.prompt}>
+            {brainstorm.prompt}
+          </span>
+        )}
         {context.length > 0 && (
           <button type="button" className={`design-context${showContext ? " on" : ""}`} onClick={(e) => (e.stopPropagation(), setOpenId(null), setShowContext((v) => !v))}>
             Context <i>{context.length}</i>
@@ -280,7 +293,7 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
           </button>
         )}
         {waiting > 0 && <span className="design-waiting">{waiting} {live ? "suggested" : "left as suggestions"}</span>}
-        {brainstorm.busy ? (
+        {props.bare ? null : brainstorm.busy ? (
           <span className="design-busy">Listening…</span>
         ) : (
           live && brainstorm.heard === "failed" && <span className="design-busy trouble">Stand couldn't read the talk just now</span>
@@ -295,7 +308,7 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
                 ? "Stand couldn't read the talk just now. It tries again as you talk."
                 : brainstorm.heard === "nothing"
                   ? "Stand is listening, and hasn't heard the parts of a design yet. Say what the parts are and how they connect."
-                  : "Start talking it through. What Stand hears shows here as suggestions, and joins the diagram when someone keeps it."}
+                  : "Start talking it through. What Stand hears joins the diagram as you go."}
           </p>
         ) : (
           laid && (
@@ -384,7 +397,9 @@ export function DesignBoard(props: { brainstorm: BrainstormView; onKeep?: (id: s
               <Said quote={openArrow!.quote} />
             </>
           )}
-          {props.onKeep && (
+          {props.onRename && live && !(openBox ?? openArrow)!.suggested ? (
+            <EditRow name={(openBox ?? openArrow)!.label ?? ""} onRename={(label) => props.onRename!(openId!, label)} onRemove={() => (props.onDrop?.(openId!), setOpenId(null))} />
+          ) : props.onKeep && (
             <footer className="design-foot">
               {(openBox ?? openArrow)!.suggested && (
                 <button type="button" className="primary" onClick={() => props.onKeep!(openId!)}>

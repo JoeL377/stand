@@ -576,6 +576,8 @@ export function Meeting(props: {
           board={room.board}
           brainstorm={room.brainstorm}
           brainstorms={room.brainstorms}
+          sketchStopped={room.sketchStopped}
+          onSketchStoppedClose={room.closeSketchStopped}
           list={room.list}
           agentCards={room.agentCards}
           notes={room.notes}
