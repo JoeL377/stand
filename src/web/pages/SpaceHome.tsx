@@ -520,7 +520,12 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
         )}
 
-        <section className={tab === "projects" ? "sh-panel tasks projects" : `sh-panel ${tab}`} role="tabpanel">
+        <section
+          className={tab === "projects" ? "sh-panel tasks projects" : `sh-panel ${tab}`}
+          role="tabpanel"
+          // The name column is as wide as the longest meeting name on the list, so short names keep their numbers close.
+          style={tab === "meetings" ? ({ "--sh-mname": `${Math.max(10, ...meetings.map((m) => (m.title ?? kindOf.get(m.id)?.name ?? "Meeting").length)) * 0.56 + 1}em` } as React.CSSProperties) : undefined}
+        >
           {tab === "chat" && <SpaceChat roomId={room.id} name={room.name} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
           {tab === "meetings" && (
             <>
