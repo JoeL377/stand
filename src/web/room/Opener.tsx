@@ -176,9 +176,6 @@ export function Opener(props: {
           // Once the talk has a topic of its own, Move on becomes the board's offer to switch to it.
           (props.next ? (
             <button type="button" className="topic-moving opener-next" onClick={acts.onClose} title="Switch the board to it now, for everyone">
-              <span className="agent-mark" aria-hidden>
-                ✦
-              </span>{" "}
               Looks like you've moved to <strong>{props.next}</strong>
               <span className="topic-moving-go" aria-hidden>
                 Switch →
@@ -200,13 +197,6 @@ export function Opener(props: {
       {deck && props.part !== "checkin" && (
         // In a meeting on a phone the opening line keeps to two lines until it's tapped.
         <p className={props.label || full ? "topic-summary" : "topic-summary clamped"} onClick={() => setFull(true)}>
-          {deck.by === "claude" && (
-            <>
-              <span className="agent-mark" aria-hidden>
-                ✦
-              </span>{" "}
-            </>
-          )}
           {deck.summary ?? `${deck.closed} ${deck.closed === 1 ? "task" : "tasks"} closed since the last meeting.`}
         </p>
       )}

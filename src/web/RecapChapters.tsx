@@ -89,9 +89,6 @@ export function ChapterChip({ c, i, startedAt, at, crux, onPick }: { c: MeetingC
         </span>
         {crux && (
           <span className="rc-pop-crux">
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>{" "}
             {crux}
           </span>
         )}
@@ -135,9 +132,6 @@ export function FromChip({ from }: { from: NoteFrom }) {
             </span>
             {c.crux && (
               <span className="rc-pop-crux">
-                <span className="agent-mark" aria-hidden>
-                  ✦
-                </span>{" "}
                 {c.crux}
               </span>
             )}
@@ -329,9 +323,6 @@ function ChapterRow(props: {
       <div className="rc-ch-body">
         {props.crux?.crux && (
           <p className="rc-ch-crux">
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>{" "}
             {props.crux.crux}
           </p>
         )}

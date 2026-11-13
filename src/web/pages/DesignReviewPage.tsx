@@ -216,7 +216,7 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
         {spec.requestedBy ? `Review requested by ${spec.requestedBy}. ` : ""}
         {mine ? "You prepare this spec: what each slide says, and which sections and questions go to the call." : "Comment on a passage of the spec to add a question. Its author prepares the slides."}
       </p>
-      {brief.status === "writing" && <p className="dr-note" role="status">✦ Stand is writing the slides from the spec…</p>}
+      {brief.status === "writing" && <p className="dr-note" role="status">Stand is writing the slides from the spec…</p>}
       {brief.status === "failed" && (
         <p className="dr-note error">
           Stand couldn't write the slides.{" "}
@@ -347,7 +347,7 @@ function SpecPrep({ roomId, spec, live, change, onRemove }: { roomId: string; sp
 
 const Stand = () => (
   <span className="dr-stand" title="Written by Stand from the spec. The author can rewrite it.">
-    ✦ Stand
+    Stand
   </span>
 );
 

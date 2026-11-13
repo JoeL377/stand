@@ -1,4 +1,4 @@
-// The Pilot seat: one person at a time drives ✦ Stand in a meeting, by typing on an answer card's box or
+// The Pilot seat: one person at a time drives Stand in a meeting, by typing on an answer card's box or
 // holding Ask Stand. Everyone else watches the card and asks to take over.
 // - The seat starts free; whoever asks Stand something first takes it.
 // - "Ask to pilot" puts you in line. The pilot gets Hand over / Not now. If they don't answer, the seat goes

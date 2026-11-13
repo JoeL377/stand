@@ -1,5 +1,5 @@
 import { usePersonColors } from "../PersonColors.tsx";
-// Pilot: one person at a time drives ✦ Stand (server/pilot.ts). The pilot types on an answer card's box
+// Pilot: one person at a time drives Stand (server/pilot.ts). The pilot types on an answer card's box
 // (or holds Ask Stand); everyone else sees who's piloting on that card's foot, with "Ask to pilot". The
 // pilot gets a small pop-up over the controls, wherever they are in the meeting: Hand over or Not now,
 // with a thin bar running down to when the seat goes over by itself. The seat changing hands says so

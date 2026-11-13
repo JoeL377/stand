@@ -239,7 +239,7 @@ export function DesignStage(props: {
             })}
             {props.busy ? (
               <p className="muted small">
-                <span className="agent-mark">✦</span> Writing
+                Writing
               </p>
             ) : (
               !caught.length && (
@@ -349,7 +349,7 @@ function Question({ item, open, onOpen }: { item: Item; open: boolean; onOpen?: 
 
 const Stand = () => (
   <span className="dr-stand" title="Written by Stand from the spec. The author can rewrite it.">
-    ✦ Stand
+    Stand
   </span>
 );
 

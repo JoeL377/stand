@@ -42,7 +42,7 @@ export function useWork(ids: string[]): Record<string, ActionWork> {
 }
 
 /** The pill after a to-do's text: "Working" with a spinner while an agent is on it, "Ready to ship"
- *  while its PR waits to merge, else the log's ✦. */
+ *  while its PR waits to merge, else just the count. */
 export function WorkPill({ work, open, onToggle }: { work: ActionWork; open: boolean; onToggle: () => void }) {
   const done = work.log.find((e) => e.status === "done");
   const label = work.working
@@ -68,7 +68,7 @@ export function WorkPill({ work, open, onToggle }: { work: ActionWork; open: boo
       title={title}
       onClick={onToggle}
     >
-      {work.working ? <span className="fu-spin" aria-hidden /> : <span aria-hidden>✦</span>}
+      {work.working && <span className="fu-spin" aria-hidden />}
       {label}
     </button>
   );

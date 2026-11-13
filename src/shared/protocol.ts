@@ -476,7 +476,7 @@ export interface ListNote extends Note {
   heard?: boolean;
 }
 
-/** One way to settle an open question, as ✦ Stand found it. */
+/** One way to settle an open question, as Stand found it. */
 export interface AgentOption {
   title: string;
   /** The tradeoff, in a line. */
@@ -485,7 +485,7 @@ export interface AgentOption {
   source: { title: string; url: string } | null;
 }
 
-/** Something ✦ Stand, the meeting's own agent, did because someone asked: options for an open
+/** Something Stand, the meeting's own agent, did because someone asked: options for an open
  *  question on the board, or an answer to a question someone asked out loud (push-to-talk) or typed
  *  to @stand in the chat, which shows in the Chat. Kept with the meeting, so it is also the agent's
  *  log of what it did, for whom, and what it cost. */
@@ -522,12 +522,12 @@ export interface AgentCard {
   /** While it's working: what Stand has written so far, as it writes it, and what it searched the web for. */
   draft?: AgentDraft | null;
   /** A card someone's own agent put in the call over the MCP (say_in_call): whose agent, which one and
-   *  the model it reported. Left out, the card is ✦ Stand's. Stand ran no model for it, so it has no cost. */
+   *  the model it reported. Left out, the card is Stand's. Stand ran no model for it, so it has no cost. */
   agent?: Actor;
   /** A card from someone's own agent: a longer write-up in markdown, folded under its words. */
   detail?: string;
 }
-/** The Pilot seat: the one person who drives ✦ Stand (types or holds Ask Stand) right now. */
+/** The Pilot seat: the one person who drives Stand (types or holds Ask Stand) right now. */
 export interface PilotView {
   /** The pilot (participant id and name), or null while the seat is free: whoever asks first takes it. */
   id: string | null;
@@ -551,7 +551,7 @@ export interface PilotView {
   now: number;
 }
 
-/** ✦ Stand's card as it's being written (streamed from the model). */
+/** Stand's card as it's being written (streamed from the model). */
 export interface AgentDraft {
   /** Web searches so far, oldest first; the last one is running while nothing's written yet. */
   searches: string[];
@@ -614,7 +614,7 @@ export interface Snap {
   /** Null for a snap saved straight to the space between meetings. */
   meetingId: string | null;
   itemId: string | null;
-  /** The agent picked the item and nobody has confirmed it yet (shown with ✦). */
+  /** The agent picked the item and nobody has confirmed it yet (shown tinted). */
   itemSuggested: boolean;
   ts: number;
   /** The image, at the size it was shared (cropped if someone cropped it). */
@@ -868,7 +868,7 @@ export interface NoteFrom {
     at: number;
     minutes: number;
     outcome: DiscussionOutcome;
-    /** The recap's ✦ line about it, when it has one. */
+    /** The recap's line about it, when it has one. */
     crux: string | null;
   } | null;
   /** Not from a meeting: someone added it by hand (an agent, through the MCP), and who. startedAt is when. */
@@ -913,7 +913,7 @@ export interface UpNext {
   builtAt: number;
   /** When Claude last merged, reworded and ordered the list; null when it's the plain ranking. */
   polishedAt: number | null;
-  /** Claude is reworking the list right now (the ✦ pulses). */
+  /** Claude is reworking the list right now (the pulses). */
   polishing: boolean;
 }
 
@@ -1179,7 +1179,7 @@ export type ClientMessage = (
   | { type: "sketch.offer"; take: boolean }
   | { type: "note.add"; itemId: string | null; kind: "action" | "decision" | "question"; text: string; owner?: string | null }
   | { type: "demo.play" }
-  /** Anyone: ask ✦ Stand for options on an open question on the board's list. */
+  /** Anyone: ask Stand for options on an open question on the board's list. */
   | { type: "agent.options"; noteId: string }
   /** Anyone: take one of a card's options, as a decision or as a to-do. */
   | { type: "agent.pick"; cardId: string; index: number; as: "decision" | "task" }
@@ -1280,9 +1280,9 @@ export type ServerMessage =
   | { type: "list"; items: ListNote[] | null }
   /** `others`: the other maps and diagrams of this call, oldest first. */
   | { type: "brainstorm"; brainstorm: BrainstormView | null; others: BrainstormSummary[]; /** The sketch that just stopped in this call, for its closing card. */ stopped?: BrainstormView | null }
-  /** What ✦ Stand, the meeting's own agent, has put on the board so far (meetingAgent.ts). */
+  /** What Stand, the meeting's own agent, has put on the board so far (meetingAgent.ts). */
   | { type: "agent"; cards: AgentCard[] }
-  /** Who pilots ✦ Stand, and who's asking to (server/pilot.ts), after every change. */
+  /** Who pilots Stand, and who's asking to (server/pilot.ts), after every change. */
   | { type: "pilot"; pilot: PilotView }
   | { type: "meeting.ended"; meetingId: string }
   /** Stand is restarting for an update: the call carries on once it's back, and the audio never stops. */
@@ -1378,7 +1378,7 @@ export const MAX_SYNTHESIS_INSTRUCTIONS = 2000;
 /** One space (a room) as the home page lists it. */
 /** The space page's feed: what came into the space, newest first, and where it stands. */
 /** A note someone saved straight to the space between meetings, typed or dictated on the
- *  Mac's bar. Like a snap, the agent suggests its item (✦) when nobody picked one. */
+ *  Mac's bar. Like a snap, the agent suggests its item when nobody picked one. */
 export interface Jot {
   id: string;
   roomId: string;

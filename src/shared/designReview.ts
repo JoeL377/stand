@@ -19,7 +19,7 @@ export interface BriefSection {
   heading: string;
   /** What the section decides, in up to four lines. */
   lines: string[];
-  /** The author wrote the lines; until then they are Stand's (✦). */
+  /** The author wrote the lines; until then they are Stand's. */
   edited: boolean;
   /** The author took the section off the call. */
   off: boolean;

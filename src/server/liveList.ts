@@ -256,7 +256,7 @@ export class ListKeeper {
     return it;
   }
 
-  /** A line someone put on the list with a click (✦ Stand's options, meetingAgent.ts). A decision that
+  /** A line someone put on the list with a click (Stand's options, meetingAgent.ts). A decision that
    *  settles an open question closes it as answered. Returns the new line, or null when one like it is there. */
   addByHand(kind: Kind, who: string | null, text: string, itemId: string | null, answers: string | null = null, at = Date.now()): ListItem | null {
     const t = clip(text.trim(), 200);

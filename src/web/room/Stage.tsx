@@ -27,7 +27,7 @@ import { type AgentActs, AgentTabMark, SaidNotice, SaidPanel, useSaidNotice } fr
 const SNAP_KEYS_WORDS = "Control + Shift + S";
 
 export function Stage(props: {
-  /** Who pilots ✦ Stand, and asking it things on an answer card. */
+  /** Who pilots Stand, and asking it things on an answer card. */
   pilot?: PilotActs;
   state: RoomState;
   me: Participant | undefined;
@@ -53,7 +53,7 @@ export function Stage(props: {
   brainstorms?: BrainstormSummary[];
   sketchStopped?: BrainstormView | null;
   onSketchStoppedClose?: () => void;
-  /** What ✦ Stand has put on the board (server/meetingAgent.ts); null when the server runs no agent. */
+  /** What Stand has put on the board (server/meetingAgent.ts); null when the server runs no agent. */
   agentCards: AgentCard[] | null;
   notes: Note[];
   /** Items whose live notes are being redrawn right now (keyed "" for off the agenda). */
@@ -562,9 +562,6 @@ export function Stage(props: {
         {/* A quiet nudge for the host only: their click is what moves the meeting. */}
         {canSteer && !props.ending && suggested && state.suggestion && (
           <div className="nudge" role="status" title={state.suggestion.reason}>
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>
             <span className="nudge-text">
               {state.suggestion.source === "talk" ? "Sounds like " : sharer && sharer.id !== props.participantId ? "The shared screen shows " : "Your screen shows "}
               <strong>
@@ -765,7 +762,7 @@ function SnapTab({ snap, me }: { snap: Snap; me: string }) {
         </span>
         {snap.caption && (
           <span className="stage-snap-cap" title={snap.caption}>
-            <span className="agent-mark">✦</span> {snap.caption}
+            {snap.caption}
           </span>
         )}
       </figcaption>
@@ -789,7 +786,7 @@ function StageSnap(props: { snap: Snap; me: string; canClose: boolean; onOpen: (
         <span className="stage-snap-who">{who}</span>
         {snap.caption && (
           <span className="stage-snap-cap">
-            <span className="agent-mark">✦</span> {snap.caption}
+            {snap.caption}
           </span>
         )}
       </figcaption>

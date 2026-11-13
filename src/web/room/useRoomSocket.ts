@@ -118,9 +118,9 @@ export function useRoomSocket(roomId: string, enabled: boolean) {
   const [brainstorms, setBrainstorms] = useState<BrainstormSummary[]>([]);
   /** The sketch that was just stopped in this call, for its wrap-up; gone once another starts or it is closed. */
   const [sketchStopped, setSketchStopped] = useState<BrainstormView | null>(null);
-  /** What ✦ Stand has put on the board; null when the server runs no agent. */
+  /** What Stand has put on the board; null when the server runs no agent. */
   const [agentCards, setAgentCards] = useState<AgentCard[] | null>(null);
-  /** Who pilots ✦ Stand, with its server times moved onto this computer's clock. */
+  /** Who pilots Stand, with its server times moved onto this computer's clock. */
   const [pilot, setPilot] = useState<PilotView | null>(null);
   /** Items whose notes the agent is rewriting right now ("" = off-agenda). */
   const [notesBusy, setNotesBusy] = useState<string[]>([]);

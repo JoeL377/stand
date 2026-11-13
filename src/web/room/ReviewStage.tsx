@@ -193,12 +193,12 @@ export function ReviewStage(props: {
         })}
         {props.busy ? (
           <span className="rv-latest muted">
-            <span className="agent-mark">✦</span> Writing
+            Writing
           </span>
         ) : (
           latest && (
             <span className="rv-latest" dir="auto" title={latest.text}>
-              <span className="agent-mark">✦</span> {latest.text}
+              {latest.text}
             </span>
           )
         )}
@@ -269,7 +269,7 @@ export function ReviewStage(props: {
         })}
         {props.busy && (
           <p className="muted">
-            <span className="agent-mark">✦</span> Writing
+            Writing
           </p>
         )}
         {props.onAdd && !disabled && <AddLine onAdd={props.onAdd} />}
