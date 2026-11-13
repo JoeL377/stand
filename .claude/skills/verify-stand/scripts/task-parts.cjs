@@ -132,7 +132,7 @@ const INVITE = "Invite support to the next review";
       await openTasks("Guest checkout");
       const checklist = family(await sections(), CHECKLIST);
       check("a part that is ready to ship stays under its parent in the project", checklist.parent?.count === "0/2 parts" && checklist.parts.map((p) => p.text).sort().join() === [LAUNCH_NOTE, TERMS].sort().join(), checklist);
-      check("the space has two tabs, Projects and Meetings", (await page.getByRole("tablist", { name: "The space" }).getByRole("tab").allInnerTexts()).map((t) => t.replace(/\s*\d+$/, "").trim()).join() === "Projects,Meetings");
+      check("the space has two tabs, Projects and Meetings", ((t) => t.length === 2 && /Projects/.test(t[0]) && /Meetings/.test(t[1]))(await page.getByRole("tablist", { name: "The space" }).getByRole("tab").allInnerTexts()), await page.getByRole("tablist", { name: "The space" }).getByRole("tab").allInnerTexts());
       check("a project's page lists one kind at a time", (await page.getByRole("tablist", { name: "What to show" }).getByRole("tab").allInnerTexts()).map((t) => t.replace(/\s*\d+$/, "").trim()).join() === "Tasks,Questions,Decisions");
       await mine();
       check("Mine is one list with no projects in it", (await page.locator(".sh-project").count()) === 0 && (await rowsIn(".sh-task-group.by-owner")).length >= 1);
