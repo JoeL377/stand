@@ -205,8 +205,9 @@ export function DesignBoard(props: {
   }, []);
   const tall = size.w > 0 && size.w < 620;
   // Descriptions and notes show unless you turned them off; a phone starts without them.
+  // The sketch has no switch for it: wide shows them, narrow does not.
   const [textPick, setTextPick] = useState<boolean | null>(savedText);
-  const text = textPick ?? !tall;
+  const text = props.bare ? !tall : (textPick ?? !tall);
   const hasText = boxes.some((b) => b.detail || b.points.length) || groups.some((g) => g.detail);
   const setText = (v: boolean) => {
     setTextPick(v);
@@ -287,7 +288,7 @@ export function DesignBoard(props: {
             Context <i>{context.length}</i>
           </button>
         )}
-        {hasText && (
+        {hasText && !props.bare && (
           <button type="button" className={`design-context design-text${text ? " on" : ""}`} aria-pressed={text} title={text ? "Hide descriptions and notes" : "Show descriptions and notes"} onClick={(e) => (e.stopPropagation(), setText(!text))}>
             Text
           </button>
