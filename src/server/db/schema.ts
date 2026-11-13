@@ -460,16 +460,15 @@ CREATE TABLE IF NOT EXISTS channel_reads (
   read_up_to INTEGER NOT NULL,
   PRIMARY KEY (channel_id, user_id)
 );
--- A phone or browser that said yes to notifications (push.ts): where its push service takes them.
-CREATE TABLE IF NOT EXISTS push_subscriptions (
-  endpoint TEXT PRIMARY KEY,
+-- An iPhone with the Stand app that said yes to notifications (push.ts): its Apple push token, and
+-- whether it was built for Apple's test servers (sandbox, an Xcode build) or the real ones (TestFlight, App Store).
+CREATE TABLE IF NOT EXISTS push_devices (
+  token TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  p256dh TEXT NOT NULL,
-  auth TEXT NOT NULL,
-  user_agent TEXT,
+  env TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS push_devices_user ON push_devices(user_id);
 -- Which chat messages in a space notify someone: 'mentions' (only @mentions and replies to them).
 -- No row is every message.
 CREATE TABLE IF NOT EXISTS chat_notify (

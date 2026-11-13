@@ -1,39 +1,37 @@
-// Notifications (push.ts): the phones and browsers each person turned them on in, and which chat
-// messages in a space reach them.
+// Notifications (push.ts): the iPhones each person turned them on in, and which chat messages in a
+// space reach them.
 import type { DatabaseSync } from "node:sqlite";
-import type { ChatNotify } from "../../shared/push.ts";
+import type { ApnsEnv, ChatNotify } from "../../shared/push.ts";
 import type { Row } from "./rows.ts";
 
-export interface PushSubscriptionRow {
-  endpoint: string;
+export interface PushDevice {
+  token: string;
   userId: string;
-  p256dh: string;
-  auth: string;
+  env: ApnsEnv;
 }
 
-const toSub = (r: Row): PushSubscriptionRow => ({
-  endpoint: r.endpoint as string,
+const toDevice = (r: Row): PushDevice => ({
+  token: r.token as string,
   userId: r.user_id as string,
-  p256dh: r.p256dh as string,
-  auth: r.auth as string,
+  env: r.env === "sandbox" ? "sandbox" : "production",
 });
 
 export function pushStore(db: DatabaseSync) {
   return {
-    /** A device said yes. The same device again (its endpoint) moves to whoever is signed in on it now. */
-    savePushSubscription(s: PushSubscriptionRow & { userAgent?: string | null }) {
+    /** A phone said yes. The same phone again moves to whoever is signed in on it now. */
+    savePushDevice(d: PushDevice) {
       db.prepare(
-        `INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, user_agent, created_at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth, user_agent = excluded.user_agent`,
-      ).run(s.endpoint, s.userId, s.p256dh, s.auth, s.userAgent ?? null, Date.now());
+        `INSERT INTO push_devices (token, user_id, env, created_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, env = excluded.env`,
+      ).run(d.token, d.userId, d.env, Date.now());
     },
     /** userId: only when it is theirs. */
-    removePushSubscription(endpoint: string, userId?: string) {
-      if (userId) db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?").run(endpoint, userId);
-      else db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+    removePushDevice(token: string, userId?: string) {
+      if (userId) db.prepare("DELETE FROM push_devices WHERE token = ? AND user_id = ?").run(token, userId);
+      else db.prepare("DELETE FROM push_devices WHERE token = ?").run(token);
     },
-    pushSubscriptions(userId: string): PushSubscriptionRow[] {
-      return (db.prepare("SELECT * FROM push_subscriptions WHERE user_id = ? ORDER BY created_at").all(userId) as Row[]).map(toSub);
+    pushDevices(userId: string): PushDevice[] {
+      return (db.prepare("SELECT * FROM push_devices WHERE user_id = ? ORDER BY created_at").all(userId) as Row[]).map(toDevice);
     },
     chatNotify(roomId: string, userId: string): ChatNotify {
       const r = db.prepare("SELECT level FROM chat_notify WHERE room_id = ? AND user_id = ?").get(roomId, userId) as Row | undefined;

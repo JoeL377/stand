@@ -3,6 +3,8 @@ import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewStat
 import type { ChatCaught, ChatMessage, ChatSession, ChatThread } from "../shared/chat.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type { Project } from "../shared/projects.ts";
+import type { ChatNotify, NotifyStatus } from "../shared/push.ts";
+import { phoneApp } from "./phoneApp.ts";
 import type {
   BrainstormSummary,
   BrainstormView,
@@ -114,7 +116,8 @@ export const api = {
   config: () => call<Capabilities>("GET", "/api/config"),
   me: () => call<User>("GET", "/api/auth/me"),
   devSignIn: (name: string, email: string) => call<User>("POST", "/api/auth/dev", { name, email }),
-  signOut: () => call<{ ok: true }>("POST", "/api/auth/logout"),
+  // In the iPhone app, its phone stops getting notifications for whoever signs out.
+  signOut: () => call<{ ok: true }>("POST", "/api/auth/logout", { pushToken: phoneApp()?.pushToken }),
   createRoom: (name: string, purpose = "") => call<{ id: string; name: string }>("POST", "/api/rooms", { name, purpose }),
   spaces: () => call<SpaceSummary[]>("GET", "/api/spaces"),
   updateSpace: (id: string, patch: { name?: string; purpose?: string; synthesisInstructions?: string }) =>
@@ -208,6 +211,9 @@ export const api = {
   prepareDesignReview: (taskId: string, change: BriefChange) => call<{ spec: DesignSpec | null }>("PATCH", `/api/tasks/${taskId}/design-review`, change),
   task: (id: string) => call<TaskDetail>("GET", `/api/tasks/${id}`),
   chat: (roomId: string) => call<ChatThread>("GET", `/api/rooms/${roomId}/chat`),
+  notify: (roomId: string) => call<NotifyStatus>("GET", `/api/rooms/${roomId}/notify`),
+  setNotify: (roomId: string, level: ChatNotify) => call<NotifyStatus>("PUT", `/api/rooms/${roomId}/notify`, { level }),
+  testPush: () => call<{ sent: number }>("POST", "/api/push/test"),
   /** A page of a channel's messages: those before a seq, or those after one. */
   chatMessages: (channelId: string, page: { before?: number; after?: number }) =>
     call<{ messages: ChatMessage[]; sessions: ChatSession[]; caught: ChatCaught[] }>("GET", `/api/channels/${channelId}/messages?${page.after !== undefined ? `after=${page.after}` : `before=${page.before ?? ""}`}`),

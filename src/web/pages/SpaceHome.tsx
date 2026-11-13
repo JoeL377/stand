@@ -38,7 +38,7 @@ import { CopyForAgent } from "../CopyForAgent.tsx";
 import { MOD } from "../shortcuts.ts";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { TaskDrawer } from "../TaskDrawer.tsx";
-import { SpaceChat, useSpaceChat } from "../SpaceChat.tsx";
+import { ChatNotifyBell, SpaceChat, useSpaceChat } from "../SpaceChat.tsx";
 import { Opener } from "../room/Opener.tsx";
 
 type Entry =
@@ -138,6 +138,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     setFocusChat((n) => n + 1);
   };
   openChat.current = toChat;
+  // ?chat=1, from a notification on the iPhone app: open on the chat.
+  const chatLink = params.get("chat") === "1";
+  useEffect(() => {
+    if (!chatLink) return;
+    openChat.current();
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("chat");
+      return next;
+    }, { replace: true });
+  }, [chatLink, setParams]);
   // Command + J opens chat with the cursor in its box, and closes the dock again; typing in the box keeps it.
   const chatKey = useRef(() => {});
   chatKey.current = () => (docked ? showDock(false) : toChat());
@@ -461,6 +472,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             </button>
           ))}
           {!phone && tab === "tasks" && <span className="sh-tab-tools" ref={setTabTools} />}
+          {tab === "chat" && <span className="sh-chat-bell"><ChatNotifyBell roomId={room.id} /></span>}
           {/* One pill at the end of the tab row filters Tasks and Decisions by project. */}
           {(tab === "tasks" || tab === "decisions") && (
             <label className={projectFilter ? "sh-project-filter on" : "sh-project-filter"} title="Filter by project">
@@ -740,6 +752,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           <div className="sh-dock-head">
             <ChatIcon size={14} />
             <strong>Chat</strong>
+            <ChatNotifyBell roomId={room.id} />
             <button className="icon-btn" aria-label="Close chat" title={`Close chat (${CHAT_SHORTCUT})`} onClick={() => showDock(false)}>
               <CloseIcon />
             </button>

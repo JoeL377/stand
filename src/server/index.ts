@@ -16,6 +16,7 @@ import { jotRoutes } from "./routes/jots.ts";
 import { meetingRoutes } from "./routes/meetings.ts";
 import { openRoutes } from "./routes/open.ts";
 import { projectRoutes } from "./routes/projects.ts";
+import { pushRoutes } from "./routes/push.ts";
 import { sourceRoutes } from "./routes/sources.ts";
 import { reviewRoutes } from "./routes/reviews.ts";
 import { snapRoutes } from "./routes/snaps.ts";
@@ -67,6 +68,7 @@ reviewRoutes(app, services);
 designReviewRoutes(app, services);
 meetingRoutes(app, services);
 chatRoutes(app, services);
+pushRoutes(app, services);
 
 // Serve the built web app in production.
 const dist = path.resolve("dist");

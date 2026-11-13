@@ -3748,6 +3748,12 @@ a .mention { color: inherit; }
 .sh-dock-head { flex: none; display: flex; align-items: center; gap: 8px; height: 32px; color: var(--muted); }
 .sh-dock-head strong { font-size: 14px; font-weight: 600; color: var(--text); }
 .sh-dock-head .icon-btn { margin-left: auto; margin-right: -6px; display: grid; place-items: center; }
+.sh-dock-head .chat-bell { margin-right: 0; }
+.sh-dock-head .chat-bell + .icon-btn { margin-left: 2px; }
+.sh-chat-bell { flex: none; margin-left: auto; display: inline-flex; align-items: center; }
+.sh-chat-bell:empty { display: none; }
+.chat-bell { display: grid; place-items: center; }
+.chat-bell.muted { color: var(--muted); }
 .sh-dock .space-chat { max-width: none; }
 .sh-dock .chat-msg { padding: 1px 4px; }
 .sh-dock .chat-caught { margin-left: 42px; margin-right: 4px; }

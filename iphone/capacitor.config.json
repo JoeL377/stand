@@ -1,0 +1,18 @@
+{
+  "appId": "studio.conxt.stand",
+  "appName": "Stand",
+  "webDir": "www",
+  "server": {
+    "url": "https://stand-production-3d3f.up.railway.app",
+    "allowNavigation": ["stand-production-3d3f.up.railway.app"]
+  },
+  "ios": {
+    "scheme": "Stand",
+    "appendUserAgent": "StandiPhone/1",
+    "limitsNavigationsToAppBoundDomains": false,
+    "contentInset": "never"
+  },
+  "plugins": {
+    "StatusBar": { "overlaysWebView": false, "style": "DEFAULT" }
+  }
+}

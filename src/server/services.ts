@@ -16,6 +16,7 @@ import { startLiveKitTranscriber } from "./livekit.ts";
 import { createAgent } from "./llm.ts";
 import { labeled } from "./usage.ts";
 import { PlanBriefs } from "./planBrief.ts";
+import { Push } from "./push.ts";
 import { ProjectSuggester, SUGGEST_AFTER_CHANGE_MS, SUGGEST_AFTER_PROJECT_MS } from "./projectSuggest.ts";
 import { QuestionSweeper } from "./questionSweep.ts";
 import { Sources, setSources } from "./sources.ts";
@@ -275,11 +276,14 @@ export function startServices() {
         { quietMs: config.chatCaptureQuietMs ?? undefined, maxWaitMs: config.chatCaptureMaxWaitMs ?? undefined },
       )
     : null;
+  // Notifications on the iPhone app for new chat messages (push.ts).
+  const push = new Push(db, config.apns);
   const chat = new Chat(
     db,
     (roomId, e) => {
       spaceEvents.send(roomId, e);
       capture?.heard(e);
+      push.heard(roomId, e);
     },
     { quietMs: config.chatQuietMs ?? undefined },
   );
@@ -301,6 +305,7 @@ export function startServices() {
     sources,
     chat,
     spaceEvents,
+    push,
     agents,
     uploadLinks,
     specTouched,
