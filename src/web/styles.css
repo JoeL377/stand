@@ -4905,3 +4905,4 @@ a.ac-target:hover { text-decoration: underline; }
   .ac-burst-line time { display: none; }
   .ac-burst .ac-said, .ac-burst .ac-meta, .ac-burst .ac-items { margin-left: 0; }
 }
+@media (min-width: 821px) { .sh-panel .followups li > .cfa + .row-more { margin-left: -6px; } }
