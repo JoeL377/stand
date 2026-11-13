@@ -130,9 +130,6 @@ export function ActorTag({ actor }: { actor: Actor | null | undefined }) {
   if (actor.kind === "stand")
     return (
       <span className="tl-actor" title={actor.model ? `Stand, the meeting's own agent, running ${actor.model}` : "Stand, the meeting's own agent"}>
-        <span className="agent-mark" aria-hidden>
-          ✦
-        </span>{" "}
         Stand
       </span>
     );

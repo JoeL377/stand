@@ -1416,10 +1416,10 @@ li:hover > .cfa .cfa-btn, li:focus-within > .cfa .cfa-btn, .cfa:has(.cfa-pop) .c
 .agenda .item:hover > .item-tools, .agenda .item:focus-within > .item-tools { pointer-events: auto; }
 .agenda .item-main { padding: 6px 8px; }
 
-/* ---- agenda: the agent's suggestions (✦ marks only what the agent proposed and nobody added yet) ---- */
+/* ---- agenda: the agent's suggestions (marks only what the agent proposed and nobody added yet) ---- */
 .upnext { margin: 2px 6px 8px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
 .upnext-head { display: flex; align-items: center; gap: 2px; position: relative; }
-/* The group header leads (chevron, ✦, name); its rows hang off a guide line below the chevron,
+/* The group header leads (chevron, name); its rows hang off a guide line below the chevron,
    in smaller muted type than agenda items, so the levels read apart at a glance. */
 .upnext-toggle { flex: 1; min-width: 0; white-space: nowrap; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: left; box-shadow: none; }
 .upnext-toggle:hover { background: var(--hover); }
@@ -1482,7 +1482,7 @@ li:hover > .cfa .cfa-btn, li:focus-within > .cfa .cfa-btn, .cfa:has(.cfa-pop) .c
 .snap-thumb { position: relative; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: none; cursor: pointer; overflow: hidden; }
 .snap-thumb img { display: block; height: 84px; max-width: 160px; object-fit: cover; }
 .snap-thumb:hover { border-color: var(--accent); }
-.snap-thumb-mark { position: absolute; top: 4px; right: 6px; color: #fff; font-size: 12px; text-shadow: 0 1px 3px rgb(0 0 0 / 0.6); }
+.snap-thumb-mark { position: absolute; top: 4px; right: 4px; padding: 0 5px; border-radius: 4px; background: rgb(0 0 0 / 0.55); color: #fff; font-size: 10px; line-height: 16px; font-weight: 600; }
 .snaps-pill { display: inline-flex; align-items: center; gap: 5px; }
 
 /* ---- Stand for Mac: no title bar or window buttons, so the top edge drags the window ---- */
@@ -1821,14 +1821,14 @@ a.sh-pill:hover { text-decoration: none; }
 .screen > .topic-board, .board-tab > .topic-board, .view-pane > .topic-board { position: relative; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg); color: var(--text); text-align: left; }
 .topic-waiting { flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 18px; text-align: center; }
 .topic-hint { margin: 0; font-size: 13px; color: var(--muted); }
-/* Before the first topic: the ✦ pulses while the first notes are being written. */
+/* Before the first topic: the pulses while the first notes are being written. */
 .topic-hint.updating .agent-mark { display: inline-block; animation: notes-pulse 1.2s ease-in-out infinite; }
 /* The current topic fills the screen; everything else waits in the strip under it. */
 .topic-now { position: relative; overflow: hidden; flex: 1 0 auto; display: flex; flex-direction: column; gap: 16px; padding: 22px 24px 18px; border-radius: 12px; background: var(--panel-2); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); transition: opacity 160ms var(--ease-out, ease-out); }
 .topic-now.topic-in { animation: topic-in 240ms var(--ease-out, ease-out), topic-flash 1.6s ease-out; }
 /* While the notes are being redrawn from the latest talk, a light runs left to right along the top edge. */
 .topic-now.updating::before { content: ""; position: absolute; top: 0; left: 0; width: 35%; height: 2px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 45%, #fff), transparent); animation: topic-updating 1.6s ease-in-out infinite; }
-/* …and a quiet "✦ Updating" fades in at the right of the card's top line. */
+/* …and a quiet "Updating" fades in at the right of the card's top line. */
 .topic-updating { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); opacity: 0; transition: opacity 300ms ease-out; }
 .topic-updating .agent-mark { color: var(--accent-text); }
 .topic-updating.on { opacity: 1; }
@@ -1841,7 +1841,7 @@ a.sh-pill:hover { text-decoration: none; }
 .topic-now-label.live { color: var(--accent-text); }
 .topic-now-label.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: notes-pulse 1.4s ease-in-out infinite; }
 .topic-mins { font-size: 12px; color: var(--muted); }
-/* Who moved the board here: ✦ Stand by itself, or a person's dot. */
+/* Who moved the board here: Stand by itself, or a person's dot. */
 .topic-moved-by { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topic-moved-by .agent-mark { font-size: 11px; }
 .topic-moved-by .topic-dot { flex: none; }
@@ -2545,7 +2545,7 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .rc-cost { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 @media (max-width: 640px) { .cost-pill { display: none; } }
 
-/* ✦ Stand's options on an open question (room/AgentCard.tsx). The ask is a quiet pill at the end of
+/* Stand's options on an open question (room/AgentCard.tsx). The ask is a quiet pill at the end of
    the line, seen on hover; the card sits under the line, bordered, one line per option. */
 .agent-find { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 7px; border: 0; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font: inherit; font-size: 11px; line-height: 18px; cursor: pointer; opacity: 0; transition: opacity 120ms; }
 .topic-task:hover .agent-find, .agent-find:focus-visible { opacity: 1; }
@@ -2554,6 +2554,9 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 /* A decision Stand heard: it isn't one until someone confirms it. */
 .topic-tasks li.heard .topic-task-text { color: var(--muted); font-style: italic; }
 .topic-tasks li.heard .topic-note-mark { color: var(--accent-text); }
+/* Heard, not confirmed: a hollow ring where a confirmed line has its solid mark. */
+.topic-note-mark.heard-mark { display: inline-flex; align-items: center; justify-content: center; }
+.topic-note-mark.heard-mark::before { content: ""; width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--muted) 80%, transparent); }
 .heard-row { display: flex !important; align-items: center; gap: 6px; padding: 0 0 6px 20px; font-size: 13px; }
 .heard-row .agent-mark { color: var(--accent-text); }
 .heard-label { flex: none; color: var(--muted); }
@@ -2593,8 +2596,8 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .agent-space-when { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--text) 6%, transparent); font-size: 11px; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .agent-card.working .agent-mark { animation: none; } }
 
-/* What ✦ Stand is up to, for the whole call: a quiet "✦ Finding options" on the card's top line,
-   then "✦ Options ready" for a few seconds (a click shows the card). The card itself glows once. */
+/* What Stand is up to, for the whole call: a quiet "Finding options" on the card's top line,
+   then "Options ready" for a few seconds (a click shows the card). The card itself glows once. */
 .agent-status { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 8px; border: 0; border-radius: 999px; font: inherit; font-size: 11px; line-height: 18px; white-space: nowrap; animation: fade-in 300ms ease-out; }
 .agent-status .agent-mark { font-size: 11px; color: var(--accent-text); }
 .agent-status.working { color: var(--muted); background: none; }
@@ -2602,7 +2605,7 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .agent-status.ready { background: var(--accent-soft); color: var(--accent-text); cursor: pointer; }
 .agent-status.ready:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .agent-card.fresh { animation: topic-flash 1.6s ease-out; }
-.agent-tab-mark { font-size: 10px; color: var(--accent-text); }
+.agent-tab-mark { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-text); vertical-align: middle; }
 .agent-tab-mark.working { animation: notes-pulse 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .agent-status, .agent-status.working .agent-mark, .agent-card.fresh, .agent-tab-mark.working { animation: none; }
@@ -2659,13 +2662,13 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
   .people-pop { position: fixed; left: 8px; right: 8px; top: 52px; width: auto; }
 }
 
-/* ✦ Ask Stand, push-to-talk, beside the mic. Held: lit, the ✦ pulses. */
+/* Ask Stand, push-to-talk, beside the mic. Held: lit, the pulses. */
 .control.ask { user-select: none; -webkit-user-select: none; touch-action: none; }
 .ask-mark { font-size: 15px; line-height: 18px; height: 18px; color: var(--accent-text); }
 .control.ask.on { background: var(--accent-soft); color: var(--accent-text); }
 .control.ask.on .ask-mark { animation: notes-pulse 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .control.ask.on .ask-mark { animation: none; } }
-/* ✦ Stand's answers in the Chat. */
+/* Stand's answers in the Chat. */
 .seg.agent-answer .seg-head { align-items: center; gap: 5px; }
 .seg.agent-answer .agent-mark { color: var(--accent-text); }
 .agent-answer-who { font-weight: 600; font-size: 13px; color: var(--accent-text); }
@@ -2718,7 +2721,7 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .said-card-detail > summary:hover, .tl-detail > summary:hover { color: var(--text); }
 .said-card-detail[open] > summary, .tl-detail[open] > summary { margin-bottom: 10px; }
 .tl-detail { margin-top: 6px; padding-top: 6px; }
-/* Something happening on a card, said on its line: the topic just changed or is about to, ✦ Stand is at work or just back. */
+/* Something happening on a card, said on its line: the topic just changed or is about to, Stand is at work or just back. */
 .card-entry-signal { color: var(--accent-text); font-weight: 500; }
 .card-entry.signal.move { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); animation: card-entry-glow 1.6s ease-in-out 2; }
 .card-entry.signal.working .card-entry-mark { animation: notes-pulse 1.2s ease-in-out infinite; }
@@ -2747,9 +2750,9 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .card-step.live { padding: 4px 12px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
 .card-step.live.moved { background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); animation: live-back-glow 1.6s ease-in-out 3; }
 .card-list-toggle { display: none; }
-/* An answer from ✦ Stand as a card: the question as its title, the answer under it, follow-ups below. */
+/* An answer from Stand as a card: the question as its title, the answer under it, follow-ups below. */
 .answer-stack .topic-now-label.ask { color: var(--accent-text); }
-/* Questions to ✦ Stand as a chat, like an assistant app: the question in a bubble on the right, the answer under it. */
+/* Questions to Stand as a chat, like an assistant app: the question in a bubble on the right, the answer under it. */
 .ask-thread { display: flex; flex-direction: column; gap: 22px; max-width: 760px; width: 100%; margin-top: 6px; }
 /* An answer card fills the board and its chat scrolls inside it, the box fixed at its foot. */
 .card-slide.fill { flex: 1 1 0; min-height: min(420px, 70vh); }
@@ -2782,7 +2785,7 @@ button.task-answer:hover, button.task-answer[aria-expanded="true"] { border-colo
 .answer-stack .agent-answer-todo { font-size: 14px; }
 .answer-stack .agent-answer-todo button { font-size: 12px; line-height: 22px; padding: 0 10px; }
 .answer-stack .topic-hint { margin-top: auto; }
-/* Pilot: one person drives ✦ Stand. The card's foot is their box, or who's piloting with Ask to pilot. */
+/* Pilot: one person drives Stand. The card's foot is their box, or who's piloting with Ask to pilot. */
 .answer-stack .topic-now-head .pilot-pill-wrap { margin-left: auto; }
 .pilot-pill-wrap { position: relative; display: inline-flex; }
 .pilot-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 0; height: 24px; padding: 0 10px 0 3px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--text) 7%, transparent); box-shadow: none; color: var(--text); font-size: 12px; font-weight: 500; white-space: nowrap; }
@@ -2830,7 +2833,7 @@ body:has(.pilot-request) .toasts { bottom: 196px; }
 .card-list-new:hover, .card-list-new.on { background: var(--accent-soft); color: var(--accent-text); }
 @media (prefers-reduced-motion: reduce) { .pilot-request { animation: none; } .pilot-bar i { animation: none; width: var(--pilot-from, 100%); } }
 .running-list .topic-sections.columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-/* ✦ Stand writing as it goes: a caret after the words so far, searches as a quiet line, options sliding in. */
+/* Stand writing as it goes: a caret after the words so far, searches as a quiet line, options sliding in. */
 .streaming::after { content: ""; display: inline-block; width: 0.45em; height: 1em; margin-left: 2px; vertical-align: -0.12em; background: var(--accent); border-radius: 1px; animation: notes-pulse 1s ease-in-out infinite; }
 .agent-searched { font-size: 12px; color: var(--muted); }
 .agent-options.drafting > li { animation: line-in 240ms var(--ease-out, ease-out); }

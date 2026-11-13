@@ -95,11 +95,11 @@ export function TaskPresentation({ presentation, canSteer, disabled, onChange }:
           {brief.status === "none" && <p className="muted small">AI briefs are unavailable. These are the sections of the spec; open Full spec to read them.</p>}
           {brief.summary && <><h2>Summary</h2><p>{brief.summary}</p></>}
           {brief.sections.filter((s) => !s.off).map((s) => <section key={s.heading}>
-            <h2>{s.heading}{!s.edited && s.lines.length > 0 && <span className="muted small" title="Written by Stand from the spec"> ✦</span>}</h2>
+            <h2>{s.heading}{!s.edited && s.lines.length > 0 && <span className="muted small" title="Written by Stand from the spec"> · draft</span>}</h2>
             {s.lines.length > 0 && <ul>{s.lines.map((line, i) => <li key={i}>{line}</li>)}</ul>}
           </section>)}
           {brief.suggestions.some((q) => q.state === "open") && <>
-            <h2>Questions Stand suggests <span className="muted small">✦</span></h2>
+            <h2>Questions Stand suggests</h2>
             <ol>{brief.suggestions.filter((q) => q.state === "open").map((q) => <li key={q.id}>{q.text}</li>)}</ol>
           </>}
         </>}

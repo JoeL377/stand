@@ -182,9 +182,6 @@ export function RecapPage() {
             <>
               {" · "}
               <span className="rc-writing" role="status">
-                <span className="agent-mark" aria-hidden>
-                  ✦
-                </span>{" "}
                 Writing the recap…
               </span>
             </>
@@ -212,9 +209,6 @@ export function RecapPage() {
         {/* Reviews people asked for out loud that didn't happen in the call (server/nextSteps.ts). */}
         {data.next?.map((n) => (
           <span key={n.id} className="rp-pill rc-asked" title={`${n.by.split(/\s+/)[0]} asked for it in the call`}>
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>
             Suggested next · {n.kind === "design-review" ? "Design review" : "Product review"}
             {n.topic ? `: ${n.topic}` : ""}
           </span>
@@ -274,9 +268,6 @@ export function RecapPage() {
       {data.synthesis && (
         <section id="synthesis" className="doc-section rc-section rc-synthesis">
           <h2 className="rc-h synth">
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>{" "}
             Synthesis
           </h2>
           <Markdown text={data.synthesis} />
@@ -376,9 +367,6 @@ export function RecapPage() {
           <ul className="rc-next">
             {[...upNext.suggestions, ...upNext.parked].map((s) => (
               <li key={s.key}>
-                <span className="upnext-mark" aria-hidden>
-                  ✦
-                </span>
                 <span className="rc-next-title">{s.title}</span>
                 <span className="muted small">{s.reason}</span>
               </li>

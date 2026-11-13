@@ -1,7 +1,7 @@
 // Captures: what people save straight to a space between meetings, from the Mac's bar: a note,
 // typed or dictated, with any snaps of the screen pinned to it (each with the text the Mac read
 // off it), or snaps on their own. Everyone in the space sees it once it's saved. The agent captions a snap and, when
-// nobody picked an item, suggests one, marked ✦ until someone confirms it. A capture never
+// nobody picked an item, suggests one, marked until someone confirms it. A capture never
 // becomes a to-do or decision by itself.
 
 import { brainstormsOf } from "./brainstorm.ts";

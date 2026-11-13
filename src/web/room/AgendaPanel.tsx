@@ -540,7 +540,7 @@ export function AgendaPanel(props: {
 type AddMode = "slides" | "type" | "pdf" | "linear";
 
 /** The agent's draft of what to talk about next: one collapsed line until opened.
- *  The ✦ marks only things the agent proposed and nobody has added yet. */
+ *  The marks only things the agent proposed and nobody has added yet. */
 function agoText(ts: number) {
   const min = Math.round((Date.now() - ts) / 60000);
   if (min < 1) return "just now";
@@ -567,7 +567,7 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
   const provenance = `Drafted by the agent from ${plural(upNext.meetingsUsed, "meeting")} and ${plural(upNext.updatesUsed, "update")}${
     upNext.polishing ? " · Claude is tidying it now" : upNext.polishedAt ? ` · tidied by Claude ${agoText(upNext.polishedAt)}` : ""
   }`;
-  // Rows sit under the header's ✦, so they don't repeat it.
+  // Rows sit under the Suggested header, so they don't repeat it.
   const row = (s: UpNextSuggestion, isParked = false) => (
     <li key={s.key} className={isParked ? "upnext-row parked" : "upnext-row"}>
       <span className="upnext-title">{s.title}</span>
@@ -618,9 +618,6 @@ function Suggested(props: { upNext: UpNext; canSteer: boolean; send: (m: ClientM
         <button className="upnext-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)} title={provenance}>
           <span className={open ? "chev open" : "chev"} aria-hidden>
             <ChevronIcon />
-          </span>
-          <span className={upNext.polishing ? "upnext-mark pulsing" : "upnext-mark"} aria-hidden>
-            ✦
           </span>
           <span>{suggestions.length ? `Suggested · ${suggestions.length}` : "Suggested"}</span>
           {upNext.total > 0 && (

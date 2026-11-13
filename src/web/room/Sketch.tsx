@@ -365,9 +365,6 @@ export function SketchBoard(props: {
       <span className="rp-grow" />
       {updatedAt && (
         <span key={updatedAt} className="topic-updating on done sk-updated" role="status">
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>{" "}
           Updated
         </span>
       )}
@@ -388,9 +385,6 @@ export function SketchBoard(props: {
           >
             Redraw
           </button>
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>
           <span className="nudge-text">
             {b.offer!.style === "diagram"
               ? "This is turning into steps. Redraw "
@@ -409,9 +403,6 @@ export function SketchBoard(props: {
         </div>
       ) : undo ? (
         <div className="nudge sk-note">
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>
           <span className="nudge-text">
             {undo.by ? `${undo.by}: ` : ""}
             {undo.text}
@@ -428,9 +419,6 @@ export function SketchBoard(props: {
       ) : (
         why && (
           <div className="nudge sk-note">
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>
             <span className="nudge-text">New subject, drawn as a diagram.</span>
             <button
               type="button"

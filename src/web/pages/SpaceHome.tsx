@@ -803,7 +803,7 @@ function SnapRow(props: {
         {snap.line ? (
           <span className="sh-what">{snap.line}</span>
         ) : snap.caption ? (
-          <span className="sh-what agent">✦ {snap.caption}</span>
+          <span className="sh-what agent">{snap.caption}</span>
         ) : (
           <span className="sh-what muted">Snap</span>
         )}
@@ -898,7 +898,6 @@ function ItemPill(props: {
         title={suggested ? "The agent's pick. Click to confirm it or choose another item." : "Choose the item it's about"}
         onClick={() => setOpen((o) => !o)}
       >
-        {suggested && "✦ "}
         {item ? item.title : props.of.itemId ? "An earlier item" : "No item"}
       </button>
       {open && (
@@ -1351,9 +1350,6 @@ function TasksTab(props: {
       onClick={() => setSweeping(sweep)}
       title={`Stand thinks ${sweep.proposals.length === 1 ? "1 open question is" : `${sweep.proposals.length} open questions are`} settled or no longer ${sweep.proposals.length === 1 ? "matters" : "matter"}. Nothing closes until you confirm.`}
     >
-      <span className="agent-mark" aria-hidden>
-        ✦
-      </span>
       Sweep<span className="sh-sweep-long"> questions</span>
       <span className="count">{sweep.proposals.length}</span>
     </button>
@@ -1364,9 +1360,6 @@ function TasksTab(props: {
     <>
       {deck && (
         <button type="button" className="sh-done-since" onClick={() => setShowDeck(true)} title="See the pages the next meeting opens on">
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>
           <strong>Done since {new Date(deck.sinceStartedAt).toLocaleDateString([], { month: "short", day: "numeric" })}</strong>
           {deck.summary && <span className="sh-done-since-summary">{deck.summary}</span>}
           <span className="count">{deck.closed}</span>
@@ -2345,7 +2338,7 @@ function SnapView(props: {
         ) : (
           snap.line && <p className="sh-view-line">{snap.line}</p>
         )}
-        {snap.caption && <p className="sh-view-caption">✦ {snap.caption}</p>}
+        {snap.caption && <p className="sh-view-caption">{snap.caption}</p>}
         {snap.screenText && (
           <details className="sh-view-text">
             <summary>Text in it</summary>

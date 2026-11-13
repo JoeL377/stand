@@ -180,9 +180,6 @@ function WrapUp(props: { sketch: BrainstormView; roomId: string; onClose?: () =>
     <div className="view-empty sk-wrap">
       <div className="sk-wrap-card">
         <header>
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>
           <strong>{shown.length ? "Sketch saved" : "Nothing was sketched"}</strong>
           <span className="rp-grow" />
           {props.onClose && (

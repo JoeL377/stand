@@ -1215,7 +1215,7 @@ test("since last time: carried tasks open the meeting, Stand hears one called do
   assert.deepEqual([state().checkIn?.closed, state().checkIn?.held], [true, false]);
 });
 
-/** An agent that answers every question with "Fly.io" at once, so ✦ Stand's cards run in tests. */
+/** An agent that answers every question with "Fly.io" at once, so Stand's cards run in tests. */
 class AnsweringAgent extends HeuristicAgent {
   async liveList() {
     return { add: [], change: [], close: [] } as never;

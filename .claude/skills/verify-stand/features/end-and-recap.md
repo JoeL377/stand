@@ -4,7 +4,7 @@ The host ends the meeting for everyone; the server runs the Sonnet tidy pass per
 
 ## Sub-features
 - Leave is the only way out: the last person leaving ends the meeting; the host with others present gets a menu (Leave / End for everyone). No confirm.
-- Ending sends everyone to the recap at once; the recap page shows "✦ Writing the recap…" and fills in when the write-up is saved, and the space can start a new call meanwhile.
+- Ending sends everyone to the recap at once; the recap page shows "Writing the recap…" and fills in when the write-up is saved, and the space can start a new call meanwhile.
 - Space page after the meeting: meeting row `1 min · N to-dos · N decided · N open`, item links, Tasks / Decisions tabs.
 - Recap page.
 
