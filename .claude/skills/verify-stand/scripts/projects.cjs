@@ -112,7 +112,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
       await page.locator("footer.controls").waitFor({ state: "detached", timeout: 180_000 });
       const deadline = Date.now() + 180_000;
       for (;;) {
-        await page.goto(`${base}/s/${roomId}`);
+        await page.goto(`${base}/s/${roomId}?project=${linked.id}`);
         await page.getByRole("tab", { name: /^Tasks/ }).click();
         await page.locator(".sh-panel").waitFor(); await page.waitForTimeout(1500);
         if (await page.getByRole("region", { name: linked.name }).locator(".followups li").count()) break;
@@ -127,21 +127,25 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
     const room = await api(`/api/rooms/${roomId}`);
     const onItem = room.followUps.filter((f) => room.items.some((i) => i.id === f.itemId && i.title === item.replace(/^DEMO-104\s*/, "")) || f.project === linked.id);
     check("the call's to-dos on the linked line are in its project", onItem.length > 0 && onItem.every((f) => f.project === linked.id), onItem.map((f) => [f.text, f.project]));
-    check("the project's section groups them by who has them", /· \d+/.test(sectionText) && (sectionText.match(/\n(You|No owner|[A-Z][a-z]+) · \d+/g) ?? []).length >= 1, sectionText.slice(0, 400));
-    check("Onboarding stays with nothing open in it", /Nothing open in this project/.test(await page.getByRole("region", { name: "Onboarding" }).innerText()));
+    check("the project's view groups them by where they stand", (sectionText.match(/(In progress|To do|Questions) · \d+/g) ?? []).length >= 1, sectionText.slice(0, 400));
+    const onboardingId = (await api(`/api/rooms/${roomId}/projects`)).find((p) => p.name === "Onboarding").id;
 
     await step("move a to-do to Onboarding with the picker", async () => {
       const first = section.locator(".followups li").first();
       await first.getByRole("button", { name: /^Change project/ }).click();
       await snap("picker-open");
       await page.getByRole("dialog", { name: "Change project" }).getByRole("option", { name: "Onboarding" }).click();
+      await page.goto(`${base}/s/${roomId}?project=${onboardingId}`);
       await page.getByRole("region", { name: "Onboarding" }).locator(".followups li").first().waitFor();
       await snap("tasks-moved");
     });
 
     await step("filter the tab to one project", async () => {
-      const onboarding = (await api(`/api/rooms/${roomId}/projects`)).find((p) => p.name === "Onboarding");
-      await page.getByLabel("Filter by project").selectOption(onboarding.id);
+      await page.goto(`${base}/s/${roomId}`);
+      await page.getByRole("region", { name: "Onboarding" }).getByText("1 open").waitFor();
+      await snap("projects-list");
+      check("the first view is a row per project", (await page.locator(".pj-list .sh-project .followups li").count()) === 0 && (await page.getByRole("region", { name: linked.name }).count()) === 1);
+      await page.getByRole("region", { name: "Onboarding" }).getByRole("button", { name: "Onboarding", exact: true }).click();
       await page.waitForURL(/project=/);
       await snap("tasks-filtered");
       const text = await page.locator(".sh-panel").innerText();
@@ -193,7 +197,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
       await page.request.post(`${base}/api/rooms/${roomId}/projects`, { data: { name: "Pricing" } });
       const deadline = Date.now() + 150_000;
       for (;;) {
-        await page.goto(`${base}/s/${roomId}`);
+        await page.goto(`${base}/s/${roomId}?project=${onboardingId}`);
         await page.getByRole("tab", { name: /^Tasks/ }).click();
         await page.locator(".sh-panel").waitFor(); await page.waitForTimeout(1000);
         if (await pill().count()) break;

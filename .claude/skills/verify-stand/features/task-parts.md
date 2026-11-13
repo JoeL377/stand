@@ -4,7 +4,7 @@ A to-do can be a part of another to-do (`notes.parent_id`, one level). The Tasks
 
 ## Reach it
 
-- Space page → Tasks. A part sits under its parent, one step in (`li.part`), when both are in the same project section. It stays there whoever owns it: the family is in the parent's owner group.
+- Space page → Tasks → a project's row. In the project's view a part sits under its parent, one step in (`li.part`), when both are in that project. It stays there whoever owns it: the family is in the parent's owner group.
 - The parent's row has a pill, `1/3 parts`: done parts of the ones still wanted. A dropped part doesn't count. It counts every part, also the ones a filter or `Mine` keeps out of view.
 - A part whose parent isn't the row above it names it after its text, `Part of: …`, and a click on that opens the parent. That is a part under **For you**, under **Done** or **Dropped**, in another project than its parent, or with `Mine` on while the parent is someone else's.
 - The task drawer sets it: `Make it a part of a to-do` / `Change` → `Remove` under **Part of**. Agents set it with `parent` on `create_action` and `update_action`.

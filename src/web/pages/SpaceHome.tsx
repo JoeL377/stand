@@ -330,6 +330,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const matching = (n: Note) => matchesProject(n.project ?? null, projectFilter);
   const projectPicker = (n: Note) => <ProjectPicker note={n} roomId={room.id} projects={projects} onSaved={load} />;
   const filtered = projectProblem(projects, projectFilter);
+  const decisionsIn = new Map<string, number>();
+  for (const n of decisions) if (n.project && !n.replacedBy) decisionsIn.set(n.project, (decisionsIn.get(n.project) ?? 0) + 1);
 
   const reviews = feed?.reviews ?? [];
   const designReviews = feed?.designReviews ?? [];
@@ -473,8 +475,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           ))}
           {!phone && tab === "tasks" && <span className="sh-tab-tools" ref={setTabTools} />}
           {tab === "chat" && <span className="sh-chat-bell"><ChatNotifyBell roomId={room.id} /></span>}
-          {/* One pill at the end of the tab row filters Tasks and Decisions by project. */}
-          {(tab === "tasks" || tab === "decisions") && (
+          {/* One pill at the end of the tab row filters Decisions by project. Tasks opens a project from its row. */}
+          {tab === "decisions" && (
             <label className={projectFilter ? "sh-project-filter on" : "sh-project-filter"} title="Filter by project">
               {/* A phone has room for the mark only; the menu opens from it. */}
               <svg className="sh-project-mark" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
@@ -614,6 +616,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               projectPicker={projectPicker}
               projects={projects}
               projectFilter={filtered ? "" : projectFilter}
+              onProject={setProjectFilter}
+              decisions={decisionsIn}
+              onDecisions={() => pickTab("decisions")}
               mine={mine}
               onMine={(on) => setParam("mine", on ? "1" : "")}
               toolsIn={phone ? null : tabTools}
@@ -981,9 +986,11 @@ function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; 
 type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
 
 /**
- * One list for everything still to do in the space: to-dos (Do) and open questions (Answer). Tasks
- * where a comment tags you come first, then work waiting on someone's look (a PR reported ready),
- * then the rest grouped by owner, yours first, then folded Done and Dropped. Anyone can tick a task
+ * Everything still to do in the space, by project. The first view is the projects themselves, a row
+ * each: what is moving, who is on it and how far along it is, under the tasks that wait on you (a
+ * comment that tags you, a PR reported ready). A row opens that project's own view: its to-dos (Do)
+ * and open questions (Answer) by where they stand, then its folded Done and Dropped. A space with no
+ * projects is one plain list. Anyone can tick a task
  * off, drop it or reopen it, with Undo. An open question takes an answer under its line, and the
  * sweep closes the ones Stand proposed and someone confirms (Questions.tsx).
  */
@@ -992,6 +999,11 @@ function TasksTab(props: {
   projects: Project[];
   /** "" for all, "none" for Unassigned, or one project's id. */
   projectFilter: string;
+  /** Opens one project's view ("none" for Unassigned), or goes back to the list of projects (""). */
+  onProject: (filter: string) => void;
+  /** How many kept decisions each project has, by id: the project's view links to them. */
+  decisions: Map<string, number>;
+  onDecisions: () => void;
   /** Only the tasks of the person looking (?mine=1). */
   mine: boolean;
   onMine: (on: boolean) => void;
@@ -1027,32 +1039,6 @@ function TasksTab(props: {
   const [sweeping, setSweeping] = useState<QuestionSweep | null>(null);
   const { sweep } = props;
   const asked = props.open.filter((n) => n.kind === "question").length;
-  // Which project sections someone folded, kept in this browser. A phone works the other way round:
-  // every project starts as one row, and what is kept is the ones someone opened.
-  const phone = usePhone();
-  const foldKey = phone ? `stand.projectOpen.phone.${props.roomId}` : `stand.projectFold.${props.roomId}`;
-  const readFold = () => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(foldKey) ?? "[]") as string[]);
-    } catch {
-      return new Set<string>();
-    }
-  };
-  const [marked, setMarked] = useState<Set<string>>(readFold);
-  useEffect(() => setMarked(readFold()), [foldKey]);
-  // Asking for one project, or only your own to-dos, is already a short list: nothing starts shut there.
-  const narrowed = phone && Boolean(props.projectFilter || props.mine);
-  const folded = { has: (id: string) => !narrowed && marked.has(id) !== phone };
-  const toggleFold = (id: string) =>
-    setMarked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      try {
-        localStorage.setItem(foldKey, JSON.stringify([...next]));
-      } catch {}
-      return next;
-    });
   const me = firstName(props.me);
   const isMine = (n: Note) => !!n.owner && firstName(n.owner) === me;
   const open = props.mine ? props.open.filter(isMine) : props.open;
@@ -1101,16 +1087,18 @@ function TasksTab(props: {
     const ids = projects.map((p) => p.id).filter((x) => x !== dragging);
     moveProject(dragging, ids.indexOf(target) + (after ? 1 : 0));
   };
-  // One section per project, in the list's order; then Unassigned. A project with nothing open
-  // stays until someone archives it, and an archived one shows only while something open is in it.
-  const inProject = new Map<string, TaskNote[]>();
-  for (const n of rest) {
-    const k = n.project && projects.some((p) => p.id === n.project) ? n.project : "";
-    inProject.set(k, [...(inProject.get(k) ?? []), n]);
-  }
-  const inView = projects.filter(
-    (p) => (props.projectFilter ? p.id === props.projectFilter : !p.archived || inProject.has(p.id)) && (!props.mine || inProject.has(p.id)),
-  );
+  // One row per project, in the list's order; then Unassigned. A project with nothing open stays
+  // until someone archives it, and an archived one shows only while something open is in it.
+  const known = (id: string | null | undefined) => (id && projects.some((p) => p.id === id) ? id : "");
+  const group = (notes: TaskNote[]) => {
+    const out = new Map<string, TaskNote[]>();
+    for (const n of notes) out.set(known(n.project), [...(out.get(known(n.project)) ?? []), n]);
+    return out;
+  };
+  const openIn = group(open);
+  const doneIn = group(closed.filter((n) => stateOf(n) !== "dropped"));
+  const readyIn = group(waiting);
+  const inView = projects.filter((p) => (!p.archived || openIn.has(p.id)) && (!props.mine || openIn.has(p.id)));
   // Active first: projects with work in progress, then where the newest to-dos are. Team order: the list's own.
   const activity = projectActivity(
     open
@@ -1118,7 +1106,10 @@ function TasksTab(props: {
       .map((n) => ({ project: n.project, ts: n.ts, inProgress: stateOf(n, work[n.id]) === "doing", reportedAt: work[n.id]?.log[0]?.ts })),
   );
   const sections = sort === "active" ? activeFirst(inView, activity) : inView;
-  const canSort = !props.projectFilter && sections.length > 1;
+  // One project's view, the list of projects, or with no projects at all one plain list.
+  const viewing = props.projectFilter === "none" ? "" : props.projectFilter || null;
+  const plain = props.projects.length === 0;
+  const canSort = viewing === null && sections.length > 1;
   const canOrder = canSort && sort === "team";
   /** Up or down past the next project in view. */
   const nudge = (id: string, dir: -1 | 1) => {
@@ -1127,8 +1118,7 @@ function TasksTab(props: {
     const ids = projects.map((p) => p.id).filter((x) => x !== id);
     moveProject(id, ids.indexOf(next.id) + (dir > 0 ? 1 : 0));
   };
-  const unassigned = inProject.get("") ?? [];
-  const showUnassigned = (!props.projectFilter || props.projectFilter === "none") && (unassigned.length > 0 || props.projects.length === 0);
+  const unassigned = openIn.get("") ?? [];
   const done = closed.filter((n) => stateOf(n) !== "dropped");
   const dropped = closed.filter((n) => stateOf(n) === "dropped");
   const nameOf = (id: string | null | undefined) => props.projects.find((p) => p.id === id)?.name ?? null;
@@ -1290,10 +1280,10 @@ function TasksTab(props: {
     const owners = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || groups.get(b)!.length - groups.get(a)!.length || a.localeCompare(b));
     return owners.map((o) => ({ key: o, notes: groups.get(o)! }));
   };
-  /** A section's rows, still grouped by who has them; the row's own face says who, so a small gap
-   *  stands in for a heading per person. A to-do's parts stay under it, in its owner's group. */
-  const byOwner = (notes: TaskNote[], section: string) => {
-    const families = withParts(notes);
+  /** Rows grouped by who has them; the row's own face says who, so a small gap stands in for a
+   *  heading per person. A to-do's parts stay under it, in its owner's group. */
+  type Family = { note: TaskNote; parts: TaskNote[] };
+  const byOwner = (families: Family[], section: string) => {
     const partsOf = new Map(families.map((f) => [f.note.id, f.parts]));
     const under = new Set(families.flatMap((f) => f.parts.map((p) => p.id)));
     return ownerGroups(families.map((f) => f.note)).map((g) => (
@@ -1307,26 +1297,45 @@ function TasksTab(props: {
       </div>
     ));
   };
-  /** Who has what in a section, as faces with counts on its header line. */
-  const ownerTally = (notes: TaskNote[]) => (
-    <span className="sh-project-owners">
-      {ownerGroups(notes).map((g) => {
-        const label = `${g.key === me ? "You" : g.key || "No owner"} · ${g.notes.length}`;
-        return (
-          <span key={g.key || "nobody"} className="sh-owner-tally" title={label} aria-label={label}>
-            {g.key ? (
-              <Face name={g.notes[0].owner!} color={colorFor(g.notes[0].owner!)} size={16} title={label} />
-            ) : (
-              <span className="rc-face none" style={{ width: 16, height: 16, fontSize: 9 }} aria-hidden>
-                ?
-              </span>
-            )}
-            {g.notes.length}
-          </span>
-        );
-      })}
-    </span>
-  );
+  /** A project's open work by where it stands: what someone is on, what waits, what is still asked. */
+  const byState = (notes: TaskNote[], section: string) => {
+    const families = withParts(notes);
+    const groups: Array<[string, Family[]]> = [
+      ["In progress", families.filter((f) => f.note.kind === "action" && stateOf(f.note, work[f.note.id]) === "doing")],
+      ["To do", families.filter((f) => f.note.kind === "action" && stateOf(f.note, work[f.note.id]) !== "doing")],
+      ["Questions", families.filter((f) => f.note.kind !== "action")],
+    ];
+    return groups
+      .filter(([, fs]) => fs.length > 0)
+      .map(([label, fs]) => (
+        <div key={label} className="sh-task-group pj-state">
+          <p className="sh-group">
+            {label} · {fs.length}
+          </p>
+          {byOwner(fs, section)}
+        </div>
+      ));
+  };
+  /** Who has a project's open work, as a short stack of faces; the counts are in each face's tooltip. */
+  const ownerFaces = (notes: TaskNote[]) => {
+    const groups = ownerGroups(notes).filter((g) => g.key);
+    return (
+      <span className="pj-faces">
+        {groups.slice(0, 4).map((g) => (
+          <Face key={g.key} name={g.notes[0].owner!} color={colorFor(g.notes[0].owner!)} size={18} title={`${g.key === me ? "You" : g.key} · ${g.notes.length}`} />
+        ))}
+        {groups.length > 4 && <span className="pj-faces-more">+{groups.length - 4}</span>}
+      </span>
+    );
+  };
+  /** What a project's line shows, from the tasks in view. */
+  const lineOf = (id: string) => ({
+    open: openIn.get(id)?.length ?? 0,
+    done: doneIn.get(id)?.length ?? 0,
+    ready: readyIn.get(id)?.length ?? 0,
+    inProgress: id ? (activity.get(id)?.inProgress ?? 0) : (openIn.get("") ?? []).filter((n) => n.kind === "action" && stateOf(n, work[n.id]) === "doing").length,
+    owners: openIn.has(id) && ownerFaces(openIn.get(id)!),
+  });
 
   const fold = (label: string, n: number, open: boolean, toggle: () => void, icon: React.ReactNode) =>
     n > 0 && (
@@ -1373,20 +1382,23 @@ function TasksTab(props: {
             <>
               {mineButton}
               {sweepButton}
-              <TaskMenu
-                onAdd={() => setAdding(true)}
-                sort={canSort ? sort : null}
-                onSort={pickSort}
-              />
+              {viewing === null && (
+                <button type="button" className="rp-pill" onClick={() => setAdding(true)}>
+                  + Project
+                </button>
+              )}
+              {canSort && <TaskMenu sort={sort} onSort={pickSort} />}
             </>,
             props.toolsIn,
           )
         : !adding && (
             <div className="sh-task-tools">
               {mineButton}
-              <button type="button" className="rp-pill desk-only" onClick={() => setAdding(true)}>
-                + Project
-              </button>
+              {viewing === null && (
+                <button type="button" className="rp-pill desk-only" onClick={() => setAdding(true)}>
+                  + Project
+                </button>
+              )}
               {sweepButton}
               {canSort && (
                 <label className="sh-project-sort" title={sort === "active" ? "Projects with work in progress first, then the ones with the newest to-dos" : "The team's order, most important first. Drag a project to change it."}>
@@ -1412,7 +1424,19 @@ function TasksTab(props: {
           />
         </div>
       )}
-      {!open.length && !sections.length && (
+      {viewing !== null && !plain && (
+        <ProjectLine
+          head
+          project={viewing ? (projects.find((p) => p.id === viewing) ?? null) : null}
+          {...lineOf(viewing)}
+          decisions={viewing ? (props.decisions.get(viewing) ?? 0) : 0}
+          onDecisions={props.onDecisions}
+          onOpen={() => props.onProject("")}
+          roomId={props.roomId}
+          reload={props.reload}
+        />
+      )}
+      {!open.length && (viewing !== null || !sections.length) && (
         <p className="sh-card-empty">
           {props.mine ? "Nothing open is yours." : filterName ? `No open tasks in ${filterName}.` : "Nothing open. New tasks come from meetings and what people save here."}
         </p>
@@ -1433,73 +1457,69 @@ function TasksTab(props: {
           {list([...mentioned, ...waiting])}
         </div>
       )}
-      {sections.map((p, i) => {
-        const notes = inProject.get(p.id) ?? [];
-        const isFolded = folded.has(p.id);
-        const drop = dropAt?.id === p.id && dragging !== p.id ? (dropAt.after ? " drop-after" : " drop-before") : "";
-        return (
-          <section
-            key={p.id}
-            className={`sh-project${isFolded ? " folded" : ""}${dragging === p.id ? " dragging" : ""}${drop}`}
-            aria-label={p.name}
-            onDragOver={
-              dragging
-                ? (e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    const box = e.currentTarget.getBoundingClientRect();
-                    const after = e.clientY > box.top + box.height / 2;
-                    if (dropAt?.id !== p.id || dropAt.after !== after) setDropAt({ id: p.id, after });
-                  }
-                : undefined
-            }
-            onDrop={
-              dragging
-                ? (e) => {
-                    e.preventDefault();
-                    if (dropAt) dropOn(dropAt.id, dropAt.after);
-                    setDragging(null);
-                    setDropAt(null);
-                  }
-                : undefined
-            }
-          >
-            <ProjectHead
-              project={p}
-              count={notes.length}
-              owners={notes.length > 0 && ownerTally(notes)}
-              inProgress={activity.get(p.id)?.inProgress ?? 0}
-              folded={isFolded}
-              onFold={() => toggleFold(p.id)}
-              roomId={props.roomId}
-              reload={props.reload}
-              order={
-                canOrder
-                  ? {
-                      onUp: i > 0 ? () => nudge(p.id, -1) : undefined,
-                      onDown: i < sections.length - 1 ? () => nudge(p.id, 1) : undefined,
-                      onDragStart: () => setDragging(p.id),
-                      onDragEnd: () => (setDragging(null), setDropAt(null)),
-                    }
-                  : undefined
-              }
-            />
-            {!isFolded && (notes.length ? byOwner(notes, p.id) : <p className="sh-card-empty small">Nothing open in this project.</p>)}
-          </section>
-        );
-      })}
-      {showUnassigned && unassigned.length > 0 && (
-        <section className={`sh-project unassigned${folded.has("") ? " folded" : ""}`} aria-label="Unassigned">
-          <div className="sh-project-head" onClick={foldOnRow(() => toggleFold(""))}>
-            <button type="button" className="sh-project-fold" aria-expanded={!folded.has("")} onClick={() => toggleFold("")}>
-              <ChevronIcon />
-              <span className="sh-project-name">{props.projects.length ? "Unassigned" : "All tasks"}</span>
-              <span className="count">{unassigned.length}</span>
-            </button>
-            {ownerTally(unassigned)}
-          </div>
-          {!folded.has("") && byOwner(unassigned, "")}
+      {plain ? (
+        byOwner(withParts(rest), "")
+      ) : viewing !== null ? (
+        <section className="sh-project open" aria-label={viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
+          {byState(rest, viewing)}
         </section>
+      ) : (
+        <div className="pj-list">
+          {sections.map((p, i) => {
+            const drop = dropAt?.id === p.id && dragging !== p.id ? (dropAt.after ? " drop-after" : " drop-before") : "";
+            return (
+              <section
+                key={p.id}
+                aria-label={p.name}
+                className={`sh-project${dragging === p.id ? " dragging" : ""}${drop}`}
+                onDragOver={
+                  dragging
+                    ? (e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        const box = e.currentTarget.getBoundingClientRect();
+                        const after = e.clientY > box.top + box.height / 2;
+                        if (dropAt?.id !== p.id || dropAt.after !== after) setDropAt({ id: p.id, after });
+                      }
+                    : undefined
+                }
+                onDrop={
+                  dragging
+                    ? (e) => {
+                        e.preventDefault();
+                        if (dropAt) dropOn(dropAt.id, dropAt.after);
+                        setDragging(null);
+                        setDropAt(null);
+                      }
+                    : undefined
+                }
+              >
+                <ProjectLine
+                  project={p}
+                  {...lineOf(p.id)}
+                  onOpen={() => props.onProject(p.id)}
+                  roomId={props.roomId}
+                  reload={props.reload}
+                  order={
+                    canOrder
+                      ? {
+                          onUp: i > 0 ? () => nudge(p.id, -1) : undefined,
+                          onDown: i < sections.length - 1 ? () => nudge(p.id, 1) : undefined,
+                          onDragStart: () => setDragging(p.id),
+                          onDragEnd: () => (setDragging(null), setDropAt(null)),
+                        }
+                      : undefined
+                  }
+                />
+              </section>
+            );
+          })}
+          {unassigned.length > 0 && (
+            <section className="sh-project unassigned" aria-label="Unassigned">
+              <ProjectLine project={null} {...lineOf("")} onOpen={() => props.onProject("none")} roomId={props.roomId} reload={props.reload} />
+            </section>
+          )}
+        </div>
       )}
       {done.length > 0 && (
         <div className={showDone ? "sh-done open" : "sh-done"}>
@@ -1517,70 +1537,67 @@ function TasksTab(props: {
   );
 }
 
-/** A click anywhere on a project's header row folds it, except on its own controls (the name's button, the menu, the grip). */
-const foldOnRow = (fold: () => void) => (e: React.MouseEvent<HTMLElement>) => {
-  if ((e.target as HTMLElement).closest("button, a, input, select, [role=menu], .sh-project-grip")) return;
-  fold();
-};
-
-/** The Tasks tab's less used tools, in one menu at the end of the tab row: a new project, and the project order. */
-function TaskMenu(props: { onAdd: () => void; sort: "active" | "team" | null; onSort: (sort: "active" | "team") => void }) {
+/** The order of the projects, in a menu at the end of the tab row. */
+function TaskMenu(props: { sort: "active" | "team"; onSort: (sort: "active" | "team") => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
   const pick = (run: () => void) => () => (setOpen(false), run());
   return (
     <span className="sh-project-menu sh-task-menu" ref={ref}>
-      <button type="button" className="sh-project-more" aria-label="More for tasks" aria-haspopup="menu" aria-expanded={open} title="New project, project order" onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="sh-project-more" aria-label="Project order" aria-haspopup="menu" aria-expanded={open} title="Project order" onClick={() => setOpen((v) => !v)}>
         ⋯
       </button>
       {open && (
         <span className="sh-menu" role="menu">
-          <button role="menuitem" onClick={pick(props.onAdd)}>
-            New project
-          </button>
-          {props.sort && (
-            <>
-              <button role="menuitemradio" aria-checked={props.sort === "active"} className={props.sort === "active" ? "on" : undefined} title="Projects with work in progress first, then the ones with the newest to-dos" onClick={pick(() => props.onSort("active"))}>
+          <button role="menuitemradio" aria-checked={props.sort === "active"} className={props.sort === "active" ? "on" : undefined} title="Projects with work in progress first, then the ones with the newest to-dos" onClick={pick(() => props.onSort("active"))}>
                 Active projects first
               </button>
               <button role="menuitemradio" aria-checked={props.sort === "team"} className={props.sort === "team" ? "on" : undefined} title="The team's order, most important first. Drag a project to change it." onClick={pick(() => props.onSort("team"))}>
                 Team order
               </button>
-            </>
-          )}
         </span>
       )}
     </span>
   );
 }
 
-/** A project section's header: fold it, drag it by its handle to change the order, and Move up, Move
- *  down, Rename, Edit goal, Archive or Delete from its menu. */
-function ProjectHead(props: {
-  project: Project;
-  count: number;
-  /** Who has its open to-dos, as faces with counts. */
-  owners?: React.ReactNode;
+/** One project on one line. In the list of projects it is a row that opens the project; as `head` it
+ *  tops the project's own view, with the way back. Either way it reads across the same: the name and
+ *  goal, what is moving (in progress, ready to ship), who is on it, how much of it is done, and what
+ *  is still open. Its menu has Move up, Move down, Rename, Edit goal, Archive and Delete.
+ *  `project` null is Unassigned: the tasks no project has yet. */
+function ProjectLine(props: {
+  project: Project | null;
+  head?: boolean;
+  open: number;
+  done: number;
   /** Open to-dos in it that someone is on now. */
   inProgress: number;
-  folded: boolean;
-  onFold: () => void;
+  /** Open to-dos whose work is in and waits to ship. */
+  ready: number;
+  /** Who has its open work, as faces. */
+  owners?: React.ReactNode;
+  /** Kept decisions in it, linked from its own view. */
+  decisions?: number;
+  onDecisions?: () => void;
+  /** The row opens the project; the head goes back to the list. */
+  onOpen: () => void;
   roomId: string;
   reload: () => void;
   /** Left out when the order can't change here: one project in view, a filter on, or Active first. */
   order?: { onUp?: () => void; onDown?: () => void; onDragStart: () => void; onDragEnd: () => void };
 }) {
-  const { project: p, order } = props;
+  const { project: p, order, head } = props;
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<"name" | "goal" | null>(null);
   const ref = useDismiss<HTMLSpanElement>(menu, () => setMenu(false));
-  const change = (what: string, run: () => Promise<unknown>) => {
+  const change = (what: string, run: () => Promise<unknown>, leave = false) => {
     setMenu(false);
-    run().then(props.reload, errorToast(`Couldn't ${what}`));
+    run().then(() => (leave && head ? props.onOpen() : props.reload()), errorToast(`Couldn't ${what}`));
   };
-  if (editing)
+  if (editing && p)
     return (
-      <div className="sh-project-head editing">
+      <div className="pj-line editing">
         <ProjectForm
           label={editing === "name" ? "Rename project" : "Project goal"}
           submit="Save"
@@ -1596,8 +1613,21 @@ function ProjectHead(props: {
         />
       </div>
     );
+  const name = p?.name ?? "Unassigned";
+  const total = props.open + props.done;
+  const tally = `${props.done} done · ${props.open} open`;
+  const onRow = (e: React.MouseEvent<HTMLElement>) => {
+    if (head || (e.target as HTMLElement).closest("button, a, input, select, [role=menu], .sh-project-grip")) return;
+    props.onOpen();
+  };
   return (
-    <div className="sh-project-head" onClick={foldOnRow(props.onFold)}>
+    <div className={`pj-line${head ? " head" : ""}${p ? "" : " unassigned"}`} onClick={onRow}>
+      {head && (
+        <button type="button" className="pj-back" onClick={props.onOpen} aria-label="All projects" title="All projects">
+          <ChevronIcon />
+          Projects
+        </button>
+      )}
       {order && (
         <span
           className="sh-project-grip"
@@ -1606,9 +1636,9 @@ function ProjectHead(props: {
           aria-hidden
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = "move";
-            e.dataTransfer.setData("text/plain", p.name);
-            const section = e.currentTarget.closest("section");
-            if (section) e.dataTransfer.setDragImage(section, 12, 12);
+            e.dataTransfer.setData("text/plain", name);
+            const row = e.currentTarget.closest(".sh-project");
+            if (row) e.dataTransfer.setDragImage(row, 12, 12);
             order.onDragStart();
           }}
           onDragEnd={order.onDragEnd}
@@ -1616,19 +1646,55 @@ function ProjectHead(props: {
           <GripIcon />
         </span>
       )}
-      <button type="button" className="sh-project-fold" aria-expanded={!props.folded} onClick={props.onFold} title={p.goal ?? undefined}>
-        <ChevronIcon />
-        <span className="sh-project-name">{p.name}</span>
-        <span className="count">{props.count}</span>
-        {props.inProgress > 0 && <span className="sh-project-live">{props.inProgress} in progress</span>}
-        {p.archived && <span className="muted small">Archived</span>}
-      </button>
-      {props.owners}
-      <span className="sh-project-menu" ref={ref}>
-        <button type="button" className="sh-project-more" aria-label={`${p.name}: more`} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
-          ⋯
+      <span className="pj-title">
+        {head ? (
+          <strong className="pj-name">{name}</strong>
+        ) : (
+          <button type="button" className="pj-name" onClick={props.onOpen}>
+            {name}
+          </button>
+        )}
+        {p?.archived && <span className="muted small">Archived</span>}
+        {p?.goal && (
+          <span className="pj-goal" title={p.goal}>
+            {p.goal}
+          </span>
+        )}
+      </span>
+      <span className="pj-moving">
+        {props.inProgress > 0 && (
+          <span className="pj-live" title={`${props.inProgress} in progress: someone is on ${props.inProgress === 1 ? "it" : "them"} now`}>
+            {props.inProgress}
+            <span className="pj-word"> in progress</span>
+          </span>
+        )}
+        {props.ready > 0 && (
+          <span className="pj-ready" title={`${props.ready} ready to ship: the work is in and waits for a look`}>
+            {props.ready}
+            <span className="pj-word"> ready</span>
+          </span>
+        )}
+      </span>
+      {head && props.decisions! > 0 && (
+        <button type="button" className="rp-pill pj-decisions" onClick={props.onDecisions} title="This project's decisions">
+          Decisions<span className="count">{props.decisions}</span>
         </button>
-        {menu && (
+      )}
+      {props.owners || <span className="pj-faces" />}
+      <span className="pj-meter" role="img" aria-label={tally} title={tally}>
+        <span style={{ width: total ? `${Math.round((props.done / total) * 100)}%` : 0 }} />
+      </span>
+      <span className="pj-open" title={tally}>
+        {props.open}
+        <span className="pj-word"> open</span>
+      </span>
+      <span className="sh-project-menu pj-menu" ref={ref}>
+        {p && (
+          <button type="button" className="sh-project-more" aria-label={`${p.name}: more`} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
+            ⋯
+          </button>
+        )}
+        {menu && p && (
           <span className="sh-menu" role="menu">
             {order && (
               <>
@@ -1664,7 +1730,7 @@ function ProjectHead(props: {
               role="menuitem"
               onClick={() => {
                 if (window.confirm(`Delete the project ${p.name}? Its tasks stay, and go back to their agenda item's project or to Unassigned.`))
-                  change("delete it", () => api.deleteProject(props.roomId, p.id));
+                  change("delete it", () => api.deleteProject(props.roomId, p.id), true);
               }}
             >
               Delete
