@@ -1121,7 +1121,8 @@ export class RoomSession implements SpeechSink {
    *  when it can't. */
   agentSay(agent: Actor, out: Parameters<AgentKeeper["say"]>[1]): AgentCard | string {
     if (this.ended) return "That call has ended.";
-    this.agentCards ??= new AgentKeeper();
+    // With no ✦ Stand model the keeper starts here: from the cards kept with the meeting, so a restart loses none.
+    this.agentCards ??= new AgentKeeper(this.db.meetingAgentCards(this.meetingId));
     const why = this.agentCards.sayRefusal(agent);
     if (why) return why;
     const card = this.agentCards.say(agent, out);

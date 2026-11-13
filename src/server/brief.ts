@@ -557,7 +557,7 @@ function timelineLine(e: BriefTimelineEntry): string {
     case "ask":
       return `- ${at} ${e.who} asked Stand: ${e.text}${ref}${e.answer ? `\n  - Stand: ${e.answer.replace(/\n/g, "\n    ")}` : ""}`;
     case "agent":
-      return `- ${at} ${e.who}: ${e.text}${ref}${e.detail ? `\n  - The full write-up:\n    ${e.detail.replace(/\n/g, "\n    ")}` : ""}`;
+      return `- ${at} ${e.who}: ${e.text.replace(/\n/g, "\n  ")}${ref}${e.detail ? `\n  - The full write-up:\n    ${e.detail.replace(/\n/g, "\n    ")}` : ""}`;
     default:
       return `- ${at} ${e.who}${e.kind === "chat" ? " (chat)" : ""}: ${e.text}${ref}`;
   }

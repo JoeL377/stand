@@ -21,7 +21,7 @@ import { macApp } from "../macApp.ts";
 import { dismissToast, errorToast, toast, undoing } from "../Toasts.tsx";
 import { BoardStrip, TopicBoard, type Rewind } from "./TopicBoard.tsx";
 import type { PilotActs } from "./Pilot.tsx";
-import { AgentTabMark } from "./AgentCard.tsx";
+import { type AgentActs, AgentTabMark, SaidNotice, SaidPanel, useSaidNotice } from "./AgentCard.tsx";
 
 /** The Mac app's snap shortcut, written out: ⇧ alone reads as an arrow. */
 const SNAP_KEYS_WORDS = "Control + Shift + S";
@@ -62,6 +62,10 @@ export function Stage(props: {
   /** A phone: the stage is the whole call, and the map and diagram pills wait until there is one or they're asked for. */
   phone?: boolean;
   phoneViews?: boolean;
+  /** A phone's sheet is up over the stage: the board is out of view. */
+  covered?: boolean;
+  /** Closes the phone's sheet, so a card opened from its line shows. */
+  onUncover?: () => void;
   /** Set to a function that snaps the shared screen while one is up, for the pop-out bar. */
   snapRef?: MutableRefObject<(() => Promise<boolean>) | null>;
 }) {
@@ -330,6 +334,35 @@ export function Stage(props: {
     onClose: () => send({ type: "stage.snap.close" }),
   };
 
+  const agentActs: AgentActs | undefined =
+    props.agentCards && !props.ending && !props.offline
+      ? {
+          cards: props.agentCards,
+          onFind: (noteId) => send({ type: "agent.options", noteId }),
+          onPick: (cardId, index, as) => send({ type: "agent.pick", cardId, index, as }),
+          onDismiss: (cardId) => send({ type: "agent.dismiss", cardId }),
+          onTodo: (cardId) => send({ type: "agent.todo", cardId }),
+        }
+      : props.agentCards?.length
+        ? { cards: props.agentCards }
+        : undefined;
+  // A card from someone's own agent while the board is out of view on this screen: a notice at the foot
+  // of the middle screen, and Open shows the card in a panel here only, over the share or the slide.
+  const shown = usePageShown();
+  const [saidOpen, setSaidOpen] = useState<string | null>(null);
+  const boardInView = shown && !props.covered && (!middleTaken || tab === "board") && !openSnap && view === "card" && !saidOpen;
+  const notice = useSaidNotice(props.agentCards, boardInView);
+  const saidCard = saidOpen ? props.agentCards?.find((c) => c.id === saidOpen && !c.dismissed) : undefined;
+  useEffect(() => {
+    if (saidOpen && !saidCard) setSaidOpen(null);
+  }, [saidOpen, !!saidCard]);
+  const openSaid = (id: string) => {
+    notice.see(id);
+    setSaidOpen(id);
+    props.onUncover?.();
+  };
+  const noticeOn = notice.card && !props.ending && !saidOpen ? notice.card : null;
+
   // The topic card: the board's first view.
   const card = (
     <TopicBoard
@@ -344,19 +377,7 @@ export function Stage(props: {
       notes={props.list ?? props.notes}
       followUps={state.followUps}
       pilot={props.pilot}
-      agent={
-        props.agentCards && !props.ending && !props.offline
-          ? {
-              cards: props.agentCards,
-              onFind: (noteId) => send({ type: "agent.options", noteId }),
-              onPick: (cardId, index, as) => send({ type: "agent.pick", cardId, index, as }),
-              onDismiss: (cardId) => send({ type: "agent.dismiss", cardId }),
-              onTodo: (cardId) => send({ type: "agent.todo", cardId }),
-            }
-          : props.agentCards?.length
-            ? { cards: props.agentCards }
-            : undefined
-      }
+      agent={agentActs}
       onDone={props.ending ? undefined : (noteId, done) => send({ type: "followup.done", noteId, done })}
       onRemove={canSteer && !props.ending ? removeNote : undefined}
       onConfirm={props.ending || props.offline ? undefined : (noteId) => send({ type: "list.confirm", noteId })}
@@ -467,7 +488,7 @@ export function Stage(props: {
               >
                 Board
                 {!boardOpen && live && <i className="view-dot" title="Stand is sketching" aria-label="Stand is sketching" />}
-                {!boardOpen && <AgentTabMark cards={props.agentCards} />}
+                {!boardOpen && <AgentTabMark cards={props.agentCards} unseen={notice.unseen} />}
               </button>
             )}
             {tabSnaps.map((s) => (
@@ -522,6 +543,13 @@ export function Stage(props: {
   );
 
   const nextCard = state.next && !props.ending ? <NextCard key={state.next.id} next={state.next} roomId={state.roomId} offline={props.offline} send={send} onDraw={(what, topic) => startSketch(topic, what)} /> : null;
+  const saidNotice = noticeOn && !props.covered ? <SaidNotice key={noticeOn.id} card={noticeOn} more={notice.more} onOpen={() => openSaid(noticeOn.id)} onClose={notice.close} /> : null;
+  const dock = nextCard || saidNotice ? (
+    <>
+      {saidNotice}
+      {nextCard}
+    </>
+  ) : null;
 
   return (
     <main className="stage">
@@ -570,7 +598,8 @@ export function Stage(props: {
         </div>
         {/* Stand offers a map, a diagram or a review to everyone, and anyone answers: at the bottom of the middle
             screen, or of the slide when a review's slide is what shows (ReviewStage puts it there; styles.css). */}
-        {nextCard && <div className="next-dock">{nextCard}</div>}
+        {dock && <div className="next-dock">{dock}</div>}
+        {saidCard && <SaidPanel card={saidCard} acts={agentActs} onClose={() => setSaidOpen(null)} />}
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
         {cropSnap && (
           <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
@@ -620,7 +649,7 @@ export function Stage(props: {
               disabled={Boolean(props.offline || props.ending)}
               shot={myShot}
               onShot={setMyShot}
-              dock={nextCard}
+              dock={dock}
               onFlip={flip}
               onOutcome={(outcome) => send({ type: "review.outcome", itemId: focusItem.id, outcome })}
               onRemove={canSteer ? removeNote : undefined}
@@ -688,8 +717,22 @@ export function Stage(props: {
           board
         )}
       </div>
+      {/* A phone's sheet covers the stage: the notice is one line over it, as Stand's suggestion is (Meeting.tsx). */}
+      {noticeOn && props.covered && <SaidNotice key={noticeOn.id} line card={noticeOn} more={notice.more} onOpen={() => openSaid(noticeOn.id)} onClose={notice.close} />}
+
     </main>
   );
+}
+
+/** The page is in front: a card on a hidden tab hasn't been seen. */
+function usePageShown() {
+  const [shown, setShown] = useState(() => document.visibilityState !== "hidden");
+  useEffect(() => {
+    const on = () => setShown(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", on);
+    return () => document.removeEventListener("visibilitychange", on);
+  }, []);
+  return shown;
 }
 
 export function Avatar({ id, name, picture, size = 44 }: { id: string; name: string; picture?: string | null; size?: number }) {

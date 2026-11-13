@@ -7,10 +7,13 @@
 // few seconds, which jumps to the card. A question asked out loud (push-to-talk) or typed (@stand)
 // gets a card of its own in the board's stack instead: AnswerPart is one question and its answer.
 // What someone's own agent says in the call over the MCP is a card in the stack too: SaidCard.
-import { useEffect, useState } from "react";
+// While the board is out of view on a screen, a card from an agent comes up there as a notice
+// (SaidNotice) that opens the card in a panel on that screen only (SaidPanel).
+import { useEffect, useRef, useState } from "react";
 import type { AgentCard, AgentDraft } from "../../shared/protocol.ts";
 import { Markdown } from "../Markdown.tsx";
 import { usePersonColors } from "../PersonColors.tsx";
+import { isSaid, saidLine, saidNotice, saidOnBoard } from "../agentNotice.ts";
 
 export interface AgentActs {
   cards: AgentCard[];
@@ -44,16 +47,15 @@ export function showCard(id: string) {
   setTimeout(() => document.getElementById(`agent-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 80);
 }
 
-/** A card someone's own agent put in the call by itself (say_in_call), with nobody asking it there. */
-export const isSaid = (c: AgentCard) => !!c.agent && c.kind === "answer" && !c.question;
+export { isSaid };
 
-/** A small ✦ on the Board tab beside a share: pulsing while ✦ Stand works, still for a moment once it's back
- *  or someone's own agent has put a card on the board. */
-export function AgentTabMark({ cards }: { cards: AgentCard[] | null | undefined }) {
+/** A small ✦ on the Board tab beside a share: pulsing while ✦ Stand works, still for a moment once it's back,
+ *  and still for as long as a card from someone's own agent is there that this screen hasn't seen (`unseen`). */
+export function AgentTabMark({ cards, unseen = 0 }: { cards: AgentCard[] | null | undefined; unseen?: number }) {
   const { working, ready } = useAgentStatus(cards);
   const asked = (cards ?? []).some((c) => c.kind === "answer" && (c.status === "listening" || c.status === "working"));
-  if (!working.length && !ready.length && !asked) return null;
-  const last = ready.at(-1);
+  if (!working.length && !ready.length && !asked && !unseen) return null;
+  const last = ready.at(-1) ?? (unseen ? saidOnBoard(cards).at(-1) : undefined);
   return (
     <span
       className={working.length || asked ? "agent-tab-mark working" : "agent-tab-mark ready"}
@@ -339,6 +341,104 @@ export function SaidCard({ card, acts }: { card: AgentCard; acts?: AgentActs }) 
           <Markdown text={card.detail} />
         </details>
       )}
+    </div>
+  );
+}
+
+/** Cards from agents this screen hasn't seen, and the notice for the newest. `inView`: the board's card is
+ *  on this screen now, so what is on the board counts as seen. Cards that were there when the screen
+ *  opened count as seen too. */
+export function useSaidNotice(cards: AgentCard[] | null | undefined, inView: boolean) {
+  const on = saidOnBoard(cards);
+  const ids = on.map((c) => c.id).join(" ");
+  const [seen, setSeen] = useState<Set<string> | null>(null);
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  const arrived = useRef(new Map<string, number>());
+  const [, tick] = useState(0);
+  const t = Date.now();
+  for (const c of on) if (!arrived.current.has(c.id)) arrived.current.set(c.id, t);
+  const add = (more: string[]) => setSeen((s) => (s && more.every((id) => s.has(id)) ? s : new Set([...(s ?? []), ...more])));
+  useEffect(() => {
+    if (seen === null && cards) setSeen(new Set(on.map((c) => c.id)));
+  }, [cards]);
+  useEffect(() => {
+    if (inView && seen !== null) add(on.map((c) => c.id));
+  }, [inView, ids, seen === null]);
+  const n = saidNotice(cards, seen ?? new Set(on.map((c) => c.id)), arrived.current, t, closed);
+  useEffect(() => {
+    if (n.ends === null) return;
+    const id = setTimeout(() => tick((x) => x + 1), Math.max(0, n.ends - Date.now()) + 50);
+    return () => clearTimeout(id);
+  }, [n.ends]);
+  return {
+    ...n,
+    /** The card was in view (opened in the panel). */
+    see: (id: string) => add([id]),
+    /** × on the notice: it goes, and the cards stay unseen for the Board tab's mark. */
+    close: () => setClosed((c) => new Set([...c, ...on.map((x) => x.id)])),
+  };
+}
+
+/** The notice at the foot of the middle screen (or one line over a phone's sheet): whose agent, the first
+ *  line of what it said, Open and ×. */
+export function SaidNotice({ card, more, line, onOpen, onClose }: { card: AgentCard; more: number; line?: boolean; onOpen: () => void; onClose: () => void }) {
+  const colorFor = usePersonColors();
+  const who = `${card.by.split(" ")[0]}'s agent`;
+  return (
+    <div className={line ? "phone-next said-notice-line" : "nudge said-notice"} role="status" title={`${card.by}'s own agent put a card on the board`}>
+      <span className="agent-mark" aria-hidden>
+        ✦
+      </span>
+      <span className="said-notice-who" style={{ color: colorFor(card.agent?.personId ?? card.by) }}>
+        {who}
+      </span>
+      <button type="button" className={line ? "phone-next-what" : "said-notice-what"} onClick={onOpen}>
+        {saidLine(card, 90) || "put a card on the board"}
+      </button>
+      {more > 0 && <span className="said-notice-more muted">+{more}</span>}
+      <button type="button" className={line ? "link" : "primary said-notice-open"} onClick={onOpen}>
+        Open
+      </button>
+      <button type="button" className="link muted" onClick={onClose} aria-label="Close">
+        ✕
+      </button>
+    </div>
+  );
+}
+
+/** A card from an agent opened from its notice: over the middle screen, on this screen only, while the
+ *  share or the slide goes on under it. Escape or × closes it. */
+export function SaidPanel({ card, acts, onClose }: { card: AgentCard; acts?: AgentActs; onClose: () => void }) {
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onClose]);
+  return (
+    <div className="said-panel" role="dialog" aria-label={`From ${card.by.split(" ")[0]}'s agent`}>
+      <SaidCard card={card} acts={acts && { ...acts, onDismiss: undefined }} />
+      <div className="said-panel-foot">
+        <button type="button" onClick={onClose} title="Only you see this panel">
+          Close
+        </button>
+        {acts?.onDismiss && (
+          <button
+            type="button"
+            className="link muted"
+            title="Take this card off the board, for everyone"
+            onClick={() => {
+              acts.onDismiss!(card.id);
+              onClose();
+            }}
+          >
+            Dismiss for everyone
+          </button>
+        )}
+      </div>
     </div>
   );
 }
