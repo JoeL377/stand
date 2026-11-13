@@ -4355,3 +4355,27 @@ footer.controls .control.pill { padding: 7px 16px; }
   .topic-now li.topic-task:hover .topic-check:not([aria-pressed="true"]):not(:disabled), .topic-now .topic-check:not([aria-pressed="true"]):focus-visible { border-color: color-mix(in srgb, var(--text) 45%, transparent); }
   .topic-now li.topic-task:hover .topic-check:not([aria-pressed="true"]):not(:disabled)::before, .topic-now .topic-check:not([aria-pressed="true"]):focus-visible::before { opacity: 0; }
 }
+
+/* ---- card lists: every mark, box and face sits centred on its line's first row ---- */
+.topic-now .topic-tasks li.topic-task { align-items: flex-start; gap: 8px; }
+.topic-now .topic-tasks li.topic-task > .topic-note-mark { flex: none; width: 15px; height: 1.4em; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.topic-now .topic-tasks li.topic-task:not(.heard):not(.leaving) > .topic-note-mark { position: relative; height: 1.4em; font-size: inherit; color: transparent; overflow: hidden; }
+.topic-now .topic-tasks li.topic-task:not(.heard):not(.leaving) > .topic-note-mark::before { position: absolute; left: 50%; top: 50%; margin: -2.5px 0 0 -2.5px; }
+.topic-now .topic-tasks li.topic-task > .topic-check { top: 0; margin-top: calc((1.4em - 15px) / 2); }
+/* A face's own type is small, so its offset is in px: an 18px face on a 20px row. */
+.topic-now .topic-tasks li.topic-task .topic-dot { align-self: flex-start; margin-top: 1px; }
+.topic-now .topic-tasks li.topic-task > .topic-task-at, .topic-now .topic-tasks li.topic-task > .topic-task-answers { align-self: flex-start; margin-top: 2px; line-height: 16px; }
+.topic-now .topic-tasks li.topic-task > .topic-task-remove { align-self: flex-start; height: 20px; display: inline-flex; align-items: center; }
+.topic-now .topic-details li { align-items: flex-start; gap: 10px; }
+.topic-now .topic-details li > .topic-dot { margin-top: 0; }
+.topic-now .topic-details li > .topic-note-mark { height: 1.4em; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.topic-now .topic-section-label { display: flex; align-items: center; gap: 6px; line-height: 16px; }
+.topic-now .topic-section-label .topic-tab-count { margin-left: 0; line-height: 16px; }
+/* In a column the hover tools lie over the line's end, so they never narrow the text. */
+.topic-col .topic-task > .topic-task-remove { position: absolute; right: -14px; top: 0; }
+@media (hover: hover) {
+  .topic-col .topic-task .agent-find { position: absolute; right: 0; top: 1px; background: color-mix(in srgb, var(--accent) 24%, var(--panel-2)); box-shadow: -8px 0 8px var(--panel-2); pointer-events: none; }
+  .topic-col .topic-task:hover .agent-find, .topic-col .topic-task .agent-find:focus-visible { pointer-events: auto; }
+}
+.topic-now-head .topic-updating { line-height: 16px; }
+.topic-remark > .topic-dot { flex: none; }
