@@ -1,4 +1,7 @@
 import { meetingTimeline } from "./timeline.ts";
+import { archivedRows } from "./archive.ts";
+import { MEETING_TITLE_MAX, cleanMeetingTitle, meetingKindName } from "./meetingNames.ts";
+import { forgetMeetingFrom } from "./noteFrom.ts";
 import { changeReview, logThreadChange, quotePassage, reviewFor } from "./planReview.ts";
 import { BrainstormError, shownDiagram, startBrainstorm } from "./brainstorm.ts";
 import { CONTEXT_MAX, CONTEXT_TEXT_MAX, parseSeed } from "./designSession.ts";
@@ -22,7 +25,7 @@ import { projectActivity, type Project } from "../shared/projects.ts";
 import { isClosed, stateOf } from "../shared/tasks.ts";
 import { type DB, ParentError, ProjectError } from "./db.ts";
 import { IDEA_SLIDES_MAX, ideaReviewView, reviewedIdeas, setUpIdeaReview } from "./ideaReview.ts";
-import { ReviewError, addSlide, lastReview, reviewView, slideName, slideShotKey } from "./reviews.ts";
+import { ReviewError, addSlide, lastReview, reviewOfMeeting, reviewView, slideName, slideShotKey } from "./reviews.ts";
 import { ownedBy } from "./spaces.ts";
 import { recordMentions } from "./mentions.ts";
 import { answerOf, openQuestions, settledView } from "./spaceSettle.ts";
@@ -1560,6 +1563,72 @@ export function agentApi(deps: AgentDeps) {
     },
 
     /** What changed in a space since a date, in one call. */
+    /** A space's meetings as the Meetings tab lists them, newest first, each with the name it shows
+     *  under and what it was about, so an agent can suggest better names. */
+    listMeetings(caller: Caller, opts: { space: string; since?: string; limit?: number; unnamed?: boolean }, baseUrl = "") {
+      const room = findSpace(caller, opts.space);
+      const since = opts.since ? Date.parse(opts.since) : 0;
+      if (Number.isNaN(since)) throw new AgentError(`"${clip(opts.since ?? "", 40)}" isn't a date. Use one like 2026-10-11.`);
+      const limit = Math.min(Math.max(1, Math.round(opts.limit ?? 30)), 100);
+      const gone = new Set(archivedRows(db, room.id).map((a) => a.ref));
+      const rows = db
+        .feedMeetings(room.id, 200)
+        .filter((m) => m.startedAt >= since && !gone.has(`meeting:${m.id}`) && !(opts.unnamed && m.title))
+        .slice(0, limit);
+      return {
+        space: { id: room.id, name: room.name },
+        meetings: rows.map((m) => {
+          const kind = meetingKindName(db, m.id);
+          const topics = [...new Set(db.meetingDiscussions(m.id).map((d) => d.topic).filter(Boolean))];
+          const slides = kind === "Product review" ? reviewOfMeeting(db, m.id)?.titles : undefined;
+          return {
+            id: m.id,
+            name: m.title ?? kind,
+            named: !!m.title,
+            kind,
+            on: day(m.startedAt),
+            started_at: new Date(m.startedAt).toISOString(),
+            minutes: Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000)),
+            summary: m.summary ? clip(m.summary, 500) : undefined,
+            topics: topics.length ? topics.slice(0, 8).map((t) => clip(t, 120)) : undefined,
+            slides: slides?.length ? slides.slice(0, 8) : undefined,
+            to_dos: m.todos,
+            decided: m.decided,
+            open: m.open,
+            url: `${baseUrl}/meetings/${m.id}`,
+          };
+        }),
+        note: "name is what the Meetings tab shows: the name someone gave it, or its kind (Meeting, Product review...) when named is false. rename_meetings changes it.",
+      };
+    },
+
+    /** Gives meetings the names people will know them by. A blank title goes back to the kind's name. */
+    renameMeetings(caller: Caller, args: { renames: Array<{ meeting: string; title: string }> }, baseUrl = "") {
+      requireWrite(caller);
+      if (!args.renames?.length) throw new AgentError("Give at least one meeting and its new title.");
+      if (args.renames.length > 50) throw new AgentError("At most 50 meetings in one call.");
+      const rooms = new Set<string>();
+      // Check them all first, so a bad id renames nothing.
+      const plan = args.renames.map(({ meeting, title }) => {
+        const id = (meeting ?? "").trim().replace(/^.*\/meetings\//, "").replace(/[/?#].*$/, "");
+        const m = id ? db.getMeeting(id) : null;
+        if (!m || m.added || m.chat) throw new AgentError(`No meeting "${clip(meeting ?? "", 60)}". list_meetings gives the ids.`);
+        space(m.roomId, caller);
+        if (typeof title === "string" && title.trim().length > MEETING_TITLE_MAX)
+          throw new AgentError(`"${clip(title, 40)}" is too long: a meeting's name is at most ${MEETING_TITLE_MAX} characters, one line.`);
+        return { m, title: cleanMeetingTitle(title) };
+      });
+      const renamed = plan.map(({ m, title }) => {
+        db.setMeetingTitle(m.id, title);
+        forgetMeetingFrom(m.id);
+        rooms.add(m.roomId);
+        const kind = meetingKindName(db, m.id);
+        return { id: m.id, name: title ?? kind, was: m.title ?? kind, on: day(m.startedAt), url: `${baseUrl}/meetings/${m.id}` };
+      });
+      for (const r of rooms) deps.notify(r, "followups");
+      return { renamed, shows_on: "The space's Meetings tab and each meeting's recap page in Stand." };
+    },
+
     whatsNew(caller: Caller, opts: { space: string; since?: string; allUpdates?: boolean }, baseUrl = "") {
       const room = findSpace(caller, opts.space);
       const since = opts.since ? Date.parse(opts.since) : Date.now() - WHATS_NEW_DAYS * 86_400_000;
@@ -1598,6 +1667,7 @@ export function agentApi(deps: AgentDeps) {
           .filter((m) => m.startedAt >= since)
           .map((m) => ({
             id: m.id,
+            name: m.title ?? meetingKindName(db, m.id),
             on: day(m.startedAt),
             minutes: Math.round((m.endedAt - m.startedAt) / 60_000),
             summary: m.summary ?? undefined,

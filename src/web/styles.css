@@ -1965,6 +1965,13 @@ a.sh-pill:hover { text-decoration: none; }
 }
 
 /* Recap chapters (RecapChapters.tsx): the chapter bar, chips on notes, the Chapters section. */
+/* The recap's heading names the meeting; a click renames it. */
+.rc-title-btn { all: unset; cursor: text; display: inline-flex; align-items: baseline; gap: 10px; border-radius: 6px; max-width: 100%; }
+.rc-title-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rc-title-edit { color: var(--muted); opacity: 0; transition: opacity 120ms; align-self: center; display: inline-flex; }
+.rc-title-btn:hover .rc-title-edit, .rc-title-btn:focus-visible .rc-title-edit { opacity: 1; }
+.rc-title-input { font: inherit; letter-spacing: inherit; color: var(--text); background: transparent; border: none; border-bottom: 1px solid var(--line); outline: none; padding: 0; width: min(100%, 22em); }
+.rc-title-input:focus { border-bottom-color: var(--accent); }
 .rc-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .rc-face { flex: none; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 9.5px; font-weight: 600; color: #fff; }
 .rc-face.none { background: var(--panel-2); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); font-size: 10px; }
@@ -2280,6 +2287,8 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
 .sh-end { flex: none; width: 76px; display: inline-flex; justify-content: flex-end; }
 /* A quiet list: names and counts a step lighter. */
 .sh-panel.meetings .sh-who { font-weight: 550; }
+/* A meeting's name, which can be one someone gave it: one line that trails off. */
+.sh-panel.meetings .sh-mname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sh-panel.meetings .sh-counts .sh-count { font-weight: 400; }
 /* The day sits beside its first row, not on a line of its own. */
 .sh-panel.meetings .sh-day { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: start; }
@@ -2294,8 +2303,9 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .sh-panel.meetings .sh-day h3 { height: 38px; }
   /* A meeting reads across like a table row: kind, length, what came out of it, each in its own
      column close to the name. Only the time and the page it left behind sit at the far end. */
-  .sh-panel.meetings .sh-day .sh-row-link .sh-row-text { order: 0; flex: none; gap: 0; }
-  .sh-panel.meetings .sh-day .sh-row-link .sh-who { flex: 0 0 124px; }
+  .sh-panel.meetings .sh-day .sh-row-link .sh-row-text { order: 0; flex: none; gap: 0; min-width: 0; }
+  /* Wide enough for a name someone gave it ("Projects spec and review mode"); a longer one trails off. */
+  .sh-panel.meetings .sh-day .sh-row-link .sh-mname { flex: 0 0 clamp(124px, 26vw, 300px); }
   .sh-panel.meetings .sh-day .sh-row-link .sh-len { flex: 0 0 60px; text-align: right; font-variant-numeric: tabular-nums; }
   .sh-panel.meetings .sh-day .sh-counts { order: 1; margin-left: 22px; }
   .sh-panel.meetings .sh-day .sh-time { order: 2; width: auto; margin-left: auto; opacity: 0; }

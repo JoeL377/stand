@@ -153,6 +153,8 @@ export const api = {
   itemHistory: (itemId: string) =>
     call<ItemHistory & { room: { id: string; name: string } }>("GET", `/api/items/${itemId}/history`),
   meeting: (id: string) => call<MeetingRecap>("GET", `/api/meetings/${id}`),
+  /** Names a meeting; an empty title goes back to the name its kind gives it. */
+  renameMeeting: (id: string, title: string) => call<{ title: string | null; kindName: string }>("PUT", `/api/meetings/${id}/title`, { title }),
   review: (roomId: string, reviewId: string) =>
     call<{ roomName: string; review: ReviewView | null; reviews: ReviewSummary[] }>("GET", `/api/rooms/${roomId}/reviews/${encodeURIComponent(reviewId)}`),
   /** With `design` it starts a design session: what to start from (pasted notes or a diagram) and the to-do its draft spec goes on. */

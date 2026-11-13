@@ -20,7 +20,7 @@ References look like stand:action/<id>, stand:decision/<id>, stand:question/<id>
 At the start of a session, call whats_new for the space you're working in and work from what it says. It covers the last 7 days and what's being worked on right now, so nobody has to re-explain.
 Before starting on a to-do, call start_work with its ref: one call marks it as yours and returns why it exists, its plan, what it depends on and what else is in progress. Tell your person about any heads_up before going on; nothing stops you.
 
-"What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Both list mentions_you: tasks where someone tagged your person with @Name in a comment and waits on them. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief.
+"What's new?" or catching up on a space -> whats_new. "What's mine?" -> list_my_work. Both list mentions_you: tasks where someone tagged your person with @Name in a comment and waits on them. Everything to do in a space -> list_actions. What people saved to a space lately -> list_notes. What's coming up in the next meeting -> get_suggested_agenda. Starting on an item -> get_item_context. What happened in a meeting -> get_meeting_brief. A space's meetings with their names -> list_meetings; when your person wants meetings named for what they were about -> rename_meetings.
 If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. When your person asks for a review of that plan, or it has a question the team must decide, request_design_review puts it on the space's next design review with your questions; don't ask for one otherwise. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action. When you split a to-do into smaller to-dos, give each one parent, so they show as its parts and follow its project.
 A space's open questions -> list_questions. When you can answer one, or your person says one no longer matters -> close_question: an answer is kept as a decision linked to the question, and a drop takes a reason.
@@ -216,6 +216,45 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     },
     ({ meeting_id, space_id, transcript, carried_over }) =>
       run(() => api.meetingBrief(caller, { meetingId: meeting_id, spaceId: space_id, transcript, carriedOver: carried_over }, baseUrl)),
+  );
+
+  server.registerTool(
+    "list_meetings",
+    {
+      title: "List a space's meetings with their names",
+      description:
+        "A space's finished meetings as its Meetings tab lists them, newest first. Each has its id, name (what the tab shows: the name someone gave it, or its kind like Meeting or Product review when named is false), kind, day, length, summary, topics (what the talk was about, in order), slides (for a product review), counts of to-dos, decisions and open questions, and the recap url. Use it to suggest names that say what each meeting was about; rename_meetings applies them.",
+      inputSchema: {
+        space: z.string().describe("The space's id or name (from list_spaces)"),
+        since: z.string().optional().describe("Only meetings since this date, like 2026-11-01"),
+        unnamed: z.boolean().optional().describe("Only the meetings nobody has named yet"),
+        limit: z.number().int().optional().describe("Default 30, at most 100"),
+      },
+      annotations: READ,
+    },
+    ({ space, since, unnamed, limit }) => run(() => api.listMeetings(caller, { space, since, unnamed, limit }, baseUrl)),
+  );
+
+  server.registerTool(
+    "rename_meetings",
+    {
+      title: "Rename Stand meetings",
+      description:
+        "Gives one or more meetings a name that says what they were about. The name shows on the space's Meetings tab, the recap page, and where a to-do or decision says which meeting it came from. Keep names short, a few words, like \"Projects spec and review mode\". An empty title takes the name off, so the meeting shows its kind again. Ids come from list_meetings or a recap link (/meetings/<id>). Anyone in the space can rename its meetings, and people can rename them on the recap page too. Rename only when your person asks or agrees to the names.",
+      inputSchema: {
+        renames: z
+          .array(
+            z.object({
+              meeting: z.string().describe("The meeting's id, or its recap link"),
+              title: z.string().describe("The new name, one line, at most 80 characters. Empty to take the name off"),
+            }),
+          )
+          .min(1)
+          .max(50),
+      },
+      annotations: { ...WRITE, idempotentHint: true },
+    },
+    ({ renames }) => run(() => api.renameMeetings(caller, { renames }, baseUrl)),
   );
 
   server.registerTool(

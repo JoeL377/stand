@@ -167,7 +167,9 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange
                 <span className={n.owner ? undefined : "muted"}>{n.owner ?? "Anyone"}</span>
               )}
               {task.meeting ? (
-                <Link to={`/meetings/${task.meeting.id}`}>From the {task.meeting.chat ? "chat" : "meeting"} on {fmtDate(task.meeting.startedAt)}</Link>
+                <Link to={`/meetings/${task.meeting.id}`}>
+                  {task.meeting.title ? `From ${task.meeting.title} on ${fmtDate(task.meeting.startedAt)}` : `From the ${task.meeting.chat ? "chat" : "meeting"} on ${fmtDate(task.meeting.startedAt)}`}
+                </Link>
               ) : (
                 <span>Added{n.editedBy ? ` by ${n.editedBy}` : ""}</span>
               )}

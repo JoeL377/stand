@@ -4,6 +4,7 @@
 // suggestions also come off the agenda (the same as removing or dismissing them there), and come
 // back when restored.
 
+import { meetingKindName } from "./meetingNames.ts";
 import type { ArchivedKind, ArchivedRow } from "../shared/protocol.ts";
 import type { DB } from "./db.ts";
 
@@ -38,7 +39,7 @@ export function archiveRow(db: DB, roomId: string, ref: string, by: string, sugg
   switch (r.kind) {
     case "meeting": {
       const m = db.getMeeting(r.id);
-      return !!m && m.roomId === roomId && put("Meeting", m.endedAt ?? m.startedAt);
+      return !!m && m.roomId === roomId && put(m.title ?? meetingKindName(db, m.id), m.endedAt ?? m.startedAt);
     }
     case "snap": {
       const s = db.getSnap(r.id);
