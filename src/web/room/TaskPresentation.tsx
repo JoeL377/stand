@@ -7,10 +7,21 @@ import { PlanReviewBody } from "../PlanReview.tsx";
 
 type Presentation = { id: string; mode: "brief" | "spec" };
 
-export function TaskPicker({ roomId, notes, disabled, onPick }: {
+/** The top bar's More menu asks for the picker with this window event. */
+export const PRESENT_TASK = "stand:present-task";
+
+export function TaskPicker({ roomId, notes, disabled, onPick, bare }: {
   roomId: string; notes: Note[]; disabled?: boolean; onPick: (task: Presentation) => void;
+  /** No button of its own: it opens from the top bar's More menu. */
+  bare?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!bare || disabled) return;
+    const show = () => setOpen(true);
+    window.addEventListener(PRESENT_TASK, show);
+    return () => window.removeEventListener(PRESENT_TASK, show);
+  }, [bare, disabled]);
   const [tasks, setTasks] = useState<Note[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -23,7 +34,7 @@ export function TaskPicker({ roomId, notes, disabled, onPick }: {
   }, [roomId, open]);
   const all = [...new Map([...tasks, ...notes].filter((n) => n.kind === "action" || n.kind === "question").map((n) => [n.id, n])).values()];
   return <div className="task-picker">
-    <button disabled={disabled} aria-expanded={open} onClick={() => setOpen(!open)}>Present task</button>
+    {!bare && <button disabled={disabled} aria-expanded={open} onClick={() => setOpen(!open)}>Present task</button>}
     {open && <div className="task-picker-menu" role="dialog" aria-label="Choose a task to present">
       <div className="row"><input autoFocus aria-label="Search tasks" placeholder="Search tasks…" value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => setOpen(false)} aria-label="Close task picker">✕</button></div>
       {error && <p className="error">{error}</p>}

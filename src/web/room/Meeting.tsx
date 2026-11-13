@@ -17,6 +17,7 @@ import { PopOutBar, canPopOut, usePopOut } from "./PopOutBar.tsx";
 import { LinkIcon, Logo, MicIcon, MicOffIcon, PlayIcon, ShareIcon, StopShareIcon } from "../icons.tsx";
 import { dismissToast, toast, undoing } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
+import { PRESENT_TASK } from "./TaskPresentation.tsx";
 import { MOD, meetingShortcuts } from "../shortcuts.ts";
 import { ExperienceControl, runningExperience } from "./Experiences.tsx";
 import { TaskPicker } from "./TaskPresentation.tsx";
@@ -429,9 +430,10 @@ export function Meeting(props: {
       {!phone && (
       <header className="topbar">
         <div className="topbar-left">
-          <Logo size={20} />
-          <strong className="room-name">{state.roomName}</strong>
-          <span className="timer">
+          <span className="topbar-logo" title={state.roomName}>
+            <Logo size={20} />
+          </span>
+          <span className="timer" title={state.roomName}>
             <span className={notRecording ? "rec-dot off" : "rec-dot"} aria-hidden /> {fmtDuration(now - state.meetingStartedAt)}
           </span>
           {notRecording && !micFirst && (
@@ -463,8 +465,10 @@ export function Meeting(props: {
               <MicOffIcon /> {media.audioAway === "elsewhere" ? "Mic in another window · Talk here" : "Audio disconnected · Reconnect"}
             </button>
           ) : (
+            // Plain muted shows on your face and on the Unmute button; the bar speaks up only for trouble.
             !media.micOn &&
-            !media.audioDown && (
+            !media.audioDown &&
+            (media.micError || media.micStarting || micFirst) && (
               <button
                 className={media.micError ? "badge muted-pill blocked" : "badge muted-pill"}
                 onClick={() => void media.toggleMic()}
@@ -492,27 +496,15 @@ export function Meeting(props: {
             offline={!room.connected}
             send={send}
           />
-          {offParts.length > 0 && <DemoMode parts={offParts} />}
-          {room.cost && (
-            <span className="cost-pill" title={`What this meeting's Claude calls have cost so far:\n${costLines(room.cost).join("\n")}`}>
-              {fmtCost(room.cost.usd)}
-            </span>
-          )}
-          <button
-            className="ghost icon-btn keys-btn"
-            title="How Stand works and keyboard shortcuts (?)"
-            aria-label="Help and keyboard shortcuts"
-            aria-expanded={showKeys}
-            // The sheet closes on any click outside it; this button toggles it instead.
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => setShowKeys((v) => !v)}
-          >
-            ?
-          </button>
-          {/* Alone, inviting someone is the next thing to do. Once people are in, it is an icon. */}
-          <button className={state.participants.length > 1 && !copied ? "ghost invite quiet" : "ghost invite"} onClick={copyInvite} aria-label="Copy invite link" title="Copy invite link">
-            <LinkIcon /> {(copied || state.participants.length <= 1) && <span className="invite-label">{copied ? "Copied ✓" : "Copy invite link"}</span>}
-          </button>
+          {copied && <span className="badge invite-copied" role="status">Invite link copied ✓</span>}
+          <TopMore
+            roomName={state.roomName}
+            offParts={offParts}
+            cost={room.cost ? { usd: fmtCost(room.cost.usd), lines: costLines(room.cost) } : null}
+            canPresent={canSteer && !writingUp && room.connected}
+            onInvite={copyInvite}
+            onHelp={() => setShowKeys(true)}
+          />
         </div>
       </header>
       )}
@@ -1084,22 +1076,63 @@ function MicMenu(props: { mics: Mic[]; micId: string | null; onPick: (id: string
 }
 
 /** One pill for what isn't connected yet, with the details a click away. */
-function DemoMode({ parts }: { parts: string[] }) {
+/** Everything in the top bar that isn't needed at a glance: invite, present a task, help, what's
+ *  not connected and what the call has cost. */
+function TopMore(props: {
+  roomName: string;
+  offParts: string[];
+  cost: { usd: string; lines: string[] } | null;
+  canPresent: boolean;
+  onInvite: () => void;
+  onHelp: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
+  const pick = (run: () => void) => () => {
+    setOpen(false);
+    run();
+  };
   return (
-    <span className="pop-wrap demo-mode" ref={ref}>
-      <button className="badge" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        Demo mode
+    <span className="pop-wrap top-more" ref={ref}>
+      <button className="ghost icon-btn top-more-btn" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden>
+          <circle cx="3" cy="8" r="1.4" />
+          <circle cx="8" cy="8" r="1.4" />
+          <circle cx="13" cy="8" r="1.4" />
+        </svg>
       </button>
       {open && (
-        <div className="add-menu demo-mode-pop" role="dialog">
-          <strong>Demo mode</strong>
-          <ul>
-            {parts.map((p) => (
-              <li key={p}>{p[0].toUpperCase() + p.slice(1)}.</li>
-            ))}
-          </ul>
+        <div className="add-menu top-more-menu" role="menu">
+          <strong className="top-more-name" dir="auto">
+            {props.roomName}
+          </strong>
+          <button role="menuitem" onClick={pick(props.onInvite)}>
+            Copy invite link
+          </button>
+          {props.canPresent && (
+            <button role="menuitem" onClick={pick(() => window.dispatchEvent(new Event(PRESENT_TASK)))}>
+              Present a task
+            </button>
+          )}
+          {/* The sheet closes on any click outside it, so open it after this click is over. */}
+          <button role="menuitem" onClick={pick(() => setTimeout(props.onHelp))}>
+            Help and shortcuts
+          </button>
+          {props.cost && (
+            <p className="top-more-note" title={props.cost.lines.join("\n")}>
+              Claude cost so far <span>{props.cost.usd}</span>
+            </p>
+          )}
+          {props.offParts.length > 0 && (
+            <div className="top-more-note">
+              Demo mode
+              <ul>
+                {props.offParts.map((p) => (
+                  <li key={p}>{p[0].toUpperCase() + p.slice(1)}.</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </span>

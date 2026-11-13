@@ -4,12 +4,17 @@
 // what's behind it, on your screen only.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Typed } from "./written.tsx";
 import type { BrainCaught, BrainNode, BrainstormView } from "../../shared/protocol.ts";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { usePersonColors } from "../PersonColors.tsx";
 import { initials } from "../util.ts";
 
 const FRESH_MS = 7_000;
+/** How long the pill for a new circle that landed off screen stays. */
+const AWAY_MS = 20_000;
+/** The most a click on that pill leaves the map zoomed in. */
+const AWAY_ZOOM = 1.3;
 export const KIND = { action: { label: "To do", Icon: TodoIcon }, decision: { label: "Decided", Icon: DecidedIcon }, question: { label: "Open", Icon: QuestionIcon } } as const;
 export const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
@@ -264,7 +269,7 @@ export function BrainMap(props: {
   const moved = useRef(false);
   const gestures = {
         onPointerDown: (e: React.PointerEvent) => {
-          if ((e.target as HTMLElement).closest(".brain-card, .brain-fit, .brain-kinds, .brain-zoom")) return;
+          if ((e.target as HTMLElement).closest(".brain-card, .brain-fit, .brain-kinds, .brain-zoom, .brain-new-pill")) return;
           touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
           if (touches.current.size === 1) moved.current = false;
         },
@@ -319,6 +324,26 @@ export function BrainMap(props: {
     return () => clearTimeout(t);
   }, [anyFresh, nodes.length]);
 
+  // Zoomed in, a new circle can land off screen. A pill names it, and a click goes to it; the
+  // view is never moved under someone who is reading.
+  const [away, setAway] = useState<string | null>(null);
+  const offScreen = (q: { x: number; y: number }) => {
+    const sx = v.x + q.x * v.k;
+    const sy = v.y + q.y * v.k;
+    return sx < 24 || sy < 24 || sx > size.w - 24 || sy > size.h - 24;
+  };
+  const newest = placed.filter((q) => q.node && fresh(q.id)).at(-1);
+  useEffect(() => {
+    if (newest && view && offScreen(newest)) setAway(newest.id);
+  }, [newest?.id]);
+  useEffect(() => {
+    if (!away) return;
+    const t = setTimeout(() => setAway(null), AWAY_MS);
+    return () => clearTimeout(t);
+  }, [away]);
+  const awayAt = away && view ? (at.get(away) ?? null) : null;
+  const awayPill = awayAt?.node && offScreen(awayAt) ? awayAt : null;
+
   const [openId, setOpenId] = useState<string | null>(null);
   const open = openId === "root" ? null : (nodes.find((n) => n.id === openId) ?? null);
   // A "+N more" pill opens a card of just the ideas it stands for.
@@ -346,6 +371,26 @@ export function BrainMap(props: {
 
   return (
     <div className={`brain${narrow ? " narrow" : ""}${props.className ? ` ${props.className}` : ""}`} ref={box} onClick={() => setOpenId(null)} {...gestures}>
+      {awayPill && (
+        <button
+          type="button"
+          className="brain-new-pill"
+          title="Go to it"
+          onClick={(e) => {
+            e.stopPropagation();
+            // Close enough to read it and see what it hangs off, never the tight zoom it was missed at.
+              const k = Math.min(v.k, AWAY_ZOOM);
+              setView(clampView(k, size.w / 2 - awayPill.x * k, size.h / 2 - awayPill.y * k));
+            setAway(null);
+          }}
+        >
+          <span className="agent-mark" aria-hidden>
+            ✦
+          </span>
+          <span className="brain-new-what">New: {awayPill.node!.label}</span>
+          <span aria-hidden>→</span>
+        </button>
+      )}
       {!narrow && dirs.length > 0 && (
         <div className="brain-zoom" role="group" aria-label="Zoom" onClick={(e) => e.stopPropagation()}>
           <button type="button" aria-label="Zoom out" title="Zoom out" disabled={v.k <= minK + 0.001} onClick={() => setView(zoomAt(v, 1 / 1.3, size.w / 2, size.h / 2))}>
@@ -380,7 +425,7 @@ export function BrainMap(props: {
             {placed.map((p) => {
               const hub = hubAt.get(p.from);
               const from = hub ?? at.get(p.from);
-              return from ? <line key={p.id} x1={from.x} y1={from.y} x2={p.x} y2={p.y} className={hub ? "trunk" : undefined} /> : null;
+              return from ? <line key={p.id} x1={from.x} y1={from.y} x2={p.x} y2={p.y} pathLength={1} className={[hub && "trunk", fresh(p.id) && "fresh"].filter(Boolean).join(" ") || undefined} /> : null;
             })}
           </svg>
           <div className={`brain-node root${brainstorm.busy ? " busy" : ""}`} style={{ left: rootAt.x, top: rootAt.y }}>
@@ -408,7 +453,9 @@ export function BrainMap(props: {
               >
                 <span className="brain-label">
                   {fresh(p.id) && p.node.by && <Face name={p.node.by} />}
-                  <span dir="auto">{p.node.label}</span>
+                  <span dir="auto">
+                    <Typed text={p.node.label} on={fresh(p.id)} />
+                  </span>
                 </span>
                 {(p.node.points.length > 0 || p.node.caught.length > 0) && (
                   <span className="brain-marks">
