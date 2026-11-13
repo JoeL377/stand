@@ -4735,3 +4735,8 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
    shorter than a name, three lines of goal and its foot, so the pinned group matches the rest. */
 .pj-grid { grid-auto-rows: 1fr; }
 .pj-grid > .sh-project { min-height: 156px; }
+/* The trail in the tab row already names the open project, so its own row starts at the goal. */
+@media (min-width: 821px) {
+  .sh-main:has(.sh-tab .sh-crumb) .pj-line.head .pj-name { display: none; }
+  .sh-main:has(.sh-tab .sh-crumb) .pj-line.head .pj-goal { color: var(--text); opacity: 0.8; }
+}
