@@ -1479,7 +1479,7 @@ function TasksTab(props: {
       })}
       {showUnassigned && unassigned.length > 0 && (
         <section className={`sh-project unassigned${folded.has("") ? " folded" : ""}`} aria-label="Unassigned">
-          <div className="sh-project-head">
+          <div className="sh-project-head" onClick={foldOnRow(() => toggleFold(""))}>
             <button type="button" className="sh-project-fold" aria-expanded={!folded.has("")} onClick={() => toggleFold("")}>
               <ChevronIcon />
               <span className="sh-project-name">{props.projects.length ? "Unassigned" : "All tasks"}</span>
@@ -1505,6 +1505,12 @@ function TasksTab(props: {
     </>
   );
 }
+
+/** A click anywhere on a project's header row folds it, except on its own controls (the name's button, the menu, the grip). */
+const foldOnRow = (fold: () => void) => (e: React.MouseEvent<HTMLElement>) => {
+  if ((e.target as HTMLElement).closest("button, a, input, select, [role=menu], .sh-project-grip")) return;
+  fold();
+};
 
 /** The Tasks tab's less used tools, in one menu at the end of the tab row: a new project, and the project order. */
 function TaskMenu(props: { onAdd: () => void; sort: "active" | "team" | null; onSort: (sort: "active" | "team") => void }) {
@@ -1580,7 +1586,7 @@ function ProjectHead(props: {
       </div>
     );
   return (
-    <div className="sh-project-head">
+    <div className="sh-project-head" onClick={foldOnRow(props.onFold)}>
       {order && (
         <span
           className="sh-project-grip"
