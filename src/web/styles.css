@@ -4914,3 +4914,7 @@ a.ac-target:hover { text-decoration: underline; }
   .ac-burst .ac-said, .ac-burst .ac-meta, .ac-burst .ac-items { margin-left: 0; }
 }
 @media (min-width: 821px) { .sh-panel .followups li > .cfa + .row-more { margin-left: -6px; } }
+/* Activity: a row's steps open with a short fade down from the row. */
+.ac-detail { animation: ac-open 160ms var(--ease-out); }
+@keyframes ac-open { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .ac-detail { animation: none; } }
