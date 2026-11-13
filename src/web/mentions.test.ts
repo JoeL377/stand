@@ -25,7 +25,7 @@ test("@Names of people in the space are marked, and a mention of you more strong
 test("chat links and markdown comments mark mentions too, but not inside code or links", () => {
   assert.equal(
     inScope(createElement(Linkified, { text: "@Huy see https://x.test/a." })),
-    '<span class="mention">@Huy</span> see <a href="https://x.test/a" target="_blank" rel="noreferrer">https://x.test/a</a>.',
+    '<span class="mention">@Huy</span> see <a href="https://x.test/a" title="https://x.test/a" target="_blank" rel="noreferrer">x.test/a</a>.',
   );
   const md = inScope(createElement(Markdown, { text: "**@Joe Liang** look at `@Huy` and [@Huy](https://x.test)\nthen @Huy", breaks: true }));
   assert.match(md, /<strong><span class="mention you">@Joe Liang<\/span><\/strong>/);
