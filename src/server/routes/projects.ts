@@ -63,6 +63,18 @@ export function projectRoutes(app: Express, ctx: Services) {
     }),
   );
 
+  // { pinned }: this person's own pin on a project. Nobody else's Tasks tab changes.
+  app.put(
+    "/api/rooms/:id/projects/:projectId/pin",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      if (typeof req.body?.pinned !== "boolean") return void res.status(400).json({ error: "Give pinned: true or false." });
+      if (!db.pinProject(room.id, req.user!.id, req.params.projectId, req.body.pinned)) return notFound(res, "No such project in this space");
+      res.json({ pinned: db.pinnedProjects(room.id, req.user!.id) });
+    }),
+  );
+
   app.delete(
     "/api/rooms/:id/projects/:projectId",
     route((req, res) => {

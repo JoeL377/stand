@@ -54,7 +54,18 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
   let roomId;
   let tool;
-  const sortBy = (value) => page.getByLabel("Project order").selectOption(value);
+  // The order is a menu at the end of the tab row: Active projects first, or Team order.
+  const orderMenu = page.getByRole("button", { name: "Project order" });
+  const sortBy = async (value) => {
+    await orderMenu.click();
+    await page.getByRole("menuitemradio", { name: value === "team" ? "Team order" : "Active projects first" }).click();
+  };
+  const sortNow = async () => {
+    await orderMenu.click();
+    const team = await page.getByRole("menuitemradio", { name: "Team order" }).getAttribute("aria-checked");
+    await orderMenu.click();
+    return team === "true" ? "team" : "active";
+  };
   const onScreen = () => page.locator("section.sh-project:not(.unassigned)").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
   const onServer = async () => (await api(`/api/rooms/${roomId}/projects`)).map((p) => p.name);
   const settled = async (want) => {
@@ -79,7 +90,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     });
 
     await step("make three projects with + Project", async () => {
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       for (const [name, goal] of [["Alpha", "First made"], ["Beta", "Second made"], ["Gamma", "Third made"]]) {
         await page.getByRole("button", { name: "+ Project" }).click();
         await page.getByLabel("Project name").fill(name);
@@ -90,7 +101,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       await snap("three-projects");
     });
     check("new projects go last, in the order made", same(await onScreen(), ["Alpha", "Beta", "Gamma"]), await onScreen());
-    check("the Tasks tab opens on Active first", (await page.getByLabel("Project order").inputValue()) === "active");
+    check("the Tasks tab opens on Active first", (await sortNow()) === "active");
     check("Active first has no drag handle", (await page.locator(".sh-project-grip").count()) === 0);
 
     await step("switch to Team order", async () => {
@@ -102,7 +113,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
     await step("drag Gamma by its handle to the top", async () => {
       const grip = page.getByRole("region", { name: "Gamma" }).locator(".sh-project-grip");
-      await page.getByRole("region", { name: "Gamma" }).locator(".sh-project-head").hover();
+      await page.getByRole("region", { name: "Gamma" }).locator(".pj-line").hover();
       await snap("grip-on-hover");
       await grip.dragTo(page.getByRole("region", { name: "Alpha" }), { targetPosition: { x: 40, y: 4 } });
       await settled(["Gamma", "Alpha", "Beta"]);
@@ -123,21 +134,22 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
     await step("reload: the order stays", async () => {
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Beta" }).waitFor();
       await snap("after-reload");
     });
     check("after a reload the screen shows the kept order", same(await onScreen(), ["Alpha", "Gamma", "Beta"]), await onScreen());
-    check("after a reload the Tasks tab is still on Team order", (await page.getByLabel("Project order").inputValue()) === "team");
+    check("after a reload the Tasks tab is still on Team order", (await sortNow()) === "team");
 
     await step("drag Alpha to the bottom", async () => {
       const grip = page.getByRole("region", { name: "Alpha" }).locator(".sh-project-grip");
       const beta = page.getByRole("region", { name: "Beta" });
       const box = await beta.boundingBox();
-      await grip.dragTo(beta, { targetPosition: { x: 40, y: box.height - 4 } });
+      // Cards sit side by side: the right half of a card drops after it.
+      await grip.dragTo(beta, { targetPosition: { x: box.width - 40, y: box.height - 4 } });
       await settled(["Gamma", "Beta", "Alpha"]);
     });
-    check("a drag onto the lower half puts it after", same(await onServer(), ["Gamma", "Beta", "Alpha"]), await onServer());
+    check("a drag onto the far half puts it after", same(await onServer(), ["Gamma", "Beta", "Alpha"]), await onServer());
 
     await step("an agent sets the order over MCP", async () => {
       const { token } = await page.request.post(`${base}/api/tokens`, { data: { label: "verify", scope: "write" } }).then((r) => r.json());
@@ -165,7 +177,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       check("an unknown name is refused with the space's projects", bad.result.isError && /Nope.*Alpha/.test(bad.result.content[0].text), bad.result.content[0].text);
       await settled(["Alpha", "Gamma", "Beta"]);
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Beta" }).waitFor();
       await snap("after-mcp-order");
     });
@@ -177,7 +189,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       await page.waitForTimeout(20);
       await tool(11, "create_action", { space: roomId, text: "Beta work", project: "Beta", owner: "unassigned" });
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Beta" }).waitFor();
     });
     check("Team order does not move for new to-dos", same(await onScreen(), ["Alpha", "Gamma", "Beta"]), await onScreen());
@@ -196,8 +208,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     await step("the agent starts on Gamma's to-do", async () => {
       await tool(12, "start_work", { ref: gammaTodo, note: "On it", model: "claude-opus-5-5" });
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
-      await page.getByRole("region", { name: "Gamma" }).getByText("1 in progress").waitFor();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
+      await page.getByRole("region", { name: "Gamma" }).locator(".pj-now").waitFor();
       await settled(["Gamma", "Beta", "Alpha"]);
       await snap("active-first-in-progress");
     });
@@ -220,11 +232,10 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     await step("with a project filter on, there is no handle", async () => {
       const id = (await api(`/api/rooms/${roomId}/projects`)).find((p) => p.name === "Gamma").id;
       await page.goto(`${base}/s/${roomId}?project=${id}`);
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
       await page.getByRole("region", { name: "Gamma" }).waitFor();
     });
     check("a filtered list has no drag handle", (await page.locator(".sh-project-grip").count()) === 0);
-    check("a filtered list has no order switch", (await page.getByLabel("Project order").count()) === 0);
+    check("a filtered list has no order switch", (await orderMenu.count()) === 0);
   } catch {
     // step() recorded it
   } finally {

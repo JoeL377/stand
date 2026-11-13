@@ -486,6 +486,13 @@ CREATE TABLE IF NOT EXISTS chat_notify (
   level TEXT NOT NULL,
   PRIMARY KEY (room_id, user_id)
 );
+-- The projects someone pinned in a space: theirs alone, first on their Tasks tab.
+CREATE TABLE IF NOT EXISTS project_pins (
+  room_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id, project_id)
+);
 `;
 
 /** Makes the tables a new database needs, and adds what later versions added to an older one.

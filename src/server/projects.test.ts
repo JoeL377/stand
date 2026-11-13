@@ -146,7 +146,17 @@ test("deleting a project unlinks its tasks and items, which follow the rules aga
     const b = db.createProject(room.id, { name: "B", fromItemId: items[1].id }, "Sam");
     const [x] = db.syncNotes(m.id, items[1].id, [{ kind: "action", text: "X", owner: null }]);
     db.setNoteProject(room.id, x.id, { projectId: a.id, by: "Sam" });
+    // A pin is one person's, and goes with the project.
+    assert.equal(db.pinProject(room.id, "u1", a.id, true), true);
+    assert.equal(db.pinProject(room.id, "u1", a.id, true), true);
+    assert.equal(db.pinProject(room.id, "u1", b.id, true), true);
+    assert.equal(db.pinProject(room.id, "u1", "nope", true), false);
+    assert.deepEqual(db.pinnedProjects(room.id, "u1").sort(), [a.id, b.id].sort());
+    assert.deepEqual(db.pinnedProjects(room.id, "u2"), []);
+    assert.equal(db.pinProject(room.id, "u1", b.id, false), true);
+    assert.deepEqual(db.pinnedProjects(room.id, "u1"), [a.id]);
     assert.equal(db.deleteProject(room.id, a.id), true);
+    assert.deepEqual(db.pinnedProjects(room.id, "u1"), []);
     assert.equal(db.getItem(items[0].id)?.projectId, null);
     assert.equal(db.getNote(x.id)?.projectSetBy, undefined);
     assert.equal(shown(db, room.id, x.id), b.id, "back to its item's project");

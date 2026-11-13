@@ -66,6 +66,12 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
   let roomId;
   const feed = () => page.request.get(`${base}/api/rooms/${roomId}/feed`).then((r) => r.json());
   const row = (text) => page.locator(".followups li", { hasText: text });
+  /** The Tasks tab is the list of projects; a question's row is in its project's own view. */
+  let projectIds = {};
+  const go = async (project, text) => {
+    await page.goto(`${base}/s/${roomId}?project=${projectIds[project]}`);
+    await row(text).waitFor();
+  };
   const openTexts = async () => (await feed()).open.map((n) => n.text);
   /** A toast stays while the pointer is on it, so the journey dismisses them itself. */
   const clearToasts = async () => {
@@ -77,13 +83,16 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
       const spaces = await page.request.get(`${base}/api/spaces`).then((r) => r.json());
       roomId = spaces.find((s) => s.name === "Acme Checkout")?.id;
       if (!roomId) throw new Error("No Acme Checkout space: this journey runs on the preview's sample data");
-      await page.goto(`${base}/s/${roomId}`);
-      await row(LINK).waitFor();
+      projectIds = Object.fromEntries((await page.request.get(`${base}/api/rooms/${roomId}/projects`).then((r) => r.json())).map((p) => [p.name, p.id]));
+      await go("Guest checkout", LINK);
       await snap("tasks-with-open-questions");
       const open = await openTexts();
       check("the space starts with six open questions", open.length === 6, open);
       check("an open question has an Answer button", (await row(LINK).getByRole("button", { name: "Answer", exact: true }).count()) === 1);
-      check("the sweep is offered", (await page.getByRole("button", { name: /Sweep questions/ }).count()) === 1);
+      await page.goto(`${base}/s/${roomId}`);
+      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("button", { name: /Sweep questions/ }).waitFor();
+      check("the sweep is offered on the Tasks tab", (await page.getByRole("button", { name: /Sweep questions/ }).count()) === 1);
     });
 
     await step("sweep: untick one proposal, close the rest in one step", async () => {
@@ -122,6 +131,7 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
     });
 
     await step("answer a question under its line", async () => {
+      await go("Guest checkout", LINK);
       await row(LINK).getByRole("button", { name: "Answer", exact: true }).click();
       const box = row(LINK).getByLabel("The answer");
       await box.waitFor();
@@ -140,6 +150,8 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
 
     await step("the answer shows under Done and on the Decisions tab", async () => {
       await clearToasts();
+      await page.goto(`${base}/s/${roomId}`);
+      await page.getByRole("tab", { name: /^Tasks/ }).click();
       await page.locator(".sh-done-toggle", { hasText: "Done" }).click();
       const done = page.locator(".sh-done li", { hasText: LINK });
       await done.waitFor();
@@ -149,6 +161,8 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
       await page.getByRole("tab", { name: /Decisions/ }).click();
       const decision = page.locator(".rc-points li", { hasText: "joins an account" });
       await decision.waitFor();
+      // What a decision answers waits for the pointer on a wide screen.
+      await decision.hover();
       await decision.locator(".rc-pill", { hasText: "Answer" }).hover();
       await snap("decision-from-answer");
       check("the decision names its question", (await decision.innerText()).includes(LINK));
@@ -157,6 +171,7 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
     await step("Undo takes the answer and its decision back", async () => {
       await clearToasts();
       await page.getByRole("tab", { name: /Tasks/ }).click();
+      await go("Payments", CAP);
       await row(CAP).getByRole("button", { name: "Answer", exact: true }).click();
       await row(CAP).getByLabel("The answer").fill("Give up after one hour");
       await row(CAP).getByRole("button", { name: "Answer", exact: true }).last().click();

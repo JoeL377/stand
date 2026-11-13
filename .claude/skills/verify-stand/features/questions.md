@@ -34,3 +34,4 @@ It opens the kept sweep (unticks one, closes two, checks the unticked one isn't 
 - **The sweep's model pass is not driven.** Without a key nothing sweeps, so the sample data carries a kept sweep with three proposals (`scripts/seed-preview.ts`); the list, the close and the keep that follow are real. `questionSweep.test.ts` covers the pass and when it runs with a scripted model. What a real model proposes on a real space is unverified here.
 - A toast stays while the pointer is on it, so two "Answered" toasts can be up at once. The script dismisses them between steps.
 - Ticking a question's checkbox still closes it with no answer ("Closed without an answer").
+- Once a space has a project, a question's row is in its project's own view (`?project=<id>`), not on the Tasks tab's first view. `Sweep questions` is on the first view only.
