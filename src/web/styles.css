@@ -4701,3 +4701,10 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
 .pj-face + .pj-face { margin-left: -6px; }
 .pj-face .avatar { flex: none; font-size: 9.5px !important; box-shadow: 0 0 0 2px var(--bg); }
 .pj-line.card .pj-faces { gap: 0; }
+
+/* A card doesn't list the to-dos that are moving: two small dots with a count say that some are. */
+.pj-line.card { grid-template-areas: "title title title title" "faces moving meter open"; }
+.pj-line.card .pj-moving { visibility: visible; justify-self: end; gap: 10px; font-size: 12px; }
+.pj-line.card .pj-moving .pj-word { display: none; }
+.pj-line.card .pj-live::before, .pj-line.card .pj-ready::before { margin-right: 0; }
+.pj-line.card .pj-live { display: inline-flex; align-items: center; gap: 5px; }

@@ -1450,11 +1450,6 @@ function TasksTab(props: {
     return first ? { text: first.text, face: face(first), more: more.length, onOpen: () => props.onOpen(first.id) } : undefined;
   };
 
-  /** What is moving in a project, for a card: up to three, in progress first, then ready to ship. */
-  const nowsOf = (id: string) =>
-    [...doingIn(id).map((n) => ({ n, ready: false })), ...(readyIn.get(id) ?? []).map((n) => ({ n, ready: true }))]
-      .slice(0, 3)
-      .map(({ n, ready }) => ({ id: n.id, text: n.text, ready, face: face(n), onOpen: () => props.onOpen(n.id) }));
   const grid = !phone;
   /** One project in the list: a card on a wide screen, a row that opens in place on a phone. */
   const projectSection = (p: Project) => {
@@ -1493,7 +1488,6 @@ function TasksTab(props: {
           {...lineOf(p.id)}
           card={grid}
           now={nowOf(p.id)}
-          nows={nowsOf(p.id)}
           pinned={pins.has(p.id)}
           onPin={() => togglePin(p.id)}
           onOpen={() => props.onProject(p.id)}
@@ -1712,7 +1706,6 @@ function TasksTab(props: {
                   {...lineOf("")}
                   card={grid}
                   now={nowOf("")}
-                  nows={nowsOf("")}
                   onOpen={() => props.onProject("none")}
                   roomId={props.roomId}
                   reload={props.reload}
@@ -1785,9 +1778,8 @@ function ProjectLine(props: {
   onDecisions?: () => void;
   /** What someone is on now, on a row: the newest in-progress to-do, and how many more there are. */
   now?: { text: string; face: React.ReactNode; more: number; onOpen: () => void };
-  /** A card on a wide screen: the goal under the name, and up to three to-dos that are moving (`nows`). */
+  /** A card on a wide screen: the goal under the name. */
   card?: boolean;
-  nows?: Array<{ id: string; text: string; ready: boolean; face: React.ReactNode; onOpen: () => void }>;
   /** A row: its tasks are open under it. */
   expanded?: boolean;
   /** Your own pin on it. */
@@ -1886,19 +1878,6 @@ function ProjectLine(props: {
           )
         )}
       </span>
-      {card && (
-        <span className="pj-nows">
-          {(props.nows ?? []).map((n) => (
-            <span key={n.id} className={n.ready ? "pj-now ready" : "pj-now"}>
-              <button type="button" className="pj-now-task" onClick={n.onOpen} title={`${n.ready ? "Ready to ship" : "In progress"}: ${n.text}`}>
-                {n.text}
-              </button>
-              {n.face}
-            </span>
-          ))}
-          {props.inProgress + props.ready > (props.nows?.length ?? 0) && <span className="pj-now-more">+{props.inProgress + props.ready - (props.nows?.length ?? 0)} more</span>}
-        </span>
-      )}
       <span className="pj-moving">
         {props.inProgress > 0 && (
           <span className={head ? "pj-live" : "pj-live row"} title={`${props.inProgress} in progress: someone is on ${props.inProgress === 1 ? "it" : "them"} now`}>
