@@ -111,7 +111,7 @@ const INVITE = "Invite support to the next review";
       await page.getByRole("region", { name: "Payments" }).getByRole("button", { name: "Payments", exact: true }).click();
       await page.waitForURL(/project=/);
       await page.getByRole("region", { name: "Payments" }).locator(".followups li").first().waitFor();
-      check("a click on a card opens the project's own page", (await page.locator(".pj-grid").count()) === 0 && (await page.getByRole("button", { name: "All projects" }).count()) === 1);
+      check("a click on a card opens the project's own page", (await page.locator(".pj-grid").count()) === 0 && (await page.locator(".sh-tab .sh-crumb").count()) === 1);
       await snap("tasks-with-parts");
       const worker = family(await sections(), WORKER);
       check("the parent says how many of its parts are done", worker.parent?.count === "1/3 parts", worker.parent);

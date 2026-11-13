@@ -1,11 +1,11 @@
 # Sign in and spaces
 
-Home (`/`) is find-and-enter: a left sidebar (New space, All spaces, Manage spaces, Connect an agent, Your spaces) and the space cards. A space (`/s/<id>`) is invite-only and holds the team's context: one page of tabs: Meetings (meetings, bar notes, snaps, agent reports), Tasks (to-dos and open questions), Decisions, Up next, Invite and Start talking (synthesis instructions live under Manage spaces) (Join when someone is in a meeting).
+Home (`/`) is find-and-enter: a left sidebar (New space, All spaces, Manage spaces, Connect an agent, Your spaces) and the space cards. A space (`/s/<id>`) is invite-only and holds the team's context: one page of tabs: Meetings (meetings, bar notes, snaps, agent reports), Tasks (to-dos and open questions), Decisions; people and the invite link behind the faces at the top right; Start talking on the Meetings tab and on the sidebar mic (synthesis instructions live under Manage spaces) (Join when someone is in a meeting).
 
 ## Sub-features
 - Stand-in sign-in (name + email), only while Google isn't configured.
 - New space pop-up: name + "What is it for?" line, Create and enter.
-- Space page: the Meetings, Tasks, Decisions and Up next tabs, Invite (copies the link).
+- Space page: the Meetings, Tasks, Decisions and Up next tabs; the faces at the top right open people and Copy invite link.
 - Manage spaces (`/spaces/manage`): only its cost panel is in a journey (`cost.cjs`, [cost.md](cost.md)).
 
 ## How to get to it (user POV)
@@ -16,5 +16,5 @@ Open the app, type a name and work email, Continue. Click **New space** in the s
 
 ## Gotchas
 - With Google or an allowlist configured the stand-in form disappears and `/api/auth/dev` refuses. `launch.sh` unsets both on purpose.
-- A brand-new space shows "Demo mode · 2 services not connected" (LiveKit and Linear). That is expected here.
+- A brand-new space shows "Demo mode · 2 services not connected" (LiveKit and Linear) in the pop-up behind the faces. That is expected here.
 - Space names must be unique per run for the checks; `drive.cjs` stamps the time into the name.

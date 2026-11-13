@@ -82,6 +82,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
 
     let item;
     await step("start talking, play the demo, and make a project from its last agenda line", async () => {
+      await page.getByRole("tab", { name: /^Meetings/ }).click();
       await page.getByRole("button", { name: "Start talking" }).click();
       await page.getByRole("button", { name: "Leave", exact: true }).waitFor();
       const show = page.getByRole("button", { name: "Show the agenda" });

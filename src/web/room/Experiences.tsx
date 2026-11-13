@@ -1,7 +1,7 @@
 // Reviews inside a call. A call starts as plain talk; the host can put a product review, a design
 // review or an idea review on its board from here, one at a time, and "Finish" takes it off again so
 // the call goes on as plain talk. Each keeps what it would have kept at the end of the call. The same
-// reviews start from the space page's menu, beside Start talking.
+// reviews start from the Meetings tab on the space page, in the menu beside Start talking.
 
 import { useEffect, useState } from "react";
 import type { Item, SpaceFeed } from "../../shared/protocol.ts";
