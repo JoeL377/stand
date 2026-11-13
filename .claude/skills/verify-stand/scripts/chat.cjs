@@ -165,7 +165,7 @@ const thread = (page) => page.locator(".chat-thread");
 
     lastPage = bo;
     await step("Bo looks at Tasks; a new message from Vera shows as unread on the Chat tab", async () => {
-      await bo.getByRole("tab", { name: /^Tasks/ }).click();
+      await bo.getByRole("tab", { name: /^Projects/ }).click();
       await say(vera, "One more thing: the footer link is broken.");
       await bo.getByRole("tab", { name: /^Chat\s*1$/ }).waitFor({ timeout: 5000 });
       await snap("bo-unread-while-on-tasks", bo);

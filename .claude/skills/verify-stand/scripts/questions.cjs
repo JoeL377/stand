@@ -66,11 +66,11 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
   let roomId;
   const feed = () => page.request.get(`${base}/api/rooms/${roomId}/feed`).then((r) => r.json());
   const row = (text) => page.locator(".followups li", { hasText: text });
-  /** The Tasks tab is the list of projects; a question's row is in its project's own view. */
+  /** A question's row is on its project's page, under Questions. */
   let projectIds = {};
   const go = async (project, text) => {
-    await page.goto(`${base}/s/${roomId}?project=${projectIds[project]}`);
-    await row(text).waitFor();
+    await page.goto(`${base}/s/${roomId}?project=${projectIds[project]}&show=questions`);
+    if (text) await row(text).waitFor();
   };
   const openTexts = async () => (await feed()).open.map((n) => n.text);
   /** A toast stays while the pointer is on it, so the journey dismisses them itself. */
@@ -79,7 +79,7 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
     await page.locator(".toast").first().waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
   };
   try {
-    await step("open the sample space's Tasks tab", async () => {
+    await step("open the sample space's projects", async () => {
       const spaces = await page.request.get(`${base}/api/spaces`).then((r) => r.json());
       roomId = spaces.find((s) => s.name === "Acme Checkout")?.id;
       if (!roomId) throw new Error("No Acme Checkout space: this journey runs on the preview's sample data");
@@ -90,9 +90,8 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
       check("the space starts with six open questions", open.length === 6, open);
       check("an open question has an Answer button", (await row(LINK).getByRole("button", { name: "Answer", exact: true }).count()) === 1);
       await page.goto(`${base}/s/${roomId}`);
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
       await page.getByRole("button", { name: /Sweep questions/ }).waitFor();
-      check("the sweep is offered on the Tasks tab", (await page.getByRole("button", { name: /Sweep questions/ }).count()) === 1);
+      check("the sweep is offered beside the tabs, over the projects", (await page.getByRole("button", { name: /Sweep questions/ }).count()) === 1);
     });
 
     await step("sweep: untick one proposal, close the rest in one step", async () => {
@@ -125,6 +124,7 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
       check("the unticked one stays open", after.open.some((n) => n.text === LONG), after.open.map((n) => n.text));
       check("and Stand doesn't propose it again", after.questionSweep === null, after.questionSweep);
       await button.waitFor({ state: "detached" });
+      await go("Payments");
       await page.locator(".sh-done-toggle", { hasText: "Dropped" }).click();
       await page.locator(".sh-done li", { hasText: ONCALL }).locator(".rc-pill", { hasText: "Dropped" }).hover();
       await snap("after-sweep");
@@ -148,17 +148,16 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
       check("it left the open list", !f.open.some((n) => n.text === LINK));
     });
 
-    await step("the answer shows under Done and on the Decisions tab", async () => {
+    await step("the answer shows under Answered and among the project's decisions", async () => {
       await clearToasts();
-      await page.goto(`${base}/s/${roomId}`);
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
-      await page.locator(".sh-done-toggle", { hasText: "Done" }).click();
+      await go("Guest checkout");
+      await page.locator(".sh-done-toggle", { hasText: "Answered" }).click();
       const done = page.locator(".sh-done li", { hasText: LINK });
       await done.waitFor();
       await done.locator(".rc-pill", { hasText: "Answered" }).hover();
       await snap("done-with-answer");
-      check("the Done row carries the answer", /joins an account/.test(await done.innerText()));
-      await page.getByRole("tab", { name: /Decisions/ }).click();
+      check("the Answered row carries the answer", /joins an account/.test(await done.innerText()));
+      await page.getByRole("tablist", { name: "What to show" }).getByRole("tab", { name: /Decisions/ }).click();
       const decision = page.locator(".rc-points li", { hasText: "joins an account" });
       await decision.waitFor();
       // What a decision answers waits for the pointer on a wide screen.
@@ -170,7 +169,6 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
 
     await step("Undo takes the answer and its decision back", async () => {
       await clearToasts();
-      await page.getByRole("tab", { name: /Tasks/ }).click();
       await go("Payments", CAP);
       await row(CAP).getByRole("button", { name: "Answer", exact: true }).click();
       await row(CAP).getByLabel("The answer").fill("Give up after one hour");

@@ -128,7 +128,7 @@ async function marksAre(page, want) {
     check("Bo sees no mark: the messages are Vera's own", (await marks(bo)).length === 0, await marks(bo));
 
     await step("Bo goes to Tasks, and Vera writes a third message", async () => {
-      await bo.getByRole("tab", { name: /^Tasks/ }).click();
+      await bo.getByRole("tab", { name: /^Projects/ }).click();
       await say(vera, THIRD);
       await thread(vera).getByText(THIRD).waitFor();
       await bo.getByRole("tab", { name: /^Chat\s*1$/ }).waitFor({ timeout: 5000 });

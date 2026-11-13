@@ -138,7 +138,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "List a space's open questions",
       description:
-        "The open questions in one Stand space, oldest first, as its Tasks tab lists them: asked in a meeting or a chat, and nobody answered or dropped them and no later decision settled them. Each has its ref, the day it was asked and its project. Use it to find questions you can answer from your work, or old ones to clear with your person; close_question closes one.",
+        "The open questions in one Stand space, oldest first, as its projects list them: asked in a meeting or a chat, and nobody answered or dropped them and no later decision settled them. Each has its ref, the day it was asked and its project. Use it to find questions you can answer from your work, or old ones to clear with your person; close_question closes one.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
       },
@@ -564,7 +564,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Add a to-do to Stand",
       description:
-        "Adds a to-do to a Stand space by hand, for work that never came up in a meeting. It shows in the space's Tasks tab like the to-dos meetings catch (marked as added by this person), comes up in the next meeting's check-in while open, and counts toward what got done since the last meeting once closed. Give a status to add one that's already underway, done or dropped, and a summary for the details or what was done. Returns its ref for update_action, post_update and complete_action.",
+        "Adds a to-do to a Stand space by hand, for work that never came up in a meeting. It shows in its project on the space's Projects tab like the to-dos meetings catch (marked as added by this person), comes up in the next meeting's check-in while open, and counts toward what got done since the last meeting once closed. Give a status to add one that's already underway, done or dropped, and a summary for the details or what was done. Returns its ref for update_action, post_update and complete_action.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         text: z.string().describe("What needs doing, in a line, like a meeting's to-do: \"Add a mic picker to the meeting room\""),
@@ -587,7 +587,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Answer or drop a Stand open question",
       description:
-        "Closes one open question. Give exactly one of answer, decision or drop. answer: Stand keeps it as a decision linked to the question, because a resolved question becomes a decision, so write it as a line that stands on its own (\"Host on Fly.io\", not \"Fly\" or \"Yes\"). decision: a decision the space already has that answers it; nothing new is written. drop: nobody needs the answer any more, with why in a line. The question moves to Done or Dropped on the Tasks tab, as closed by this person via this agent. Answer from what you know: your work, the repo, or what your person tells you. Don't guess, and ask your person before you drop questions in bulk.",
+        "Closes one open question. Give exactly one of answer, decision or drop. answer: Stand keeps it as a decision linked to the question, because a resolved question becomes a decision, so write it as a line that stands on its own (\"Host on Fly.io\", not \"Fly\" or \"Yes\"). decision: a decision the space already has that answers it; nothing new is written. drop: nobody needs the answer any more, with why in a line. The question moves to Answered or Dropped under its project's Questions, as closed by this person via this agent. Answer from what you know: your work, the repo, or what your person tells you. Don't guess, and ask your person before you drop questions in bulk.",
       inputSchema: {
         ref: z.string().describe("The question's reference, stand:question/<id>"),
         answer: z.string().optional().describe("The answer, in a line that stands on its own. Kept as a decision"),
@@ -623,7 +623,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Add a project to a Stand space",
       description:
-        "Makes a project in a Stand space: a named group of its to-dos, open questions and decisions, one level above them, like a feature or a workstream. It shows as a section of the space's Tasks tab. Names are unique in a space whatever the case; the name of an archived project brings that one back. Give item_id to link an agenda item: to-dos caught on it join the project by themselves. Call it when your person asks for a project, or agrees to one you suggest. Don't make one for a single to-do. Returns its ref for create_action, update_action and list_actions.",
+        "Makes a project in a Stand space: a named group of its to-dos, open questions and decisions, one level above them, like a feature or a workstream. It shows as a card on the space's Projects tab. Names are unique in a space whatever the case; the name of an archived project brings that one back. Give item_id to link an agenda item: to-dos caught on it join the project by themselves. Call it when your person asks for a project, or agrees to one you suggest. Don't make one for a single to-do. Returns its ref for create_action, update_action and list_actions.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         name: z.string().describe("What the team calls it, in a few words, 80 characters at most: \"Projects\", \"Mac bar\""),
@@ -641,7 +641,7 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
     {
       title: "Set the order of a Stand space's projects",
       description:
-        "Sets the order of a space's projects, most important first. It is one order for the whole space, as the Tasks tab shows it, where people drag projects to change it. Give the projects you want at the top, in order; the ones you leave out keep their order after them. Call it only when your person asks to change the order. When you choose what to work on next, read the order in list_spaces.",
+        "Sets the order of a space's projects, most important first. It is one order for the whole space, as the Projects tab shows it, where people drag projects to change it. Give the projects you want at the top, in order; the ones you leave out keep their order after them. Call it only when your person asks to change the order. When you choose what to work on next, read the order in list_spaces.",
       inputSchema: {
         space: z.string().describe("The space's id or name (from list_spaces)"),
         projects: z.array(z.string()).min(1).describe("Projects by ref (stand:project/<id>) or name, most important first"),

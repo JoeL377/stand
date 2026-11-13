@@ -74,9 +74,24 @@ export function agendaStore(db: DatabaseSync) {
       }
       return this.getItem(id)!;
     },
-    /** The meeting is over: the to-dos presented in it leave the agenda, with what was said on them kept. */
+    /** The agenda item an opened project is talked through on, at the end of the list. One per project:
+     *  opening it again brings the same item back. What's caught on it lands in the project. */
+    projectItem(roomId: string, projectId: string, title: string, description: string | null): Item {
+      const existing = db.prepare("SELECT * FROM items WHERE room_id = ? AND project_id = ? AND shows_project = 1").get(roomId, projectId) as Row | undefined;
+      const end = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM items WHERE room_id = ? AND archived = 0").get(roomId) as Row).p as number;
+      const id = (existing?.id as string) ?? newId();
+      if (existing) {
+        db.prepare("UPDATE items SET archived = 0, title = ?, description = ?, position = ? WHERE id = ?")
+          .run(title, description, existing.archived ? end + 1 : (existing.position as number), id);
+      } else {
+        db.prepare("INSERT INTO items (id, room_id, source, title, description, position, project_id, shows_project, created_at) VALUES (?, ?, 'agenda', ?, ?, ?, ?, 1, ?)")
+          .run(id, roomId, title, description, end + 1, projectId, Date.now());
+      }
+      return this.getItem(id)!;
+    },
+    /** The meeting is over: the to-dos presented and the projects opened in it leave the agenda, with what was said on them kept. */
     archiveTaskItems(roomId: string) {
-      db.prepare("UPDATE items SET archived = 1 WHERE room_id = ? AND note_id IS NOT NULL").run(roomId);
+      db.prepare("UPDATE items SET archived = 1 WHERE room_id = ? AND (note_id IS NOT NULL OR shows_project = 1)").run(roomId);
     },
     /** Undoes archiveItem / archiveDeck for these items, in their old places. */
     unarchiveItems(roomId: string, ids: string[]): number {

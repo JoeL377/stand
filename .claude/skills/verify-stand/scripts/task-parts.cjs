@@ -70,7 +70,7 @@ const INVITE = "Invite support to the next review";
         part: li.classList.contains("part"),
         count: li.querySelector(".task-parts")?.textContent ?? null,
         partOf: li.querySelector(".task-part-of")?.textContent ?? null,
-        owner: li.querySelector(".rc-face")?.getAttribute("title") ?? null,
+        owner: li.querySelector(".rc-name, .rc-face")?.getAttribute("title") ?? null,
       })),
     );
   const sections = () => rowsIn(".sh-panel .sh-project");
@@ -94,14 +94,13 @@ const INVITE = "Invite support to the next review";
     if (project) await page.getByRole("region", { name: project }).locator(".followups li").first().waitFor();
     else await page.locator(".sh-project").first().waitFor();
   };
-  /** The Tasks tab is every task in one list, with what waits on you first. */
-  const allTasks = async (query = "") => {
-    await page.goto(`${base}/s/${roomId}?${query}`);
-    await page.getByRole("tab", { name: /^Tasks/ }).click();
+  /** Mine is what is yours across every project, in one list, with what waits on you first. */
+  const mine = async () => {
+    await page.goto(`${base}/s/${roomId}?mine=1`);
     await page.locator(".sh-task-group .followups li").first().waitFor();
   };
   try {
-    await step("open the sample space's Tasks tab", async () => {
+    await step("open the sample space's projects", async () => {
       const spaces = await page.request.get(`${base}/api/spaces`).then((r) => r.json());
       roomId = spaces.find((s) => s.name === "Acme Checkout")?.id;
       if (!roomId) throw new Error("No Acme Checkout space: this journey runs on the preview's sample data");
@@ -133,8 +132,10 @@ const INVITE = "Invite support to the next review";
       await openTasks("Guest checkout");
       const checklist = family(await sections(), CHECKLIST);
       check("a part that is ready to ship stays under its parent in the project", checklist.parent?.count === "0/2 parts" && checklist.parts.map((p) => p.text).sort().join() === [LAUNCH_NOTE, TERMS].sort().join(), checklist);
-      await allTasks();
-      check("the Tasks tab is one list with no projects in it", (await page.locator(".sh-project").count()) === 0 && (await rowsIn(".sh-task-group.by-owner")).length >= 5);
+      check("the space has two tabs, Projects and Meetings", (await page.getByRole("tablist", { name: "The space" }).getByRole("tab").allInnerTexts()).map((t) => t.replace(/\s*\d+$/, "").trim()).join() === "Projects,Meetings");
+      check("a project's page lists one kind at a time", (await page.getByRole("tablist", { name: "What to show" }).getByRole("tab").allInnerTexts()).map((t) => t.replace(/\s*\d+$/, "").trim()).join() === "Tasks,Questions,Decisions");
+      await mine();
+      check("Mine is one list with no projects in it", (await page.locator(".sh-project").count()) === 0 && (await rowsIn(".sh-task-group.by-owner")).length >= 1);
       const terms = (await forYou()).find((r) => r.text === TERMS);
       check("a part under For you is a row of its own that names its parent", terms && !terms.part && terms.partOf === `Part of: ${CHECKLIST}`, terms);
       const saved = await room();
@@ -174,9 +175,11 @@ const INVITE = "Invite support to the next review";
       await openTasks("Payments");
       const worker = family(await sections(), WORKER);
       check("the parent counts the new part, ticked", worker.parent?.count === "2/4 parts" && !worker.parts.some((p) => p.text === INVITE), worker);
-      await allTasks();
       await page.locator(".sh-done-toggle", { hasText: "Done" }).click();
       const done = await rowsIn(".sh-done.open");
+      await openTasks("Guest checkout");
+      await page.locator(".sh-done-toggle", { hasText: "Done" }).click();
+      done.push(...(await rowsIn(".sh-done.open")));
       check(
         "done parts name their parent under Done",
         [KEY, INVITE].every((t) => done.find((r) => r.text === t)?.partOf === `Part of: ${WORKER}`),
@@ -189,7 +192,7 @@ const INVITE = "Invite support to the next review";
     });
 
     await step("Mine: a part whose parent is someone else's names it", async () => {
-      await allTasks("mine=1");
+      await mine();
       const rows = await rowsIn(".sh-task-group.by-owner");
       check("the parent keeps its count while its other part is out of view", family(rows, CHECKLIST).parent?.count === "0/2 parts", rows);
       check("the part that waits on you still names its parent", (await forYou()).some((r) => r.text === TERMS && r.partOf === `Part of: ${CHECKLIST}`));
@@ -198,13 +201,11 @@ const INVITE = "Invite support to the next review";
 
     await step("on a phone", async () => {
       await page.setViewportSize({ width: 390, height: 844 });
-      // A phone has rows, and a row opens its project in place.
+      // A phone has rows, and a row opens its project's page.
       await page.goto(`${base}/s/${roomId}`);
-      // The space opens on the tab last looked at, which was Tasks.
-      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Payments" }).getByRole("button", { name: "Payments", exact: true }).click();
       await page.getByRole("region", { name: "Payments" }).locator(".followups li").first().waitFor();
-      check("on a phone a row opens its project under it", !/project=/.test(page.url()) && (await page.locator(".pj-list .sh-project").count()) >= 3);
+      check("on a phone a row opens its project's page", /project=/.test(page.url()) && (await page.getByRole("tablist", { name: "What to show" }).count()) === 1);
       await openTasks("Payments");
       const wide = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
       check("the page doesn't scroll sideways", !wide);

@@ -82,7 +82,7 @@ function check(name, pass, detail) {
       ref = (await tool(2, "create_action", { space: roomId, text: "Write the launch post", owner: "unassigned" })).created.ref;
       fs.writeFileSync(path.join(out, "mcp-get-before.json"), JSON.stringify(await tool(3, "get", { ref }), null, 2));
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await row().waitFor();
       await snap("unassigned");
     });

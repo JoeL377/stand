@@ -96,7 +96,7 @@ const caught = (page, text) => dock(page).locator(".chat-caught", { hasText: tex
     check("the Chat button in the head says the dock is open", (await vera.getByRole("button", { name: "Chat", pressed: true }).count()) === 1);
 
     await step("the dock stays while Vera goes through Meetings and Decisions", async () => {
-      for (const t of [/^Meetings/, /^Decisions/, /^Tasks/]) {
+      for (const t of [/^Meetings/, /^Projects/]) {
         await vera.getByRole("tab", { name: t }).click();
         await box(vera).waitFor();
       }
@@ -106,7 +106,7 @@ const caught = (page, text) => dock(page).locator(".chat-caught", { hasText: tex
     await step("Bo opens the space on Tasks and writes from there", async () => {
       await signIn(bo, "Bo Tester", "bo@verify.test");
       await bo.goto(spaceUrl);
-      await bo.getByRole("tab", { name: /^Tasks/, selected: true }).waitFor();
+      await bo.getByRole("tab", { name: /^Projects/, selected: true }).waitFor();
       // Closed until he opens it, here as in every space.
       await bo.getByRole("button", { name: "Chat", pressed: false }).click();
       await say(bo, FROM_TASKS);
@@ -175,7 +175,7 @@ const caught = (page, text) => dock(page).locator(".chat-caught", { hasText: tex
 
     lastPage = bo;
     await step("Command + J closes the dock and opens it with the cursor in the box", async () => {
-      await bo.getByRole("tab", { name: /^Tasks/ }).click();
+      await bo.getByRole("tab", { name: /^Projects/ }).click();
       await bo.keyboard.press("ControlOrMeta+j");
       await dock(bo).waitFor({ state: "detached" });
       await say(vera, "While Bo has the dock closed");
@@ -193,7 +193,7 @@ const caught = (page, text) => dock(page).locator(".chat-caught", { hasText: tex
     await step("the dock stays closed after a reload when it was closed", async () => {
       await bo.getByRole("button", { name: "Close chat" }).click();
       await bo.reload();
-      await bo.getByRole("tab", { name: /^Tasks/ }).waitFor();
+      await bo.getByRole("tab", { name: /^Projects/ }).waitFor();
       check("the dock is closed after the reload", (await dock(bo).count()) === 0);
       await bo.getByRole("button", { name: /^Chat/ }).click();
       await box(bo).waitFor();
@@ -231,7 +231,7 @@ const caught = (page, text) => dock(page).locator(".chat-caught", { hasText: tex
       // Back on a wide screen, the Chat tab picked here shows as the dock, beside Tasks.
       await vera.setViewportSize({ width: 1280, height: 800 });
       await box(vera).waitFor();
-      await vera.getByRole("tab", { name: /^Tasks/, selected: true }).waitFor();
+      await vera.getByRole("tab", { name: /^Projects/, selected: true }).waitFor();
     });
   } catch {
     // The failed step is in the summary.

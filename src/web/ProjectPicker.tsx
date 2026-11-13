@@ -5,7 +5,11 @@ import { api } from "./api.ts";
 import { useDismiss } from "./useDismiss.ts";
 
 /** A task's, question's or decision's project: pick one, type a new name, set Unassigned, or follow the agenda. */
-export function ProjectPicker({ note, roomId, projects, onSaved }: { note: Note; roomId: string; projects: Project[]; onSaved: () => void }) {
+export function ProjectPicker({ note, roomId, projects, onSaved, own }: {
+  note: Note; roomId: string; projects: Project[]; onSaved: () => void;
+  /** Shown inside its own project: a suggestion reads "Suggested", not the project's name again. */
+  own?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -68,7 +72,7 @@ export function ProjectPicker({ note, roomId, projects, onSaved }: { note: Note;
           setOpen(!open);
         }}
       >
-        {suggested ? `${suggested.name}?` : (current?.name ?? "+ Project")}
+        {suggested ? (own ? "Suggested" : `${suggested.name}?`) : (current?.name ?? "+ Project")}
       </button>
       {open && (
         <span

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PlanBrief } from "../../shared/designReview.ts";
 import type { Note, TaskDetail } from "../../shared/protocol.ts";
+import type { Project } from "../../shared/projects.ts";
 import { STATE_LABEL, stateOf } from "../../shared/tasks.ts";
 import { api } from "../api.ts";
 import { PlanReviewBody } from "../PlanReview.tsx";
@@ -10,8 +11,10 @@ type Presentation = { id: string; mode: "brief" | "spec" };
 /** The top bar's More menu asks for the picker with this window event. */
 export const PRESENT_TASK = "stand:present-task";
 
-export function TaskPicker({ roomId, notes, disabled, onPick, bare }: {
+export function TaskPicker({ roomId, notes, disabled, onPick, onProject, bare }: {
   roomId: string; notes: Note[]; disabled?: boolean; onPick: (task: Presentation) => void;
+  /** Opens a project on the board. */
+  onProject?: (projectId: string) => void;
   /** No button of its own: it opens from the top bar's More menu. */
   bare?: boolean;
 }) {
@@ -23,6 +26,7 @@ export function TaskPicker({ roomId, notes, disabled, onPick, bare }: {
     return () => window.removeEventListener(PRESENT_TASK, show);
   }, [bare, disabled]);
   const [tasks, setTasks] = useState<Note[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
@@ -30,15 +34,24 @@ export function TaskPicker({ roomId, notes, disabled, onPick, bare }: {
     let active = true;
     setError("");
     api.presentationTasks(roomId).then((tasks) => { if (active) setTasks(tasks); }, (e) => { if (active) setError(e.message); });
+    if (onProject) api.projects(roomId).then((all) => { if (active) setProjects(all.filter((p) => !p.archived)); }, () => {});
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, open]);
+  const found = projects.filter((p) => `${p.name} ${p.goal ?? ""}`.toLowerCase().includes(query.toLowerCase()));
   const all = [...new Map([...tasks, ...notes].filter((n) => n.kind === "action" || n.kind === "question").map((n) => [n.id, n])).values()];
   return <div className="task-picker">
-    {!bare && <button disabled={disabled} aria-expanded={open} onClick={() => setOpen(!open)}>Present task</button>}
-    {open && <div className="task-picker-menu" role="dialog" aria-label="Choose a task to present">
-      <div className="row"><input autoFocus aria-label="Search tasks" placeholder="Search tasks…" value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => setOpen(false)} aria-label="Close task picker">✕</button></div>
+    {!bare && <button disabled={disabled} aria-expanded={open} onClick={() => setOpen(!open)}>{onProject ? "Open project or task" : "Present task"}</button>}
+    {open && <div className="task-picker-menu" role="dialog" aria-label={onProject ? "Choose a project or task to open" : "Choose a task to present"}>
+      <div className="row"><input autoFocus aria-label={onProject ? "Search projects and tasks" : "Search tasks"} placeholder={onProject ? "Search projects and tasks…" : "Search tasks…"} value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => setOpen(false)} aria-label="Close task picker">✕</button></div>
       {error && <p className="error">{error}</p>}
-      <div className="task-picker-list">{all.filter((n) => `${n.text} ${n.owner ?? ""}`.toLowerCase().includes(query.toLowerCase())).map((n) =>
+      <div className="task-picker-list">
+        {found.length > 0 && <p className="tp-kind">Projects</p>}
+        {found.map((p) =>
+          <button key={p.id} onClick={() => { onProject!(p.id); setOpen(false); }}><strong>{p.name}</strong><span className="muted small">{p.openTodos} open{p.goal ? ` · ${p.goal}` : ""}</span></button>
+        )}
+        {found.length > 0 && <p className="tp-kind">Tasks</p>}
+        {all.filter((n) => `${n.text} ${n.owner ?? ""}`.toLowerCase().includes(query.toLowerCase())).map((n) =>
         <button key={n.id} onClick={() => { onPick({ id: n.id, mode: "brief" }); setOpen(false); }}><strong>{n.text}</strong><span className="muted small">{n.owner ?? "Unassigned"} · {STATE_LABEL[stateOf(n)]}</span></button>
       )}</div>
       {!all.length && !error && <p className="muted">No tasks available yet.</p>}
