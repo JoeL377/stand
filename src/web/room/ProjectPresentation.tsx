@@ -3,6 +3,8 @@
 // to-dos up from here, and closing that comes back to the project.
 
 import { useEffect, useState } from "react";
+import { Check, FolderOpen } from "lucide-react";
+import { useDismiss } from "../useDismiss.ts";
 import type { Note } from "../../shared/protocol.ts";
 import type { Project } from "../../shared/projects.ts";
 import { stateOf } from "../../shared/tasks.ts";
@@ -18,6 +20,8 @@ export function ProjectPresentation(props: {
   disabled?: boolean;
   onTask: (taskId: string) => void;
   onClose: () => void;
+  /** The call's bar closes it (ProjectControl), so the heading has no button of its own. */
+  closeInBar?: boolean;
 }) {
   const { roomId, projectId } = props;
   const [project, setProject] = useState<Project | null>(null);
@@ -77,7 +81,7 @@ export function ProjectPresentation(props: {
         <strong className="pp-name" dir="auto">{project?.name ?? "Project"}</strong>
         {project?.goal && <span className="pp-goal" dir="auto">{project.goal}</span>}
         <span className="pp-count">{open ? `${open.length} open` : ""}</span>
-        {props.canSteer && (
+        {props.canSteer && !props.closeInBar && (
           <button type="button" disabled={props.disabled} onClick={props.onClose}>
             Close project
           </button>
@@ -111,5 +115,47 @@ export function ProjectPresentation(props: {
         </div>
       )}
     </section>
+  );
+}
+
+/** "Open project" on the call's bar, beside Share screen and Start review: the space's projects in the
+ *  team's order, one click puts one on the board for everyone. While one is up the button is lit, the
+ *  menu marks it, another project swaps in, and "Close project" goes back to where the call was. */
+export function ProjectControl(props: { roomId: string; shown: string | null; disabled?: boolean; onOpen: (projectId: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  // Read when the menu opens: projects are made and reordered between calls, and in this one.
+  useEffect(() => {
+    if (open) api.projects(props.roomId).then((all) => setProjects(all.filter((p) => !p.archived)), () => setProjects([]));
+  }, [open, props.roomId]);
+  const pick = (id: string | null) => () => {
+    setOpen(false);
+    if (id !== props.shown) props.onOpen(id);
+  };
+  return (
+    <div className="xp" ref={box}>
+      <button className={props.shown ? "control on" : "control"} disabled={props.disabled} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="Put a project on the board for everyone. What's said while it's up is filed under it.">
+        <FolderOpen size={20} strokeWidth={1.6} aria-hidden />
+        <span>{props.shown ? "Project" : "Open project"}</span>
+      </button>
+      {open && (
+        <div className="rp-menu sh-start-menu xp-menu pc-menu" role="menu">
+          {!projects && <p className="muted pc-note">…</p>}
+          {projects?.length === 0 && <p className="muted pc-note">This space has no projects yet.</p>}
+          {projects?.map((p) => (
+            <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === props.shown} onClick={pick(p.id)}>
+              <strong dir="auto">{p.name}</strong>
+              {p.id === props.shown ? <Check size={14} aria-label="On the board" /> : <span className="muted">{p.openTodos} open</span>}
+            </button>
+          ))}
+          {props.shown && (
+            <button type="button" role="menuitem" className="pc-close" onClick={pick(null)}>
+              Close project
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

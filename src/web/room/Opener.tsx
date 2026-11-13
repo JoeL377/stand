@@ -54,6 +54,9 @@ export function showOpener(p: {
   // Brought back on purpose: up until someone moves on again.
   if (p.checkIn?.held) return hasKickoff(p.deck, p.followUps, p.meetingStartedAt);
   const { done } = openerPages(p.deck, p.followUps, p.meetingStartedAt);
+  // The check-in alone is a long list to open a call on: it's one of the board's start cards
+  // (StartCards.tsx) and the card list's "Still open from earlier", and comes up when someone picks it.
+  if (!done) return false;
   const left = unanswered(p.followUps, p.meetingStartedAt).length;
   // Nothing to show, or the check-in at the end is through.
   if (!left && (!done || (p.checkIn?.page ?? 0) >= done)) return false;
@@ -64,6 +67,8 @@ export function showOpener(p: {
 /** Where the Kickoff chapter ends on the bar: null while it's on screen. */
 export function kickoffEnd(p: Parameters<typeof showOpener>[0]): number | null {
   if (showOpener(p)) return null;
+  // Never opened: it took no time on the bar.
+  if (!p.deck?.slides.length && !p.checkIn?.answeredAt && !p.checkIn?.closedAt) return p.meetingStartedAt;
   if (p.checkIn?.closedAt) return p.checkIn.closedAt;
   const answered = p.checkIn?.answeredAt ?? 0;
   // Through the check-in: when the last answer came. Left alone: when the idle rule gave the middle back.

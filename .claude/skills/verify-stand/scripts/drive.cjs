@@ -107,6 +107,8 @@ async function meeting() {
   });
   await step("play the scripted 4-person demo", async () => {
     await page.getByRole("button", { name: "Play demo" }).click();
+    // A call with an empty agenda has no agenda column; it comes, folded, with the demo's items.
+    await page.getByRole("button", { name: "Show the agenda" }).click({ timeout: 15000 }).catch(() => {});
     // The demo walks all four agenda items; the last one is DEMO-104. Notes trail the talk.
     await page.getByText(/DEMO-104 · \d+ remarks?/).waitFor({ timeout: 120_000 });
     await snap("meeting-demo-midway");

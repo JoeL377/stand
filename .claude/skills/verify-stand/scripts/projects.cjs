@@ -88,6 +88,8 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
       const show = page.getByRole("button", { name: "Show the agenda" });
       if (await show.count()) await show.click();
       await page.getByRole("button", { name: "Play demo" }).click();
+      // A call with an empty agenda has no agenda column; it comes, folded, with the demo's items.
+      await page.getByRole("button", { name: "Show the agenda" }).click({ timeout: 15000 }).catch(() => {});
       // The demo adds its agenda; the last line is DEMO-104.
       const row = page.locator("li.item", { hasText: "DEMO-104" });
       await row.waitFor({ timeout: 60_000 });
