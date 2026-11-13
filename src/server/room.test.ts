@@ -1747,6 +1747,28 @@ test("a next step said out loud goes on one card: nothing starts by itself, anyo
   assert.deepEqual(suggestedNext(db.meetingNext(session.meetingId)).map((n) => [n.kind, n.topic, n.state]), [["design-review", "The projects migration", "noted"]]);
 });
 
+test("Stand's card stays up for a full minute of other talk, then counts as missed", async (t) => {
+  const db = openDb(":memory:");
+  const room = db.createRoom("Test");
+  const session = new RoomSession(db, new HeuristicAgent(), room, () => {});
+  await join(session, { id: "u1", name: "Joe" });
+  await join(session, { id: "u2", name: "Huy" });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  session.addSpeech("u1", "Joe", "Let's start a brainstorm on the Discord integration", Date.now());
+  const card = session.state().next!;
+  assert.equal(card.kind, "map");
+  // People keep talking, about that and about other things: none of it takes the card down.
+  session.addSpeech("u2", "Huy", "Sure. What if we also pull in the old threads, or maybe we skip them", Date.now());
+  session.addSpeech("u1", "Joe", "Let's start a brainstorm on the Discord integration, yeah", Date.now());
+  t.mock.timers.tick(59_000);
+  assert.equal(session.state().next?.id, card.id, "still up just before the minute");
+  t.mock.timers.tick(1_000);
+  assert.equal(session.state().next, null);
+  assert.equal(db.meetingNext(session.meetingId).find((n) => n.id === card.id)?.state, "missed");
+  t.mock.timers.reset();
+  await session.end();
+});
+
 test("Stand offers a map by itself when two people trade ideas, says it guessed, and doesn't repeat itself", async () => {
   const db = openDb(":memory:");
   const room = db.createRoom("Test");
