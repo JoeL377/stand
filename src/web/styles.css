@@ -4796,3 +4796,14 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
   .td-phone-acts > button { height: 26px; min-height: 0; padding: 0 10px; border-radius: 999px; font-size: 12px; }
 }
 @media (hover: none) and (min-width: 821px) { .sh-panel .followups li > .row-more { opacity: 1; } }
+
+/* A new project starts as a faint card after the last one: a click turns it into the form in place. */
+.pj-grid > .sh-project.pj-ghost { display: flex; border-style: dashed; background: transparent; }
+.pj-grid > .sh-project.pj-ghost:not(.adding):hover { border-color: color-mix(in srgb, var(--text) 45%, var(--line)); }
+.pj-ghost-add { flex: 1; display: grid; place-items: center; height: auto; min-height: 0; padding: 0; border: 0; border-radius: 12px; background: none; box-shadow: none; color: var(--muted); font-size: 14px; cursor: pointer; opacity: 0.75; transition: opacity 0.12s ease, color 0.12s ease; }
+.pj-ghost-add:hover, .pj-ghost-add:focus-visible { background: none; color: var(--text); opacity: 1; }
+.pj-ghost.adding { border-style: solid; background: var(--panel); }
+.pj-ghost .sh-project-form { display: grid; grid-template-columns: auto auto 1fr; align-content: center; justify-items: start; gap: 8px; padding: 16px 18px; }
+.pj-ghost .sh-project-form input { grid-column: 1 / -1; justify-self: stretch; height: 32px; }
+.pj-ghost .sh-project-form input:first-child { font-size: 15px; font-weight: 600; }
+.pj-ghost .sh-project-form .error { grid-column: 1 / -1; }

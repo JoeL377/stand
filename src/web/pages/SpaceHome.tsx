@@ -1561,6 +1561,21 @@ function TasksTab(props: {
       + Project
     </button>
   );
+  const projectForm = (
+    <ProjectForm
+      label="New project"
+      submit="Add"
+      onCancel={() => setAdding(false)}
+      onSave={async (name, goal) => {
+        await api.createProject(props.roomId, { name, goal: goal || undefined });
+        setAdding(false);
+        props.reload();
+      }}
+    />
+  );
+  // On the cards a new project starts as a faint card of its own, the last one in the grid: a click
+  // turns it into the form, in the place the project will take.
+  const ghost = grid && !plain && viewing === null && !onlyPinned && !props.mine;
   const pills = (
     <>
       {!plain && viewing === null && pins.size > 0 && (
@@ -1617,20 +1632,7 @@ function TasksTab(props: {
               )}
             </div>
           )}
-      {adding && (
-        <div className="sh-task-tools">
-          <ProjectForm
-            label="New project"
-            submit="Add"
-            onCancel={() => setAdding(false)}
-            onSave={async (name, goal) => {
-              await api.createProject(props.roomId, { name, goal: goal || undefined });
-              setAdding(false);
-              props.reload();
-            }}
-          />
-        </div>
-      )}
+      {adding && !ghost && <div className="sh-task-tools">{projectForm}</div>}
       {viewing !== null && !plain && !props.solo && (
         <ProjectLine
           head
@@ -1765,9 +1767,19 @@ function TasksTab(props: {
                 />
               </section>
             )}
+            {ghost && (
+              <section className={adding ? "sh-project pj-ghost adding" : "sh-project pj-ghost"}>
+                {adding ? (
+                  projectForm
+                ) : (
+                  <button type="button" className="pj-ghost-add" onClick={() => setAdding(true)}>
+                    + New project
+                  </button>
+                )}
+              </section>
+            )}
             {!grid && !adding && !onlyPinned && !props.mine && addProject}
           </div>
-          {grid && !adding && !onlyPinned && !props.mine && addProject}
         </>
       )}
       {done.length > 0 && plain && (

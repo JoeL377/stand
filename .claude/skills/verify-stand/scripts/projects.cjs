@@ -70,7 +70,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
 
     await step("make a project with + Project on the Tasks tab", async () => {
       await page.getByRole("tab", { name: /^Projects/ }).click();
-      await page.getByRole("button", { name: "+ Project" }).click();
+      await page.getByRole("button", { name: /^\+ (New project|Project)$/ }).click();
       await page.getByLabel("Project name").fill("Onboarding");
       await page.getByLabel("Goal").fill("New teams get going in one call");
       await page.getByRole("button", { name: "Add", exact: true }).click();
