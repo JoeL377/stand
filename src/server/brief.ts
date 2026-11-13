@@ -29,6 +29,8 @@ export interface BriefTimelineEntry {
   text: string;
   /** Ask Stand: its answer. */
   answer?: string | null;
+  /** What someone's own agent said in the call: its longer write-up, in markdown. */
+  detail?: string;
   /** A capture or an agent's report: stand:action/<id>, stand:decision/<id> or stand:question/<id>. */
   ref?: string;
   /** A focus change: the item's short label, like "Slide 3". */
@@ -366,6 +368,7 @@ export function buildBrief(input: {
       ...(e.owner && { owner: e.owner }),
       text: e.text,
       ...(e.answer !== undefined && { answer: e.answer }),
+      ...(e.detail && { detail: e.detail }),
       ...(e.ref && { ref: e.ref }),
       ...(e.label && { label: e.label }),
       ...(e.kind !== "focus" && e.shown && e.shown.kind !== "item" && { on_screen: e.shown.label }),
@@ -554,7 +557,7 @@ function timelineLine(e: BriefTimelineEntry): string {
     case "ask":
       return `- ${at} ${e.who} asked Stand: ${e.text}${ref}${e.answer ? `\n  - Stand: ${e.answer.replace(/\n/g, "\n    ")}` : ""}`;
     case "agent":
-      return `- ${at} ${e.who}: ${e.text}${ref}`;
+      return `- ${at} ${e.who}: ${e.text}${ref}${e.detail ? `\n  - The full write-up:\n    ${e.detail.replace(/\n/g, "\n    ")}` : ""}`;
     default:
       return `- ${at} ${e.who}${e.kind === "chat" ? " (chat)" : ""}: ${e.text}${ref}`;
   }

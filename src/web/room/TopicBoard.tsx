@@ -31,7 +31,7 @@ import { Opener, type OpenerActs, hasKickoff, kickoffEnd, openerPages, showOpene
 import { SaidDonePill } from "../TaskMarks.tsx";
 import { unanswered } from "./CheckIn.tsx";
 import { PILOT_OPEN, PilotFoot, type PilotActs, PilotPill } from "./Pilot.tsx";
-import { type AgentActs, AgentStatus, AnswerPart, cardFor, FindOptions, OptionsCard, READY_MS, SHOW_CARD } from "./AgentCard.tsx";
+import { type AgentActs, AgentStatus, AnswerPart, cardFor, FindOptions, isSaid, OptionsCard, READY_MS, SaidCard, SHOW_CARD } from "./AgentCard.tsx";
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
@@ -123,10 +123,11 @@ const WHEEL_REST_MS = 700;
 const SWIPE_PX = 60;
 
 /** One card in the stack: Done since, the check-in, a topic of discussion, a question to ✦ Stand with its
- *  follow-ups, options ✦ Stand found on an open question, or the topic the board thinks the talk is moving to. */
+ *  follow-ups, options ✦ Stand found on an open question, what someone's own agent said in the call, or
+ *  the topic the board thinks the talk is moving to. */
 interface Entry {
   id: string;
-  kind: "done" | "kickoff" | "topic" | "answer" | "options" | "pending";
+  kind: "done" | "kickoff" | "topic" | "answer" | "options" | "said" | "pending";
   title: string;
   /** When it started. */
   at: number;
@@ -218,7 +219,9 @@ export function TopicBoard(props: {
   };
   const start = Math.min(props.meetingStartedAt, cardSince ?? Infinity);
   // Questions asked to ✦ Stand, each with its follow-ups: one card per first question.
-  const answers = (props.agent?.cards ?? []).filter((c) => c.kind === "answer" && !(c.status === "failed" && !c.question));
+  const answers = (props.agent?.cards ?? []).filter((c) => c.kind === "answer" && !isSaid(c) && !(c.status === "failed" && !c.question));
+  // What people's own agents said in the call, each a card of its own until someone dismisses it.
+  const agentSaid = (props.agent?.cards ?? []).filter((c) => isSaid(c) && c.status === "ready" && !c.dismissed);
   const chains = new Map<string, AgentCard[]>();
   for (const c of answers) {
     let root = c;
@@ -232,14 +235,17 @@ export function TopicBoard(props: {
   // An answer takes the live card from the topic while it's being asked and for a while after it lands,
   // unless the talk has started a topic since.
   const topicSince = current?.spans.at(-1)?.[0] ?? 0;
-  const liveChain = [...chains]
+  const liveAsk = [...chains]
     .filter(([, ch]) => {
       const last = ch.at(-1)!;
       const busy = ch.some((c) => c.status === "listening" || c.status === "working");
       return last.at >= topicSince && (busy || now - (last.readyAt ?? last.at) < ANSWER_HOLD_MS);
     })
     .sort(([, a], [, b]) => a.at(-1)!.at - b.at(-1)!.at)
-    .at(-1)?.[0];
+    .at(-1);
+  // A card from someone's own agent holds the live card the same way, from when it lands.
+  const liveSaid = agentSaid.filter((c) => c.at >= topicSince && now - c.at < ANSWER_HOLD_MS).at(-1);
+  const liveChain = liveSaid && (!liveAsk || liveSaid.at > liveAsk[1].at(-1)!.at) ? liveSaid.id : liveAsk?.[0];
   // This meeting's lines, as each card counts them: the ones said while it was the topic.
   const said = (props.notes ?? []).filter((n) => !(n as Partial<ListNote>).heard && !(n as Partial<ListNote>).closed);
   const inThread = (t: BoardThread, n: Note) => {
@@ -293,6 +299,15 @@ export function TopicBoard(props: {
       at: c.at,
       asOf: now,
       meta: [clock(c.at - start), `✦ Options for ${first(c.by)}`].join(" · "),
+      card: c,
+    })),
+    ...agentSaid.map((c) => ({
+      id: c.id,
+      kind: "said" as const,
+      title: saidTitle(c),
+      at: c.at,
+      asOf: now,
+      meta: [clock(c.at - start), `✦ ${first(c.by)}'s agent`].join(" · "),
       card: c,
     })),
   ].sort((a, b) => a.at - b.at);
@@ -366,6 +381,18 @@ export function TopicBoard(props: {
     const go = () => askRef.current();
     window.addEventListener(PILOT_OPEN, go);
     return () => window.removeEventListener(PILOT_OPEN, go);
+  }, []);
+  // "Show on the board" in the transcript, for what someone's own agent said: its card opens here.
+  // ✦ Stand's cards keep their own way there (the Open tab, under the question).
+  const showRef = useRef((_id: string) => {});
+  showRef.current = (id) => {
+    const e = entries.find((x) => x.kind === "said" && x.id === id);
+    if (e && e.id !== shownId) open(e.id);
+  };
+  useEffect(() => {
+    const show = (ev: Event) => showRef.current(String((ev as CustomEvent).detail));
+    window.addEventListener(SHOW_CARD, show);
+    return () => window.removeEventListener(SHOW_CARD, show);
   }, []);
   // Each card opens at its top.
   useEffect(() => {
@@ -456,7 +483,11 @@ export function TopicBoard(props: {
     ) : shownEntry?.chain ? (
       <AnswerStack chain={shownEntry.chain} live={shownId === liveId} onTodo={rewind ? undefined : props.agent?.onTodo} pilot={props.pilot} focus={focusBox === shownEntry.id} />
     ) : shownEntry?.card ? (
-      <OptionsView card={shownEntry.card} start={start} acts={props.agent ?? { cards: [] }} />
+      shownEntry.kind === "said" ? (
+        <SaidView card={shownEntry.card} start={start} live={shownId === liveId} acts={props.agent} />
+      ) : (
+        <OptionsView card={shownEntry.card} start={start} acts={props.agent ?? { cards: [] }} />
+      )
     ) : rewoundKickoff ? (
       <Opener
         key={rewind!.id}
@@ -568,7 +599,7 @@ export function TopicBoard(props: {
             title={e.title}
           >
             <span className="card-entry-mark" aria-hidden>
-              {e.kind === "answer" || e.kind === "options" ? "✦" : e.kind === "kickoff" ? "↺" : e.kind === "done" ? "✓" : entries.slice(0, i + 1).filter((x) => x.kind === "topic").length}
+              {e.kind === "answer" || e.kind === "options" || e.kind === "said" ? "✦" : e.kind === "kickoff" ? "↺" : e.kind === "done" ? "✓" : entries.slice(0, i + 1).filter((x) => x.kind === "topic").length}
             </span>
             <span className="card-entry-body">
               <span className="card-entry-title">{e.title}</span>
@@ -665,8 +696,30 @@ function signalOf(e: Entry, now: number): Entry["signal"] {
     if (d?.searches.length) return { text: "✦ Searching the web…", tone: "working" };
     return { text: e.kind === "options" ? "✦ Finding options…" : "✦ Finding an answer…", tone: "working" };
   }
-  if (last.status === "ready" && last.readyAt !== null && now - last.readyAt < READY_MS) return { text: e.kind === "options" ? "✦ Options ready" : "✦ Answer ready", tone: "ready" };
+  if (last.status === "ready" && last.readyAt !== null && now - last.readyAt < READY_MS)
+    return { text: e.kind === "said" ? `✦ New from ${first(last.by)}'s agent` : e.kind === "options" ? "✦ Options ready" : "✦ Answer ready", tone: "ready" };
   return null;
+}
+
+/** A card from someone's own agent in the list of cards: the first line of what it said, without its markdown. */
+function saidTitle(c: AgentCard): string {
+  const line = (c.note ?? "").split("\n").find((l) => l.trim()) ?? "";
+  const plain = line.replace(/^[#>\-*\s]+/, "").replace(/[*_`]/g, "").trim();
+  return plain.length > 80 ? `${plain.slice(0, 79).trimEnd()}…` : plain || `From ${first(c.by)}'s agent`;
+}
+
+/** What someone's own agent said in the call, as a card of its own in the stack (SaidCard). */
+function SaidView({ card, start, live, acts }: { card: AgentCard; start: number; live: boolean; acts?: AgentActs }) {
+  return (
+    <section className="topic-now said-view" aria-label={`From ${first(card.by)}'s agent`}>
+      <div className="topic-now-head">
+        <span className="topic-now-label ask">✦ From an agent</span>
+        {live && <span className="topic-now-label live">Now</span>}
+        <span className="topic-mins">at {clock(card.at - start)}</span>
+      </div>
+      <SaidCard card={card} acts={acts} />
+    </section>
+  );
 }
 
 /** Options ✦ Stand found on an open question, as a card of their own in the stack. */

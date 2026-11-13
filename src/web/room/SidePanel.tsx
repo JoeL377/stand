@@ -287,7 +287,7 @@ function Transcript(props: {
               </div>
             );
           if (e.kind === "ask") return <AskRow key={e.id} e={e} onShow={() => showCard(sourceId(e))} />;
-          if (e.kind === "agent") return <AgentRow key={e.id} e={e} />;
+          if (e.kind === "agent") return <AgentRow key={e.id} e={e} onShow={e.card ? () => showCard(e.card!) : undefined} />;
           if (e.kind === "capture") {
             const note = noteOf.get(sourceId(e));
             return note ? <CaptureRow key={e.id} note={note} entry={e} /> : null;

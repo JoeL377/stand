@@ -37,7 +37,8 @@ import { type Agent, type ItemNotesDraft, NotesTrouble, type OnDraft, type Recap
 import { meetingChapters } from "../shared/chapters.ts";
 import { currentDoneDeck } from "./doneDeck.ts";
 import { sampleSprint } from "./linear.ts";
-import type { StageView } from "../shared/timeline.ts";
+import { type Shown, type StageView, shownOf } from "../shared/timeline.ts";
+import type { Actor } from "../shared/actors.ts";
 import { runDemo } from "./demo.ts";
 import { capturedFor, mergeNotes, similar } from "./notesMerge.ts";
 import { LOCK_AFTER_MS, LOCK_MIN_LINES, settle } from "./settle.ts";
@@ -172,6 +173,14 @@ export class RoomSession implements SpeechSink {
     endedAt: number;
     length: number;
   } | null = null;
+  /** When each line was added or last grew, by this server's clock. A line's own time is when its words
+   *  started, so it can land behind a later one; someone's agent reading the call asks by this instead. */
+  private touched = new Map<string, number>();
+  private lastStamp = 0;
+  /** This server's clock, never the same twice, so a read of the call can ask for exactly what came after it. */
+  private stamp() {
+    return (this.lastStamp = Math.max(Date.now(), this.lastStamp + 1));
+  }
   private noteRuns = new Map<string | null, Promise<void>>();
   /** A run waiting behind the current one. It reads the transcript when it
    *  starts, so later requests just join it instead of queueing more runs. */
@@ -990,6 +999,53 @@ export class RoomSession implements SpeechSink {
     this.broadcastState();
   }
 
+  // ---- someone's own agent in the call, over the Stand MCP (agents.ts) -------
+
+  /** The call since a moment on this server's clock (0: all of it), for someone's own agent reading it
+   *  while it runs: the lines added or grown since, what was caught since, and what the main view shows
+   *  now. `now` is the moment to ask from next time. */
+  tail(since: number) {
+    const now = this.stamp();
+    // A line from before a restart has no time here: its own time stands in.
+    const lines = this.db.meetingSegments(this.meetingId).filter((s) => (this.touched.get(s.id) ?? s.ts) > since);
+    const caught = this.db.meetingNotes(this.meetingId).filter((n) => n.kind !== "summary" && n.ts >= since);
+    // What ✦ Stand and people's own agents answered since: not lines of the transcript, but said in the call.
+    const answers = (this.agentCards?.all() ?? []).filter((c) => c.kind === "answer" && c.status === "ready" && !!c.note && (c.readyAt ?? c.at) >= since);
+    return { now, lines, caught, answers, showing: this.showing() };
+  }
+
+  /** What the main view shows now, as a thing to name: a share comes with the last still taken of it. */
+  private showing(): Shown | null {
+    const view = this.stageView();
+    const stills = this.db.meetingSnaps(this.meetingId);
+    let still = view.snapId ? stills.find((p) => p.id === view.snapId) : undefined;
+    if (!still && view.sharing) {
+      // Since this share started, so a still of someone else's screen isn't shown as this one.
+      let from = 0;
+      let sharer: string | null = null;
+      for (const e of this.db.stageEvents(this.meetingId)) {
+        if (e.view.sharing !== sharer) from = e.ts;
+        sharer = e.view.sharing;
+      }
+      still = stills.filter((p) => p.ts >= from).at(-1);
+    }
+    const snap = still ? { id: still.id, caption: still.caption, url: `/api/snaps/${still.id}.${still.ext}?v=${still.version}` } : null;
+    return shownOf(view, view.itemId ? this.db.getItem(view.itemId) : null, snap);
+  }
+
+  /** Someone's own agent says something in the call: a card on the board under its person's name, for
+   *  everyone, kept with the meeting. It works without ✦ Stand's own model. Returns why not, in a line,
+   *  when it can't. */
+  agentSay(agent: Actor, out: Parameters<AgentKeeper["say"]>[1]): AgentCard | string {
+    if (this.ended) return "That call has ended.";
+    this.agentCards ??= new AgentKeeper();
+    const why = this.agentCards.sayRefusal(agent);
+    if (why) return why;
+    const card = this.agentCards.say(agent, out);
+    this.agentChanged();
+    return card;
+  }
+
   nameOf(participantId: string) {
     return this.participants.get(participantId)?.name;
   }
@@ -1737,6 +1793,7 @@ export class RoomSession implements SpeechSink {
     ) {
       const seg = this.db.appendSegmentText(last.segmentId, t);
       if (seg) {
+        this.touched.set(seg.id, this.stamp());
         this.lastSpeech = { ...last, endedAt: Math.max(last.endedAt, endedAt), length: seg.text.length };
         this.broadcast({ type: "segment.updated", segment: seg });
         this.scheduleNotes(seg.itemId, NOTES_DEBOUNCE_MS);
@@ -1792,6 +1849,7 @@ export class RoomSession implements SpeechSink {
   private addSegment(speakerId: string, speakerName: string, kind: "speech" | "chat", text: string, ts: number) {
     const itemId = kind === "chat" ? this.focusItemId : this.focusAt(ts);
     const segment = this.db.addSegment({ meetingId: this.meetingId, itemId, speakerId, speakerName, kind, text, ts });
+    this.touched.set(segment.id, this.stamp());
     if (kind === "chat") this.lastSpeech = null;
     this.broadcast({ type: "segment", segment });
     this.scheduleNotes(itemId, NOTES_DEBOUNCE_MS);
