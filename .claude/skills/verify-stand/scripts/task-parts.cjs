@@ -104,10 +104,11 @@ const INVITE = "Invite support to the next review";
       projectIds = Object.fromEntries((await page.request.get(`${base}/api/rooms/${roomId}/projects`).then((r) => r.json())).map((p) => [p.name, p.id]));
       await openTasks();
       await snap("projects");
-      check("the first view is a row per project, with no task rows in them", (await page.locator(".pj-list .sh-project").count()) >= 3 && (await sections()).length === 0);
+      check("the first view is a row per project, with no task rows in them", (await page.locator(".pj-grid .sh-project").count()) >= 3 && (await sections()).length === 0);
       await page.getByRole("region", { name: "Payments" }).getByRole("button", { name: "Payments", exact: true }).click();
+      await page.waitForURL(/project=/);
       await page.getByRole("region", { name: "Payments" }).locator(".followups li").first().waitFor();
-      check("a click opens the project under its row", !/project=/.test(page.url()) && (await page.locator(".pj-list .sh-project").count()) >= 3);
+      check("a click on a card opens the project's own page", (await page.locator(".pj-grid").count()) === 0 && (await page.getByRole("button", { name: "All projects" }).count()) === 1);
       await snap("tasks-with-parts");
       const worker = family(await sections(), WORKER);
       check("the parent says how many of its parts are done", worker.parent?.count === "1/3 parts", worker.parent);
@@ -190,6 +191,11 @@ const INVITE = "Invite support to the next review";
 
     await step("on a phone", async () => {
       await page.setViewportSize({ width: 390, height: 844 });
+      // A phone has rows, and a row opens its project in place.
+      await page.goto(`${base}/s/${roomId}`);
+      await page.getByRole("region", { name: "Payments" }).getByRole("button", { name: "Payments", exact: true }).click();
+      await page.getByRole("region", { name: "Payments" }).locator(".followups li").first().waitFor();
+      check("on a phone a row opens its project under it", !/project=/.test(page.url()) && (await page.locator(".pj-list .sh-project").count()) >= 3);
       await openTasks("Payments");
       const wide = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
       check("the page doesn't scroll sideways", !wide);

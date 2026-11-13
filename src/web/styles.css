@@ -4533,3 +4533,40 @@ footer.controls .control.pill { padding: 7px 16px; }
 .sh-panel .pj-name:hover, .sh-panel .pj-name:focus { background: none; }
 .pj-list > .sh-project:has(+ .after-pins) { border-bottom: 0; }
 .pj-list > .sh-project.after-pins { margin-top: 6px; border-top: 2px solid var(--line); }
+
+/* On a wide screen the projects are cards: the name and goal, up to three to-dos in progress with
+   who has them, then who is on it, what is ready, the meter and what is open. A click opens the
+   project's own page. Your pinned cards are a first group. */
+.pj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 12px; }
+.pj-grid.pinned + .pj-grid { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.pj-grid > .sh-project { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); transition: border-color 0.12s ease; }
+.pj-grid > .sh-project:hover { border-color: color-mix(in srgb, var(--text) 35%, var(--line)); }
+.pj-grid > .sh-project.dragging { opacity: 0.45; }
+.pj-grid > .sh-project.drop-before { box-shadow: -3px 0 0 var(--text); }
+.pj-grid > .sh-project.drop-after { box-shadow: 3px 0 0 var(--text); }
+.pj-line.card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "title title pin menu" "nows nows nows nows" "faces moving meter open"; align-items: center; gap: 10px 10px; height: 100%; min-height: 0; margin: 0; padding: 12px 12px 12px 14px; border-radius: 12px; }
+.pj-line.card:not(.editing):hover { background: none; }
+.pj-line.card .pj-title { grid-area: title; flex-direction: column; align-items: flex-start; gap: 2px; }
+.pj-line.card .pj-name { max-width: 100%; font-size: 15px; }
+.pj-line.card .pj-goal { flex: none; max-width: 100%; font-size: 12.5px; }
+.pj-line.card .pj-pin { grid-area: pin; justify-self: end; align-self: start; margin: -3px -6px 0 0; }
+.pj-line.card .pj-menu { grid-area: menu; justify-self: end; align-self: start; width: auto; margin: -3px -6px 0 0; }
+.pj-line.card .pj-nows { grid-area: nows; align-self: start; display: flex; flex-direction: column; gap: 6px; min-height: 72px; min-width: 0; }
+.pj-line.card .pj-now { flex: none; }
+.pj-line.card .pj-now-task { flex: 1 1 auto; }
+.pj-line.card .pj-now-more { padding-left: 14px; }
+.pj-line.card .pj-faces { grid-area: faces; width: auto; justify-content: flex-start; padding-left: 5px; }
+.pj-line.card .pj-moving { grid-area: moving; min-width: 0; justify-content: flex-start; }
+.pj-line.card .pj-meter { grid-area: meter; width: 64px; }
+.pj-line.card .pj-open { grid-area: open; width: auto; }
+.pj-line.card .sh-project-grip { position: absolute; left: 0; top: 14px; margin: 0; }
+.pj-grid ~ .pj-add, .pj-grid + .pj-add { margin-top: 6px; }
+.pj-line.card { grid-template-areas: "title title title title" "nows nows nows nows" "faces moving meter open"; }
+.pj-line.card .pj-title { align-self: start; padding-right: 52px; }
+.pj-line.card .pj-nows { min-height: 0; }
+.pj-line.card .pj-nows:empty { display: none; }
+.pj-line.card .pj-pin { position: absolute; top: 9px; right: 34px; margin: 0; }
+.pj-line.card .pj-menu { position: absolute; top: 9px; right: 6px; margin: 0; }
+.pj-line.card .pj-faces, .pj-line.card .pj-moving, .pj-line.card .pj-meter, .pj-line.card .pj-open { align-self: end; }
+.pj-now.ready::before { background: var(--ok); }
+.pj-line.card .pj-moving { visibility: hidden; }

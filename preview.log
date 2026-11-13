@@ -1,0 +1,22 @@
+
+> standup@0.1.0 preview:ui
+> export DATA_DIR=./data/preview PORT=3101 PREVIEW_USER=sam@acme.test && npm run preview:seed && concurrently -k -n server,web -c blue,green "tsx watch src/server/index.ts" "vite --port 5181 --strictPort"
+
+
+> standup@0.1.0 preview:seed
+> node --import tsx scripts/seed-preview.ts
+
+Sample data is in /home/user/stand/data/preview. You are Sam Rivera, with no sign-in.
+[web] 
+[web]   VITE v8.3.3  ready in 213 ms
+[web] 
+[web]   ➜  Local:   http://localhost:5181/
+[web]   ➜  Network: use --host to expose
+[server] (node:2818) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[server] (Use `node --trace-warnings ...` to show where the warning was created)
+[server] standup server on http://localhost:3101
+[server]   audio: off (mock mode) · transcription: browser · notes: heuristic · Linear: off · GitHub app: off
+[server] [ship] can't read https://github.com/acme-demo/checkout/pull/44 (private repo the Stand GitHub App isn't installed on?)
+[server] [ship] can't read https://github.com/acme-demo/checkout/pull/45 (private repo the Stand GitHub App isn't installed on?)
+[web] vite --port 5181 --strictPort exited with code SIGTERM
+--> Sending SIGTERM to other processes..

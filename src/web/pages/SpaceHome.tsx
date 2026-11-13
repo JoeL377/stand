@@ -1036,6 +1036,7 @@ function TasksTab(props: {
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
   const [adding, setAdding] = useState(false);
+  const phone = usePhone();
   // Your own pins. A click shows at once and saves behind it.
   const [pins, setPins] = useState(() => new Set(props.pinned));
   useEffect(() => setPins(new Set(props.pinned)), [props.pinned.join()]);
@@ -1394,6 +1395,73 @@ function TasksTab(props: {
     return first ? { text: first.text, face: face(first), more: more.length, onOpen: () => props.onOpen(first.id) } : undefined;
   };
 
+  /** What is moving in a project, for a card: up to three, in progress first, then ready to ship. */
+  const nowsOf = (id: string) =>
+    [...doingIn(id).map((n) => ({ n, ready: false })), ...(readyIn.get(id) ?? []).map((n) => ({ n, ready: true }))]
+      .slice(0, 3)
+      .map(({ n, ready }) => ({ id: n.id, text: n.text, ready, face: face(n), onOpen: () => props.onOpen(n.id) }));
+  const grid = !phone;
+  /** One project in the list: a card on a wide screen, a row that opens in place on a phone. */
+  const projectSection = (p: Project) => {
+    const i = sections.indexOf(p);
+    const drop = dropAt?.id === p.id && dragging !== p.id ? (dropAt.after ? " drop-after" : " drop-before") : "";
+    return (
+      <section
+        key={p.id}
+        aria-label={p.name}
+        className={`sh-project${!grid && isOpen(p.id) ? " open" : ""}${!grid && p.id === firstUnpinned ? " after-pins" : ""}${dragging === p.id ? " dragging" : ""}${drop}`}
+        onDragOver={
+          dragging
+            ? (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const box = e.currentTarget.getBoundingClientRect();
+                // Cards sit side by side, rows one under the other.
+                const after = grid ? e.clientX > box.left + box.width / 2 : e.clientY > box.top + box.height / 2;
+                if (dropAt?.id !== p.id || dropAt.after !== after) setDropAt({ id: p.id, after });
+              }
+            : undefined
+        }
+        onDrop={
+          dragging
+            ? (e) => {
+                e.preventDefault();
+                if (dropAt) dropOn(dropAt.id, dropAt.after);
+                setDragging(null);
+                setDropAt(null);
+              }
+            : undefined
+        }
+      >
+        <ProjectLine
+          project={p}
+          {...lineOf(p.id)}
+          card={grid}
+          now={nowOf(p.id)}
+          nows={nowsOf(p.id)}
+          expanded={isOpen(p.id)}
+          pinned={pins.has(p.id)}
+          onPin={() => togglePin(p.id)}
+          onOpen={grid ? () => props.onProject(p.id) : () => toggleOpen(p.id)}
+          onAlone={grid ? undefined : () => props.onProject(p.id)}
+          roomId={props.roomId}
+          reload={props.reload}
+          order={
+            canOrder
+              ? {
+                  onUp: i > 0 ? () => nudge(p.id, -1) : undefined,
+                  onDown: i < sections.length - 1 ? () => nudge(p.id, 1) : undefined,
+                  onDragStart: () => setDragging(p.id),
+                  onDragEnd: () => (setDragging(null), setDropAt(null)),
+                }
+              : undefined
+          }
+        />
+        {!grid && isOpen(p.id) && <div className="pj-body">{openIn.has(p.id) ? byState(openIn.get(p.id)!, p.id) : <p className="sh-card-empty small">Nothing open in this project.</p>}</div>}
+      </section>
+    );
+  };
+
   const fold = (label: string, n: number, open: boolean, toggle: () => void, icon: React.ReactNode) =>
     n > 0 && (
       <button className="sh-done-toggle" aria-expanded={open} onClick={toggle}>
@@ -1534,70 +1602,31 @@ function TasksTab(props: {
           {byState(open, viewing)}
         </section>
       ) : (
-        <div className="pj-list">
-          {sections.map((p, i) => {
-            const drop = dropAt?.id === p.id && dragging !== p.id ? (dropAt.after ? " drop-after" : " drop-before") : "";
-            return (
-              <section
-                key={p.id}
-                aria-label={p.name}
-                className={`sh-project${isOpen(p.id) ? " open" : ""}${p.id === firstUnpinned ? " after-pins" : ""}${dragging === p.id ? " dragging" : ""}${drop}`}
-                onDragOver={
-                  dragging
-                    ? (e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                        const box = e.currentTarget.getBoundingClientRect();
-                        const after = e.clientY > box.top + box.height / 2;
-                        if (dropAt?.id !== p.id || dropAt.after !== after) setDropAt({ id: p.id, after });
-                      }
-                    : undefined
-                }
-                onDrop={
-                  dragging
-                    ? (e) => {
-                        e.preventDefault();
-                        if (dropAt) dropOn(dropAt.id, dropAt.after);
-                        setDragging(null);
-                        setDropAt(null);
-                      }
-                    : undefined
-                }
-              >
+        <>
+          {/* A wide screen has the projects as cards, your pinned ones in a first group; a phone has rows that open in place. */}
+          {grid && pins.size > 0 && <div className="pj-grid pinned">{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
+          <div className={grid ? "pj-grid" : "pj-list"}>
+            {sections.filter((p) => !grid || !pins.has(p.id)).map(projectSection)}
+            {unassigned.length > 0 && !onlyPinned && (
+              <section className={`sh-project unassigned${!grid && isOpen("") ? " open" : ""}`} aria-label="Unassigned">
                 <ProjectLine
-                  project={p}
-                  {...lineOf(p.id)}
-                  now={nowOf(p.id)}
-                  expanded={isOpen(p.id)}
-                  pinned={pins.has(p.id)}
-                  onPin={() => togglePin(p.id)}
-                  onOpen={() => toggleOpen(p.id)}
-                  onAlone={() => props.onProject(p.id)}
+                  project={null}
+                  {...lineOf("")}
+                  card={grid}
+                  now={nowOf("")}
+                  nows={nowsOf("")}
+                  expanded={isOpen("")}
+                  onOpen={grid ? () => props.onProject("none") : () => toggleOpen("")}
                   roomId={props.roomId}
                   reload={props.reload}
-                  order={
-                    canOrder
-                      ? {
-                          onUp: i > 0 ? () => nudge(p.id, -1) : undefined,
-                          onDown: i < sections.length - 1 ? () => nudge(p.id, 1) : undefined,
-                          onDragStart: () => setDragging(p.id),
-                          onDragEnd: () => (setDragging(null), setDropAt(null)),
-                        }
-                      : undefined
-                  }
                 />
-                {isOpen(p.id) && <div className="pj-body">{openIn.has(p.id) ? byState(openIn.get(p.id)!, p.id) : <p className="sh-card-empty small">Nothing open in this project.</p>}</div>}
+                {!grid && isOpen("") && <div className="pj-body">{byState(unassigned, "")}</div>}
               </section>
-            );
-          })}
-          {unassigned.length > 0 && !onlyPinned && (
-            <section className={`sh-project unassigned${isOpen("") ? " open" : ""}`} aria-label="Unassigned">
-              <ProjectLine project={null} {...lineOf("")} now={nowOf("")} expanded={isOpen("")} onOpen={() => toggleOpen("")} roomId={props.roomId} reload={props.reload} />
-              {isOpen("") && <div className="pj-body">{byState(unassigned, "")}</div>}
-            </section>
-          )}
-          {!adding && !onlyPinned && !props.mine && addProject}
-        </div>
+            )}
+            {!grid && !adding && !onlyPinned && !props.mine && addProject}
+          </div>
+          {grid && !adding && !onlyPinned && !props.mine && addProject}
+        </>
       )}
       {done.length > 0 && (
         <div className={showDone ? "sh-done open" : "sh-done"}>
@@ -1660,6 +1689,9 @@ function ProjectLine(props: {
   onDecisions?: () => void;
   /** What someone is on now, on a row: the newest in-progress to-do, and how many more there are. */
   now?: { text: string; face: React.ReactNode; more: number; onOpen: () => void };
+  /** A card on a wide screen: the goal under the name, and up to three to-dos that are moving (`nows`). */
+  card?: boolean;
+  nows?: Array<{ id: string; text: string; ready: boolean; face: React.ReactNode; onOpen: () => void }>;
   /** A row: its tasks are open under it. */
   expanded?: boolean;
   /** Your own pin on it. */
@@ -1674,7 +1706,7 @@ function ProjectLine(props: {
   /** Left out when the order can't change here: one project in view, a filter on, or Active first. */
   order?: { onUp?: () => void; onDown?: () => void; onDragStart: () => void; onDragEnd: () => void };
 }) {
-  const { project: p, order, head } = props;
+  const { project: p, order, head, card } = props;
   const idle = !head && !props.now && props.ready === 0;
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<"name" | "goal" | null>(null);
@@ -1709,7 +1741,7 @@ function ProjectLine(props: {
     props.onOpen();
   };
   return (
-    <div className={`pj-line${head ? " head" : ""}${p ? "" : " unassigned"}${idle ? " idle" : ""}`} onClick={onRow}>
+    <div className={`pj-line${head ? " head" : ""}${card ? " card" : ""}${p ? "" : " unassigned"}${idle ? " idle" : ""}`} onClick={onRow}>
       {head && (
         <button type="button" className="pj-back" onClick={props.onOpen} aria-label="All projects" title="All projects">
           <ChevronIcon />
@@ -1738,13 +1770,13 @@ function ProjectLine(props: {
         {head ? (
           <strong className="pj-name">{name}</strong>
         ) : (
-          <button type="button" className="pj-name" aria-expanded={!!props.expanded} onClick={props.onOpen} title={p?.goal ?? undefined}>
-            <ChevronIcon />
+          <button type="button" className="pj-name" aria-expanded={card ? undefined : !!props.expanded} onClick={props.onOpen} title={p?.goal ?? undefined}>
+            {!card && <ChevronIcon />}
             {name}
           </button>
         )}
         {p?.archived && <span className="muted small">Archived</span>}
-        {!head && props.now ? (
+        {!head && !card && props.now ? (
           <span className="pj-now">
             <button type="button" className="pj-now-task" onClick={props.now.onOpen} title={`In progress: ${props.now.text}`}>
               {props.now.text}
@@ -1764,6 +1796,19 @@ function ProjectLine(props: {
           )
         )}
       </span>
+      {card && (
+        <span className="pj-nows">
+          {(props.nows ?? []).map((n) => (
+            <span key={n.id} className={n.ready ? "pj-now ready" : "pj-now"}>
+              <button type="button" className="pj-now-task" onClick={n.onOpen} title={`${n.ready ? "Ready to ship" : "In progress"}: ${n.text}`}>
+                {n.text}
+              </button>
+              {n.face}
+            </span>
+          ))}
+          {props.inProgress + props.ready > (props.nows?.length ?? 0) && <span className="pj-now-more">+{props.inProgress + props.ready - (props.nows?.length ?? 0)} more</span>}
+        </span>
+      )}
       <span className="pj-moving">
         {props.inProgress > 0 && (
           <span className={head ? "pj-live" : "pj-live row"} title={`${props.inProgress} in progress: someone is on ${props.inProgress === 1 ? "it" : "them"} now`}>

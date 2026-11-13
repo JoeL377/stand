@@ -145,10 +145,11 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       const grip = page.getByRole("region", { name: "Alpha" }).locator(".sh-project-grip");
       const beta = page.getByRole("region", { name: "Beta" });
       const box = await beta.boundingBox();
-      await grip.dragTo(beta, { targetPosition: { x: 40, y: box.height - 4 } });
+      // Cards sit side by side: the right half of a card drops after it.
+      await grip.dragTo(beta, { targetPosition: { x: box.width - 40, y: box.height - 4 } });
       await settled(["Gamma", "Beta", "Alpha"]);
     });
-    check("a drag onto the lower half puts it after", same(await onServer(), ["Gamma", "Beta", "Alpha"]), await onServer());
+    check("a drag onto the far half puts it after", same(await onServer(), ["Gamma", "Beta", "Alpha"]), await onServer());
 
     await step("an agent sets the order over MCP", async () => {
       const { token } = await page.request.post(`${base}/api/tokens`, { data: { label: "verify", scope: "write" } }).then((r) => r.json());
