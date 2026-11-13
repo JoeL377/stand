@@ -4614,14 +4614,17 @@ footer.controls .control.pill { padding: 7px 16px; }
 .start-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 220px)); justify-content: center; gap: 12px; width: 100%; max-width: 960px; }
 .start-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: none; color: var(--text); text-align: left; cursor: pointer; transition: border-color 120ms, background 120ms, transform 120ms; }
 .start-card:hover:not(:disabled) { border-color: var(--muted); background: var(--panel-2); transform: translateY(-1px); }
-.start-kind { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.start-card.on { border-color: var(--muted); background: var(--panel-2); }
+.start-kind { display: inline-flex; align-items: center; color: var(--muted); }
+.start-pick { position: relative; display: flex; min-width: 0; }
+.start-pick > .start-card { flex: 1; }
+.rp-menu.sh-start-menu.start-menu { top: calc(100% + 6px); left: 0; right: auto; min-width: 100%; text-align: left; }
 .start-card strong { max-width: 100%; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .start-meta { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
   .start-cards { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .start-card { flex-direction: row; align-items: center; gap: 10px; padding: 12px 14px; }
   .start-card strong { flex: 1; min-width: 0; }
-  .start-kind { font-size: 0; gap: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .start-card { transition: none; } .start-card:hover:not(:disabled) { transform: none; } }
 

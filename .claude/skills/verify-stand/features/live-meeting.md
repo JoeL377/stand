@@ -25,6 +25,6 @@ On a space page open the **Meetings** tab and click **Start talking** (a call th
 
 ## First view, projects and the agenda column
 
-- Before the talk has a topic the board shows up to four start cards (`.start-card`, `src/web/room/StartCards.tsx`): reviews with something waiting, the space's projects with open to-dos in the team's order (host only), and `Still open from earlier` with its count, which puts the check-in on everyone's board. The check-in no longer opens a call by itself; it is also in the `Cards` menu.
+- Before the talk has a topic the board shows up to four start cards (`.start-card`, `src/web/room/StartCards.tsx`), in this order: `Open project` (host only; one card, its menu `.start-menu` lists the projects), `Start brainstorm` (opens the Sketch), `Design review` and `Product review` when something waits, and `Still open from earlier` with its count, which puts the check-in on everyone's board. The check-in no longer opens a call by itself; it is also in the `Cards` menu.
 - `Open project` on the call's bar (host only) lists the space's projects; picking one puts it on the board (`.project-presentation`). While one is up the button reads `Project`, the menu marks it (`menuitemradio`, `aria-checked`) and ends with `Close project`.
 - A call with nothing on its agenda has no agenda column (`.meeting-grid.no-agenda`). The top bar's More menu has `Add an agenda`; the column also comes, folded, with the first item (demo items, a review's slides, an opened project). `Show the agenda` only exists then.

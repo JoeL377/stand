@@ -370,6 +370,8 @@ export function Stage(props: {
   const noticeOn = notice.card && !props.ending && !saidOpen ? notice.card : null;
 
   const steady = !props.offline && !props.ending;
+  // The start cards are built before the sketch's own code below.
+  const startSketchRef = useRef<(topic: string) => Promise<boolean>>(async () => false);
   // The topic card: the board's first view.
   const card = (
     <TopicBoard
@@ -398,6 +400,7 @@ export function Stage(props: {
             toCheck={unanswered(state.followUps ?? [], state.meetingStartedAt).length}
             onCheckIn={() => send({ type: "checkin", open: true })}
             onProject={canSteer ? (projectId) => send({ type: "project.present", projectId }) : undefined}
+            onBrainstorm={props.brainstorm?.status === "live" ? undefined : () => void startSketchRef.current("")}
             mayStart={() => mayTakeOver(state, props.participantId)}
           />
         ) : undefined
@@ -437,6 +440,7 @@ export function Stage(props: {
       return false;
     }
   };
+  startSketchRef.current = startSketch;
   const acts = {
     style: (s: string, style: "map" | "diagram") => void send({ type: "sketch.style", subject: s, style }),
     edit: (s: string, id: string, op: "rename" | "remove" | "move", arg?: { label?: string; to?: string }) => void send({ type: "sketch.edit", subject: s, id, op, ...arg }),
