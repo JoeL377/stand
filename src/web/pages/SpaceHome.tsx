@@ -19,7 +19,7 @@ import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
 import { Face, FromChip, QuoteMark } from "../RecapChapters.tsx";
-import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, GripIcon, LinkIcon, MicIcon, TrashIcon } from "../icons.tsx";
+import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, GripIcon, LinkIcon, MicIcon, PinIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { Avatar } from "../room/Stage.tsx";
 import { removeSnap } from "../Snaps.tsx";
@@ -617,6 +617,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               projects={projects}
               projectFilter={filtered ? "" : projectFilter}
               onProject={setProjectFilter}
+              pinned={room.pinnedProjects ?? []}
               decisions={decisionsIn}
               onDecisions={() => pickTab("decisions")}
               mine={mine}
@@ -1001,6 +1002,8 @@ function TasksTab(props: {
   projectFilter: string;
   /** Opens one project's view ("none" for Unassigned), or goes back to the list of projects (""). */
   onProject: (filter: string) => void;
+  /** The projects the person looking pinned: theirs alone, first on the list and open. */
+  pinned: string[];
   /** How many kept decisions each project has, by id: the project's view links to them. */
   decisions: Map<string, number>;
   onDecisions: () => void;
@@ -1033,6 +1036,44 @@ function TasksTab(props: {
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
   const [adding, setAdding] = useState(false);
+  // Your own pins. A click shows at once and saves behind it.
+  const [pins, setPins] = useState(() => new Set(props.pinned));
+  useEffect(() => setPins(new Set(props.pinned)), [props.pinned.join()]);
+  const togglePin = (id: string) => {
+    const on = !pins.has(id);
+    setPins((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    api.pinProject(props.roomId, id, on).then(props.reload, (err) => {
+      setPins(new Set(props.pinned));
+      errorToast(on ? "Couldn't pin it" : "Couldn't unpin it")(err);
+    });
+  };
+  // What this browser remembers of the list: the projects someone opened or shut by hand (a pinned
+  // one starts open, the others shut), and whether only the pinned ones show.
+  const viewKey = `stand.projectView.${props.roomId}`;
+  const [view, setView] = useState<{ open: Record<string, boolean>; onlyPinned: boolean }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(viewKey) ?? "{}");
+      return { open: saved.open ?? {}, onlyPinned: saved.onlyPinned === true };
+    } catch {
+      return { open: {}, onlyPinned: false };
+    }
+  });
+  const saveView = (next: typeof view) => {
+    setView(next);
+    try {
+      localStorage.setItem(viewKey, JSON.stringify(next));
+    } catch {}
+  };
+  const isOpen = (id: string) => view.open[id] ?? pins.has(id);
+  const toggleOpen = (id: string) => saveView({ ...view, open: { ...view.open, [id]: !isOpen(id) } });
+  const onlyPinned = view.onlyPinned && pins.size > 0;
+  // The tasks that wait on you sit behind a pill, so the projects come first.
+  const [showForYou, setShowForYou] = useState(false);
   // The open question someone is writing an answer to.
   const [answering, setAnswering] = useState<string | null>(null);
   // The sweep someone has open, as it was when they opened it.
@@ -1105,7 +1146,10 @@ function TasksTab(props: {
       .filter((n) => n.kind === "action")
       .map((n) => ({ project: n.project, ts: n.ts, inProgress: stateOf(n, work[n.id]) === "doing", reportedAt: work[n.id]?.log[0]?.ts })),
   );
-  const sections = sort === "active" ? activeFirst(inView, activity) : inView;
+  const ordered = sort === "active" ? activeFirst(inView, activity) : inView;
+  // Your pinned projects first, then the others; or the pinned ones alone.
+  const sections = [...ordered.filter((p) => pins.has(p.id)), ...(onlyPinned ? [] : ordered.filter((p) => !pins.has(p.id)))];
+  const firstUnpinned = pins.size > 0 ? sections.find((p) => !pins.has(p.id))?.id : undefined;
   // One project's view, the list of projects, or with no projects at all one plain list.
   const viewing = props.projectFilter === "none" ? "" : props.projectFilter || null;
   const plain = props.projects.length === 0;
@@ -1300,9 +1344,12 @@ function TasksTab(props: {
   /** A project's open work by where it stands: what someone is on, what waits, what is still asked. */
   const byState = (notes: TaskNote[], section: string) => {
     const families = withParts(notes);
+    const ready = (f: Family) => !!work[f.note.id]?.ready;
+    const doing = (f: Family) => f.note.kind === "action" && !ready(f) && stateOf(f.note, work[f.note.id]) === "doing";
     const groups: Array<[string, Family[]]> = [
-      ["In progress", families.filter((f) => f.note.kind === "action" && stateOf(f.note, work[f.note.id]) === "doing")],
-      ["To do", families.filter((f) => f.note.kind === "action" && stateOf(f.note, work[f.note.id]) !== "doing")],
+      ["Ready to ship", families.filter(ready)],
+      ["In progress", families.filter(doing)],
+      ["To do", families.filter((f) => f.note.kind === "action" && !ready(f) && !doing(f))],
       ["Questions", families.filter((f) => f.note.kind !== "action")],
     ];
     return groups
@@ -1333,9 +1380,19 @@ function TasksTab(props: {
     open: openIn.get(id)?.length ?? 0,
     done: doneIn.get(id)?.length ?? 0,
     ready: readyIn.get(id)?.length ?? 0,
-    inProgress: id ? (activity.get(id)?.inProgress ?? 0) : (openIn.get("") ?? []).filter((n) => n.kind === "action" && stateOf(n, work[n.id]) === "doing").length,
+    inProgress: doingIn(id).length,
     owners: openIn.has(id) && ownerFaces(openIn.get(id)!),
   });
+  /** What someone is on now in a project, the latest report first. */
+  const doingIn = (id: string) =>
+    (openIn.get(id) ?? [])
+      .filter((n) => n.kind === "action" && !work[n.id]?.ready && stateOf(n, work[n.id]) === "doing")
+      .sort((a, b) => (work[b.id]?.log[0]?.ts ?? b.ts) - (work[a.id]?.log[0]?.ts ?? a.ts));
+  /** The row's answer to "what is being worked on": the newest of them, by name, with who has it. */
+  const nowOf = (id: string) => {
+    const [first, ...more] = doingIn(id);
+    return first ? { text: first.text, face: face(first), more: more.length, onOpen: () => props.onOpen(first.id) } : undefined;
+  };
 
   const fold = (label: string, n: number, open: boolean, toggle: () => void, icon: React.ReactNode) =>
     n > 0 && (
@@ -1351,6 +1408,27 @@ function TasksTab(props: {
     <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only the tasks you own">
       Mine
     </button>
+  );
+  const forYou = mentioned.length + waiting.length;
+  const addProject = (
+    <button type="button" className="pj-add" onClick={() => setAdding(true)}>
+      + Project
+    </button>
+  );
+  const pills = (
+    <>
+      {!plain && forYou > 0 && (
+        <button type="button" className={showForYou ? "rp-pill for-you on" : "rp-pill for-you"} aria-pressed={showForYou} onClick={() => setShowForYou((v) => !v)} title="Tasks that wait on you: someone tagged you, or work is ready to ship">
+          For you<span className="count">{forYou}</span>
+        </button>
+      )}
+      {viewing === null && pins.size > 0 && (
+        <button type="button" className={onlyPinned ? "rp-pill on" : "rp-pill"} aria-pressed={onlyPinned} onClick={() => saveView({ ...view, onlyPinned: !onlyPinned })} title="Only the projects you pinned">
+          Pinned
+        </button>
+      )}
+      {mineButton}
+    </>
   );
   const sweepButton = !props.mine && !props.projectFilter && sweep && (
     <button
@@ -1380,26 +1458,15 @@ function TasksTab(props: {
       {props.toolsIn
         ? createPortal(
             <>
-              {mineButton}
+              {pills}
               {sweepButton}
-              {viewing === null && (
-                <button type="button" className="rp-pill" onClick={() => setAdding(true)}>
-                  + Project
-                </button>
-              )}
               {canSort && <TaskMenu sort={sort} onSort={pickSort} />}
             </>,
             props.toolsIn,
           )
         : !adding && (
             <div className="sh-task-tools">
-              {mineButton}
-              {viewing === null && (
-                <button type="button" className="rp-pill desk-only" onClick={() => setAdding(true)}>
-                  + Project
-                </button>
-              )}
-              {sweepButton}
+              {pills}
               {canSort && (
                 <label className="sh-project-sort" title={sort === "active" ? "Projects with work in progress first, then the ones with the newest to-dos" : "The team's order, most important first. Drag a project to change it."}>
                   <select aria-label="Project order" value={sort} onChange={(e) => pickSort(e.target.value === "team" ? "team" : "active")}>
@@ -1441,7 +1508,7 @@ function TasksTab(props: {
           {props.mine ? "Nothing open is yours." : filterName ? `No open tasks in ${filterName}.` : "Nothing open. New tasks come from meetings and what people save here."}
         </p>
       )}
-      {mentioned.length + waiting.length > 0 && (
+      {forYou > 0 && (plain || showForYou) && (
         <div className="sh-task-group for-you">
           <p
             className="sh-group waiting"
@@ -1452,16 +1519,19 @@ function TasksTab(props: {
               .filter(Boolean)
               .join("\n")}
           >
-            For you · {mentioned.length + waiting.length}
+            For you · {forYou}
           </p>
           {list([...mentioned, ...waiting])}
         </div>
       )}
       {plain ? (
-        byOwner(withParts(rest), "")
+        <>
+          {byOwner(withParts(rest), "")}
+          {!adding && !props.mine && addProject}
+        </>
       ) : viewing !== null ? (
         <section className="sh-project open" aria-label={viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
-          {byState(rest, viewing)}
+          {byState(open, viewing)}
         </section>
       ) : (
         <div className="pj-list">
@@ -1471,7 +1541,7 @@ function TasksTab(props: {
               <section
                 key={p.id}
                 aria-label={p.name}
-                className={`sh-project${dragging === p.id ? " dragging" : ""}${drop}`}
+                className={`sh-project${isOpen(p.id) ? " open" : ""}${p.id === firstUnpinned ? " after-pins" : ""}${dragging === p.id ? " dragging" : ""}${drop}`}
                 onDragOver={
                   dragging
                     ? (e) => {
@@ -1497,7 +1567,12 @@ function TasksTab(props: {
                 <ProjectLine
                   project={p}
                   {...lineOf(p.id)}
-                  onOpen={() => props.onProject(p.id)}
+                  now={nowOf(p.id)}
+                  expanded={isOpen(p.id)}
+                  pinned={pins.has(p.id)}
+                  onPin={() => togglePin(p.id)}
+                  onOpen={() => toggleOpen(p.id)}
+                  onAlone={() => props.onProject(p.id)}
                   roomId={props.roomId}
                   reload={props.reload}
                   order={
@@ -1511,14 +1586,17 @@ function TasksTab(props: {
                       : undefined
                   }
                 />
+                {isOpen(p.id) && <div className="pj-body">{openIn.has(p.id) ? byState(openIn.get(p.id)!, p.id) : <p className="sh-card-empty small">Nothing open in this project.</p>}</div>}
               </section>
             );
           })}
-          {unassigned.length > 0 && (
-            <section className="sh-project unassigned" aria-label="Unassigned">
-              <ProjectLine project={null} {...lineOf("")} onOpen={() => props.onProject("none")} roomId={props.roomId} reload={props.reload} />
+          {unassigned.length > 0 && !onlyPinned && (
+            <section className={`sh-project unassigned${isOpen("") ? " open" : ""}`} aria-label="Unassigned">
+              <ProjectLine project={null} {...lineOf("")} now={nowOf("")} expanded={isOpen("")} onOpen={() => toggleOpen("")} roomId={props.roomId} reload={props.reload} />
+              {isOpen("") && <div className="pj-body">{byState(unassigned, "")}</div>}
             </section>
           )}
+          {!adding && !onlyPinned && !props.mine && addProject}
         </div>
       )}
       {done.length > 0 && (
@@ -1580,14 +1658,24 @@ function ProjectLine(props: {
   /** Kept decisions in it, linked from its own view. */
   decisions?: number;
   onDecisions?: () => void;
-  /** The row opens the project; the head goes back to the list. */
+  /** What someone is on now, on a row: the newest in-progress to-do, and how many more there are. */
+  now?: { text: string; face: React.ReactNode; more: number; onOpen: () => void };
+  /** A row: its tasks are open under it. */
+  expanded?: boolean;
+  /** Your own pin on it. */
+  pinned?: boolean;
+  onPin?: () => void;
+  /** The row opens the project under it; the head goes back to the list. */
   onOpen: () => void;
+  /** Opens the project's own view from a row. */
+  onAlone?: () => void;
   roomId: string;
   reload: () => void;
   /** Left out when the order can't change here: one project in view, a filter on, or Active first. */
   order?: { onUp?: () => void; onDown?: () => void; onDragStart: () => void; onDragEnd: () => void };
 }) {
   const { project: p, order, head } = props;
+  const idle = !head && !props.now && props.ready === 0;
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<"name" | "goal" | null>(null);
   const ref = useDismiss<HTMLSpanElement>(menu, () => setMenu(false));
@@ -1621,7 +1709,7 @@ function ProjectLine(props: {
     props.onOpen();
   };
   return (
-    <div className={`pj-line${head ? " head" : ""}${p ? "" : " unassigned"}`} onClick={onRow}>
+    <div className={`pj-line${head ? " head" : ""}${p ? "" : " unassigned"}${idle ? " idle" : ""}`} onClick={onRow}>
       {head && (
         <button type="button" className="pj-back" onClick={props.onOpen} aria-label="All projects" title="All projects">
           <ChevronIcon />
@@ -1650,20 +1738,35 @@ function ProjectLine(props: {
         {head ? (
           <strong className="pj-name">{name}</strong>
         ) : (
-          <button type="button" className="pj-name" onClick={props.onOpen}>
+          <button type="button" className="pj-name" aria-expanded={!!props.expanded} onClick={props.onOpen} title={p?.goal ?? undefined}>
+            <ChevronIcon />
             {name}
           </button>
         )}
         {p?.archived && <span className="muted small">Archived</span>}
-        {p?.goal && (
-          <span className="pj-goal" title={p.goal}>
-            {p.goal}
+        {!head && props.now ? (
+          <span className="pj-now">
+            <button type="button" className="pj-now-task" onClick={props.now.onOpen} title={`In progress: ${props.now.text}`}>
+              {props.now.text}
+            </button>
+            {props.now.face}
+            {props.now.more > 0 && (
+              <span className="pj-now-more" title={`${props.now.more} more in progress`}>
+                +{props.now.more}
+              </span>
+            )}
           </span>
+        ) : (
+          p?.goal && (
+            <span className="pj-goal" title={p.goal}>
+              {p.goal}
+            </span>
+          )
         )}
       </span>
       <span className="pj-moving">
         {props.inProgress > 0 && (
-          <span className="pj-live" title={`${props.inProgress} in progress: someone is on ${props.inProgress === 1 ? "it" : "them"} now`}>
+          <span className={head ? "pj-live" : "pj-live row"} title={`${props.inProgress} in progress: someone is on ${props.inProgress === 1 ? "it" : "them"} now`}>
             {props.inProgress}
             <span className="pj-word"> in progress</span>
           </span>
@@ -1688,6 +1791,12 @@ function ProjectLine(props: {
         {props.open}
         <span className="pj-word"> open</span>
       </span>
+      {!head && !props.onPin && <span className="pj-pin none" aria-hidden />}
+      {props.onPin && (
+        <button type="button" className={props.pinned ? "pj-pin on" : "pj-pin"} aria-pressed={!!props.pinned} aria-label={props.pinned ? `Unpin ${name}` : `Pin ${name}`} title={props.pinned ? "Unpin" : "Pin: keep it first on your list, and open"} onClick={props.onPin}>
+          <PinIcon />
+        </button>
+      )}
       <span className="sh-project-menu pj-menu" ref={ref}>
         {p && (
           <button type="button" className="sh-project-more" aria-label={`${p.name}: more`} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
@@ -1705,6 +1814,11 @@ function ProjectLine(props: {
                   Move down
                 </button>
               </>
+            )}
+            {props.onAlone && (
+              <button role="menuitem" onClick={() => (setMenu(false), props.onAlone!())}>
+                Open on its own
+              </button>
             )}
             <button role="menuitem" onClick={() => (setMenu(false), setEditing("name"))}>
               Rename

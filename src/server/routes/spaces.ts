@@ -163,6 +163,7 @@ export function spaceRoutes(app: Express, ctx: Services) {
         items: db.listItems(room.id),
         decks: db.listDecks(room.id),
         projects: db.listProjects(room.id, graph),
+        pinnedProjects: db.pinnedProjects(room.id, req.user!.id),
         meetings: db.listMeetings(room.id),
         followUps: grouped(withFrom(db, db.roomFollowUps(room.id).filter((f) => !f.doneAt))),
         doneFollowUps: grouped(

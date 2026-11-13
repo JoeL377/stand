@@ -28,7 +28,7 @@ It checks the sample families (a parent with a done part and two open ones, one 
 
 ## Gotchas
 
-- Wait for `.sh-task-group.for-you` before reading rows. A to-do that is ready to ship moves from its section to For you once its work has loaded, so a part can be under its parent for a moment first.
+- With projects, `For you` is a pill: click it, then wait for `.sh-task-group.for-you` before reading rows. A to-do that is ready to ship is listed there and also stays in its project, under `Ready to ship` or under its parent.
 - The sample data has two to-dos named "Remove the browser retry path": Priya's is the part, Leo's came from the chat.
 - A part goes under its parent only inside one section. Give a part its own project by hand and it moves to that section as a row of its own, with `Part of: …`.
 - Not driven: a parent that was deleted (the part reads as having none), and more than one level, which the server refuses. `src/web/taskParts.test.ts` covers what the list does with such data.

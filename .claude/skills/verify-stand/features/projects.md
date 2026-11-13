@@ -1,14 +1,14 @@
 # Projects
 
-A project is a named group of a space's to-dos, open questions and decisions (`src/shared/projects.ts`). The Tasks tab is the list of projects: one row each (name, goal, `N in progress`, `N ready`, who is on it, a done meter, `N open`), then Unassigned. A row opens that project's own view (`?project=<id>`): its line with `Projects` to go back and a `Decisions` pill, then its rows under `In progress`, `To do` and `Questions`. A space with no projects is one plain list.
+A project is a named group of a space's to-dos, open questions and decisions (`src/shared/projects.ts`). The Tasks tab is the list of projects: one row each (name, goal, `N in progress`, `N ready`, who is on it, a done meter, `N open`), then Unassigned. A row shows the newest in-progress to-do by name with its owner (`.pj-now`, `+N` for more) in place of the count, and a click opens the project under its row: its rows under `Ready to ship`, `In progress`, `To do` and `Questions`. Several can be open; the browser remembers (`stand.projectView.<room>`). A pin on the row (`Pin <name>` / `Unpin <name>`) is the person's own, kept on the server (`PUT /api/rooms/<id>/projects/<pid>/pin`): pinned projects come first and start open, and a `Pinned` pill shows only them. `For you` is a pill in the tab row that shows the tasks waiting on you above the list. `Open on its own` in a row's `⋯` menu, or `?project=<id>`, gives the project's own view, with `Projects` to go back and a `Decisions` pill. A space with no projects is one plain list.
 
 ## Reach it
 
-- Space page → Tasks → `+ Project`, or the project pill on any task row (`Change project: …`).
+- Space page → Tasks → `+ Project` under the list, or the project pill on any task row (`Change project: …`).
 - In a call: the agenda line's `Project for …` menu → `Make project`, `Link to project`, `Remove project link`.
 - A project's row on the Tasks tab, `?project=<id>` or `?project=none`, and `Mine` (`?mine=1`). The Decisions tab keeps the filter at the end of the tab row (`Filter by project`).
 - MCP: `list_spaces` (projects), `list_actions` (project filter), `get` with `stand:project/<id>`, `create_project`, `order_projects`, `project` on `create_action` and `update_action`.
-- Order: the `⋯` menu (`Project order`) at the end of the tab row, after `Mine` and `+ Project`. `Active first` (the default) puts projects with a to-do in progress first, then the ones with the newest open to-dos; a row says `N in progress`. `Team order` is the space's one saved order, most important first: drag a project by the handle at the left of its row, or use `Move up` / `Move down` in its `⋯` menu. A new project goes last. `list_spaces` and the project filter use the team's order; `list_spaces` adds `in_progress` and `latest_activity` to each project.
+- Order: the `⋯` menu (`Project order`) at the end of the tab row. `Active first` (the default) puts projects with a to-do in progress first, then the ones with the newest open to-dos; a row says `N in progress`. `Team order` is the space's one saved order, most important first: drag a project by the handle at the left of its row, or use `Move up` / `Move down` in its `⋯` menu. A new project goes last. `list_spaces` and the project filter use the team's order; `list_spaces` adds `in_progress` and `latest_activity` to each project.
 
 ## Drive it
 
@@ -18,7 +18,7 @@ A project is a named group of a space's to-dos, open questions and decisions (`s
 
 ## Gotchas
 
-- Task rows are not on the Tasks tab's first view once a space has a project: open the project (its row, or `?project=<id>`) before looking for `.followups li`. Each project is a `region` named for it, in the list and in its own view.
+- Task rows are not on the Tasks tab's first view once a space has a project: open the project (a click on its row, or `?project=<id>`) before looking for `.followups li`. `getByRole("button", { name: "Pin X" })` also matches `Unpin X`: pass `exact: true`. Each project is a `region` named for it, in the list and in its own view.
 
 - Wait for `.sh-panel`, not `networkidle`: the space page keeps a connection open.
 - A to-do is in a project by the rules on each read, so linking a line mid-call is enough; nothing is copied onto the to-do.

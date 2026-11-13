@@ -91,7 +91,8 @@ const INVITE = "Invite support to the next review";
   let projectIds = {};
   const openTasks = async (project, query = "") => {
     await page.goto(`${base}/s/${roomId}?${project ? `project=${projectIds[project]}` : ""}${query}`);
-    // The rows that wait on someone move to For you once their work has loaded.
+    // What waits on someone is behind the For you pill, which shows once their work has loaded.
+    await page.getByRole("button", { name: /^For you/ }).click();
     await page.locator(".sh-task-group.for-you .followups li").first().waitFor();
     if (project) await page.getByRole("region", { name: project }).locator(".followups li").first().waitFor();
   };
@@ -105,8 +106,8 @@ const INVITE = "Invite support to the next review";
       await snap("projects");
       check("the first view is a row per project, with no task rows in them", (await page.locator(".pj-list .sh-project").count()) >= 3 && (await sections()).length === 0);
       await page.getByRole("region", { name: "Payments" }).getByRole("button", { name: "Payments", exact: true }).click();
-      await page.waitForURL(/project=/);
       await page.getByRole("region", { name: "Payments" }).locator(".followups li").first().waitFor();
+      check("a click opens the project under its row", !/project=/.test(page.url()) && (await page.locator(".pj-list .sh-project").count()) >= 3);
       await snap("tasks-with-parts");
       const worker = family(await sections(), WORKER);
       check("the parent says how many of its parts are done", worker.parent?.count === "1/3 parts", worker.parent);
@@ -126,7 +127,7 @@ const INVITE = "Invite support to the next review";
       check("the part's checkbox starts to the right of its parent's", indent >= 16, indent);
       await openTasks("Guest checkout");
       const checklist = family(await sections(), CHECKLIST);
-      check("a parent with a part under For you counts it too", checklist.parent?.count === "0/2 parts" && checklist.parts.map((p) => p.text).join() === LAUNCH_NOTE, checklist);
+      check("a part that is ready to ship stays under its parent in the project", checklist.parent?.count === "0/2 parts" && checklist.parts.map((p) => p.text).sort().join() === [LAUNCH_NOTE, TERMS].sort().join(), checklist);
       const terms = (await forYou()).find((r) => r.text === TERMS);
       check("a part under For you is a row of its own that names its parent", terms && !terms.part && terms.partOf === `Part of: ${CHECKLIST}`, terms);
       const saved = await room();
@@ -182,7 +183,7 @@ const INVITE = "Invite support to the next review";
     await step("Mine: a part whose parent is someone else's names it", async () => {
       await openTasks("Guest checkout", "&mine=1");
       const rows = await sections();
-      check("the parent keeps its count while its other part is out of view", family(rows, CHECKLIST).parent?.count === "0/2 parts" && rows.every((r) => !r.part), rows);
+      check("the parent keeps its count while its other part is out of view", family(rows, CHECKLIST).parent?.count === "0/2 parts" && family(rows, CHECKLIST).parts.map((p) => p.text).join() === TERMS, rows);
       check("the part that waits on you still names its parent", (await forYou()).some((r) => r.text === TERMS && r.partOf === `Part of: ${CHECKLIST}`));
       await snap("mine");
     });

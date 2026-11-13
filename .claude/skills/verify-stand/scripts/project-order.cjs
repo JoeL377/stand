@@ -208,7 +208,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       await tool(12, "start_work", { ref: gammaTodo, note: "On it", model: "claude-opus-5-5" });
       await page.reload();
       await page.getByRole("tab", { name: /^Tasks/ }).click();
-      await page.getByRole("region", { name: "Gamma" }).getByText("1 in progress").waitFor();
+      await page.getByRole("region", { name: "Gamma" }).locator(".pj-now").waitFor();
       await settled(["Gamma", "Beta", "Alpha"]);
       await snap("active-first-in-progress");
     });

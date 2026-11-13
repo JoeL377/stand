@@ -237,6 +237,19 @@ export function projectsStore(db: DatabaseSync) {
       return store.listProjects(roomId);
     },
 
+    /** The projects this person pinned in the space. A pin is theirs alone: nobody else sees it. */
+    pinnedProjects(roomId: string, userId: string): string[] {
+      return (db.prepare("SELECT project_id FROM project_pins WHERE room_id = ? AND user_id = ?").all(roomId, userId) as Row[]).map((r) => r.project_id as string);
+    },
+    /** Pins or unpins a project for one person. False when the space has no such project. */
+    pinProject(roomId: string, userId: string, id: string, pinned: boolean): boolean {
+      const r = row(id);
+      if (!r || r.room_id !== roomId) return false;
+      if (pinned) db.prepare("INSERT OR IGNORE INTO project_pins (room_id, user_id, project_id) VALUES (?, ?, ?)").run(roomId, userId, id);
+      else db.prepare("DELETE FROM project_pins WHERE room_id = ? AND user_id = ? AND project_id = ?").run(roomId, userId, id);
+      return true;
+    },
+
     /** Deletes a project. Its tasks and agenda items lose the link, and the tasks follow the rules again. */
     deleteProject(roomId: string, id: string): boolean {
       const r = row(id);
@@ -247,6 +260,7 @@ export function projectsStore(db: DatabaseSync) {
         db.prepare("UPDATE notes SET suggested_project_id = NULL WHERE suggested_project_id = ?").run(id);
         db.prepare("UPDATE items SET project_id = NULL WHERE project_id = ? AND room_id = ?").run(id, roomId);
         db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+        db.prepare("DELETE FROM project_pins WHERE project_id = ?").run(id);
         db.exec("COMMIT");
       } catch (err) {
         db.exec("ROLLBACK");

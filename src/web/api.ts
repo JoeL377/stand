@@ -89,6 +89,8 @@ export interface RoomInfo {
   decks: Deck[];
   /** The space's projects in order, archived ones too. */
   projects: Project[];
+  /** The projects the person looking pinned, by id. */
+  pinnedProjects?: string[];
   people: Array<{ name: string; picture: string | null }>;
   meetings: Array<{ id: string; startedAt: number; endedAt: number | null; summary: string | null; segmentCount: number }>;
   /** Open action items from the room's past meetings. */
@@ -177,6 +179,7 @@ export const api = {
   createProject: (roomId: string, input: { name: string; goal?: string; fromItemId?: string }) => call<Project>("POST", `/api/rooms/${roomId}/projects`, input),
   updateProject: (roomId: string, projectId: string, change: { name?: string; goal?: string | null; position?: number; archived?: boolean }) =>
     call<Project>("PATCH", `/api/rooms/${roomId}/projects/${projectId}`, change),
+  pinProject: (roomId: string, projectId: string, pinned: boolean) => call<{ pinned: string[] }>("PUT", `/api/rooms/${roomId}/projects/${projectId}/pin`, { pinned }),
   deleteProject: (roomId: string, projectId: string) => call<{ ok: true }>("DELETE", `/api/rooms/${roomId}/projects/${projectId}`),
   /** A project's id, null for Unassigned, or "auto" to follow the rules again. */
   setNoteProject: (roomId: string, noteId: string, projectId: string | null | "auto") =>
