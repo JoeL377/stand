@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 
 /** Motion for moving around the app, and only for that: a tab, a project, a space, a drawer or a
  *  sheet. Lists and data that change on their own never move here; the call board has its own
@@ -79,4 +80,43 @@ export function useTabInk(ref: React.RefObject<HTMLElement | null>, selectedKey:
     // The tabs themselves are fixed for a row; re-observe if the selection changes which exist.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
+}
+
+/** Pages that sit in the spaces frame (the sidebar and a page beside it). Everything else, a
+ *  meeting's recap, a review or a brainstorm, is a page of its own opened from one of them. */
+const framed = (path: string) => /^\/($|s\/[^/]+\/?$|r\/[^/]+\/?$|spaces\/manage|agents)/.test(path);
+/** /r/<id> and /s/<id> are the same space. */
+const placeOf = (path: string) => path.replace(/^\/r\//, "/s/").replace(/\/$/, "") || "/";
+
+/** Moving between pages. Opening a recap, review or brainstorm brings it in from the right; going
+ *  back to the space brings the space's page in from the left while the sidebar holds still; another
+ *  space (or All spaces) fades the page in with a small lift. Not on the first page of a visit, and
+ *  not for anything inside one page (tabs, a project, joining the call). Renders nothing. */
+export function RouteMotion(): null {
+  const { pathname } = useLocation();
+  const was = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const from = was.current;
+    was.current = pathname;
+    if (from === null || placeOf(from) === placeOf(pathname)) return;
+    const a = framed(from), b = framed(pathname);
+    // A page that is still loading comes in once it has something to show, so the move lands on
+    // the page and not on "Loading…". It gives up after a moment rather than move late.
+    const find = () => {
+      const page = document.getElementById("root")?.firstElementChild;
+      if (!page || page.classList.contains("loading")) return null;
+      return b ? page.querySelector(".sp-surface") ?? (a ? null : page) : page;
+    };
+    const from_ = a && b ? { y: 6 } : b ? { x: -12 } : a ? { x: 12 } : { y: 4 };
+    let frame = 0;
+    let tries = 0;
+    const look = () => {
+      const el = find();
+      if (el) return enter(el, from_, 200);
+      if (++tries < 90) frame = requestAnimationFrame(look);
+    };
+    look();
+    return () => cancelAnimationFrame(frame);
+  }, [pathname]);
+  return null;
 }

@@ -9,6 +9,7 @@ import { RefPage } from "./pages/RefPage.tsx";
 import { AuthGate, useAuth } from "./auth.tsx";
 import { MentionScope, useSpacePeople } from "./Mentions.tsx";
 import { Toasts } from "./Toasts.tsx";
+import { RouteMotion } from "./motion.ts";
 
 /** A page in a space: @Names of the people in it are marked in what it shows. */
 function InSpace({ children }: { children: React.ReactNode }) {
@@ -42,6 +43,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/decks/:deckId" element={<DeckHistoryPage />} />
           <Route path="/decks/:deckId/edit" element={<DeckEditorPage />} />
         </Routes>
+        <RouteMotion />
       </AuthGate>
       <Toasts />
     </BrowserRouter>
