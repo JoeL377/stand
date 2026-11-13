@@ -2,7 +2,8 @@
 // draws what the talk is working out, as a map or a diagram per subject. Each person picks theirs;
 // nothing else in the call changes.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useFadeOnPick } from "../motion.ts";
 import { Link } from "react-router-dom";
 import { Image as ImageIcon, List as ListIcon, Square, Type as WordsIcon } from "lucide-react";
 import { UNTITLED_DESIGN, type BrainstormSummary, type BrainstormView } from "../../shared/protocol.ts";
@@ -53,6 +54,9 @@ export function ViewPane(props: {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
   const view = props.tabs ? props.view : "card";
+  // Card, Sketch and the sketch's Picture / List / Words: what they show fades in; the pill row holds still.
+  const pane = useRef<HTMLDivElement>(null);
+  useFadeOnPick(pane, `${view}|${as}`, (el) => [...el.children].filter((c) => !c.classList.contains("view-bar")));
   const pills = (
     <span className="bp-views" role="group" aria-label="View">
       {PILLS.map((p) => (
@@ -77,7 +81,7 @@ export function ViewPane(props: {
     </>
   );
   return (
-    <div className="view-pane">
+    <div className="view-pane" ref={pane}>
       {props.tabs && !sketching && (
         <div className="view-bar">
           {pills}

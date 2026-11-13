@@ -4839,3 +4839,6 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
 .sh-archived-kind { flex: none; width: 64px; font-size: 12px; color: var(--muted); }
 .archived-pop .sh-archived-title { color: var(--text); }
 .sh-head-menu button .count { margin-left: auto; color: var(--muted); font-size: 12px; }
+/* In a call: the board's tab over a share or a deck, and a snap's tab, fade in when picked. */
+.board-tab, .snap-tab { animation: fade-in 140ms var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { .board-tab, .snap-tab { animation: none; } }
