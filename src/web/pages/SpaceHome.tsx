@@ -22,6 +22,7 @@ import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
 import { FromChip, QuoteMark } from "../RecapChapters.tsx";
 import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, GripIcon, LinkIcon, MicIcon, PinIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
+import { ActivityTab } from "../Activity.tsx";
 import { Avatar } from "../Avatar.tsx";
 import { removeSnap } from "../Snaps.tsx";
 import { AnswerForm, SweepPop, answeredToast } from "../Questions.tsx";
@@ -354,6 +355,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     chat: chat.unread,
     // Mine counts what is open and yours.
     mine: [...todos, ...questions].filter((n) => !!n.owner && firstName(n.owner) === firstName(user.name)).length,
+    // A log has no number worth reading.
+    activity: 0,
   };
   const deck = feed?.doneDeck ?? null;
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
@@ -588,6 +591,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           style={tab === "meetings" ? ({ "--sh-mname": `${Math.max(10, ...meetings.map((m) => (m.title ?? kindOf.get(m.id)?.name ?? "Meeting").length)) * 0.56 + 1}em` } as React.CSSProperties) : undefined}
         >
           {tab === "chat" && <SpaceChat roomId={room.id} name={room.name} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
+          {tab === "activity" && <ActivityTab roomId={room.id} onOpenTask={showTask} />}
           {tab === "meetings" && (
             <>
               {error && !feed && (
@@ -2482,7 +2486,7 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "projects" | "chat" | "meetings" | "mine";
+type TabKey = "projects" | "chat" | "meetings" | "mine" | "activity";
 /** What a project's page lists: one kind at a time. */
 type ProjectShow = "tasks" | "questions" | "decisions" | "done";
 /** The space's tabs, in the order people look at them. */
@@ -2632,6 +2636,8 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
   { key: "mine", label: "Mine" },
+  // What agents did in the space. People's changes can join it later, which is why it isn't "Agents".
+  { key: "activity", label: "Activity" },
 ];
 
 /** Decisions or open questions across the space's meetings, as the recap lists them. A decision a

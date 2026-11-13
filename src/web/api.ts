@@ -1,6 +1,7 @@
 import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
 import type { ChatCaught, ChatMessage, ChatReport, ChatSession, ChatThread } from "../shared/chat.ts";
+import type { ActivityPage } from "../shared/activity.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type { Project } from "../shared/projects.ts";
 import type { ChatNotify, NotifyStatus } from "../shared/push.ts";
@@ -135,6 +136,9 @@ export interface RoomInfo {
 
 export const api = {
   work: (ids: string[]) => call<Record<string, ActionWork>>("GET", `/api/work?ids=${ids.join(",")}`),
+  /** A page of the space's Activity tab: what agents did, newest first. `before` is the last page's `next`. */
+  activity: (roomId: string, opts: { who?: string; before?: number } = {}) =>
+    call<ActivityPage>("GET", `/api/rooms/${roomId}/activity?${new URLSearchParams({ ...(opts.who ? { who: opts.who } : {}), ...(opts.before ? { before: String(opts.before) } : {}) })}`),
   tokens: () => call<AgentToken[]>("GET", "/api/tokens"),
   createToken: (label: string, scope: AgentToken["scope"]) => call<{ token: string; info: AgentToken }>("POST", "/api/tokens", { label, scope }),
   revokeToken: (id: string) => call<{ ok: true }>("DELETE", `/api/tokens/${id}`),

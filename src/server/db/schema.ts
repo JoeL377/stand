@@ -358,6 +358,18 @@ CREATE TABLE IF NOT EXISTS work_shots (
   ts INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS work_shots_note ON work_shots(note_id, ts);
+-- What an agent did over the MCP that leaves no other record of who did it (activity.ts): naming
+-- meetings, setting up a design session or an idea review, making a project. Append only. The
+-- space's Activity tab reads these beside the records every other action already leaves.
+CREATE TABLE IF NOT EXISTS agent_events (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  ts INTEGER NOT NULL,
+  actor_json TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  event_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_events_room ON agent_events(room_id, ts);
 -- Conflict checks people's own agents run on a decision (decisionCheck.ts). A row means someone
 -- took it; done_at means it came back. A decision with no row is waiting.
 CREATE TABLE IF NOT EXISTS decision_checks (

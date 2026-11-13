@@ -1,6 +1,7 @@
 // Spaces: the list, a space and its agenda, its feed and suggested agenda, archiving, and the call's token.
 import type { Express } from "express";
 import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS, type Note, type SpaceMembers } from "../../shared/protocol.ts";
+import { spaceActivity } from "../activity.ts";
 import { archiveRow, restoreRow } from "../archive.ts";
 import { spaceFeed } from "../captures.ts";
 import { capabilities, config } from "../config.ts";
@@ -32,6 +33,17 @@ export function spaceRoutes(app: Express, ctx: Services) {
   const { db, sessions, live, polisher, afterItemsChange } = ctx;
   // The spaces you're in. Spaces are invite only: opening one from its link
   // adds you, and only then does it show on your home page.
+  // The Activity tab: what agents did in the space, newest first, a page at a time.
+  app.get(
+    "/api/rooms/:id/activity",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      const before = Number(req.query.before);
+      const who = typeof req.query.who === "string" && req.query.who ? req.query.who.slice(0, 200) : undefined;
+      res.json(spaceActivity(db, room.id, { before: Number.isFinite(before) && before > 0 ? before : undefined, who }));
+    }),
+  );
   app.get(
     "/api/spaces",
     route((req, res) => {

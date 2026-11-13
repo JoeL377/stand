@@ -412,6 +412,14 @@ const old =api.addContext(samsAgent, { space: room.id, text: "Stripe is the only
 api.addContext(samsAgent, { space: room.id, text: "Stripe takes cards; Adyen takes everything in the EU", replaces: old.created.ref });
 api.addContext(samsAgent, { space: room.id, text: "Launch freeze starts Nov 28" });
 
+// For the Activity tab: a burst of to-dos one agent added in a minute, the meetings an agent named,
+// and a design session one set up. Their times go back below, so the tab has more than one day.
+const launchPrep = ["Add Apple Pay to the one-page layout", "Write the rollback plan for Nov 20", "Check the tax line for EU orders", "Add a status page banner for launch day", "Dry-run the launch on staging"].map(
+  (text) => api.createAction(samsAgent, { space: room.id, text }).created.ref.split("/")[1],
+);
+api.renameMeetings(priyasAgent, { renames: [{ meeting: earlier.id, title: "Retries move to the server" }, { meeting: latest.id, title: "Guest checkout goes to everyone" }] });
+api.startDesignSession(leosAgent, { space: room.id, topic: "How a retry moves through the queue", context: [{ title: "Retry worker PR", text: "The worker reads failed charges from the queue and retries with backoff." }] }, "");
+
 // Notes saved from the bar between meetings.
 db.addJot({ id: "previewjot1", roomId: room.id, itemId: guest.id, text: "Support asked if guest orders can be looked up by email. Worth checking before the 20th.", byId: maya.id, by: maya.name, ts: now - 6 * 3_600_000 });
 db.addJot({ id: "previewjot2", roomId: room.id, itemId: null, text: "Legal is fine with the new receipt wording.", byId: leo.id, by: leo.name, ts: now - DAY });
@@ -473,6 +481,9 @@ const hoursAgo = (h: number) => now - h * 3_600_000;
 raw.prepare("UPDATE updates SET ts = ? WHERE note_id = ?").run(hoursAgo(30), key.id);
 raw.prepare("UPDATE notes SET done_at = ? WHERE id = ?").run(hoursAgo(30), key.id);
 raw.prepare("UPDATE notes SET done_at = ? WHERE id = ?").run(hoursAgo(50), fraud.id);
+launchPrep.forEach((id, i) => raw.prepare("UPDATE notes SET ts = ? WHERE id = ?").run(hoursAgo(27) + i * 8000, id));
+raw.prepare("UPDATE agent_events SET ts = ? WHERE kind = 'renamed'").run(hoursAgo(47));
+raw.prepare("UPDATE agent_events SET ts = ? WHERE kind = 'design'").run(hoursAgo(3));
 raw.close();
 
 console.log(`Sample data is in ${dir}. You are Sam Rivera, with no sign-in.`);
