@@ -3784,6 +3784,16 @@ a .mention { color: inherit; }
 .sh-what.sh-count { flex: none; }
 /* Stand's card for a next step someone asked for out loud, and the reviews it kept for the recap. */
 .next-card .nudge-text strong { font-weight: 600; }
+/* It sits at the bottom of the middle screen, in the middle; on a review, at the bottom of the slide. */
+.next-dock { position: absolute; z-index: 6; left: 50%; bottom: 14px; translate: -50% 0; width: max-content; max-width: min(760px, calc(100% - 28px)); display: flex; pointer-events: none; }
+.next-dock .next-card { gap: 10px; padding: 7px 10px 7px 7px; border-radius: 12px; font-size: 14px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.5), inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+@starting-style { .next-dock .next-card { opacity: 0; transform: translateY(6px); } }
+.next-card .next-do { flex: none; padding: 7px 14px; border-radius: 9px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+/* The slide carries it while a review's slide is what shows; under a board or a snap opened over the slide, the screen does. */
+.screen:has(.rv-dock):not(:has(.board-tab, .snap-tab)) > .next-dock { display: none; }
+.rv-strip ~ .rv-dock { bottom: 66px; }
+.rv-pic:has(.rv-dock) .rv-landed { bottom: 70px; }
+.rv-pic:has(.rv-dock) .rv-strip ~ .rv-landed { bottom: 122px; }
 .rc-asked { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-asked .agent-mark { font-size: 12px; color: var(--accent-text); }
 /* Who presents what's in the middle of the call (RoomState.presenter): named in the top bar, also beside a share's or a deck's tabs. */

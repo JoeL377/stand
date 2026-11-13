@@ -533,6 +533,8 @@ export function Stage(props: {
       </div>
   );
 
+  const nextCard = state.next && !props.ending ? <NextCard key={state.next.id} next={state.next} roomId={state.roomId} offline={props.offline} send={send} onDraw={drawNext} /> : null;
+
   return (
     <main className="stage">
       {/* What's being discussed and the host's Present task sit in the call's top bar when there's
@@ -541,8 +543,6 @@ export function Stage(props: {
 
       <div className="screen" ref={screenRef}>
         <div className="nudges">
-        {/* Someone asked for a map, a diagram or a review out loud: Stand offers it to everyone, and anyone answers. */}
-        {state.next && !props.ending && <NextCard key={state.next.id} next={state.next} roomId={state.roomId} offline={props.offline} send={send} onDraw={drawNext} />}
         {/* A quiet nudge for the host only: their click is what moves the meeting. */}
         {canSteer && !props.ending && suggested && state.suggestion && (
           <div className="nudge" role="status" title={state.suggestion.reason}>
@@ -580,6 +580,9 @@ export function Stage(props: {
           <BoardStrip board={props.board} focusItemId={state.focusItemId} onOpen={() => pickTab("board")} />
         )}
         </div>
+        {/* Stand offers a map, a diagram or a review to everyone, and anyone answers: at the bottom of the middle
+            screen, or of the slide when a review's slide is what shows (ReviewStage puts it there; styles.css). */}
+        {nextCard && <div className="next-dock">{nextCard}</div>}
         {flash > 0 && <div key={flash} className="snap-flash" aria-hidden />}
         {cropSnap && (
           <SnapGallery snaps={[cropSnap]} me={props.participantId} isHost={canSteer} startCrop onClose={() => setCropId(null)} />
@@ -629,6 +632,7 @@ export function Stage(props: {
               disabled={Boolean(props.offline || props.ending)}
               shot={myShot}
               onShot={setMyShot}
+              dock={nextCard}
               onFlip={flip}
               onOutcome={(outcome) => send({ type: "review.outcome", itemId: focusItem.id, outcome })}
               onRemove={canSteer ? removeNote : undefined}
