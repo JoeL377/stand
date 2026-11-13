@@ -4,13 +4,13 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Image as ImageIcon, List as ListIcon, Square } from "lucide-react";
+import { ChevronDown, Image as ImageIcon, List as ListIcon, Square, Type as WordsIcon } from "lucide-react";
 import { UNTITLED_DESIGN, type BrainstormSummary, type BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { brainstormHref } from "../pages/BrainstormPage.tsx";
 import { errorToast } from "../Toasts.tsx";
-import { SketchBoard, StyleChip, shownSubjects, subjectCount, type SketchActs } from "./Sketch.tsx";
+import { SketchBoard, StyleChip, shownSubjects, subjectCount, type SketchActs, type SketchAs } from "./Sketch.tsx";
 
 export type ViewTab = "card" | "sketch";
 
@@ -47,7 +47,7 @@ export function ViewPane(props: {
   /** On a phone the sketch opens as a list, with the picture a tap away. */
   phone?: boolean;
 }) {
-  const [picked, setPicked] = useState<"picture" | "list" | null>(null);
+  const [picked, setPicked] = useState<SketchAs | null>(null);
   const as = picked ?? (props.phone ? "list" : "picture");
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
   const view = props.tabs ? props.view : "card";
@@ -65,10 +65,7 @@ export function ViewPane(props: {
   const sketching = view === "sketch" && !!live;
   const switches = (
     <>
-      <button type="button" className="rp-pill view-flip" aria-label={as === "list" ? "Show the picture" : "Show as a list"} title={as === "list" ? "See it drawn" : "Read it as a list"} onClick={() => setPicked(as === "list" ? "picture" : "list")}>
-        {as === "list" ? <ImageIcon size={13} aria-hidden /> : <ListIcon size={13} aria-hidden />}
-        {!props.phone && (as === "list" ? "Picture" : "List")}
-      </button>
+      <AsMenu as={as} phone={props.phone} onPick={setPicked} />
       {props.onStop && (
         <button type="button" className="rp-pill view-stop-btn" onClick={props.onStop} title="The sketch is kept on its page, and each diagram as a draft spec on a to-do. The call goes on.">
           <Square size={10} aria-hidden />
@@ -112,6 +109,45 @@ export function ViewPane(props: {
         </div>
       )}
     </div>
+  );
+}
+
+const AS: Array<{ key: SketchAs; label: string; Icon: typeof ImageIcon; title: string }> = [
+  { key: "picture", label: "Picture", Icon: ImageIcon, title: "See it drawn" },
+  { key: "list", label: "List", Icon: ListIcon, title: "Read it as a list" },
+  { key: "words", label: "Words", Icon: WordsIcon, title: "The words the talk keeps coming back to" },
+];
+
+/** One pill for how the sketch is read. It names the reading on screen; its menu has the other two. */
+function AsMenu(props: { as: SketchAs; phone?: boolean; onPick: (as: SketchAs) => void }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const key = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", key);
+    return () => (window.removeEventListener("click", close), window.removeEventListener("keydown", key));
+  }, [open]);
+  const on = AS.find((x) => x.key === props.as)!;
+  return (
+    <span className="sk-chip-wrap view-as-wrap" onClick={(e) => e.stopPropagation()}>
+      <button type="button" className={`rp-pill view-flip${open ? " on" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Shown as: ${on.label}`} title="Picture, list or words" onClick={() => setOpen((v) => !v)}>
+        <on.Icon size={13} aria-hidden />
+        {!props.phone && on.label}
+        <ChevronDown size={12} aria-hidden />
+      </button>
+      {open && (
+        <span className="sk-menu" role="menu">
+          {AS.map((x) => (
+            <button key={x.key} type="button" role="menuitemradio" aria-checked={x.key === props.as} className={`sk-menu-row${x.key === props.as ? " on" : ""}`} title={x.title} onClick={() => (setOpen(false), props.onPick(x.key))}>
+              <x.Icon size={13} aria-hidden />
+              <span className="sk-menu-name">{x.label}</span>
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
   );
 }
 

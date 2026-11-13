@@ -4,6 +4,7 @@
 // has a chip saying how it is drawn, and picking the other way redraws just that subject. Nobody
 // drags or draws here: what is wrong is fixed by a click on it, or by telling Stand.
 
+import { BrainWords } from "./BrainWords.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Share2, Workflow } from "lucide-react";
 import {
@@ -127,6 +128,9 @@ function caughtOf(
     : mapNodes(b, s, i).flatMap((n) => n.caught);
 }
 
+/** How a sketch is read: drawn, as an outline, or as the words the talk kept coming back to. */
+export type SketchAs = "picture" | "list" | "words";
+
 export function StyleChip(props: {
   subject: SketchSubject;
   onPick?: (style: SketchStyle) => void;
@@ -248,7 +252,7 @@ export function SketchBoard(props: {
   brainstorm: BrainstormView;
   acts?: SketchActs;
   phone?: boolean;
-  as: "picture" | "list";
+  as: SketchAs;
   /** The subject picked on this screen; null follows the talk. */
   subject: string | null;
   onSubject: (id: string | null) => void;
@@ -335,7 +339,7 @@ export function SketchBoard(props: {
   );
   // In a call the list reads one subject at a time too, the one the pill names; a page lists them all.
   const inCall = !!(props.lead || props.tail);
-  const menu = (props.as === "picture" || inCall) && (
+  const menu = props.as !== "words" && (props.as === "picture" || inCall) && (
     <SubjectMenu
       shown={shown.map((x) => ({ ...x, n: subjectCount(b, x.s, x.i).n }))}
       mainId={mainId}
@@ -441,6 +445,15 @@ export function SketchBoard(props: {
     </div>
   );
 
+  if (props.as === "words") {
+    return (
+      <div className={`sketch as-words${props.phone ? " phone" : ""}${props.className ? ` ${props.className}` : ""}`}>
+        {pills}
+        <BrainWords brainstorm={b} />
+        {dock}
+      </div>
+    );
+  }
   if (props.as === "list") {
     return (
       <div

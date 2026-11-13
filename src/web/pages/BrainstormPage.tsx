@@ -53,8 +53,9 @@ export function BrainstormPage() {
   const hidden = new Set(subjects.flatMap((s, i) => (s.style === "diagram" ? subjectNodes(b.nodes, s, i === 0).map((n) => n.id) : [])));
   const maps = { ...b, nodes: b.nodes.filter((n) => !hidden.has(n.id)) };
   const hasIdeas = maps.nodes.some((n) => n.parent);
-  const ideas = (view === "ideas" || view === "words") && hasIdeas;
-  const list = !ideas && (view === "list" || view === "map");
+  const ideas = view === "ideas" && hasIdeas;
+  const words = view === "words";
+  const list = !ideas && !words && (view === "list" || view === "map");
   const parts = subjects.reduce((n, s) => n + (s.style === "diagram" ? (s.diagram?.boxes.filter((x) => !x.suggested).length ?? 0) : 0), 0);
   const count = [hasIdeas ? brainCount({ directions: maps.nodes.filter((n) => !n.parent).length, ideas: maps.nodes.filter((n) => n.parent).length }) : "", parts ? `${parts} part${parts === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
   const star = (idea: string, on: boolean) => {
@@ -75,11 +76,14 @@ export function BrainstormPage() {
         <BrainstormPicker roomId={roomId} current={b} all={data.brainstorms} />
         <span className="muted bp-count">{count}</span>
         <span className="bp-views" role="group" aria-label="View">
-          <button type="button" className={`rp-pill${!ideas && !list ? " on" : ""}`} aria-pressed={!ideas && !list} onClick={() => setParams(phone ? { view: "picture" } : {}, { replace: true })}>
+          <button type="button" className={`rp-pill${!ideas && !list && !words ? " on" : ""}`} aria-pressed={!ideas && !list && !words} onClick={() => setParams(phone ? { view: "picture" } : {}, { replace: true })}>
             Picture
           </button>
           <button type="button" className={`rp-pill${list ? " on" : ""}`} aria-pressed={list} onClick={() => setParams(phone ? {} : { view: "list" }, { replace: true })}>
             List
+          </button>
+          <button type="button" className={`rp-pill${words ? " on" : ""}`} aria-pressed={words} onClick={() => setParams({ view: "words" }, { replace: true })} title="The words the talk kept coming back to">
+            Words
           </button>
           {hasIdeas && (
             <button type="button" className={`rp-pill${ideas ? " on" : ""}`} aria-pressed={ideas} onClick={() => setParams({ view: "ideas" }, { replace: true })} title="Star the ideas worth coming back to">
@@ -125,7 +129,7 @@ export function BrainstormPage() {
       {ideas ? (
         <BrainIdeas brainstorm={maps} onStar={star} />
       ) : (
-        <SketchBoard brainstorm={b} phone={phone} as={list ? "list" : "picture"} subject={subject} onSubject={setSubject} className="bp-map" />
+        <SketchBoard brainstorm={b} phone={phone} as={words ? "words" : list ? "list" : "picture"} subject={subject} onSubject={setSubject} className="bp-map" />
       )}
     </div>
   );
