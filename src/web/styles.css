@@ -4610,3 +4610,9 @@ footer.controls .control.pill { padding: 7px 16px; }
 }
 /* Half a page wide: a to-do's hover-only bits take no room until the pointer is on its row. */
 .pj-page.with-side .pj-main .followups li:not(:hover):not(:focus-within):not(.opened) > :is(.row-quiet, .sh-archive, .cfa) { display: none; }
+
+/* Where a to-do stands shows on its checkbox: a blue ring for in progress, a green one for ready to ship. */
+.followups li.stands-doing > .check { border-color: var(--accent); background: radial-gradient(circle, var(--accent) 0 3px, transparent 3.6px); }
+.followups li.stands-ready > .check { border-color: var(--ok); background: radial-gradient(circle, var(--ok) 0 3px, transparent 3.6px); }
+.fu-work.quiet { color: var(--muted); background: var(--panel-2); }
+.fu-work.quiet:hover, .fu-work.quiet.open { background: var(--hover); }

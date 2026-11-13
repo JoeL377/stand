@@ -1230,6 +1230,7 @@ function TasksTab(props: {
   const list = (notes: TaskNote[], closed = false, section?: string, under?: Set<string>) => (
     <FollowUpList
       oneLine
+      stateInBox
       notes={notes}
       openId={props.openId}
       onOpen={(n) => props.onOpen(n.id)}
@@ -1275,7 +1276,7 @@ function TasksTab(props: {
               </button>
             ))}
           {n.saidDone && !n.doneAt && <SaidDonePill quote={n.saidDone} onUndo={() => notSaid(n)} />}
-          {!closed && n.state === "doing" && !work[n.id]?.working && <span className="rc-pill task-doing">Doing</span>}
+          
           {closed && <ClosedPill note={n} />}
           {closed && n.answeredBy && (
             <span className="rc-pill-wrap">
