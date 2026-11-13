@@ -1561,6 +1561,21 @@ function TasksTab(props: {
       + Project
     </button>
   );
+  const projectForm = (
+    <ProjectForm
+      label="New project"
+      submit="Add"
+      onCancel={() => setAdding(false)}
+      onSave={async (name, goal) => {
+        await api.createProject(props.roomId, { name, goal: goal || undefined });
+        setAdding(false);
+        props.reload();
+      }}
+    />
+  );
+  // On the cards a new project starts as a faint card of its own, after the last project: a click
+  // turns it into the form, in the place the project will take.
+  const ghost = grid && !plain && viewing === null && !onlyPinned && !props.mine;
   const pills = (
     <>
       {!plain && viewing === null && pins.size > 0 && (
@@ -1600,12 +1615,6 @@ function TasksTab(props: {
             <>
               {pills}
               {sweepButton}
-              {/* Adding a project is offered beside the tabs, in view however long the list of projects is. */}
-              {!plain && viewing === null && !props.mine && !onlyPinned && (
-                <button type="button" className="rp-pill pj-add-pill" aria-pressed={adding} onClick={() => setAdding(true)} title="New project">
-                  + Project
-                </button>
-              )}
               {canSort && <TaskMenu sort={sort} onSort={pickSort} />}
             </>,
             props.toolsIn,
@@ -1623,20 +1632,7 @@ function TasksTab(props: {
               )}
             </div>
           )}
-      {adding && (
-        <div className="sh-task-tools">
-          <ProjectForm
-            label="New project"
-            submit="Add"
-            onCancel={() => setAdding(false)}
-            onSave={async (name, goal) => {
-              await api.createProject(props.roomId, { name, goal: goal || undefined });
-              setAdding(false);
-              props.reload();
-            }}
-          />
-        </div>
-      )}
+      {adding && !ghost && <div className="sh-task-tools">{projectForm}</div>}
       {viewing !== null && !plain && !props.solo && (
         <ProjectLine
           head
@@ -1758,6 +1754,17 @@ function TasksTab(props: {
           {grid && pins.size > 0 && <div className="pj-grid pinned">{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
           <div className={grid ? "pj-grid" : "pj-list"}>
             {sections.filter((p) => !grid || !pins.has(p.id)).map(projectSection)}
+            {ghost && (
+              <section className={adding ? "sh-project pj-ghost adding" : "sh-project pj-ghost"}>
+                {adding ? (
+                  projectForm
+                ) : (
+                  <button type="button" className="pj-ghost-add" onClick={() => setAdding(true)}>
+                    + New project
+                  </button>
+                )}
+              </section>
+            )}
             {(unassigned.length > 0 || props.loose) && !onlyPinned && (
               <section className={`sh-project unassigned`} aria-label="Unassigned">
                 <ProjectLine
@@ -1771,9 +1778,8 @@ function TasksTab(props: {
                 />
               </section>
             )}
-            {!grid && !props.toolsIn && !adding && !onlyPinned && !props.mine && addProject}
+            {!grid && !adding && !onlyPinned && !props.mine && addProject}
           </div>
-          {grid && !props.toolsIn && !adding && !onlyPinned && !props.mine && addProject}
         </>
       )}
       {done.length > 0 && plain && (

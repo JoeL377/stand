@@ -92,7 +92,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     await step("make three projects with + Project", async () => {
       await page.getByRole("tab", { name: /^Projects/ }).click();
       for (const [name, goal] of [["Alpha", "First made"], ["Beta", "Second made"], ["Gamma", "Third made"]]) {
-        await page.getByRole("button", { name: "+ Project" }).click();
+        await page.getByRole("button", { name: /^\+ (New project|Project)$/ }).click();
         await page.getByLabel("Project name").fill(name);
         await page.getByLabel("Goal").fill(goal);
         await page.getByRole("button", { name: "Add", exact: true }).click();
