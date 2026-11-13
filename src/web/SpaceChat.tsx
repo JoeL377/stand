@@ -10,7 +10,7 @@ import { api } from "./api.ts";
 import { mergeCaught, placeCaught } from "./chatCaught.ts";
 import { asMessage, restore, serial, unsaved, type PendingMessage } from "./chatPending.ts";
 import { moveRead, placeReads } from "./chatReads.ts";
-import { CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
+import { ChevronIcon, CloseIcon, EditIcon, SendIcon, TrashIcon } from "./icons.tsx";
 import { Linkified } from "./Linkified.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
 import { usePersonColors } from "./PersonColors.tsx";
@@ -261,6 +261,8 @@ export function SpaceChat(props: {
   onOpenTask?: (id: string) => void;
   /** Each rise puts the cursor in the box. */
   focus?: number;
+  /** The space's name, for the box. */
+  name?: string;
 }) {
   const { roomId, me, chat } = props;
   const { thread } = chat;
@@ -269,6 +271,8 @@ export function SpaceChat(props: {
   // Where you had read to when the tab opened: the "New" line sits there, and stays while you read.
   const [newFrom, setNewFrom] = useState<number | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  // On a touch screen a message of yours shows its tools once you tap it.
+  const [picked, setPicked] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   // The newest message you had in view when you scrolled up from the foot; null while you're at it.
   const [awayAt, setAwayAt] = useState<number | null>(null);
@@ -404,7 +408,7 @@ export function SpaceChat(props: {
         )}
         {rows.length === 0 && (
           <p className="sh-card-empty chat-empty">
-            Nothing here yet. Write to the people in this space between meetings: what you send stays here for them to read.
+            Nothing here yet.
           </p>
         )}
         {rows.map(({ m, day, head, fresh, caught, recap, pending, readBy }) => (
@@ -425,6 +429,8 @@ export function SpaceChat(props: {
             onRemoveCaught={chat.removeCaught}
             mine={m.authorId === me.id}
             editing={editing === m.id}
+            picked={picked === m.id}
+            onPick={() => setPicked((v) => (v === m.id ? null : m.id))}
             onEdit={(on) => setEditing(on ? m.id : null)}
             onChanged={chat.apply}
           />
@@ -438,6 +444,7 @@ export function SpaceChat(props: {
       )}
       <Composer
         focus={props.focus}
+        name={props.name}
         roomId={roomId}
         people={thread.people.filter((p) => p.id !== me.id)}
         onSend={(text) => {
@@ -467,6 +474,8 @@ function MessageRow(props: {
   onRemoveCaught: (line: CaughtLine) => Promise<void>;
   mine: boolean;
   editing: boolean;
+  picked: boolean;
+  onPick: () => void;
   onEdit: (on: boolean) => void;
   onChanged: (m: ChatMessage) => void;
 }) {
@@ -510,8 +519,9 @@ function MessageRow(props: {
         </div>
       )}
       <div
-        className={`chat-msg${props.head ? " head" : ""}${m.deletedAt ? " deleted" : ""}${props.mentionsMe ? " mentions-you" : ""}${props.pending ? ` ${props.pending === "failed" ? "failed" : "pending"}` : ""}`}
+        className={`chat-msg${props.head ? " head" : ""}${m.deletedAt ? " deleted" : ""}${props.mentionsMe ? " mentions-you" : ""}${props.pending ? ` ${props.pending === "failed" ? "failed" : "pending"}` : ""}${props.picked ? " picked" : ""}`}
         data-seq={props.pending ? undefined : m.seq}
+        onClick={mine && !props.editing ? (e) => !(e.target as HTMLElement).closest("a, button, textarea") && props.onPick() : undefined}
       >
         <div className="chat-msg-side">
           {props.head ? <Avatar id={m.author} name={m.author} size={28} /> : <span className="chat-msg-time">{fmtTime(m.ts).replace(/\s?[AP]M$/i, "")}</span>}
@@ -590,9 +600,13 @@ function MessageRow(props: {
           </span>
         )}
       </div>
-      {props.caught.map((line) => (
-        <CaughtRow key={line.id} line={line} onOpen={props.onOpenTask} onRemove={props.onRemoveCaught} />
-      ))}
+      {props.caught.length > 0 && (
+        <div className="chat-caughts">
+          {props.caught.map((line) => (
+            <CaughtRow key={line.id} line={line} onOpen={props.onOpenTask} onRemove={props.onRemoveCaught} />
+          ))}
+        </div>
+      )}
       {props.recap && <SessionRecap caught={props.recap} />}
       {props.readBy.length > 0 && <ReadMarks names={props.readBy} />}
     </>
@@ -612,11 +626,11 @@ function ReadMarks({ names }: { names: string[] }) {
   );
 }
 
-/** The meeting transcript's words for the same thing (room/SidePanel.tsx CaptureRow). */
-const CAUGHT_LABEL: Record<CaughtLine["kind"], string> = { action: "Added to Todo!", decision: "Added to Decided!", question: "Added to Open questions!" };
+/** The Tasks tab's words for each kind. */
+const CAUGHT_LABEL: Record<CaughtLine["kind"], string> = { action: "To-do", decision: "Decided", question: "Open" };
 const CAUGHT_NAME: Record<CaughtLine["kind"], string> = { action: "to-do", decision: "decision", question: "open question" };
 
-/** A to-do, open question or decision Stand caught, under the message it came from. */
+/** A to-do, open question or decision Stand caught, as one chip under the message it came from. */
 function CaughtRow(props: { line: CaughtLine; onOpen?: (id: string) => void; onRemove: (line: CaughtLine) => Promise<void> }) {
   const { line } = props;
   const [removing, setRemoving] = useState(false);
@@ -630,48 +644,58 @@ function CaughtRow(props: { line: CaughtLine; onOpen?: (id: string) => void; onR
       errorToast("Couldn't remove it")(err);
     });
   };
-  const text = (
+  const said = `${CAUGHT_LABEL[line.kind]}: ${line.text}${line.owner ? ` · ${line.owner}` : ""}`;
+  const inner = (
     <>
-      <Linkified text={line.text} />
-      {line.owner && <span className="chat-caught-owner"> · {line.owner}</span>}
-    </>
-  );
-  return (
-    <div className={`chat-caught ${line.kind}${line.closed ? " closed" : ""}`} role="note" data-caught={line.id}>
       <span className="agent-mark" aria-hidden>
         ✦
       </span>
-      <div className="chat-caught-body">
-        <strong className="chat-caught-label">{CAUGHT_LABEL[line.kind]}</strong>
-        {opens ? (
-          <button type="button" className="link chat-caught-text" onClick={() => props.onOpen!(line.id)}>
-            {text}
-          </button>
-        ) : (
-          <span className="chat-caught-text">{text}</span>
-        )}
-      </div>
-      <button type="button" className="icon-btn chat-caught-remove" disabled={removing} aria-label={`Remove this ${CAUGHT_NAME[line.kind]}`} title="Not one: remove it" onClick={remove}>
-        <CloseIcon size={12} />
+      <strong className="chat-caught-label">{CAUGHT_LABEL[line.kind]}</strong>
+      <span className="chat-caught-text">{line.text}</span>
+    </>
+  );
+  return (
+    <div className={`chat-caught ${line.kind}${line.closed ? " closed" : ""}`} role="note" data-caught={line.id} title={said}>
+      {opens ? (
+        <button type="button" className="chat-caught-open" aria-label={said} onClick={() => props.onOpen!(line.id)}>
+          {inner}
+        </button>
+      ) : (
+        <span className="chat-caught-open">{inner}</span>
+      )}
+      {line.owner && <Avatar id={line.owner} name={line.owner} size={16} />}
+      <button type="button" className="chat-caught-remove" disabled={removing} aria-label={`Remove this ${CAUGHT_NAME[line.kind]}`} title="Not one: remove it" onClick={remove}>
+        <CloseIcon size={10} />
       </button>
     </div>
   );
 }
 
-/** What a stretch of chat was about, after its last message, once it has closed. */
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** What a stretch of chat was about, after its last message, once it has closed: one line that opens to the summary. */
 function SessionRecap({ caught }: { caught: ChatCaught }) {
+  const [open, setOpen] = useState(false);
+  const n = (k: CaughtLine["kind"]) => caught.lines.filter((l) => l.kind === k).length;
+  const counts = [n("action") && counted(n("action"), "to-do", "to-dos"), n("decision") && `${n("decision")} decided`, n("question") && `${n("question")} open`].filter(Boolean);
+  const title = caught.topics[0]?.topic ?? "Summary";
+  const more = caught.topics.slice(1);
+  if (!caught.summary && !caught.topics.length) return null;
   return (
-    <div className="chat-recap" role="note">
-      <div className="chat-recap-head">
+    <div className={open ? "chat-recap open" : "chat-recap"} role="note">
+      <button type="button" className="chat-recap-head" aria-expanded={open} disabled={!caught.summary && !more.length} onClick={() => setOpen((o) => !o)}>
         <span className="agent-mark" aria-hidden>
           ✦
         </span>
-        <strong>What this was about</strong>
-      </div>
-      {caught.summary && <p className="chat-recap-summary">{caught.summary}</p>}
-      {caught.topics.length > 0 && (
+        <strong>{title}</strong>
+        {more.length > 0 && <span className="chat-recap-n">+{more.length}</span>}
+        {counts.length > 0 && <span className="chat-recap-n">· {counts.join(" · ")}</span>}
+        {(caught.summary || more.length > 0) && <ChevronIcon />}
+      </button>
+      {open && caught.summary && <p className="chat-recap-summary">{caught.summary}</p>}
+      {open && more.length > 0 && (
         <ul className="chat-recap-topics">
-          {caught.topics.map((t) => (
+          {more.map((t) => (
             <li key={t.id}>{t.topic}</li>
           ))}
         </ul>
@@ -681,7 +705,7 @@ function SessionRecap({ caught }: { caught: ChatCaught }) {
 }
 
 /** The box at the foot of the thread. Enter sends, and Shift+Enter makes a new line. */
-function Composer(props: { roomId: string; people: Array<{ id: string; name: string }>; onSend: (text: string) => void; focus?: number }) {
+function Composer(props: { roomId: string; people: Array<{ id: string; name: string }>; onSend: (text: string) => void; focus?: number; name?: string }) {
   const draftKey = `stand.chatDraft.${props.roomId}`;
   const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
@@ -718,7 +742,7 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
     >
       <MentionTextarea
         aria-label="Write to the space"
-        placeholder="Write to the space… Type @ for a name"
+        placeholder={props.name ? `Message ${props.name}` : "Message the space"}
         rows={1}
         value={text}
         maxLength={TEXT_MAX}

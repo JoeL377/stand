@@ -57,9 +57,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const wide = useWide();
   const [dockOpen, setDockOpen] = useState(() => {
     try {
-      return localStorage.getItem(DOCK_KEY) !== "0";
+      return localStorage.getItem(DOCK_KEY) === "1";
     } catch {
-      return true;
+      return false;
     }
   });
   const showDock = (open: boolean) => {
@@ -497,7 +497,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         )}
 
         <section className={`sh-panel ${tab}`} role="tabpanel">
-          {tab === "chat" && <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
+          {tab === "chat" && <SpaceChat roomId={room.id} name={room.name} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
           {tab === "meetings" && (
             <>
               {error && !feed && (
@@ -761,7 +761,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               <CloseIcon />
             </button>
           </div>
-          <SpaceChat roomId={room.id} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />
+          <SpaceChat roomId={room.id} name={room.name} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />
         </aside>
       )}
     </SpacesShell>
