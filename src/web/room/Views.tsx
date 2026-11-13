@@ -4,7 +4,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Image as ImageIcon, List as ListIcon } from "lucide-react";
+import { Image as ImageIcon, List as ListIcon, Square } from "lucide-react";
 import { UNTITLED_DESIGN, type BrainstormSummary, type BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
@@ -82,7 +82,8 @@ export function ViewPane(props: {
             </button>
           )}
           {props.onStop && view === "sketch" && live && (
-            <button type="button" className="link muted view-stop" onClick={props.onStop} title="The sketch is kept on its page, and each diagram as a draft spec on a to-do. The call goes on.">
+            <button type="button" className="rp-pill view-stop-btn" onClick={props.onStop} title="The sketch is kept on its page, and each diagram as a draft spec on a to-do. The call goes on.">
+              <Square size={10} aria-hidden />
               {props.phone ? "Stop" : "Stop drawing"}
             </button>
           )}

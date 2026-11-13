@@ -4042,27 +4042,12 @@ a .mention { color: inherit; }
 .sk-live { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .sk-kinds { flex: none; display: flex; gap: 6px; }
 .sk-body { flex: 1; min-height: 0; display: flex; }
-.sk-side { flex: none; width: 188px; display: flex; flex-direction: column; gap: 10px; padding: 12px 0 12px 14px; overflow-y: auto; }
-.sk-thumb { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
-.sk-thumb:hover { border-color: color-mix(in srgb, var(--text) 45%, var(--line)); }
-.sk-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.sk-thumb.live { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
-.sk-thumb-pic { display: block; pointer-events: none; }
-.sk-thumb-svg { display: block; width: 100%; height: auto; }
-.sk-thumb-svg line { stroke: var(--line); stroke-width: 1; }
-.sk-thumb-svg circle, .sk-thumb-svg rect { fill: color-mix(in srgb, var(--text) 30%, var(--panel)); }
-.sk-thumb-svg circle.idea { fill: color-mix(in srgb, var(--text) 16%, var(--panel)); }
-.sk-thumb-svg rect.centre { fill: color-mix(in srgb, var(--accent) 70%, var(--panel)); }
-.sk-thumb-name { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; min-width: 0; }
-.sk-thumb-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sk-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.sk-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 26px; padding: 10px 16px 0; min-width: 0; font-size: 13px; }
 .sk-canvas { flex: 1; min-height: 0; display: flex; position: relative; }
 .sk-title { all: unset; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; cursor: text; border-radius: 6px; padding: 1px 4px; margin-left: -4px; }
 .sk-title:not(:disabled):hover { background: var(--hover); }
 .sk-title:focus-visible { outline: 2px solid var(--accent); }
 .sk-title-edit input { font: inherit; font-size: 14px; font-weight: 600; width: min(360px, 50vw); padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
-.sk-back { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; white-space: nowrap; }
 .sk-chip-wrap { position: relative; flex: none; display: inline-flex; }
 .sk-chip { all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .sk-chip.plain { cursor: default; color: var(--muted); }
@@ -4129,17 +4114,21 @@ a .mention { color: inherit; }
 .sk-wrap-card > footer .primary { padding: 6px 14px; font-size: 13px; }
 /* A phone: one row for the sketch (how it is drawn, the subjects, the counts), one subject at a time. */
 .sk-chip.compact { gap: 3px; padding: 0 7px; }
-.sk-one { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
-.sk-head[hidden] { display: none; }
 .view-flip { cursor: pointer; }
 .sketch.phone .design-text { display: none; }
 .sketch.phone .design-top:not(:has(.design-context:not(.design-text))) { display: none; }
 @media (max-width: 760px) {
   .sk-bar { padding: 6px 10px 0; gap: 6px; }
-  .sk-head { padding: 8px 10px 0; }
   .sk-list { padding: 10px 14px 80px; }
   .sk-kinds .brain-kind-pill { padding: 0 8px; }
   .sk-menu { width: min(250px, calc(100vw - 24px)); }
   .sk-note { font-size: 13px; }
   .sk-note .nudge-text { white-space: normal; }
 }
+/* Stop drawing is a button, in the colour of ending something, so it is found at a glance. */
+.view-stop-btn { flex: none; cursor: pointer; color: var(--danger, #e5484d); border-color: color-mix(in srgb, var(--danger, #e5484d) 55%, var(--line)); background: color-mix(in srgb, var(--danger, #e5484d) 10%, var(--panel)); font-weight: 600; }
+.view-stop-btn svg { fill: currentColor; }
+.view-stop-btn:hover { background: color-mix(in srgb, var(--danger, #e5484d) 20%, var(--panel)); }
+/* The diagram's own switches (Context, Text) float over its corner on a sketch, so they take no row. */
+.sketch .design.bare .design-top { position: absolute; z-index: 4; top: 8px; right: 12px; padding: 0; }
+.sk-bar .sk-title { margin-left: 0; }

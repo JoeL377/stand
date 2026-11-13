@@ -1,6 +1,6 @@
 // The sketch: the one board a call draws on (server/sketch.ts). It holds every subject the talk was
 // on, each drawn as a map (BrainMap) or as a diagram (DesignBoard). The subject the talk is on fills
-// the canvas and the others wait small at the side; a pill per subject brings one back. Each subject
+// the canvas; a pill per subject brings another one up. Each subject
 // has a chip saying how it is drawn, and picking the other way redraws just that subject. Nobody
 // drags or draws here: what is wrong is fixed by a click on it, or by telling Stand.
 
@@ -147,7 +147,6 @@ export function SketchBoard(props: {
   const picked = props.subject && shown.some((x) => x.s.id === props.subject) ? props.subject : null;
   const mainId = picked ?? liveId ?? (shown.find((x) => subjectCount(b, x.s, x.i).n > 0) ?? shown[0]).s.id;
   const main = shown.find((x) => x.s.id === mainId)!;
-  const others = shown.filter((x) => x.s.id !== mainId);
   const acts = live ? props.acts : undefined;
 
   // To-dos, decisions and open questions caught on anything on the sketch: one set of counts, and one filter for all of it.
@@ -176,17 +175,13 @@ export function SketchBoard(props: {
   }, [undo?.at]);
   const offer = live && b.offer ? (shown.find((x) => x.s.id === b.offer!.subject) ?? null) : null;
 
-  // A phone keeps the sketch's own controls to this one row: how the subject on screen is drawn, then
-  // the subjects (or the one subject's name), then the counts.
-  const oneRow = !!props.phone && props.as === "picture";
+  // The sketch's own controls are this one row: how the subject on screen is drawn, then the
+  // subjects (or the one subject's name), then the counts.
+  const oneRow = props.as === "picture";
   const pills = (shown.length > 1 || totals.length > 0 || oneRow) && (
     <div className="sk-bar">
-      {oneRow && <StyleChip compact subject={main.s} onPick={acts ? (style) => acts.style(main.s.id, style) : undefined} />}
-      {oneRow && shown.length === 1 && (
-        <span className="sk-one" dir="auto">
-          {main.s.title}
-        </span>
-      )}
+      {oneRow && <StyleChip compact={props.phone} subject={main.s} onPick={acts ? (style) => acts.style(main.s.id, style) : undefined} />}
+      {oneRow && shown.length === 1 && <SubjectTitle subject={main.s} onRename={acts ? (label) => acts.edit(main.s.id, main.s.id, "rename", { label }) : undefined} />}
       {shown.length > 1 && (
         <span className="sk-subjects" role="tablist" aria-label="Subjects">
           {shown.map(({ s, i }) => {
@@ -308,82 +303,12 @@ export function SketchBoard(props: {
     <div className={`sketch${props.phone ? " phone" : ""}${props.className ? ` ${props.className}` : ""}`}>
       {pills}
       <div className="sk-body">
-        {!props.phone && others.length > 0 && (
-          <aside className="sk-side" aria-label="Other subjects">
-            {others.map((x) => (
-              <button key={x.s.id} type="button" className={`sk-thumb${x.s.id === liveId ? " live" : ""}`} onClick={() => props.onSubject(x.s.id === liveId ? null : x.s.id)} title={`Show ${x.s.title}`}>
-                <span className="sk-thumb-pic" aria-hidden>
-                  <Thumb b={b} s={x.s} i={x.i} />
-                </span>
-                <span className="sk-thumb-name">
-                  {x.s.id === liveId && <i className="sk-live" aria-label="Live" />}
-                  <span dir="auto">{x.s.title}</span>
-                </span>
-              </button>
-            ))}
-          </aside>
-        )}
         <section className="sk-main" aria-label={main.s.title}>
-          <header className="sk-head" hidden={oneRow}>
-            <StyleChip subject={main.s} onPick={acts ? (style) => acts.style(main.s.id, style) : undefined} />
-            {(main.s.style === "diagram" || shown.length === 1) && <SubjectTitle subject={main.s} onRename={acts ? (label) => acts.edit(main.s.id, main.s.id, "rename", { label }) : undefined} />}
-            {live && main.s.id !== liveId && liveId && (
-              <button type="button" className="link sk-back" onClick={() => props.onSubject(null)}>
-                <i className="sk-live" aria-hidden /> Back to {shown.find((x) => x.s.id === liveId)!.s.title}
-              </button>
-            )}
-            {live && b.busy && <span className="design-busy">Listening…</span>}
-          </header>
           <div className="sk-canvas">{draw(main)}</div>
         </section>
       </div>
       {dock}
     </div>
-  );
-}
-
-/** A subject kept small at the side: the shape of what it holds, not its words. */
-function Thumb({ b, s, i }: { b: BrainstormView; s: SketchSubject; i: number }) {
-  const W = 160;
-  const H = 84;
-  if (s.style === "diagram") {
-    const boxes = inOrder(s.diagram ?? EMPTY).slice(0, 8);
-    const per = Math.min(4, Math.max(1, boxes.length));
-    const at = (k: number) => ({ x: 14 + (k % per) * ((W - 28) / per), y: 16 + Math.floor(k / per) * 34 });
-    const bw = (W - 28) / per - 8;
-    return (
-      <svg viewBox={`0 0 ${W} ${H}`} className="sk-thumb-svg">
-        {boxes.slice(1).map((x, k) => (
-          <line key={x.id} x1={at(k).x + bw} y1={at(k).y + 9} x2={at(k + 1).x} y2={at(k + 1).y + 9} />
-        ))}
-        {boxes.map((x, k) => (
-          <rect key={x.id} x={at(k).x} y={at(k).y} width={bw} height={18} rx={4} />
-        ))}
-      </svg>
-    );
-  }
-  const nodes = mapNodes(b, s, i);
-  const dirs = nodes.filter((n) => !n.parent).slice(0, 7);
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="sk-thumb-svg">
-      {dirs.flatMap((d, k) => {
-        const a = -Math.PI * 0.9 + ((k + 0.5) / dirs.length) * Math.PI * 2;
-        const x = W / 2 + 34 * Math.cos(a);
-        const y = H / 2 + 20 * Math.sin(a);
-        const ideas = nodes.filter((n) => n.parent === d.id).slice(0, 4);
-        return [
-          <line key={`${d.id}l`} x1={W / 2} y1={H / 2} x2={x} y2={y} />,
-          ...ideas.flatMap((n, j) => {
-            const t = a + (j - (ideas.length - 1) / 2) * 0.32;
-            const ix = W / 2 + 64 * Math.cos(t);
-            const iy = H / 2 + 34 * Math.sin(t);
-            return [<line key={`${n.id}l`} x1={x} y1={y} x2={ix} y2={iy} />, <circle key={n.id} cx={ix} cy={iy} r={3} className="idea" />];
-          }),
-          <circle key={d.id} cx={x} cy={y} r={5} />,
-        ];
-      })}
-      <rect x={W / 2 - 14} y={H / 2 - 7} width={28} height={14} rx={7} className="centre" />
-    </svg>
   );
 }
 
