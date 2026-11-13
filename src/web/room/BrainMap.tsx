@@ -4,6 +4,7 @@
 // what's behind it, on your screen only.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Typed } from "./written.tsx";
 import type { BrainCaught, BrainNode, BrainstormView } from "../../shared/protocol.ts";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { usePersonColors } from "../PersonColors.tsx";
@@ -380,7 +381,7 @@ export function BrainMap(props: {
             {placed.map((p) => {
               const hub = hubAt.get(p.from);
               const from = hub ?? at.get(p.from);
-              return from ? <line key={p.id} x1={from.x} y1={from.y} x2={p.x} y2={p.y} className={hub ? "trunk" : undefined} /> : null;
+              return from ? <line key={p.id} x1={from.x} y1={from.y} x2={p.x} y2={p.y} pathLength={1} className={[hub && "trunk", fresh(p.id) && "fresh"].filter(Boolean).join(" ") || undefined} /> : null;
             })}
           </svg>
           <div className={`brain-node root${brainstorm.busy ? " busy" : ""}`} style={{ left: rootAt.x, top: rootAt.y }}>
@@ -408,7 +409,9 @@ export function BrainMap(props: {
               >
                 <span className="brain-label">
                   {fresh(p.id) && p.node.by && <Face name={p.node.by} />}
-                  <span dir="auto">{p.node.label}</span>
+                  <span dir="auto">
+                    <Typed text={p.node.label} on={fresh(p.id)} />
+                  </span>
                 </span>
                 {(p.node.points.length > 0 || p.node.caught.length > 0) && (
                   <span className="brain-marks">

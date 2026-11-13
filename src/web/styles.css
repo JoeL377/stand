@@ -4379,3 +4379,14 @@ footer.controls .control.pill { padding: 7px 16px; }
 }
 .topic-now-head .topic-updating { line-height: 16px; }
 .topic-remark > .topic-dot { flex: none; }
+
+/* ---- sketch updates you can see: new circles and boxes are written in, their line draws ---- */
+.sk-bar .sk-updated { flex: none; margin-left: 0; font-size: 11px; white-space: nowrap; }
+.sk-bar .sk-updated + .sk-kinds, .sk-bar .sk-updated ~ .view-as-wrap { margin-left: 0; }
+.sk-canvas > .topic-flash { z-index: 4; }
+.brain-lines line.fresh { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 1; animation: brain-draw 700ms ease-out; }
+@keyframes brain-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.design-box.fresh { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); animation: design-in 420ms var(--ease-out, ease-out); }
+.design-box { transition: box-shadow 0.6s ease-out, border-color 0.6s ease-out; }
+@keyframes design-in { from { opacity: 0; scale: 0.9; } }
+@media (prefers-reduced-motion: reduce) { .brain-lines line.fresh, .design-box.fresh { animation: none; } }

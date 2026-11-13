@@ -27,6 +27,7 @@ import { type CSSProperties, Fragment, useContext, useEffect, useRef, useState }
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { BarSlot } from "./barSlot.ts";
+import { Typed, useUpdated } from "./written.tsx";
 import type { AgentCard, Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { fmtDuration, initials, keyOf } from "../util.ts";
@@ -54,10 +55,7 @@ const TOPIC_SLACK_MS = 45_000;
 const HERE_SHOWN = 5;
 /** How long a new to-do, decision or question glows. */
 const TASK_NEW_MS = 8_000;
-/** How long a card says it was just updated. */
-const UPDATED_MS = 6_000;
-/** A new line is written in over about this long, a word at a time. */
-const TYPE_MS = 1_400;
+
 /** How long an answered question or a checked to-do stays in place before it leaves: the
  *  question for its decision, the to-do for the Done fold. */
 const LEAVE_MS = 4_000;
@@ -1007,62 +1005,6 @@ function Card(props: {
         </p>
       )}
     </section>
-  );
-}
-
-/** When the card last gained or changed a line, for UPDATED_MS after; null otherwise. A mark that
- *  was already showing isn't a new update. */
-function useUpdated(ids: string[]): number | null {
-  const seen = useRef<Set<string>>(new Set());
-  const [at, setAt] = useState<number | null>(null);
-  const sig = [...ids].sort().join(" ");
-  useEffect(() => {
-    const added = ids.some((id) => !seen.current.has(id));
-    seen.current = new Set(ids);
-    if (added) setAt(Date.now());
-  }, [sig]);
-  useEffect(() => {
-    if (at === null) return;
-    const timer = setTimeout(() => setAt(null), UPDATED_MS);
-    return () => clearTimeout(timer);
-  }, [at]);
-  return at;
-}
-
-const STILL = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-/** A line Stand just wrote, written in a word at a time. The words still to come hold their
- *  place unseen, so nothing on the card moves while it writes. */
-function Typed({ text, on }: { text: string; on: boolean }) {
-  const words = text.split(" ");
-  const [shown, setShown] = useState<number | null>(null);
-  useEffect(() => {
-    if (!on || STILL || words.length < 2) return setShown(null);
-    setShown(0);
-    const step = Math.min(90, Math.max(25, TYPE_MS / words.length));
-    const timer = setInterval(
-      () =>
-        setShown((n) => {
-          if (n === null || n + 1 >= words.length) {
-            clearInterval(timer);
-            return null;
-          }
-          return n + 1;
-        }),
-      step,
-    );
-    return () => clearInterval(timer);
-    // The mark stays on for seconds after the writing is done; only new words start it again.
-  }, [on, text]);
-  if (shown === null) return <>{text}</>;
-  return (
-    <span className="typed" aria-label={text}>
-      <span aria-hidden>{words.slice(0, shown).join(" ")}</span>
-      <span className="typed-caret" aria-hidden />
-      <span className="typed-rest" aria-hidden>
-        {(shown ? " " : "") + words.slice(shown).join(" ")}
-      </span>
-    </span>
   );
 }
 

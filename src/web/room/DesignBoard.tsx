@@ -10,6 +10,7 @@
 // React Flow draws it (pan, pinch, the boxes as components) and ELK places it (designLayout.ts).
 
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Typed, useArrived } from "./written.tsx";
 import { BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, useViewport, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { AppWindow, CircleArrowRight, Database, FileText, Server, Split, Target, TriangleAlert, User } from "lucide-react";
@@ -33,7 +34,7 @@ const SORT: Record<DesignKind, { label: string; Icon: typeof User | null }> = {
 };
 
 /** What the boxes and arrows need from the board. */
-const Board = createContext<{ text: boolean; only?: BrainCaught["kind"] | null; openId: string | null; pick: (id: string) => void; onKeep?: (id: string) => void; onDrop?: (id: string) => void }>({ text: true, openId: null, pick: () => {} });
+const Board = createContext<{ text: boolean; only?: BrainCaught["kind"] | null; openId: string | null; fresh?: Set<string>; pick: (id: string) => void; onKeep?: (id: string) => void; onDrop?: (id: string) => void }>({ text: true, openId: null, pick: () => {} });
 
 type BoxNodeT = Node<{ box: DesignBox; body: number }, "box">;
 type GroupNodeT = Node<{ group: DesignGroup }, "frame">;
@@ -51,7 +52,7 @@ function BoxNode({ data }: NodeProps<BoxNodeT>) {
       <div
         role="button"
         tabIndex={0}
-        className={`design-box kind-${box.kind ?? "thing"}${box.suggested ? " suggested" : ""}${board.openId === box.id ? " on" : ""}${board.only && !box.caught.some((c) => c.kind === board.only) ? " dim" : ""}`}
+        className={`design-box kind-${box.kind ?? "thing"}${box.suggested ? " suggested" : ""}${board.openId === box.id ? " on" : ""}${board.only && !box.caught.some((c) => c.kind === board.only) ? " dim" : ""}${board.fresh?.has(box.id) ? " fresh" : ""}`}
         style={{ height: body }}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), board.pick(box.id))}
       >
@@ -61,7 +62,9 @@ function BoxNode({ data }: NodeProps<BoxNodeT>) {
               <Icon aria-label={label} />
             </i>
           )}
-          <strong dir="auto">{box.label}</strong>
+          <strong dir="auto">
+            <Typed text={box.label} on={!!board.fresh?.has(box.id)} />
+          </strong>
         </span>
         {board.text && box.detail && (
           <span className="design-detail" dir="auto">
@@ -301,7 +304,10 @@ export function DesignBoard(props: {
   // On the sketch the drawing keeps a margin from the board's edge.
   const inset = props.bare ? (tall ? 12 : 40) : 0;
   const view = laid && size.w ? fitInside(laid, size, tall, inset) : null;
-  const board = useMemo(() => ({ text, only: props.only, openId, pick, onKeep: props.onKeep, onDrop: props.onDrop }), [text, props.only, openId, props.onKeep, props.onDrop]);
+  // A box that joins while you watch is ringed and its name written in.
+  const fresh = useArrived(boxes.map((b) => b.id));
+  const freshSig = [...fresh].join(" ");
+  const board = useMemo(() => ({ text, only: props.only, openId, fresh, pick, onKeep: props.onKeep, onDrop: props.onDrop }), [text, props.only, openId, freshSig, props.onKeep, props.onDrop]);
 
   return (
     <div className={`brain design${tall ? " narrow" : ""}${props.bare ? " bare" : ""}${props.className ? ` ${props.className}` : ""}`} onClick={() => (setOpenId(null), setShowContext(false))}>
