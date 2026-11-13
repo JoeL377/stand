@@ -299,6 +299,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             : "Talking now";
   const talk = () => (phone && live && !wrapping ? setPrejoin(true) : props.onJoin());
   const members = spaces?.find((s) => s.id === room.id)?.people ?? [];
+  // The people of the space with their pictures, for the faces on a project's card.
+  const [pictured, setPictured] = useState<Array<{ name: string; picture: string | null }>>([]);
+  useEffect(() => {
+    api.members(room.id).then((m) => setPictured(m.members.map(({ name, picture }) => ({ name, picture }))), () => {});
+  }, [room.id]);
   const faces = live && room.people.length ? room.people : members.map((name) => ({ name, picture: null }));
 
   const copy = () => {
@@ -638,6 +643,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               roomId={room.id}
               me={user.name}
               people={members}
+              pictured={pictured}
               deck={null}
               sweep={feed?.questionSweep ?? null}
               open={[...todos, ...questions].filter(mine ? () => true : inProject)}
@@ -1061,6 +1067,8 @@ function TasksTab(props: {
   me: string;
   /** The space's people, by name: who a to-do can be given to. */
   people: string[];
+  /** The same people with their pictures, where they have one. */
+  pictured: Array<{ name: string; picture: string | null }>;
   /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
   deck: DoneDeck | null;
   /** The open questions Stand's last sweep proposes to close. */
@@ -1403,18 +1411,23 @@ function TasksTab(props: {
       </div>
     );
   };
-  /** Who has a project's open work, by first name; the counts are in each name's tooltip. */
+  /** Who has a project's open work, as their faces: a picture where they have one, else their initials
+   *  on their own colour. The counts are in each face's tooltip. */
   const ownerFaces = (notes: TaskNote[]) => {
     const groups = ownerGroups(notes).filter((g) => g.key);
+    const person = (owner: string) => props.pictured.find((m) => m.name === owner) ?? props.pictured.find((m) => firstName(m.name) === firstName(owner));
     return (
       <span className="pj-faces">
-        {groups.slice(0, 3).map((g, i) => (
-          <span key={g.key} className="rc-name" title={`${g.key === me ? "You" : g.key} · ${g.notes.length}`}>
-            {firstName(g.notes[0].owner!)}
-            {i < Math.min(groups.length, 3) - 1 ? "," : ""}
-          </span>
-        ))}
-        {groups.length > 3 && <span className="pj-faces-more">+{groups.length - 3}</span>}
+        {groups.slice(0, 5).map((g) => {
+          const owner = g.notes[0].owner!;
+          const who = person(owner);
+          return (
+            <span key={g.key} className="pj-face" title={`${g.key === me ? "You" : (who?.name ?? owner)} · ${g.notes.length}`}>
+              <Avatar id={who?.name ?? owner} name={who?.name ?? owner} picture={who?.picture} size={22} />
+            </span>
+          );
+        })}
+        {groups.length > 5 && <span className="pj-faces-more">+{groups.length - 5}</span>}
       </span>
     );
   };
