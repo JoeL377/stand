@@ -49,6 +49,8 @@ export function FollowUpList(props: {
   /** The checkbox shows where a to-do stands (a blue ring for in progress, a green one for ready to
    *  ship), so its pill is only the count of updates. */
   stateInBox?: boolean;
+  /** Leaves Copy for agent off the row, when the row offers it somewhere else. */
+  noCopy?: boolean;
 }) {
   const [saved, setSaved] = useState<Record<string, { note: Note; original: FollowUpNote }>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -124,7 +126,7 @@ export function FollowUpList(props: {
               {props.below?.(n)}
             </span>
             {props.tail?.(n)}
-            <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} />
+            {!props.noCopy && <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} />}
             {/* The log takes a line of its own under the row, as wide as the row. */}
             {open && <WorkCard work={w} />}
           </li>

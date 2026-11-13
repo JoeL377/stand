@@ -1274,11 +1274,12 @@ function TasksTab(props: {
     );
   const notSaid = (n: Note) => void api.setTask(props.roomId, n.id, { saidDone: false }).then(props.reload, errorToast("Couldn't change it"));
 
-  /** Who owns a row, as their first name in quiet text: a name reads faster than initials. */
+  /** Who owns a row, as their face: it takes less of the row than a name, and the name is its tooltip. */
   const face = (n: TaskNote) =>
     n.owner ? (
-      <span className="rc-name" title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`}>
-        {firstName(n.owner)}
+      <span className="row-face" title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`}>
+        <Avatar id={n.owner} name={n.owner} picture={props.pictured.find((x) => x.name === n.owner || firstName(x.name) === firstName(n.owner!))?.picture ?? null} size={20} />
+        <span className="rc-name">{firstName(n.owner)}</span>
       </span>
     ) : (
       <span className="rc-face none" title={n.kind === "question" ? "Anyone" : "Unassigned"}>
@@ -1351,24 +1352,24 @@ function TasksTab(props: {
           )}
         </>
       )}
+      noCopy
       tail={(n: TaskNote) => (
         <>
-          {(quietProject(n, section) || n.from) && (
-            <span className="row-quiet">
-              {quietProject(n, section) && props.projectPicker(n)}
-              {n.from && (
-                <span className="task-from">
-                  <FromChip from={n.from} />
-                </span>
-              )}
-            </span>
-          )}
-          {!closed && (
-            <button className="sh-archive sh-drop" aria-label="Drop: no longer wanted" title="Drop: no longer wanted" onClick={() => void move(n, "dropped")}>
-              <CloseIcon />
+          {/* The row is its box, its title and its owner. What can be done to it waits behind one button;
+              where it came from and its project are in the task itself, a click away. */}
+          <RowMore>
+            {!closed && (
+              <button type="button" role="menuitem" onClick={() => void move(n, "dropped")}>
+                <CloseIcon />
+                Drop
+              </button>
+            )}
+            <button type="button" role="menuitem" onClick={() => props.onArchive(n)}>
+              <ArchiveIcon />
+              Archive
             </button>
-          )}
-          <ArchiveButton onClick={() => props.onArchive(n)} />
+            <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} label />
+          </RowMore>
           {n.kind === "action" ? (
             <OwnerPicker note={n} roomId={props.roomId} people={props.people} me={props.me} onSaved={props.reload}>
               {face(n)}
@@ -2405,6 +2406,40 @@ type TabKey = "projects" | "chat" | "meetings" | "mine";
 /** What a project's page lists: one kind at a time. */
 type ProjectShow = "tasks" | "questions" | "decisions" | "done";
 /** The space's tabs, in the order people look at them. */
+/** A row's "···": what can be done to it, in a small menu, so the row itself stays quiet. */
+function RowMore(props: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: Event) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  return (
+    <span className={open ? "row-more open" : "row-more"} ref={ref}>
+      <button type="button" className="row-more-btn" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+          <circle cx="3" cy="8" r="1.4" fill="currentColor" />
+          <circle cx="8" cy="8" r="1.4" fill="currentColor" />
+          <circle cx="13" cy="8" r="1.4" fill="currentColor" />
+        </svg>
+      </button>
+      {open && (
+        // A choice shuts the menu; Copy for agent stays a moment so its "Copied" can be read.
+        <div className="rp-menu row-menu" role="menu" onClick={(e) => setTimeout(() => setOpen(false), (e.target as HTMLElement).closest(".cfa") ? 1200 : 0)}>
+          {props.children}
+        </div>
+      )}
+    </span>
+  );
+}
+
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
   return (
