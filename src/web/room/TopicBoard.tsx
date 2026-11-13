@@ -23,7 +23,10 @@ import { usePersonColors } from "../PersonColors.tsx";
 // short glow and nothing moves; the rest fold into "Earlier". While someone's pointer is on a list, new
 // lines wait behind a "2 new" pill. An answered question folds into its decision and a checked to-do
 // into "Done", each after a moment in place.
-import { type CSSProperties, Fragment, useEffect, useRef, useState } from "react";
+import { type CSSProperties, Fragment, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ChevronDown } from "lucide-react";
+import { BarSlot } from "./barSlot.ts";
 import type { AgentCard, Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
 import { fmtDuration, initials, keyOf } from "../util.ts";
@@ -202,6 +205,16 @@ export function TopicBoard(props: {
     if (following) props.onOwn?.();
   };
   const [listOpen, setListOpen] = useState(false);
+  // On a wide screen the list of cards is a menu in the board's top row (Views.tsx), so the card has the width.
+  const barSlot = useContext(BarSlot);
+  useEffect(() => {
+    if (!listOpen || !barSlot) return;
+    const close = () => setListOpen(false);
+    const key = (e: KeyboardEvent) => e.key === "Escape" && setListOpen(false);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", key);
+    return () => (window.removeEventListener("click", close), window.removeEventListener("keydown", key));
+  }, [listOpen, barSlot]);
   const paneRef = useRef<HTMLDivElement>(null);
   const latest = props.segments.at(-1);
   const live = !!latest && now - latest.ts < NOW_MS;
@@ -560,11 +573,20 @@ export function TopicBoard(props: {
         item={props.focusItem}
       />
     );
+  const toggle = (
+    <button type="button" className={barSlot ? `card-list-toggle in-bar${listOpen ? " on" : ""}` : "card-list-toggle"} onClick={(e) => (e.stopPropagation(), setListOpen((o) => !o))} aria-expanded={listOpen}>
+          {!barSlot && <span aria-hidden>☰</span>}
+          {busyNow && !listOpen && <span className="card-list-toggle-signal" aria-label="Something new on the list" />}
+          <span className="card-list-toggle-title">{rewind?.id === RUNNING ? "Running list" : (shownEntry?.title ?? "Cards")}</span>
+          {barSlot ? <ChevronDown size={12} aria-hidden /> : <span className="card-list-count">{index >= 0 ? `${index + 1} of ${entries.length}` : entries.length}</span>}
+        </button>
+  );
   const before = index > 0 ? entries[index - 1] : null;
   const after = index >= 0 && index < entries.length - 1 ? entries[index + 1] : null;
   return (
-    <div className={["topic-board", "stack", rewind && "rewinding", listOpen && "list-open"].filter(Boolean).join(" ")}>
-      <nav className="card-list" aria-label="Cards in this meeting">
+    <div className={["topic-board", "stack", rewind && "rewinding", listOpen && "list-open", barSlot && "menu-list"].filter(Boolean).join(" ")}>
+      {barSlot && createPortal(toggle, barSlot)}
+      <nav className="card-list" aria-label="Cards in this meeting" onClick={barSlot ? (e) => e.stopPropagation() : undefined}>
         <button type="button" className={rewind?.id === RUNNING ? "card-entry running on" : "card-entry running"} onClick={() => open(RUNNING)} aria-pressed={rewind?.id === RUNNING}>
           <span className="card-entry-mark" aria-hidden>
             ☰
@@ -638,12 +660,7 @@ export function TopicBoard(props: {
         )}
       </nav>
       <div className="card-pane" ref={paneRef} onWheel={onWheel} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
-        <button type="button" className="card-list-toggle" onClick={() => setListOpen((o) => !o)} aria-expanded={listOpen}>
-          <span aria-hidden>☰</span>
-          {busyNow && !listOpen && <span className="card-list-toggle-signal" aria-label="Something new on the list" />}
-          <span className="card-list-toggle-title">{rewind?.id === RUNNING ? "Running list" : (shownEntry?.title ?? "Cards")}</span>
-          <span className="card-list-count">{index >= 0 ? `${index + 1} of ${entries.length}` : entries.length}</span>
-        </button>
+        {!barSlot && toggle}
         {before && (
           <button type="button" className="card-step up" onClick={() => open(before.id)}>
             ↑ {before.title}
