@@ -2,7 +2,7 @@
 // kept up to date by the space's event stream; sending, editing and deleting are plain requests.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { type CaughtLine, type ChatCaught, type ChatEvent, type ChatMessage, type ChatReport, type ChatThread, STAND_AUTHOR, STAND_NAME } from "../shared/chat.ts";
+import { type CaughtLine, type ChatCall, type ChatCaught, type ChatEvent, type ChatMessage, type ChatReport, type ChatThread, STAND_AUTHOR, STAND_NAME } from "../shared/chat.ts";
 import { Bell, BellOff, ListPlus, Reply, SmilePlus } from "lucide-react";
 import { mentionedIn } from "../shared/mentions.ts";
 import type { NotifyStatus } from "../shared/push.ts";
@@ -155,6 +155,7 @@ export function useSpaceChat(roomId: string, me: string, onMention?: (m: ChatMes
             messages: [...t.messages.filter((m) => !ids.has(m.id) && m.seq < oldest), ...fresh.messages],
             caught: mergeCaught(t.caught, fresh.caught),
             reports: fresh.reports,
+            calls: fresh.calls,
             readUpTo: Math.max(t.readUpTo, fresh.readUpTo),
           };
         });
@@ -391,7 +392,8 @@ export function SpaceChat(props: {
   };
 
   const rows = useMemo(() => {
-    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; reports: ChatReport[]; pending: PendingMessage["state"] | null; readBy: string[] }> = [];
+    const out: Array<{ m: ChatMessage; day: string | null; head: boolean; fresh: boolean; caught: CaughtLine[]; recap: ChatCaught | null; reports: ChatReport[]; calls: ChatCall[]; pending: PendingMessage["state"] | null; readBy: string[] }> = [];
+    const called = placeReports(thread?.messages ?? [], thread?.calls ?? []);
     const reported = placeReports(thread?.messages ?? [], thread?.reports ?? []);
     const placed = placeCaught(thread?.messages ?? [], thread?.caught ?? [], thread?.channel.openSessionId ?? null);
     const reads = placeReads(thread?.messages ?? [], thread?.reads ?? []);
@@ -404,7 +406,7 @@ export function SpaceChat(props: {
       const fresh = !marked && newFrom !== null && newFrom > 0 && m.seq > newFrom && m.authorId !== me.id;
       if (fresh) marked = true;
       // What Stand put under the last message breaks the block: the next one starts under its name again.
-      const broken = !!prev && (placed.lines.has(prev.id) || placed.recaps.has(prev.id) || reported.has(prev.id));
+      const broken = !!prev && (placed.lines.has(prev.id) || placed.recaps.has(prev.id) || reported.has(prev.id) || called.has(prev.id));
       out.push({
         m,
         day,
@@ -413,13 +415,14 @@ export function SpaceChat(props: {
         caught: placed.lines.get(m.id) ?? [],
         recap: placed.recaps.get(m.id) ?? null,
         reports: reported.get(m.id) ?? [],
+        calls: called.get(m.id) ?? [],
         pending: (m.sessionId === "" && m.key && states.get(m.key)) || null,
         readBy: reads.get(m.id) ?? [],
       });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread?.messages, thread?.caught, thread?.reports, thread?.reads, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
+  }, [thread?.messages, thread?.caught, thread?.reports, thread?.calls, thread?.reads, thread?.channel.openSessionId, chat.pending, newFrom, me.id, me.name]);
 
   // The newest message stays in view, unless you scrolled up to read older ones. The thread scrolls
   // on a wide screen and the page on a phone, so both are kept.
@@ -490,7 +493,7 @@ export function SpaceChat(props: {
             Nothing here yet.
           </p>
         )}
-        {rows.map(({ m, day, head, fresh, caught, recap, reports, pending, readBy }, i) => (
+        {rows.map(({ m, day, head, fresh, caught, recap, reports, calls, pending, readBy }, i) => (
           <MessageRow
             key={m.id}
             pending={pending}
@@ -516,6 +519,7 @@ export function SpaceChat(props: {
             caught={caught}
             recap={recap}
             reports={reports}
+            calls={calls}
             onOpenTask={props.onOpenTask}
             onRemoveCaught={chat.removeCaught}
             mine={m.authorId === me.id}
@@ -595,6 +599,7 @@ function MessageRow(props: {
   caught: CaughtLine[];
   recap: ChatCaught | null;
   reports: ChatReport[];
+  calls: ChatCall[];
   onOpenTask?: (id: string) => void;
   onRemoveCaught: (line: CaughtLine) => Promise<void>;
   mine: boolean;
@@ -805,6 +810,17 @@ function MessageRow(props: {
         </div>
       )}
       {props.recap && <SessionRecap caught={props.recap} />}
+      {props.calls.map((c) => (
+        <div key={c.id} className="chat-recap">
+          <a className="chat-recap-head" href={`/meetings/${c.id}`} title="Open the call's recap, with its chat">
+            <strong>Call</strong>
+            <span>
+              · {c.messages} {c.messages === 1 ? "message" : "messages"} in its chat · {shortTime(c.ts)}
+            </span>
+            <ChevronIcon />
+          </a>
+        </div>
+      ))}
       {props.readBy.length > 0 && <ReadMarks names={props.readBy} />}
     </>
   );

@@ -1,6 +1,6 @@
 // Chat (chat.ts): channels, the sessions in them, and what chat keeps about a message beside its segment.
 import type { DatabaseSync } from "node:sqlite";
-import { type Channel, type ChatAnswer, type ChatMessage, type ChatReaction, type ChatRead, type ChatSession, STAND_AUTHOR } from "../../shared/chat.ts";
+import { type Channel, type ChatAnswer, type ChatCall, type ChatMessage, type ChatReaction, type ChatRead, type ChatSession, STAND_AUTHOR } from "../../shared/chat.ts";
 import { newId } from "../ids.ts";
 import type { Row } from "./rows.ts";
 
@@ -74,6 +74,19 @@ export function chatStore(db: DatabaseSync) {
     return { ...m, reactions: reactionsOf(m.id), ...(answer ? { answer: JSON.parse(answer.json as string) as ChatAnswer } : {}) };
   };
   return {
+    /** The space's finished calls since a time in which someone wrote in the call's chat, oldest first. */
+    callsWithChat(roomId: string, since: number): ChatCall[] {
+      return (
+        db
+          .prepare(
+            `SELECT m.id, m.ended_at, (SELECT COUNT(*) FROM segments s WHERE s.meeting_id = m.id AND s.kind = 'chat') AS n FROM meetings m
+             WHERE m.room_id = ? AND m.kind IS NULL AND m.ended_at IS NOT NULL AND m.ended_at >= ? ORDER BY m.ended_at LIMIT 50`,
+          )
+          .all(roomId, since) as Row[]
+      )
+        .filter((r) => (r.n as number) > 0)
+        .map((r) => ({ id: r.id as string, ts: r.ended_at as number, messages: r.n as number }));
+    },
     /** What comes with an answer of Stand's. */
     setChatAnswer(id: string, answer: ChatAnswer): ChatMessage | null {
       db.prepare("INSERT INTO chat_answers (segment_id, json) VALUES (?, ?) ON CONFLICT(segment_id) DO UPDATE SET json = excluded.json").run(id, JSON.stringify(answer));

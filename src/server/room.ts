@@ -1308,8 +1308,9 @@ export class RoomSession implements SpeechSink {
         this.addSegment(conn.participantId, conn.name, "chat", text, Date.now());
         // "@stand add a step…" while a sketch is on changes the sketch; anything else to Stand is a question.
         if (this.sketchAsk(text, conn.name)) break;
+        // Anyone writes to Stand in the chat; the pilot's seat only guards asking out loud and on a card.
         const q = typedAsk(text);
-        if (q) this.askTyped(ws, conn, q);
+        if (q) this.askTyped(ws, conn, q, null, true);
         break;
       }
       case "agent.ask.text": {
@@ -2102,10 +2103,10 @@ export class RoomSession implements SpeechSink {
 
   /** A question typed to Stand: on an answer card's box (follows: the answer it follows up, null for a
    *  new card), or to @stand in the chat (follows left out). Only the pilot asks. */
-  private askTyped(ws: WebSocket, conn: { participantId: string; name: string }, q: string, follows?: string | null) {
+  private askTyped(ws: WebSocket, conn: { participantId: string; name: string }, q: string, follows?: string | null, inChat = false) {
     if (!this.agentCards || !this.agent.answer || this.ended) return;
     if (!this.agentCards.canRun()) return this.send(ws, { type: "error", message: "Stand has answered as many times as it can in one meeting." });
-    if (!this.pilotUse(ws, conn)) return;
+    if (!inChat && !this.pilotUse(ws, conn)) return;
     const card = this.agentCards.ask(conn.name, conn.participantId, q, Date.now(), follows);
     this.agentChanged();
     void this.runAnswer(card.id);

@@ -40,11 +40,11 @@ export function SidePanel(props: {
   onUnseen?: (n: number) => void;
 }) {
   const { state, segments, interims, send } = props;
-  // Two tabs. The transcript is the record of the item on screen, in order: what was said, what was
-  // typed in the chat, what Stand caught, what Stand was asked and answered, and what agents reported.
-  // The chat is the meeting's one conversation, whichever item each message landed on. The topics
-  // and their notes sit on the middle screen, so the transcript opens first.
-  const [tab, setTab] = useState<"chat" | "transcript">("transcript");
+  // One stream, with pills that narrow it. All is the record of the item on screen, in order: what
+  // was said, what was typed in the chat, what Stand caught, what Stand was asked and answered, and
+  // what agents reported. Said and Stand are parts of it. Chat is the meeting's one conversation,
+  // whichever item each message landed on.
+  const [tab, setTab] = useState<View>("all");
   const shut = props.phone ? !props.open : !!props.folded && !props.peeking;
   const focus = state.items.find((i) => i.id === state.focusItemId) ?? null;
   // The running list sits out a product review (the notes agent files what's said under the slide),
@@ -80,7 +80,7 @@ export function SidePanel(props: {
   // New remarks for this item while the Transcript tab isn't open.
   const [seen, setSeen] = useState(0);
   useEffect(() => {
-    if (tab === "transcript" && !shut) setSeen(transcriptCount);
+    if (tab !== "chat" && !shut) setSeen(transcriptCount);
   }, [tab, transcriptCount, shut]);
   useEffect(() => setSeen(transcriptCount), [state.focusItemId]);
   const unseen = Math.max(0, transcriptCount - seen);
@@ -88,8 +88,8 @@ export function SidePanel(props: {
   const othersChats = chats.filter((s) => s.speakerId !== props.participantId).length;
   const [chatSeen, setChatSeen] = useState(othersChats);
   useEffect(() => {
-    // On a phone the open sheet shows chat in either view.
-    if ((tab === "chat" || props.phone) && !shut) setChatSeen(othersChats);
+    // All shows what is typed too, and on a phone the open sheet shows chat in every view.
+    if ((tab === "chat" || tab === "all" || props.phone) && !shut) setChatSeen(othersChats);
   }, [tab, othersChats, shut, props.phone]);
   const chatUnseen = Math.max(0, othersChats - chatSeen);
   useEffect(() => props.onUnseen?.(chatUnseen), [chatUnseen]);
@@ -130,7 +130,7 @@ export function SidePanel(props: {
         <button className="icon side-fold" title="Show chat and transcript" aria-label="Show chat and transcript" onClick={props.onFold}>
           <PanelIcon open={false} right />
         </button>
-        {(["chat", "transcript"] as const).map((t) => {
+        {(["chat", "all"] as const).map((t) => {
           const n = t === "chat" ? chatUnseen : unseen;
           return (
             <button
@@ -197,55 +197,11 @@ export function SidePanel(props: {
               </button>
             )}
           </div>
-          <div className="side-toggle" role="tablist" aria-label="Discussion views">
-            <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
-              {props.phone ? "Chat only" : "Chat"}
-              {tab !== "chat" && chatUnseen > 0 && !props.phone && (
-                <span className="side-tab-badge" aria-label={`${chatUnseen} new`}>
-                  {chatUnseen}
-                </span>
-              )}
-            </button>
-            <button
-              role="tab"
-              aria-selected={tab === "transcript"}
-              className={tab === "transcript" ? "on" : ""}
-              onClick={() => setTab("transcript")}
-            >
-              {props.phone ? "Everything" : "Transcript"}
-              {tab !== "transcript" && unseen > 0 && (
-                <span className="side-tab-badge" aria-label={`${unseen} new`}>
-                  {unseen}
-                </span>
-              )}
-            </button>
-          </div>
+          <ViewPills tab={tab} setTab={setTab} chatUnseen={chatUnseen} unseen={unseen} />
         </>
       ) : (
         <div className="side-top">
-          <div className="side-toggle" role="tablist" aria-label="Discussion views">
-            <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
-              {props.phone ? "Chat only" : "Chat"}
-              {tab !== "chat" && chatUnseen > 0 && !props.phone && (
-                <span className="side-tab-badge" aria-label={`${chatUnseen} new`}>
-                  {chatUnseen}
-                </span>
-              )}
-            </button>
-            <button
-              role="tab"
-              aria-selected={tab === "transcript"}
-              className={tab === "transcript" ? "on" : ""}
-              onClick={() => setTab("transcript")}
-            >
-              {props.phone ? "Everything" : "Transcript"}
-              {tab !== "transcript" && unseen > 0 && (
-                <span className="side-tab-badge" aria-label={`${unseen} new`}>
-                  {unseen}
-                </span>
-              )}
-            </button>
-          </div>
+          <ViewPills tab={tab} setTab={setTab} chatUnseen={chatUnseen} unseen={unseen} />
           <SnapsPill snaps={focusSnaps} me={props.participantId} isHost={isHost} className="side-head-snaps" />
           {props.onFold && (
             <button
@@ -274,10 +230,20 @@ export function SidePanel(props: {
           )}
         </p>
       )}
-      {tab === "transcript" ? (
-        <Transcript entries={shown} segments={segments} captures={captures} moves={moves} items={state.items} interims={interims} send={send} empty="Nothing said about this yet." tagChat />
-      ) : (
+      {tab === "chat" ? (
         <Transcript entries={chats.map(lineOf)} segments={chats} items={state.items} interims={{}} send={send} empty="No messages yet." />
+      ) : (
+        <Transcript
+          entries={tab === "all" ? shown : shown.filter((e) => (tab === "said" ? e.kind === "speech" : STAND_KINDS.has(e.kind)))}
+          segments={segments}
+          captures={captures}
+          moves={tab === "all" ? moves : []}
+          items={state.items}
+          interims={tab === "stand" ? {} : interims}
+          send={send}
+          empty={tab === "stand" ? "Stand has caught nothing here yet." : "Nothing said about this yet."}
+          tagChat
+        />
       )}
       {/* Under both tabs: what's typed from the transcript lands in it, at the moment it was sent. */}
       {!state.ending && <ChatBox send={send} />}
@@ -292,6 +258,38 @@ export function SidePanel(props: {
         </a>
       </div>
     </aside>
+  );
+}
+
+/** What the panel shows: everything on the item, or one part of it. */
+type View = "all" | "chat" | "said" | "stand";
+const VIEWS: Array<{ id: View; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "chat", label: "Chat" },
+  { id: "said", label: "Said" },
+  { id: "stand", label: "Stand" },
+];
+/** What Stand caught, was asked and answered, and what agents reported. */
+const STAND_KINDS = new Set<TimelineEntry["kind"]>(["capture", "ask", "agent"]);
+
+function ViewPills(props: { tab: View; setTab: (v: View) => void; chatUnseen: number; unseen: number }) {
+  return (
+    <div className="side-toggle" role="tablist" aria-label="Discussion views">
+      {VIEWS.map((v) => {
+        // New chat shows on Chat unless All, which has it too, is open; anything else new shows on All.
+        const n = v.id === "chat" && props.tab !== "all" ? props.chatUnseen : v.id === "all" && props.tab === "chat" ? props.unseen : 0;
+        return (
+          <button key={v.id} role="tab" aria-selected={props.tab === v.id} className={props.tab === v.id ? "on" : ""} onClick={() => props.setTab(v.id)}>
+            {v.label}
+            {props.tab !== v.id && n > 0 && (
+              <span className="side-tab-badge" aria-label={`${n} new`}>
+                {n}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -429,7 +427,7 @@ function ChatBox({ send }: { send: (m: ClientMessage) => boolean }) {
         rows={1}
         value={text}
         maxLength={2000}
-        placeholder="Message everyone"
+        placeholder="Message the call"
         aria-label="Message everyone"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {

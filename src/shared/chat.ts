@@ -49,6 +49,15 @@ export interface ChatReport {
   text: string;
 }
 
+/** A call in the space where people wrote in its chat, as the space's chat shows it: one line that opens the call's recap. */
+export interface ChatCall {
+  /** The meeting. */
+  id: string;
+  /** When it ended. */
+  ts: number;
+  messages: number;
+}
+
 export interface ChatMessage {
   /** Its place in the order of everything sent to Stand's chat; grows with each message. */
   seq: number;
@@ -141,4 +150,6 @@ export interface ChatThread {
   people: Array<{ id: string; name: string }>;
   /** What agents reported on to-dos since the oldest message here, oldest first. */
   reports: ChatReport[];
+  /** The calls since the oldest message here that had chat of their own, oldest first. */
+  calls: ChatCall[];
 }

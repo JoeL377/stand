@@ -42,6 +42,7 @@ export function chatRoutes(app: Express, ctx: Services) {
         channel,
         ...first,
         reports: first.messages.length ? chatReports(db.roomUpdates(room.id, first.messages[0].ts)) : [],
+        calls: first.messages.length ? db.callsWithChat(room.id, first.messages[0].ts) : [],
         readUpTo: db.channelReadUpTo(channel.id, req.user!.id),
         reads: db.channelReads(channel.id).filter((r) => r.userId !== req.user!.id),
         people: db.roomPeople(room.id),
