@@ -5,7 +5,7 @@ The always-on Stand bar in the Mac app: a space switcher, "Write a note…" (Con
 ## Sub-features
 - Note box unfolding from the bar, Enter saves.
 - Snaps pinned to a note; in a meeting a snap shows on everyone's middle screen.
-- Web pop-out bar from a meeting (Pop out button), partly drivable in a browser.
+- Web pop-out bar from a meeting (offered in a toast when you share your screen), partly drivable in a browser.
 
 ## How to get to it (user POV)
 Run the Mac app (`npm run try:mac` locally, or the signed .dmg), use the bar from any app.

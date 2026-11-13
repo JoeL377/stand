@@ -2356,7 +2356,6 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .controls { flex-wrap: nowrap; gap: 4px; padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
   .controls-group { position: static; transform: none; gap: 0; }
   .control { min-width: 54px; padding: 6px 4px 5px; font-size: 11px; }
-  .control.popout { display: none; }
   .control.pill { padding: 9px 12px; white-space: nowrap; }
   .agenda .panel-head .agenda-fold, .now-label, .host-note:not(:has(button)) { display: none; }
   .control span { white-space: nowrap; }
