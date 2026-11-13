@@ -553,6 +553,8 @@ export function migrate(db: DatabaseSync) {
   if (!itemCols.includes("note_id")) db.exec("ALTER TABLE items ADD COLUMN note_id TEXT");
   // The project an agenda item links to (shared/projects.ts).
   if (!itemCols.includes("project_id")) db.exec("ALTER TABLE items ADD COLUMN project_id TEXT");
+  // "Open a project" (room.ts): the item is the project itself, open on the call's board.
+  if (!itemCols.includes("shows_project")) db.exec("ALTER TABLE items ADD COLUMN shows_project INTEGER");
   const deckCols = (db.prepare("PRAGMA table_info(decks)").all() as Row[]).map((c) => c.name);
   if (!deckCols.includes("parent_item_id")) db.exec("ALTER TABLE decks ADD COLUMN parent_item_id TEXT;");
   // A product review's deck (reviews.ts).

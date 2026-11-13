@@ -144,7 +144,7 @@ async function meeting() {
       await page.waitForTimeout(5_000);
     }
     await snap("space-after-meeting");
-    await page.getByRole("tab", { name: /^Tasks/ }).click();
+    await page.getByRole("tab", { name: /^Projects/ }).click();
     await snap("space-tasks-tab");
   });
   const spaceText = await page.locator("body").innerText();

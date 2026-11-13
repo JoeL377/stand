@@ -170,6 +170,8 @@ export class RoomSession implements SpeechSink {
   private hostView: HostView | null = null;
   /** Where the meeting was when the host began presenting a to-do: "Stop presenting" goes back there. */
   private beforeTask: string | null = null;
+  /** Where the meeting was before a project was opened on the board. */
+  private beforeProject: string | null = null;
   private suggestion: Suggestion | null = null;
   /** (ts, item) pairs, so late-arriving transcripts land on the item that was
    *  in focus when the words were spoken. */
@@ -1562,6 +1564,10 @@ export class RoomSession implements SpeechSink {
         if (!isHost || this.ended) return;
         this.presentTask(msg.taskId, conn);
         break;
+      case "project.present":
+        if (!isHost || this.ended) return;
+        this.presentProject(msg.projectId, conn);
+        break;
       case "checkin.page": {
         if (!Number.isInteger(msg.page) || msg.page < 0 || msg.page > 50) return;
         this.checkInPage = msg.page;
@@ -1930,6 +1936,33 @@ export class RoomSession implements SpeechSink {
     const item = this.db.taskItem(this.roomId, task.id, task.text, about);
     if (!current?.taskId) this.beforeTask = this.focusItemId;
     this.pinnedBy = null;
+    this.setFocus(item.id, actor, "manual");
+  }
+
+  /** "Open a project": the project gets an agenda item of its own and the meeting moves to it, so the
+   *  board shows its work and what's caught while it is up lands in the project. A to-do presented from
+   *  it comes back to it. Null closes it: back to where the meeting was. */
+  private presentProject(projectId: string | null, conn: Conn) {
+    const actor = conn.name;
+    const current = this.focusItemId ? this.db.getItem(this.focusItemId) : null;
+    if (projectId === null) {
+      if (!current?.showsProject) return;
+      const back = this.items().some((i) => i.id === this.beforeProject) ? this.beforeProject : null;
+      this.beforeProject = null;
+      this.pinnedBy = null;
+      this.setFocus(back, actor, "manual");
+      return;
+    }
+    const project = typeof projectId === "string" ? this.db.getProject(this.roomId, projectId) : null;
+    if (!project || project.archived) return;
+    // The notes agent reads the description to know what the talk is about.
+    const open = this.db.withProjects(this.roomId, [...this.db.roomFollowUps(this.roomId), ...this.db.spaceNotes(this.roomId, "question", 100)]).filter((n) => n.project === project.id && !n.doneAt);
+    const about = `Talking through the project "${project.name}"${project.goal ? `: ${project.goal}` : ""}.${open.length ? `\nIts open work:\n${open.slice(0, 20).map((n) => `- ${n.text}${n.owner ? ` (${n.owner})` : ""}`).join("\n")}` : ""}`;
+    const item = this.db.projectItem(this.roomId, project.id, project.name, about);
+    if (!current?.showsProject) this.beforeProject = current?.taskId ? this.beforeTask : this.focusItemId;
+    this.beforeTask = null;
+    this.pinnedBy = null;
+    this.itemsChanged();
     this.setFocus(item.id, actor, "manual");
   }
 

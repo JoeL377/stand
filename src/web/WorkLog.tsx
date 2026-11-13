@@ -43,9 +43,17 @@ export function useWork(ids: string[]): Record<string, ActionWork> {
 
 /** The pill after a to-do's text: "Working" with a spinner while an agent is on it, "Ready to ship"
  *  while its PR waits to merge, else just the count. */
-export function WorkPill({ work, open, onToggle }: { work: ActionWork; open: boolean; onToggle: () => void }) {
+export function WorkPill({ work, open, onToggle, quiet }: {
+  work: ActionWork; open: boolean; onToggle: () => void;
+  /** The row's checkbox says where the to-do stands: the pill is only the count of updates, with the state in its tooltip. */
+  quiet?: boolean;
+}) {
   const done = work.log.find((e) => e.status === "done");
-  const label = work.working
+  const state = !quiet && work.working ? "working" : !quiet && work.ready ? "ready" : "";
+  if (quiet && !work.log.length) return null;
+  const label = quiet && !done
+    ? String(work.log.length)
+    : work.working
     ? "Working"
     : work.ready
       ? "Ready to ship"
@@ -62,13 +70,13 @@ export function WorkPill({ work, open, onToggle }: { work: ActionWork; open: boo
   return (
     <button
       type="button"
-      className={`fu-work${work.working ? " working" : ""}${work.ready ? " ready" : ""}${open ? " open" : ""}`}
+      className={`fu-work${state ? ` ${state}` : ""}${quiet ? " quiet" : ""}${open ? " open" : ""}`}
       aria-expanded={open}
       aria-label={full}
       title={title}
       onClick={onToggle}
     >
-      {work.working && <span className="fu-spin" aria-hidden />}
+      {state === "working" && <span className="fu-spin" aria-hidden />}
       {label}
     </button>
   );

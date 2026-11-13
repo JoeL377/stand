@@ -46,6 +46,9 @@ export function FollowUpList(props: {
   openId?: string | null;
   /** A class for one action's row, like "part" for a row that sits under the one above it. */
   rowClass?: (n: FollowUpNote) => string | undefined;
+  /** The checkbox shows where a to-do stands (a blue ring for in progress, a green one for ready to
+   *  ship), so its pill is only the count of updates. */
+  stateInBox?: boolean;
 }) {
   const [saved, setSaved] = useState<Record<string, { note: Note; original: FollowUpNote }>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -65,14 +68,17 @@ export function FollowUpList(props: {
         const src = props.source?.(n);
         const w = work[n.id];
         const open = opened === n.id && !!w?.log.length;
+        // Where an open to-do stands, for its box: ready to ship, or someone (or their agent) is on it.
+        const stands = !props.stateInBox || done ? null : w?.ready ? "ready" : w?.working || n.state === "doing" ? "doing" : null;
+        const standsLabel = stands === "ready" ? "Ready to ship" : stands === "doing" ? "In progress" : null;
         return (
-          <li key={n.id} className={[done && "done", dropped && "dropped", props.openId === n.id && "opened", props.rowClass?.(n)].filter(Boolean).join(" ") || undefined}>
+          <li key={n.id} className={[done && "done", dropped && "dropped", props.openId === n.id && "opened", stands && `stands-${stands}`, props.rowClass?.(n)].filter(Boolean).join(" ") || undefined}>
             <button
               className={mine && n.owner?.split(" ")[0] !== mine ? "check read" : "check"}
               role="checkbox"
               aria-checked={done}
-              aria-label={done ? `Reopen: ${n.text}` : `Mark done: ${n.text}`}
-              title={done ? `${dropped ? "Dropped" : "Done"}${n.doneBy ? ` by ${n.doneBy}` : ""}. Click to reopen.` : "Mark done"}
+              aria-label={done ? `Reopen: ${n.text}` : `${standsLabel ? `${standsLabel}. ` : ""}Mark done: ${n.text}`}
+              title={done ? `${dropped ? "Dropped" : "Done"}${n.doneBy ? ` by ${n.doneBy}` : ""}. Click to reopen.` : standsLabel ? `${standsLabel}. Click to mark done.` : "Mark done"}
               disabled={busy === n.id || Boolean(mine && n.owner?.split(" ")[0] !== mine)}
               onClick={async () => {
                 setBusy(n.id);
@@ -100,7 +106,7 @@ export function FollowUpList(props: {
                   n.text
                 )}
                 {props.after?.(n)}
-                {w && <WorkPill work={w} open={open} onToggle={() => setOpened(open ? null : n.id)} />}
+                {w && <WorkPill work={w} open={open} quiet={props.stateInBox} onToggle={() => setOpened(open ? null : n.id)} />}
               </span>
               {!props.oneLine && (
                 <span className="fu-meta">
