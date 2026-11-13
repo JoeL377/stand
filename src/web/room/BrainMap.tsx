@@ -13,6 +13,8 @@ import { initials } from "../util.ts";
 const FRESH_MS = 7_000;
 /** How long the pill for a new circle that landed off screen stays. */
 const AWAY_MS = 20_000;
+/** The most a click on that pill leaves the map zoomed in. */
+const AWAY_ZOOM = 1.3;
 export const KIND = { action: { label: "To do", Icon: TodoIcon }, decision: { label: "Decided", Icon: DecidedIcon }, question: { label: "Open", Icon: QuestionIcon } } as const;
 export const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
@@ -376,7 +378,9 @@ export function BrainMap(props: {
           title="Go to it"
           onClick={(e) => {
             e.stopPropagation();
-            setView(clampView(v.k, size.w / 2 - awayPill.x * v.k, size.h / 2 - awayPill.y * v.k));
+            // Close enough to read it and see what it hangs off, never the tight zoom it was missed at.
+              const k = Math.min(v.k, AWAY_ZOOM);
+              setView(clampView(k, size.w / 2 - awayPill.x * k, size.h / 2 - awayPill.y * k));
             setAway(null);
           }}
         >
