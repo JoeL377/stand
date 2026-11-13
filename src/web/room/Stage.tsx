@@ -1,5 +1,6 @@
 import { usePersonColors } from "../PersonColors.tsx";
 import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
+import { ProjectPresentation } from "./ProjectPresentation.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import { ReviewStage } from "./ReviewStage.tsx";
@@ -209,7 +210,9 @@ export function Stage(props: {
   // What this screen's board has open on its bar (null: live), as it last said.
   const [myRewind, setMyRewind] = useState<Rewind | null>(null);
   const shownTask = taskId ? { id: taskId, mode: amLeader ? myTaskMode : (hostView?.taskMode ?? "brief") } : null;
-  const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask);
+  // A project open on the board, with its work.
+  const shownProject = focusItem?.showsProject ? (focusItem.projectId ?? null) : null;
+  const middleTaken = showingScreen || Boolean(sharer) || deckUp || Boolean(shownTask) || Boolean(shownProject);
   // A review slide's pictures: the host's choice is everyone's, and a look of your own lasts until the host moves.
   const reviewUp = deckUp && focusItem?.slide?.layout === "review";
   // A design review slide: Full spec is each person's own look, and the host's is everyone's until they close it.
@@ -322,7 +325,7 @@ export function Stage(props: {
     setTabs((t) => t.filter((x) => x !== id));
     setTab((t) => (t === id ? null : t));
   };
-  const mainLabel = shownTask ? "Task & spec" : localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : deckUp ? "Slides" : "Main screen";
+  const mainLabel = shownProject ? "Project" : shownTask ? "Task & spec" : localScreen ? "Your screen" : sharer ? `${sharer.name.split(" ")[0]}'s screen` : deckUp ? "Slides" : "Main screen";
   // The latest snap, small in the corner of everyone's middle screen. Each person can expand
   // it for themselves; the host or whoever took it can take it down for everyone.
   const stageSnap = state.stageSnapId ? state.snaps.find((s) => s.id === state.stageSnapId) : undefined;
@@ -453,7 +456,7 @@ export function Stage(props: {
 
   const nowRow = (
       <div className={nowSlot ? "now in-bar" : "now"}>
-        {canSteer && <TaskPicker bare={!!nowSlot} roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { if (send({ type: "task.present", taskId: task.id })) pickTab(null); }} />}
+        {canSteer && <TaskPicker bare={!!nowSlot} roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { if (send({ type: "task.present", taskId: task.id })) pickTab(null); }} onProject={(projectId) => { if (send({ type: "project.present", projectId })) pickTab(null); }} />}
         <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && keyOf(focusItem) !== focusItem?.title && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}
@@ -611,7 +614,18 @@ export function Stage(props: {
             {board}
           </div>
         )}
-        {shownTask && !boardOpen && !openSnap ? (
+        {shownProject && !boardOpen && !openSnap ? (
+          <ProjectPresentation
+            key={shownProject}
+            roomId={state.roomId}
+            projectId={shownProject}
+            live={props.notes}
+            canSteer={canSteer}
+            disabled={props.offline || props.ending}
+            onTask={(taskId) => send({ type: "task.present", taskId })}
+            onClose={() => send({ type: "project.present", projectId: null })}
+          />
+        ) : shownTask && !boardOpen && !openSnap ? (
           <TaskPresentation key={shownTask.id} presentation={shownTask} canSteer={canSteer} disabled={props.offline || props.ending} onChange={(next) => (next ? setMyTaskMode(next.mode) : send({ type: "task.present", taskId: null }))} />
         ) : localScreen ? (
           <Video

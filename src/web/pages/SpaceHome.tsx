@@ -332,10 +332,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
 
   const projects = room.projects ?? [];
   const matching = (n: Note) => matchesProject(n.project ?? null, projectFilter);
-  const projectPicker = (n: Note) => <ProjectPicker note={n} roomId={room.id} projects={projects} onSaved={load} />;
+  const projectPicker = (n: Note, own?: boolean) => <ProjectPicker note={n} roomId={room.id} projects={projects} onSaved={load} own={own} />;
   const filtered = projectProblem(projects, projectFilter);
-  const decisionsIn = new Map<string, number>();
-  for (const n of decisions) if (n.project && !n.replacedBy) decisionsIn.set(n.project, (decisionsIn.get(n.project) ?? 0) + 1);
 
   const reviews = feed?.reviews ?? [];
   const designReviews = feed?.designReviews ?? [];
@@ -628,7 +626,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               projectFilter={filtered || tab === "tasks" ? "" : projectFilter}
               onProject={setProjectFilter}
               pinned={room.pinnedProjects ?? []}
-              decisions={decisionsIn}
+              decided={decisions.filter((n) => !n.replacedBy)}
               onDecisions={() => pickTab("decisions")}
               mine={tab === "tasks" && mine}
               onMine={(on) => setParam("mine", on ? "1" : "")}
@@ -1008,7 +1006,7 @@ type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
 function TasksTab(props: {
   /** Projects: the projects as cards, and one project's page. Tasks: every task in one list, by person. */
   mode: "projects" | "tasks";
-  projectPicker: (n: Note) => React.ReactNode;
+  projectPicker: (n: Note, own?: boolean) => React.ReactNode;
   projects: Project[];
   /** "" for all, "none" for Unassigned, or one project's id. */
   projectFilter: string;
@@ -1017,7 +1015,8 @@ function TasksTab(props: {
   /** The projects the person looking pinned: theirs alone, first on the list and open. */
   pinned: string[];
   /** How many kept decisions each project has, by id: the project's view links to them. */
-  decisions: Map<string, number>;
+  /** The space's standing decisions: a project's page lists its own beside its work. */
+  decided: Note[];
   onDecisions: () => void;
   /** Only the tasks of the person looking (?mine=1). */
   mine: boolean;
@@ -1260,7 +1259,7 @@ function TasksTab(props: {
               Part of: {partOf(n)!.text}
             </button>
           )}
-          {!quietProject(n, section) && props.projectPicker(n)}
+          {!quietProject(n, section) && props.projectPicker(n, section !== undefined && section !== "" && n.project === section)}
           {n.kind === "question" &&
             (closed ? (
               !n.answeredBy && <span className="task-verb">Answer</span>
@@ -1367,7 +1366,7 @@ function TasksTab(props: {
     return groups
       .filter(([, fs]) => fs.length > 0)
       .map(([label, fs]) => (
-        <div key={label} className="sh-task-group pj-state">
+        <div key={label} className={`sh-task-group pj-state ${label.split(" ")[0].toLowerCase()}`}>
           <p className="sh-group">
             {label} · {fs.length}
           </p>
@@ -1570,8 +1569,6 @@ function TasksTab(props: {
           head
           project={viewing ? (projects.find((p) => p.id === viewing) ?? null) : null}
           {...lineOf(viewing)}
-          decisions={viewing ? (props.decisions.get(viewing) ?? 0) : 0}
-          onDecisions={props.onDecisions}
           onOpen={() => props.onProject("")}
           roomId={props.roomId}
           reload={props.reload}
@@ -1603,9 +1600,48 @@ function TasksTab(props: {
           {byOwner(withParts(rest), "")}
         </>
       ) : viewing !== null ? (
-        <section className="sh-project open" aria-label={viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
-          {byState(open, viewing)}
-        </section>
+        (() => {
+          // A project's page: what there is to do on the left, what there is to settle and what was settled beside it.
+          const asked = open.filter((n) => n.kind !== "action");
+          const settled = viewing ? props.decided.filter((n) => n.project === viewing) : [];
+          const side = !phone && (asked.length > 0 || settled.length > 0);
+          return (
+            <section className={side ? "sh-project open pj-page with-side" : "sh-project open pj-page"} aria-label={viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
+              <div className="pj-main">
+                {byState(side ? open.filter((n) => n.kind === "action") : open, viewing)}
+                {side && !open.some((n) => n.kind === "action") && <p className="sh-card-empty">No open to-dos.</p>}
+              </div>
+              {(side || settled.length > 0) && (
+                <aside className="pj-side">
+                  {side && asked.length > 0 && (
+                    <div className="sh-task-group pj-state questions">
+                      <p className="sh-group">Questions · {asked.length}</p>
+                      {list(asked, false, viewing)}
+                    </div>
+                  )}
+                  {settled.length > 0 && (
+                    <div className="sh-task-group pj-state decisions">
+                      <p className="sh-group">Decisions · {settled.length}</p>
+                      <ul className="pj-decided">
+                        {settled.slice(0, 5).map((n) => (
+                          <li key={n.id}>
+                            <span dir="auto">{n.text}</span>
+                            <time>{new Date(n.ts).toLocaleDateString([], { month: "short", day: "numeric" })}</time>
+                          </li>
+                        ))}
+                      </ul>
+                      {settled.length > 5 && (
+                        <button type="button" className="pj-add" onClick={props.onDecisions}>
+                          All {settled.length} decisions
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </aside>
+              )}
+            </section>
+          );
+        })()
       ) : (
         <>
           {/* A wide screen has the projects as cards, your pinned ones in a first group; a phone has rows that open in place. */}

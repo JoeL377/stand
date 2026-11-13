@@ -626,6 +626,9 @@ export function Meeting(props: {
                 onPick={(task) => {
                   if (send({ type: "task.present", taskId: task.id })) setSheet(null);
                 }}
+                onProject={(projectId) => {
+                  if (send({ type: "project.present", projectId })) setSheet(null);
+                }}
               />
             )}
             <button
@@ -1107,7 +1110,7 @@ function TopMore(props: {
           </button>
           {props.canPresent && (
             <button role="menuitem" onClick={pick(() => window.dispatchEvent(new Event(PRESENT_TASK)))}>
-              Present a task
+              Open a project or task
             </button>
           )}
           {/* The sheet closes on any click outside it, so open it after this click is over. */}

@@ -43,6 +43,7 @@ export const toItem = (r: Row): Item => ({
   slide: r.slide_json ? JSON.parse(r.slide_json as string) : null,
   taskId: (r.note_id as string) ?? null,
   projectId: (r.project_id as string) ?? null,
+  ...(r.shows_project ? { showsProject: true } : {}),
 });
 
 export const toDeck = (r: Row): Deck => ({

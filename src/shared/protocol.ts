@@ -25,6 +25,8 @@ export interface Item {
   taskId?: string | null;
   /** The project this item links to: its tasks are in that project unless someone set theirs. */
   projectId?: string | null;
+  /** "Open a project": this item is the project itself, open on the call's board with its work. */
+  showsProject?: boolean;
 }
 
 export type SlideLayout = "title" | "bullets" | "section" | "image" | "quote" | "review" | "design";
@@ -1147,6 +1149,8 @@ export type ClientMessage = (
   | { type: "host.view"; view: HostView }
   /** The host: present this to-do (it gets an agenda item and the meeting moves there); null goes back to where the meeting was. */
   | { type: "task.present"; taskId: string | null }
+  // Host only: open a project on the board, so the talk is filed under it. Null closes it.
+  | { type: "project.present"; projectId: string | null }
   /** Anyone: turn the opening board to a page, for everyone. */
   | { type: "checkin.page"; page: number }
   /** Anyone: how the review slide on screen ended (null takes it back). */

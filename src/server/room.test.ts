@@ -1386,6 +1386,45 @@ test("presenting a task moves the meeting to an item for it, so what's said is f
   assert.equal(db.taskItem(session.state().roomId, task.id, "Review rollout", null).id, shown?.id);
 });
 
+test("opening a project moves the meeting to an item for it, so what's caught lands in the project", async () => {
+  const { db, session, meetingId, items } = setup();
+  const roomId = session.state().roomId;
+  const joe = await join(session, { id: "u1", name: "Joe" });
+  const ann = await join(session, { id: "u2", name: "Ann" });
+  const project = db.createProject(roomId, { name: "Payments", goal: "Cards that fail get paid anyway" }, null);
+  const task = db.addNote(meetingId, items[0].id, { kind: "action", text: "Build the retry worker", owner: "Joe" }, null);
+  db.setNoteProject(roomId, task.id, { projectId: project.id, by: "Joe" });
+  session.setFocus(items[1].id, "Joe", "manual");
+
+  // Only the host opens one.
+  await say(ann, { type: "project.present", projectId: project.id });
+  assert.equal(session.state().focusItemId, items[1].id);
+  await say(joe, { type: "project.present", projectId: project.id });
+  const shown = session.state().items.find((i) => i.id === session.state().focusItemId);
+  assert.equal(shown?.showsProject, true);
+  assert.equal(shown?.projectId, project.id);
+  assert.equal(shown?.title, "Payments");
+  assert.match(shown?.description ?? "", /Talking through the project "Payments": Cards that fail get paid anyway/);
+  session.addSpeech("u2", "Ann", "The worker should give up after an hour", Date.now());
+  assert.equal(db.meetingSegments(meetingId).at(-1)?.itemId, shown?.id);
+
+  // A to-do put up from the project comes back to the project.
+  await say(joe, { type: "task.present", taskId: task.id });
+  assert.equal(session.state().items.find((i) => i.id === session.state().focusItemId)?.taskId, task.id);
+  await say(joe, { type: "task.present", taskId: null });
+  assert.equal(session.state().focusItemId, shown?.id);
+
+  // Opening it again is the same item; closing goes back to where the meeting was.
+  await say(joe, { type: "project.present", projectId: project.id });
+  assert.equal(session.state().items.filter((i) => i.showsProject).length, 1);
+  await say(joe, { type: "project.present", projectId: null });
+  assert.equal(session.state().focusItemId, items[1].id);
+
+  // After the meeting it is off the agenda.
+  await session.end();
+  assert.equal(db.listItems(roomId).some((i) => i.showsProject), false);
+});
+
 test("a brainstorm's map is drawn from the call's talk beside the board, and is done when the meeting ends", async () => {
   const { startBrainstorm } = await import("./brainstorm.ts");
   const db = openDb(":memory:");
