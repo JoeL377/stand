@@ -4704,3 +4704,35 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
   .sh-tab .sh-crumb-back { display: inline-flex; transform: rotate(180deg); margin-right: -2px; }
   .sh-tab .sh-crumb-back svg { display: block; }
 }
+
+/* A project's card says what the project is for in full, and shows who is on it as their faces. */
+.pj-line.card .pj-goal { overflow: visible; text-overflow: clip; white-space: normal; line-height: 1.4; }
+.pj-face { display: inline-flex; }
+.pj-face + .pj-face { margin-left: -6px; }
+.pj-face .avatar { flex: none; font-size: 9.5px !important; box-shadow: 0 0 0 2px var(--bg); }
+.pj-line.card .pj-faces { gap: 0; }
+
+/* A card doesn't list the to-dos that are moving: two small dots with a count say that some are. */
+.pj-line.card { grid-template-areas: "title title title title" "faces moving meter open"; }
+.pj-line.card .pj-moving { visibility: visible; justify-self: end; gap: 10px; font-size: 12px; }
+.pj-line.card .pj-moving .pj-word { display: none; }
+.pj-line.card .pj-live::before, .pj-line.card .pj-ready::before { margin-right: 0; }
+.pj-line.card .pj-live { display: inline-flex; align-items: center; gap: 5px; }
+
+/* The card, in the order someone reads it: what the project is (name, then its goal in full), then one
+   quiet line at its foot: who is on it at the left, what is going on at the right, in words. */
+.pj-line.card { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "title title title" "faces moving open"; gap: 16px 14px; padding: 16px 16px 14px 18px; }
+.pj-line.card .pj-title { gap: 5px; }
+.pj-line.card .pj-name { font-size: 15.5px; font-weight: 600; letter-spacing: -0.005em; }
+.pj-line.card .pj-goal { font-size: 13px; line-height: 1.45; }
+.pj-line.card .pj-meter { display: none; }
+.pj-line.card .pj-faces { min-height: 22px; }
+.pj-line.card .pj-moving { justify-self: end; gap: 12px; font-size: 12px; font-weight: 400; color: var(--muted); }
+.pj-line.card .pj-moving .pj-word { display: inline; }
+.pj-line.card .pj-live, .pj-line.card .pj-ready { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.pj-line.card .pj-open { font-size: 12px; color: var(--muted); }
+
+/* Every card is the same size: rows share the height of the tallest card, and a card is never
+   shorter than a name, three lines of goal and its foot, so the pinned group matches the rest. */
+.pj-grid { grid-auto-rows: 1fr; }
+.pj-grid > .sh-project { min-height: 156px; }

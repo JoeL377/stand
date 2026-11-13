@@ -299,6 +299,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             : "Talking now";
   const talk = () => (phone && live && !wrapping ? setPrejoin(true) : props.onJoin());
   const members = spaces?.find((s) => s.id === room.id)?.people ?? [];
+  // The people of the space with their pictures, for the faces on a project's card.
+  const [pictured, setPictured] = useState<Array<{ name: string; picture: string | null }>>([]);
+  useEffect(() => {
+    api.members(room.id).then((m) => setPictured(m.members.map(({ name, picture }) => ({ name, picture }))), () => {});
+  }, [room.id]);
   const faces = live && room.people.length ? room.people : members.map((name) => ({ name, picture: null }));
 
   const copy = () => {
@@ -638,6 +643,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               roomId={room.id}
               me={user.name}
               people={members}
+              pictured={pictured}
               deck={null}
               sweep={feed?.questionSweep ?? null}
               open={[...todos, ...questions].filter(mine ? () => true : inProject)}
@@ -1061,6 +1067,8 @@ function TasksTab(props: {
   me: string;
   /** The space's people, by name: who a to-do can be given to. */
   people: string[];
+  /** The same people with their pictures, where they have one. */
+  pictured: Array<{ name: string; picture: string | null }>;
   /** What got done since the last meeting, as the next meeting's Kickoff card shows it. */
   deck: DoneDeck | null;
   /** The open questions Stand's last sweep proposes to close. */
@@ -1403,18 +1411,23 @@ function TasksTab(props: {
       </div>
     );
   };
-  /** Who has a project's open work, by first name; the counts are in each name's tooltip. */
+  /** Who has a project's open work, as their faces: a picture where they have one, else their initials
+   *  on their own colour. The counts are in each face's tooltip. */
   const ownerFaces = (notes: TaskNote[]) => {
     const groups = ownerGroups(notes).filter((g) => g.key);
+    const person = (owner: string) => props.pictured.find((m) => m.name === owner) ?? props.pictured.find((m) => firstName(m.name) === firstName(owner));
     return (
       <span className="pj-faces">
-        {groups.slice(0, 3).map((g, i) => (
-          <span key={g.key} className="rc-name" title={`${g.key === me ? "You" : g.key} · ${g.notes.length}`}>
-            {firstName(g.notes[0].owner!)}
-            {i < Math.min(groups.length, 3) - 1 ? "," : ""}
-          </span>
-        ))}
-        {groups.length > 3 && <span className="pj-faces-more">+{groups.length - 3}</span>}
+        {groups.slice(0, 5).map((g) => {
+          const owner = g.notes[0].owner!;
+          const who = person(owner);
+          return (
+            <span key={g.key} className="pj-face" title={`${g.key === me ? "You" : (who?.name ?? owner)} · ${g.notes.length}`}>
+              <Avatar id={who?.name ?? owner} name={who?.name ?? owner} picture={who?.picture} size={22} />
+            </span>
+          );
+        })}
+        {groups.length > 5 && <span className="pj-faces-more">+{groups.length - 5}</span>}
       </span>
     );
   };
@@ -1437,11 +1450,6 @@ function TasksTab(props: {
     return first ? { text: first.text, face: face(first), more: more.length, onOpen: () => props.onOpen(first.id) } : undefined;
   };
 
-  /** What is moving in a project, for a card: up to three, in progress first, then ready to ship. */
-  const nowsOf = (id: string) =>
-    [...doingIn(id).map((n) => ({ n, ready: false })), ...(readyIn.get(id) ?? []).map((n) => ({ n, ready: true }))]
-      .slice(0, 3)
-      .map(({ n, ready }) => ({ id: n.id, text: n.text, ready, face: face(n), onOpen: () => props.onOpen(n.id) }));
   const grid = !phone;
   /** One project in the list: a card on a wide screen, a row that opens in place on a phone. */
   const projectSection = (p: Project) => {
@@ -1480,7 +1488,6 @@ function TasksTab(props: {
           {...lineOf(p.id)}
           card={grid}
           now={nowOf(p.id)}
-          nows={nowsOf(p.id)}
           pinned={pins.has(p.id)}
           onPin={() => togglePin(p.id)}
           onOpen={() => props.onProject(p.id)}
@@ -1699,7 +1706,6 @@ function TasksTab(props: {
                   {...lineOf("")}
                   card={grid}
                   now={nowOf("")}
-                  nows={nowsOf("")}
                   onOpen={() => props.onProject("none")}
                   roomId={props.roomId}
                   reload={props.reload}
@@ -1772,9 +1778,8 @@ function ProjectLine(props: {
   onDecisions?: () => void;
   /** What someone is on now, on a row: the newest in-progress to-do, and how many more there are. */
   now?: { text: string; face: React.ReactNode; more: number; onOpen: () => void };
-  /** A card on a wide screen: the goal under the name, and up to three to-dos that are moving (`nows`). */
+  /** A card on a wide screen: the goal under the name. */
   card?: boolean;
-  nows?: Array<{ id: string; text: string; ready: boolean; face: React.ReactNode; onOpen: () => void }>;
   /** A row: its tasks are open under it. */
   expanded?: boolean;
   /** Your own pin on it. */
@@ -1873,19 +1878,6 @@ function ProjectLine(props: {
           )
         )}
       </span>
-      {card && (
-        <span className="pj-nows">
-          {(props.nows ?? []).map((n) => (
-            <span key={n.id} className={n.ready ? "pj-now ready" : "pj-now"}>
-              <button type="button" className="pj-now-task" onClick={n.onOpen} title={`${n.ready ? "Ready to ship" : "In progress"}: ${n.text}`}>
-                {n.text}
-              </button>
-              {n.face}
-            </span>
-          ))}
-          {props.inProgress + props.ready > (props.nows?.length ?? 0) && <span className="pj-now-more">+{props.inProgress + props.ready - (props.nows?.length ?? 0)} more</span>}
-        </span>
-      )}
       <span className="pj-moving">
         {props.inProgress > 0 && (
           <span className={head ? "pj-live" : "pj-live row"} title={`${props.inProgress} in progress: someone is on ${props.inProgress === 1 ? "it" : "them"} now`}>
