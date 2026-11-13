@@ -4616,3 +4616,13 @@ footer.controls .control.pill { padding: 7px 16px; }
 .followups li.stands-ready > .check { border-color: var(--ok); background: radial-gradient(circle, var(--ok) 0 3px, transparent 3.6px); }
 .fu-work.quiet { color: var(--muted); background: var(--panel-2); }
 .fu-work.quiet:hover, .fu-work.quiet.open { background: var(--hover); }
+
+/* Colour on the space page's Projects and Tasks tabs is kept for two things: the next action and
+   where a to-do stands (its checkbox, a project's dots). Who owns what, counts and icons are neutral. */
+.sh-panel.tasks .rc-face:not(.none) { background: var(--panel-2) !important; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+.sh-panel.tasks .pj-live, .sh-panel.tasks .pj-ready { color: var(--muted); }
+.sh-panel.tasks .pj-live::before { background: var(--accent); }
+.sh-panel.tasks .pj-ready { display: inline-flex; align-items: center; gap: 6px; }
+.sh-panel.tasks .pj-ready::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.sh-panel.tasks .pj-meter > span { background: var(--muted); }
+.sh-tab.tasks svg, .sh-tab.decisions svg { color: inherit; }
