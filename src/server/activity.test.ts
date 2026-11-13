@@ -113,25 +113,27 @@ test("pages follow each other with nothing lost or shown twice, with a filter to
   assert.equal(new Set(only).size, 76);
 });
 
-test("a burst of one kind by one agent folds into a row; a lone event and other kinds stay", () => {
-  const e = (id: string, ts: number, who: string, kind: ActivityEvent["kind"], text: string): ActivityEvent => ({ id, ts, who, kind, verb: kind, target: { text, taskId: text } });
+test("a to-do's steps fold into one row that reads as the newest; a burst of one kind by one agent folds too", () => {
+  const e = (id: string, ts: number, who: string, kind: ActivityEvent["kind"], text: string, task = true): ActivityEvent => ({ id, ts, who, kind, verb: kind, target: { text, taskId: task ? text : undefined } });
   const MIN = 60_000;
   const rows = groupActivity([
-    e("1", 100 * MIN, "a", "added", "one"),
-    e("2", 99 * MIN, "b", "working", "other"),
-    e("3", 98 * MIN, "a", "added", "two"),
-    e("4", 97 * MIN, "a", "added", "three"),
-    e("5", 96 * MIN, "a", "blocked", "three"),
-    e("6", 50 * MIN, "a", "added", "long before"),
-    e("7", 49 * MIN, "a", "progress", "x"),
-    e("8", 48 * MIN, "a", "progress", "x"),
-    e("9", 47 * MIN, "a", "progress", "x"),
+    e("1", 300 * MIN, "github", "shipped", "tab"),
+    e("2", 299 * MIN, "a", "slide", "one", false),
+    e("3", 298 * MIN, "b", "working", "other"),
+    e("4", 297 * MIN, "a", "slide", "two", false),
+    e("5", 296 * MIN, "a", "ready", "tab"),
+    e("6", 295 * MIN, "a", "slide", "three", false),
+    e("7", 200 * MIN, "a", "working", "tab"),
+    e("8", 199 * MIN, "a", "added", "tab"),
+    // The same to-do, a day before: its own stretch.
+    e("9", -1200 * MIN, "a", "progress", "tab"),
+    e("10", -1300 * MIN, "a", "slide", "long before", false),
   ]);
-  assert.deepEqual(rows.map((r) => [r.id, r.verb, r.burst?.length ?? 1]), [
-    ["burst:1", "added 3 items", 3],
-    ["2", "working", 1],
-    ["5", "blocked", 1],
-    ["6", "added", 1],
-    ["burst:7", "posted 3 updates on", 3],
+  assert.deepEqual(rows.map((r) => [r.id, r.who, r.verb, r.burst?.length ?? 1, !!r.steps]), [
+    ["steps:1", "github", "shipped", 4, true],
+    ["burst:2", "a", "added 3 slides to the product review", 3, false],
+    ["3", "b", "working", 1, false],
+    ["9", "a", "progress", 1, false],
+    ["10", "a", "slide", 1, false],
   ]);
 });

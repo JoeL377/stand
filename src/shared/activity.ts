@@ -72,6 +72,8 @@ export interface ActivityRow {
   event: ActivityEvent;
   /** A burst: every event in it, newest first. */
   burst?: ActivityEvent[];
+  /** The burst is one to-do's steps (added, started, PR opened, merged), whoever took them: the row reads as its newest. */
+  steps?: boolean;
   /** A burst's line: "added 8 to-dos". */
   verb: string;
 }
@@ -80,6 +82,8 @@ export interface ActivityRow {
 export const BURST_GAP_MS = 10 * 60_000;
 /** A burst folds from this many events. */
 export const BURST_MIN = 3;
+/** A to-do's steps this close together are one stretch of work on it. */
+export const STEPS_GAP_MS = 3 * 3_600_000;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -100,26 +104,41 @@ const BURSTS: Partial<Record<ActivityKind, (n: number, sameTarget: boolean) => s
   answer: (n) => `answered ${plural(n, "question")}`,
 };
 
-/** Folds bursts: three or more events of one kind by one agent, each within ten minutes of the last,
- *  become one row where the newest of them sat. Events come and go newest first. */
+/** Folds what reads as one thing into one row, where the newest of it sat. Events come and go newest first.
+ *  First a to-do's steps: everything about one to-do, by anyone, each within three hours of the last,
+ *  is one row that reads as its newest step. Then bursts: three or more of the rest of one kind by
+ *  one agent, each within ten minutes of the last. */
 export function groupActivity(events: ActivityEvent[]): ActivityRow[] {
-  const groups: ActivityEvent[][] = [];
   const open = new Map<string, ActivityEvent[]>();
   const groupOf = new Map<string, ActivityEvent[]>();
-  for (const e of events) {
-    if (!BURSTS[e.kind]) continue;
-    const key = `${e.who}|${e.kind}`;
+  const chain = (key: string, e: ActivityEvent, gap: number) => {
     const g = open.get(key);
-    if (g && g[g.length - 1].ts - e.ts <= BURST_GAP_MS) g.push(e);
-    else {
-      const fresh = [e];
-      groups.push(fresh);
-      open.set(key, fresh);
-    }
+    if (g && g[g.length - 1].ts - e.ts <= gap) g.push(e);
+    else open.set(key, [e]);
     groupOf.set(e.id, open.get(key)!);
+  };
+  for (const e of events) if (e.target?.taskId) chain(`task|${e.target.taskId}`, e, STEPS_GAP_MS);
+  const stepsOf = (e: ActivityEvent) => {
+    const g = e.target?.taskId ? groupOf.get(e.id) : undefined;
+    return g && g.length > 1 ? g : undefined;
+  };
+  const steps = new Map<string, ActivityEvent[]>();
+  for (const e of events) {
+    const g = stepsOf(e);
+    if (g) steps.set(e.id, g);
+  }
+  for (const e of events) {
+    if (steps.has(e.id)) continue;
+    groupOf.delete(e.id);
+    if (BURSTS[e.kind]) chain(`${e.who}|${e.kind}`, e, BURST_GAP_MS);
   }
   const rows: ActivityRow[] = [];
   for (const e of events) {
+    const s = steps.get(e.id);
+    if (s) {
+      if (s[0] === e) rows.push({ id: `steps:${e.id}`, ts: e.ts, who: e.who, event: e, burst: s, steps: true, verb: e.verb });
+      continue;
+    }
     const g = groupOf.get(e.id);
     if (!g || g.length < BURST_MIN) {
       rows.push({ id: e.id, ts: e.ts, who: e.who, event: e, verb: e.verb });
