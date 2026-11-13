@@ -272,6 +272,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
 
   // Archiving takes a row off the page right away; Archived at the bottom of its tab brings it back.
   const archived = feed?.archived ?? [];
+  // The archived rows this page offers to restore.
+  const restorable = archived.filter((a) => a.kind in ARCHIVED_KIND);
   const gone = new Set(archived.map((a) => a.ref));
   const restore = (ref: string) => {
     setFeed((f) => f && { ...f, archived: f.archived.filter((a) => a.ref !== ref) });
@@ -496,6 +498,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     <LinkIcon />
                     {copied ? "Link copied" : "Copy invite link"}
                   </button>
+                  {/* What was archived is out of the way here, not at the foot of every tab. */}
+                  {restorable.length > 0 && (
+                    <button type="button" role="menuitem" onClick={() => { setHeadMore(false); setShowArchived(true); }}>
+                      <ArchiveIcon />
+                      Archived
+                      <span className="count">{restorable.length}</span>
+                    </button>
+                  )}
                   {phone && !live && (
                     <button type="button" role="menuitem" onClick={() => { setHeadMore(false); talk(); }}>
                       <MicIcon />
@@ -746,14 +756,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             />
           )}
 
-          {/* What was archived: meetings under Meetings, everything else under the projects. */}
-          {tab !== "chat" && !mine && (tab !== "projects" || !pageOf || !hasProjects) && <ArchivedList
-            rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
-            open={showArchived}
-            onToggle={() => setShowArchived((v) => !v)}
-            onRestore={restore}
-          />}
         </section>
+        {showArchived && <ArchivedPop rows={restorable} onRestore={restore} onClose={() => setShowArchived(false)} />}
         {viewing && viewing.snaps[viewing.i] && (
           <SnapView
             snap={viewing.snaps[viewing.i]}
@@ -2516,40 +2520,45 @@ function ArchiveButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Which archived rows each tab lists at its bottom. */
-const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
-  projects: ["todo", "question", "decision"],
-  chat: [],
-  meetings: ["meeting", "snap", "jot"],
-  mine: [],
-};
+/** The kinds of archived row the space page offers to restore, with the word shown beside each. */
+const ARCHIVED_KIND: Partial<Record<ArchivedKind, string>> = { todo: "To-do", question: "Question", decision: "Decision", meeting: "Meeting", snap: "Snap", jot: "Note" };
 
-/** A tab's archived rows, folded at its bottom like Done, each with Restore. */
-function ArchivedList(props: { rows: ArchivedRow[]; open: boolean; onToggle: () => void; onRestore: (ref: string) => void }) {
-  if (!props.rows.length) return null;
+/** Everything archived in the space, each with Restore. It opens from the menu behind the faces. */
+function ArchivedPop(props: { rows: ArchivedRow[]; onRestore: (ref: string) => void; onClose: () => void }) {
+  const { onClose } = props;
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onClose]);
   return (
-    <div className={props.open ? "sh-done archived open" : "sh-done archived"}>
-      <button className="sh-done-toggle" aria-expanded={props.open} onClick={props.onToggle}>
-        <ChevronIcon />
-        <ArchiveIcon size={13} />
-        Archived
-        <span className="count">{props.rows.length}</span>
-      </button>
-      {props.open && (
-        <ul className="sh-archived">
-          {props.rows.map((a) => (
-            <li key={a.ref}>
-              <span className="sh-archived-title">{a.kind === "meeting" ? `Meeting · ${fmtDate(a.ts)}` : a.title}</span>
-              <span className="sh-archived-by" title={`Archived ${fmtDate(a.at)} by ${a.by}`}>
-                {firstName(a.by)}
-              </span>
-              <button className="sh-archived-restore" onClick={() => props.onRestore(a.ref)}>
-                Restore
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog archived-pop" role="dialog" aria-modal="true" aria-label="Archived">
+        <header>
+          <h2>Archived</h2>
+          <button className="icon-btn" aria-label="Close" title="Close" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        {props.rows.length === 0 ? (
+          <p className="muted">Nothing is archived.</p>
+        ) : (
+          <ul className="sh-archived">
+            {props.rows.map((a) => (
+              <li key={a.ref}>
+                <span className="sh-archived-kind">{ARCHIVED_KIND[a.kind] ?? ""}</span>
+                <span className="sh-archived-title" title={a.title}>{a.kind === "meeting" ? fmtDate(a.ts) : a.title}</span>
+                <span className="sh-archived-by" title={`Archived ${fmtDate(a.at)} by ${a.by}`}>
+                  {firstName(a.by)}
+                </span>
+                <button className="sh-archived-restore" onClick={() => props.onRestore(a.ref)}>
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
