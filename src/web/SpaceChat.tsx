@@ -3,7 +3,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CaughtLine, ChatCaught, ChatEvent, ChatMessage, ChatThread } from "../shared/chat.ts";
+import { Bell, BellOff } from "lucide-react";
 import { mentionedIn } from "../shared/mentions.ts";
+import type { NotifyStatus } from "../shared/push.ts";
 import { api } from "./api.ts";
 import { mergeCaught, placeCaught } from "./chatCaught.ts";
 import { asMessage, restore, serial, unsaved, type PendingMessage } from "./chatPending.ts";
@@ -733,5 +735,37 @@ function Composer(props: { roomId: string; people: Array<{ id: string; name: str
         <SendIcon />
       </button>
     </form>
+  );
+}
+
+/** For people with the iPhone app: whether this space's chat notifies them of every message or only
+ *  @mentions and replies. Hidden for everyone else, since nothing reaches them either way. */
+export function ChatNotifyBell(props: { roomId: string }) {
+  const [status, setStatus] = useState<NotifyStatus | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.notify(props.roomId).then((s) => live && setStatus(s), () => {});
+    return () => {
+      live = false;
+    };
+  }, [props.roomId]);
+  if (!status?.devices) return null;
+  const all = status.level === "all";
+  const flip = () => {
+    const level = all ? "mentions" : "all";
+    setStatus({ ...status, level });
+    api.setNotify(props.roomId, level).then(setStatus, () => setStatus(status));
+  };
+  return (
+    <button
+      type="button"
+      className={all ? "icon-btn chat-bell" : "icon-btn chat-bell muted"}
+      aria-pressed={!all}
+      aria-label={all ? "Notifying you of every message. Switch to @mentions only" : "Notifying you of @mentions only. Switch to every message"}
+      title={all ? "Every message notifies your phone. Click for @mentions only" : "Only @mentions and replies notify your phone. Click for every message"}
+      onClick={flip}
+    >
+      {all ? <Bell size={14} aria-hidden /> : <BellOff size={14} aria-hidden />}
+    </button>
   );
 }

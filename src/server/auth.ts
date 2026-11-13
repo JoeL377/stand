@@ -100,6 +100,9 @@ export function origin(req: Request) {
 }
 
 const DESKTOP_CLIENT = "stand-desktop";
+const IPHONE_CLIENT = "stand-ios";
+/** Where Google sign-in hands back to the iPhone app (ios/App/App/AppDelegate.swift catches it). */
+export const IPHONE_CALLBACK = "stand://signed-in";
 
 /** Only same-site paths, so the sign-in flow can't be used as an open redirect. */
 const safeNext = (next: unknown) => (typeof next === "string" && /^\/(?!\/)/.test(next) ? next : "/");
@@ -120,6 +123,9 @@ export function authRoutes(db: DB) {
 
   r.post("/logout", (req, res) => {
     const sid = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+    // The iPhone app says which phone is signing out, so it stops getting this person's notifications.
+    const user = userFromRequest(db, req);
+    if (user && typeof req.body?.pushToken === "string") db.removePushDevice(req.body.pushToken.toLowerCase(), user.id);
     if (sid) db.deleteSession(sid);
     res.clearCookie(SESSION_COOKIE, { path: "/" });
     res.json({ ok: true });
@@ -210,10 +216,24 @@ export function authRoutes(db: DB) {
     res.set("Cache-Control", "no-store").redirect(`${back}?code=${encodeURIComponent(code)}`);
   });
 
+  // ---- the iPhone app ------------------------------------------------------
+  // The same handoff for the iPhone app: it opens this in the system's sign-in sheet, which hands
+  // the code back to the app through its own link (stand://signed-in), and the app swaps it with
+  // its secret (PKCE) at /api/auth/desktop/redeem for a session it keeps in its web view.
+  r.get("/app", (req, res) => {
+    const challenge = typeof req.query.challenge === "string" ? req.query.challenge : "";
+    if (!/^[A-Za-z0-9_-]{43}$/.test(challenge)) return res.status(400).send("Open this from the Stand app.");
+    if (!googleEnabled()) return res.status(404).send("Sign in inside the Stand app.");
+    const user = userFromRequest(db, req);
+    if (!user) return res.redirect(`/api/auth/google?next=${encodeURIComponent(`/api/auth/app?challenge=${challenge}`)}`);
+    const code = db.createAuthCode({ clientId: IPHONE_CLIENT, userId: user.id, redirectUri: IPHONE_CALLBACK, challenge, scope: "read" });
+    res.set("Cache-Control", "no-store").redirect(`${IPHONE_CALLBACK}?code=${encodeURIComponent(code)}`);
+  });
+
   r.post("/desktop/redeem", (req, res) => {
     const c = typeof req.body?.code === "string" ? db.takeAuthCode(req.body.code) : null;
     const verifier = typeof req.body?.verifier === "string" ? req.body.verifier : "";
-    if (!c || c.clientId !== DESKTOP_CLIENT || createHash("sha256").update(verifier).digest("base64url") !== c.challenge)
+    if (!c || (c.clientId !== DESKTOP_CLIENT && c.clientId !== IPHONE_CLIENT) || createHash("sha256").update(verifier).digest("base64url") !== c.challenge)
       return res.status(400).json({ error: "That sign-in link expired. Try again from the app." });
     const s = db.createSession(c.userId);
     res.set("Cache-Control", "no-store").json({ cookie: SESSION_COOKIE, session: s.id, maxAgeMs: s.maxAgeMs });

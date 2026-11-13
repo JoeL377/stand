@@ -460,6 +460,23 @@ CREATE TABLE IF NOT EXISTS channel_reads (
   read_up_to INTEGER NOT NULL,
   PRIMARY KEY (channel_id, user_id)
 );
+-- An iPhone with the Stand app that said yes to notifications (push.ts): its Apple push token, and
+-- whether it was built for Apple's test servers (sandbox, an Xcode build) or the real ones (TestFlight, App Store).
+CREATE TABLE IF NOT EXISTS push_devices (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  env TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS push_devices_user ON push_devices(user_id);
+-- Which chat messages in a space notify someone: 'mentions' (only @mentions and replies to them).
+-- No row is every message.
+CREATE TABLE IF NOT EXISTS chat_notify (
+  room_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  level TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id)
+);
 `;
 
 /** Makes the tables a new database needs, and adds what later versions added to an older one.

@@ -99,6 +99,17 @@ export const config = {
   },
   /** Public origin, e.g. https://standup.example.com. Defaults to the request's own origin. */
   publicUrl: env("PUBLIC_URL"),
+  /** Notifications on the iPhone app through Apple (push.ts). Without a key Stand sends none.
+   *  From Apple Developer > Keys, a key with Apple Push Notifications service: APNS_KEY is the .p8
+   *  file's text (its line breaks may be written as \n), APNS_KEY_ID its ten-letter id, APNS_TEAM_ID
+   *  the team's id. APNS_TOPIC is the app's bundle id (ios/App, capacitor.config.ts). */
+  apns: {
+    key: env("APNS_KEY")?.replace(/\\n/g, "\n"),
+    keyId: env("APNS_KEY_ID"),
+    teamId: env("APNS_TEAM_ID"),
+    topic: env("APNS_TOPIC") ?? "studio.conxt.stand",
+  },
+
   /** Comma-separated email addresses allowed in, e.g. "ann@gmail.com,bo@acme.com". */
   allowedEmails: (env("ALLOWED_EMAILS") ?? "")
     .split(",")
