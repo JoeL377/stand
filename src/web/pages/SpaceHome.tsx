@@ -106,15 +106,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [showReview, setShowReview] = useState(false);
   const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session">("");
-  const [picked, setTab] = useState<TabKey>(() => {
+  // Nothing saved: Projects when the space has any, otherwise Tasks.
+  const [picked, setTab] = useState<TabKey | "">(() => {
     if (openTask) return "tasks";
+    if (params.get("project")) return "projects";
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
       // To do and Questions became one Tasks tab, and Done since moved into it. Up next is gone: saved "next" falls through to Tasks.
       if (saved === "todo" || saved === "questions" || saved === "done") return "tasks";
       if (saved && TABS.some((t) => t.key === saved)) return saved as TabKey;
     } catch {}
-    return "tasks";
+    return "";
   });
   const pickTab = (key: TabKey) => {
     setTab(key);
@@ -123,7 +125,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     } catch {}
   };
   // A wide screen has no Chat tab: one saved from a narrower screen shows Tasks, with the dock open.
-  const tab: TabKey = wide && picked === "chat" ? "tasks" : picked;
+  const home: TabKey = (room.projects ?? []).some((p) => !p.archived) ? "projects" : "tasks";
+  const tab: TabKey = picked === "" || (wide && picked === "chat") ? home : picked;
   const docked = wide && dockOpen;
   chatShown.current = wide ? dockOpen : tab === "chat";
   const pickedChat = useRef(picked === "chat");
@@ -317,6 +320,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const counts: Record<TabKey, number> = {
     meetings: meetings.length,
     tasks: todos.length + questions.length,
+    projects: (room.projects ?? []).filter((p) => !p.archived).length,
     decisions: decisions.filter((n) => !n.replacedBy).length,
     // Chat counts what you haven't read, not what is there.
     chat: chat.unread,
@@ -462,7 +466,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               role="tab"
               aria-selected={tab === t.key}
               className={tab === t.key ? `sh-tab ${t.key} on` : `sh-tab ${t.key}`}
-              onClick={() => pickTab(t.key)}
+              onClick={() => {
+                // Projects again, from inside one project, goes back to all of them.
+                if (t.key === "projects" && tab === "projects" && projectFilter) setProjectFilter("");
+                pickTab(t.key);
+              }}
             >
               {t.icon}
               {t.label}
@@ -473,7 +481,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               )}
             </button>
           ))}
-          {!phone && tab === "tasks" && <span className="sh-tab-tools" ref={setTabTools} />}
+          {!phone && (tab === "tasks" || tab === "projects") && <span className="sh-tab-tools" ref={setTabTools} />}
           {tab === "chat" && <span className="sh-chat-bell"><ChatNotifyBell roomId={room.id} /></span>}
           {/* One pill at the end of the tab row filters Decisions by project. Tasks opens a project from its row. */}
           {tab === "decisions" && (
@@ -498,7 +506,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
         )}
 
-        <section className={`sh-panel ${tab}`} role="tabpanel">
+        <section className={tab === "projects" ? "sh-panel tasks projects" : `sh-panel ${tab}`} role="tabpanel">
           {tab === "chat" && <SpaceChat roomId={room.id} name={room.name} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
           {tab === "meetings" && (
             <>
@@ -602,25 +610,27 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             </>
           )}
 
-          {tab === "tasks" && (
+          {(tab === "tasks" || tab === "projects") && (
             <TasksTab
+              key={tab}
+              mode={tab}
               roomId={room.id}
               me={user.name}
               people={members}
-              deck={projectFilter ? null : deck}
+              deck={tab === "tasks" ? deck : null}
               sweep={feed?.questionSweep ?? null}
-              open={[...todos, ...questions].filter(matching)}
-              closed={[...done, ...closedQuestions].filter(matching)}
+              open={[...todos, ...questions].filter(tab === "projects" ? matching : () => true)}
+              closed={[...done, ...closedQuestions].filter(tab === "projects" ? matching : () => true)}
               all={[...todos, ...questions, ...done, ...closedQuestions]}
               mentions={feed?.mentions ?? []}
               projectPicker={projectPicker}
               projects={projects}
-              projectFilter={filtered ? "" : projectFilter}
+              projectFilter={filtered || tab === "tasks" ? "" : projectFilter}
               onProject={setProjectFilter}
               pinned={room.pinnedProjects ?? []}
               decisions={decisionsIn}
               onDecisions={() => pickTab("decisions")}
-              mine={mine}
+              mine={tab === "tasks" && mine}
               onMine={(on) => setParam("mine", on ? "1" : "")}
               toolsIn={phone ? null : tabTools}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
@@ -654,7 +664,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             </>
           )}
 
-          {tab !== "chat" && (!(tab === "tasks" || tab === "decisions") || !projectFilter) && <ArchivedList
+          {tab !== "chat" && tab !== "projects" && (tab !== "decisions" || !projectFilter) && <ArchivedList
             rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
             open={showArchived}
             onToggle={() => setShowArchived((v) => !v)}
@@ -996,6 +1006,8 @@ type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
  * sweep closes the ones Stand proposed and someone confirms (Questions.tsx).
  */
 function TasksTab(props: {
+  /** Projects: the projects as cards, and one project's page. Tasks: every task in one list, by person. */
+  mode: "projects" | "tasks";
   projectPicker: (n: Note) => React.ReactNode;
   projects: Project[];
   /** "" for all, "none" for Unassigned, or one project's id. */
@@ -1074,7 +1086,6 @@ function TasksTab(props: {
   const toggleOpen = (id: string) => saveView({ ...view, open: { ...view.open, [id]: !isOpen(id) } });
   const onlyPinned = view.onlyPinned && pins.size > 0;
   // The tasks that wait on you sit behind a pill, so the projects come first.
-  const [showForYou, setShowForYou] = useState(false);
   // The open question someone is writing an answer to.
   const [answering, setAnswering] = useState<string | null>(null);
   // The sweep someone has open, as it was when they opened it.
@@ -1152,9 +1163,9 @@ function TasksTab(props: {
   const sections = [...ordered.filter((p) => pins.has(p.id)), ...(onlyPinned ? [] : ordered.filter((p) => !pins.has(p.id)))];
   const firstUnpinned = pins.size > 0 ? sections.find((p) => !pins.has(p.id))?.id : undefined;
   // One project's view, the list of projects, or with no projects at all one plain list.
-  const viewing = props.projectFilter === "none" ? "" : props.projectFilter || null;
-  const plain = props.projects.length === 0;
-  const canSort = viewing === null && sections.length > 1;
+  const plain = props.mode === "tasks";
+  const viewing = plain ? null : props.projectFilter === "none" ? "" : props.projectFilter || null;
+  const canSort = !plain && viewing === null && sections.length > 1;
   const canOrder = canSort && sort === "team";
   /** Up or down past the next project in view. */
   const nudge = (id: string, dir: -1 | 1) => {
@@ -1485,20 +1496,15 @@ function TasksTab(props: {
   );
   const pills = (
     <>
-      {!plain && forYou > 0 && (
-        <button type="button" className={showForYou ? "rp-pill for-you on" : "rp-pill for-you"} aria-pressed={showForYou} onClick={() => setShowForYou((v) => !v)} title="Tasks that wait on you: someone tagged you, or work is ready to ship">
-          For you<span className="count">{forYou}</span>
-        </button>
-      )}
-      {viewing === null && pins.size > 0 && (
+      {!plain && viewing === null && pins.size > 0 && (
         <button type="button" className={onlyPinned ? "rp-pill on" : "rp-pill"} aria-pressed={onlyPinned} onClick={() => saveView({ ...view, onlyPinned: !onlyPinned })} title="Only the projects you pinned">
           Pinned
         </button>
       )}
-      {mineButton}
+      {plain && mineButton}
     </>
   );
-  const sweepButton = !props.mine && !props.projectFilter && sweep && (
+  const sweepButton = plain && !props.mine && !props.projectFilter && sweep && (
     <button
       type="button"
       className="rp-pill desk-only"
@@ -1571,12 +1577,12 @@ function TasksTab(props: {
           reload={props.reload}
         />
       )}
-      {!open.length && (viewing !== null || !sections.length) && (
+      {!open.length && (plain || viewing !== null) && (
         <p className="sh-card-empty">
           {props.mine ? "Nothing open is yours." : filterName ? `No open tasks in ${filterName}.` : "Nothing open. New tasks come from meetings and what people save here."}
         </p>
       )}
-      {forYou > 0 && (plain || showForYou) && (
+      {forYou > 0 && plain && (
         <div className="sh-task-group for-you">
           <p
             className="sh-group waiting"
@@ -1595,7 +1601,6 @@ function TasksTab(props: {
       {plain ? (
         <>
           {byOwner(withParts(rest), "")}
-          {!adding && !props.mine && addProject}
         </>
       ) : viewing !== null ? (
         <section className="sh-project open" aria-label={viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
@@ -1628,13 +1633,13 @@ function TasksTab(props: {
           {grid && !adding && !onlyPinned && !props.mine && addProject}
         </>
       )}
-      {done.length > 0 && (
+      {done.length > 0 && (plain || viewing !== null) && (
         <div className={showDone ? "sh-done open" : "sh-done"}>
           {fold("Done", done.length, showDone, () => setShowDone((v) => !v), <DoneIcon />)}
           {showDone && list(done, true)}
         </div>
       )}
-      {dropped.length > 0 && (
+      {dropped.length > 0 && (plain || viewing !== null) && (
         <div className={showDropped ? "sh-done open" : "sh-done"}>
           {fold("Dropped", dropped.length, showDropped, () => setShowDropped((v) => !v), <CloseIcon size={13} />)}
           {showDropped && list(dropped, true)}
@@ -2295,7 +2300,7 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "tasks" | "chat" | "meetings" | "decisions";
+type TabKey = "projects" | "tasks" | "chat" | "meetings" | "decisions";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
@@ -2317,6 +2322,7 @@ function ArchiveButton({ onClick }: { onClick: () => void }) {
 
 /** Which archived rows each tab lists at its bottom. */
 const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
+  projects: [],
   tasks: ["todo", "question"],
   chat: [],
   meetings: ["meeting", "snap", "jot"],
@@ -2390,7 +2396,17 @@ function useWide() {
   return wide;
 }
 
+const ProjectsIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden>
+    <rect x="2" y="2.5" width="5" height="5" rx="1.2" />
+    <rect x="9" y="2.5" width="5" height="5" rx="1.2" />
+    <rect x="2" y="9" width="5" height="5" rx="1.2" />
+    <rect x="9" y="9" width="5" height="5" rx="1.2" />
+  </svg>
+);
+
 const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
+  { key: "projects", label: "Projects", icon: <ProjectsIcon /> },
   { key: "tasks", label: "Tasks", icon: <TodoIcon size={14} /> },
   { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },

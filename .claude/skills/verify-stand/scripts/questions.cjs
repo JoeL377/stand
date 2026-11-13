@@ -90,8 +90,9 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
       check("the space starts with six open questions", open.length === 6, open);
       check("an open question has an Answer button", (await row(LINK).getByRole("button", { name: "Answer", exact: true }).count()) === 1);
       await page.goto(`${base}/s/${roomId}`);
+      await page.getByRole("tab", { name: /^Tasks/ }).click();
       await page.getByRole("button", { name: /Sweep questions/ }).waitFor();
-      check("the sweep is offered on the list of projects", (await page.getByRole("button", { name: /Sweep questions/ }).count()) === 1);
+      check("the sweep is offered on the Tasks tab", (await page.getByRole("button", { name: /Sweep questions/ }).count()) === 1);
     });
 
     await step("sweep: untick one proposal, close the rest in one step", async () => {
@@ -150,6 +151,7 @@ const SHIP = "Ship guest checkout to everyone on Nov 20";
     await step("the answer shows under Done and on the Decisions tab", async () => {
       await clearToasts();
       await page.goto(`${base}/s/${roomId}`);
+      await page.getByRole("tab", { name: /^Tasks/ }).click();
       await page.locator(".sh-done-toggle", { hasText: "Done" }).click();
       const done = page.locator(".sh-done li", { hasText: LINK });
       await done.waitFor();

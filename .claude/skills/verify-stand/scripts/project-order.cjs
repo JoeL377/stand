@@ -90,7 +90,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     });
 
     await step("make three projects with + Project", async () => {
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       for (const [name, goal] of [["Alpha", "First made"], ["Beta", "Second made"], ["Gamma", "Third made"]]) {
         await page.getByRole("button", { name: "+ Project" }).click();
         await page.getByLabel("Project name").fill(name);
@@ -134,7 +134,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
     await step("reload: the order stays", async () => {
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Beta" }).waitFor();
       await snap("after-reload");
     });
@@ -177,7 +177,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       check("an unknown name is refused with the space's projects", bad.result.isError && /Nope.*Alpha/.test(bad.result.content[0].text), bad.result.content[0].text);
       await settled(["Alpha", "Gamma", "Beta"]);
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Beta" }).waitFor();
       await snap("after-mcp-order");
     });
@@ -189,7 +189,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       await page.waitForTimeout(20);
       await tool(11, "create_action", { space: roomId, text: "Beta work", project: "Beta", owner: "unassigned" });
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Beta" }).waitFor();
     });
     check("Team order does not move for new to-dos", same(await onScreen(), ["Alpha", "Gamma", "Beta"]), await onScreen());
@@ -208,7 +208,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     await step("the agent starts on Gamma's to-do", async () => {
       await tool(12, "start_work", { ref: gammaTodo, note: "On it", model: "claude-opus-5-5" });
       await page.reload();
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Gamma" }).locator(".pj-now").waitFor();
       await settled(["Gamma", "Beta", "Alpha"]);
       await snap("active-first-in-progress");
@@ -232,7 +232,6 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     await step("with a project filter on, there is no handle", async () => {
       const id = (await api(`/api/rooms/${roomId}/projects`)).find((p) => p.name === "Gamma").id;
       await page.goto(`${base}/s/${roomId}?project=${id}`);
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
       await page.getByRole("region", { name: "Gamma" }).waitFor();
     });
     check("a filtered list has no drag handle", (await page.locator(".sh-project-grip").count()) === 0);

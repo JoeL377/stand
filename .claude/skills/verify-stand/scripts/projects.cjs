@@ -69,7 +69,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
     });
 
     await step("make a project with + Project on the Tasks tab", async () => {
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("button", { name: "+ Project" }).click();
       await page.getByLabel("Project name").fill("Onboarding");
       await page.getByLabel("Goal").fill("New teams get going in one call");
@@ -113,7 +113,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
       const deadline = Date.now() + 180_000;
       for (;;) {
         await page.goto(`${base}/s/${roomId}?project=${linked.id}`);
-        await page.getByRole("tab", { name: /^Tasks/ }).click();
+        await page.getByRole("tab", { name: /^Projects/ }).click();
         await page.locator(".sh-panel").waitFor(); await page.waitForTimeout(1500);
         if (await page.getByRole("region", { name: linked.name }).locator(".followups li").count()) break;
         if (Date.now() > deadline) throw new Error("no tasks in the project after 3 minutes");
@@ -186,7 +186,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
       // No project given, and its words name one: what Stand's pass should file.
       namedId = (await tool(9, "create_action", { space: roomId, text: "Record the onboarding video", owner: "unassigned" })).created.ref.split("/").pop();
       await page.goto(`${base}/s/${roomId}`);
-      await page.getByRole("tab", { name: /^Tasks/ }).click();
+      await page.getByRole("tab", { name: /^Projects/ }).click();
       await page.getByRole("region", { name: "Agent work" }).waitFor();
       await snap("tasks-agent-project");
     });
@@ -199,7 +199,7 @@ const api = (p) => page.request.get(`${base}${p}`).then((r) => r.json());
       const deadline = Date.now() + 150_000;
       for (;;) {
         await page.goto(`${base}/s/${roomId}?project=${onboardingId}`);
-        await page.getByRole("tab", { name: /^Tasks/ }).click();
+        await page.getByRole("tab", { name: /^Projects/ }).click();
         await page.locator(".sh-panel").waitFor(); await page.waitForTimeout(1000);
         if (await pill().count()) break;
         if (Date.now() > deadline) throw new Error("no suggestion after 150 s");
