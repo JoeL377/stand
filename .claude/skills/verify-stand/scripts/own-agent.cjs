@@ -116,6 +116,7 @@ async function tool(name, args) {
     check("no call yet: get_live_call says so", /No call is running/.test(none.error ?? ""), none.error);
 
     await step("start talking and play the demo to its end", async () => {
+      await page.getByRole("tab", { name: /^Meetings/ }).click();
       await page.getByRole("button", { name: "Start talking" }).click();
       await page.getByRole("button", { name: "Leave", exact: true }).waitFor();
       const show = page.getByRole("button", { name: "Show the agenda" });

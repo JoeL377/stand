@@ -182,6 +182,7 @@ const BIG_PLAN = ["# Billing export", "", "One CSV a month.", "", "```mermaid", 
     await step("the host starts the meeting; the host is not the author", async () => {
       lastPage = rae;
       await rae.goto(spaceUrl);
+      await rae.getByRole("tab", { name: /^Meetings/ }).click();
       await rae.getByRole("button", { name: "Start talking" }).click();
       await rae.getByRole("button", { name: "Leave", exact: true }).waitFor();
     });

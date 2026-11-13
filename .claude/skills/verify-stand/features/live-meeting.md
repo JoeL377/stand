@@ -11,10 +11,10 @@ The meeting screen (`/s/<id>` after Start talking): agenda on the left (rows sho
 - Play demo: a scripted standup (Priya, Sam, Alex, Jordan) over four seeded items DEMO-101..104, shown only when LiveKit or Claude is missing.
 
 ## How to get to it (user POV)
-On a space page click **Start talking**. With no LiveKit (mock mode) the host sees **Play demo** in the bottom bar.
+On a space page open the **Meetings** tab and click **Start talking** (a call that is on shows a green Join pill at the top of every tab). With no LiveKit (mock mode) the host sees **Play demo** in the bottom bar.
 
 ## Driving it with Playwright
-`drive.cjs <run> meeting` clicks `Start talking`, waits for `Leave`, clicks `Play demo`, then waits for the agenda text `DEMO-104 · N remarks` (the demo reached the last item) and `DEMO-104 · N remarks · N to-dos` (live notes landed). Screenshots `meeting-demo-midway` and `meeting-live-notes`; page text in `meeting-page.txt`. The server log should show `[agent] claude-haiku-5-5 … notes for <item>` lines.
+`drive.cjs <run> meeting` opens the Meetings tab, clicks `Start talking`, waits for `Leave`, clicks `Play demo`, then waits for the agenda text `DEMO-104 · N remarks` (the demo reached the last item) and `DEMO-104 · N remarks · N to-dos` (live notes landed). Screenshots `meeting-demo-midway` and `meeting-live-notes`; page text in `meeting-page.txt`. The server log should show `[agent] claude-haiku-5-5 … notes for <item>` lines.
 
 ## Gotchas
 - The opening board needs history the fresh DB doesn't have: an ended meeting with two speakers and tasks closed after it. Seed the DB before the server starts (the startup sweep writes the pages within seconds), or end the demo meeting, close a task on the Tasks tab and wait ~20 s for the pass.

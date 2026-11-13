@@ -1,7 +1,7 @@
 import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors.tsx";
 // A space's own page, the one people open between meetings: what came into the space since
 // last time (snaps and notes people saved, and meetings), and where the space stands
-// (to-dos, decisions, open questions and the suggested agenda). Start talking turns it into the
+// (to-dos, decisions, open questions and the suggested agenda). Start talking, on the Meetings tab, turns it into the
 // meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -393,71 +393,84 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls and only the tabs stay. */}
         <div className="sh-top">
         <header className="sh-head">
-          <h1>{room.name}</h1>
-          {room.purpose && <span className="sh-purpose">{room.purpose}</span>}
+          <h1 title={room.purpose || undefined}>{room.name}</h1>
           <span className="sh-head-end">
+            {/* A call that is on is the one thing here that asks to be acted on, on every tab. */}
             {live && (
-              <span
+              <button
+                type="button"
                 className={wrapping ? "sh-live wrapping" : "sh-live"}
-                title={wrapping ? "Nobody's in the meeting now. It ends by itself in about 2 minutes unless someone joins." : undefined}
+                onClick={talk}
+                title={wrapping ? "Nobody's in the meeting now. It ends by itself in about 2 minutes unless someone joins." : "Join the call"}
               >
                 <span className="dot" />
                 {wrapping ? "Wrapping up" : "Talking now"}
-              </span>
+                <strong>Join</strong>
+              </button>
             )}
-            {faces.length > 0 && (
-              <span className="sh-faces stack" title={faces.map((f) => f.name).join(", ")}>
-                {faces.slice(0, 4).map((p, i) => (
-                  <Avatar key={i} id={p.name} name={p.name} picture={p.picture} size={24} />
-                ))}
-                {faces.length > 4 && <span className="sh-faces-more">+{faces.length - 4}</span>}
-              </span>
-            )}
+            {/* Who is here, and everything about the space that isn't its work, behind the faces. */}
+            <span className="sh-head-more" ref={headMoreBox}>
+              <button
+                type="button"
+                className="sh-people"
+                aria-label="People and invite"
+                aria-haspopup="menu"
+                aria-expanded={headMore}
+                title={phone ? undefined : faces.map((f) => f.name).join(", ")}
+                onClick={() => setHeadMore(!headMore)}
+              >
+                {!phone && faces.length > 0 ? (
+                  <span className="sh-faces stack">
+                    {faces.slice(0, 4).map((p, i) => (
+                      <Avatar key={i} id={p.name} name={p.name} picture={p.picture} size={24} />
+                    ))}
+                    {faces.length > 4 && <span className="sh-faces-more">+{faces.length - 4}</span>}
+                  </span>
+                ) : (
+                  "···"
+                )}
+              </button>
+              {headMore && (
+                <div className="rp-menu sh-head-menu" role="menu">
+                  {room.purpose && <p className="muted">{room.purpose}</p>}
+                  {faces.length > 0 && (
+                    <ul className="sh-head-people">
+                      {faces.map((p, i) => (
+                        <li key={i}>
+                          <Avatar id={p.name} name={p.name} picture={p.picture} size={20} />
+                          {p.name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button type="button" role="menuitem" onClick={copy}>
+                    <LinkIcon />
+                    {copied ? "Link copied" : "Copy invite link"}
+                  </button>
+                  {phone && !live && (
+                    <button type="button" role="menuitem" onClick={() => { setHeadMore(false); talk(); }}>
+                      <MicIcon />
+                      Start talking
+                    </button>
+                  )}
+                  <ModeNote caps={caps} />
+                </div>
+              )}
+            </span>
             {wide && (
               <button
                 className={docked ? "sh-invite sh-chat-toggle on" : "sh-invite sh-chat-toggle"}
                 aria-pressed={docked}
+                aria-label="Chat"
                 onClick={() => (docked ? showDock(false) : toChat())}
                 title={`${docked ? "Hide" : "Show"} chat (${CHAT_SHORTCUT})`}
               >
-                <ChatIcon size={14} />
-                Chat
+                <ChatIcon size={15} />
                 {!docked && <ChatMarks unread={chat.unread} mentions={chat.mentions} />}
               </button>
             )}
-{phone ? (
-              <span className="sh-head-more" ref={headMoreBox}>
-                <button className="sh-invite" aria-label="About this space" aria-haspopup="menu" aria-expanded={headMore} onClick={() => setHeadMore(!headMore)}>
-                  ···
-                </button>
-                {headMore && (
-                  <div className="rp-menu sh-head-menu" role="menu">
-                    {room.purpose && <p className="muted">{room.purpose}</p>}
-                    <button type="button" role="menuitem" onClick={copy}>
-                      <LinkIcon />
-                      {copied ? "Link copied" : "Copy invite link"}
-                    </button>
-                  </div>
-                )}
-              </span>
-            ) : (
-            <button className="sh-invite" onClick={copy} title="Copy a link others can join with">
-              <LinkIcon />
-              {copied ? "Copied" : "Invite"}
-            </button>
-            )}
-            <StartMenu
-              label={wrapping ? "Join" : live ? "Join them" : "Start talking"}
-              review={feed?.review ?? null}
-              designReview={feed?.designReview ?? null}
-              ideaReviews={(feed?.ideaReviews ?? []).filter((r) => r.status !== "done").map((r) => ({ ...r, href: reviewHref(room.id, r.id) }))}
-              designHref={designReviewHref(room.id)}
-              onTalk={talk}
-              onReview={() => setShowReview(true)}
-            />
           </span>
         </header>
-        <ModeNote caps={caps} />
 
         <div className="sh-tabs" role="tablist" aria-label="The space">
           {TABS.filter((t) => !(wide && t.key === "chat")).map((t) => (
@@ -527,7 +540,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                   </p>
                 </div>
               )}
-              {kinds.length > 0 && (
+              {/* Starting a call lives with the calls: here, and on the mic beside the space's name in the sidebar. */}
+              <div className="sh-meet-bar">
+                {kinds.length > 0 && (
                 <div className="sh-kinds" role="group" aria-label="Kind of meeting">
                   {[{ key: "" as const, label: "All", n: 0 }, ...kinds].map((k) => (
                     <button key={k.key} type="button" className={kind === k.key ? "rp-pill on" : "rp-pill"} aria-pressed={kind === k.key} onClick={() => setKind(k.key)}>
@@ -536,7 +551,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     </button>
                   ))}
                 </div>
-              )}
+                )}
+                <StartMenu
+                  label={wrapping ? "Join" : live ? "Join them" : "Start talking"}
+                  review={feed?.review ?? null}
+                  designReview={feed?.designReview ?? null}
+                  ideaReviews={(feed?.ideaReviews ?? []).filter((r) => r.status !== "done").map((r) => ({ ...r, href: reviewHref(room.id, r.id) }))}
+                  designHref={designReviewHref(room.id)}
+                  onTalk={talk}
+                  onReview={() => setShowReview(true)}
+                />
+              </div>
               {kind && (
                 <ul className="sh-rows">
                   {kind === "review" &&
@@ -2055,9 +2080,9 @@ function StartMenu(props: {
   };
   return (
     <div className="sh-start" ref={box}>
-      <button className="primary sh-join" onClick={props.onTalk}>
+      <button className="primary sh-join" aria-label={props.label} onClick={props.onTalk}>
         <MicIcon />
-        {props.label}
+        <span className="sh-join-label">{props.label}</span>
       </button>
       <button className="primary sh-start-more" aria-label="Kinds of call" title="Kinds of call" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <ChevronIcon size={11} />

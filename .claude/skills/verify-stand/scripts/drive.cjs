@@ -97,6 +97,7 @@ async function meeting() {
   // Leaving with unsent changes asks with the browser's confirm(); Playwright dismisses dialogs unless told.
   page.on("dialog", (d) => d.accept());
   await step("start talking", async () => {
+    await page.getByRole("tab", { name: /^Meetings/ }).click();
     await page.getByRole("button", { name: "Start talking" }).click();
     await page.getByRole("button", { name: "Leave", exact: true }).waitFor();
     // The agenda starts folded to its numbered strip; open it to read the rows.

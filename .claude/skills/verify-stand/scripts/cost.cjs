@@ -118,6 +118,7 @@ function writeUsage(rooms) {
     });
 
     await step("a call: start talking, then end it", async () => {
+      await page.getByRole("tab", { name: /^Meetings/ }).click();
       await page.getByRole("button", { name: "Start talking" }).click();
       await page.getByRole("button", { name: "Leave", exact: true }).waitFor();
       await page.getByRole("button", { name: "Leave", exact: true }).click();
