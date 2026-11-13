@@ -4188,3 +4188,13 @@ a .mention { color: inherit; }
 .sk-bar .view-flip { border-color: transparent; background: none; padding: 0; width: 26px; justify-content: center; color: var(--muted); }
 .sk-bar .view-flip:hover, .sk-bar .view-flip.on { background: var(--hover); color: var(--text); }
 @media (max-width: 760px) { .sk-bar .sk-subject { justify-content: flex-start; } }
+/* The sketch's board is a surface of its own: a framed sheet with a faint grid, so the drawing has
+   edges and the row above reads as its toolbar. The map's centre is quiet: the row already names it. */
+.sketch .sk-canvas { margin: 8px 12px 10px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); }
+.sketch .sk-canvas .brain { background: radial-gradient(circle, color-mix(in srgb, var(--text) 10%, transparent) 1px, transparent 1.3px) 0 0 / 22px 22px, color-mix(in srgb, var(--panel) 55%, var(--bg)); }
+.sketch .sk-canvas .design .react-flow { background: none; }
+.sketch .brain-node.root { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); color: var(--text); border: 1.5px solid color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: none; min-height: 60px; font-size: 15px; }
+.sketch .brain-node.root.busy { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+.sketch .brain-node.root.hub { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.sketch .design .brain-zoom { position: absolute; }
+.sketch.phone .sk-canvas { margin: 6px 8px 8px; border-radius: 12px; }

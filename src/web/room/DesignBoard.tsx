@@ -10,7 +10,7 @@
 // React Flow draws it (pan, pinch, the boxes as components) and ELK places it (designLayout.ts).
 
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import { BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, useViewport, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { AppWindow, CircleArrowRight, Database, FileText, Server, Split, Target, TriangleAlert, User } from "lucide-react";
 import type { BrainCaught, BrainstormView, DesignArrow, DesignBox, DesignGroup, DesignKind } from "../../shared/protocol.ts";
@@ -155,15 +155,41 @@ const nodeTypes = { box: BoxNode, frame: GroupNode };
 const edgeTypes = { rel: RelEdge };
 
 /** Brings the whole diagram back into view when it is laid out again or the board changes size. */
-function Fit({ laid, size, tall }: { laid: Laid; size: { w: number; h: number }; tall: boolean }) {
+function Fit({ laid, size, tall, inset = 0 }: { laid: Laid; size: { w: number; h: number }; tall: boolean; inset?: number }) {
   const flow = useReactFlow();
   const first = useRef(true);
   useEffect(() => {
     if (!size.w || !size.h) return;
-    void flow.setViewport(fitView(laid, size, tall), { duration: first.current ? 0 : 300 });
+    void flow.setViewport(fitInside(laid, size, tall, inset), { duration: first.current ? 0 : 300 });
     first.current = false;
   }, [laid, size.w, size.h, tall]);
   return null;
+}
+
+/** The fit, with room left around the drawing so it does not touch the board's edge. */
+function fitInside(laid: Laid, size: { w: number; h: number }, tall: boolean, inset: number) {
+  if (!inset) return fitView(laid, size, tall);
+  const v = fitView(laid, { w: Math.max(1, size.w - inset * 2), h: Math.max(1, size.h - inset * 2) }, tall);
+  return { ...v, x: v.x + inset, y: v.y + inset };
+}
+
+/** The same zoom control as the map's: out, the size (a click fits it all), in. */
+function Zoom({ laid, size, tall, inset }: { laid: Laid; size: { w: number; h: number }; tall: boolean; inset: number }) {
+  const flow = useReactFlow();
+  const { zoom } = useViewport();
+  return (
+    <div className="brain-zoom" role="group" aria-label="Zoom" onClick={(e) => e.stopPropagation()}>
+      <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => void flow.zoomOut({ duration: 200 })}>
+        −
+      </button>
+      <button type="button" className="brain-zoom-pct" title="See it all" onClick={() => void flow.setViewport(fitInside(laid, size, tall, inset), { duration: 300 })}>
+        {Math.round(zoom * 100)}%
+      </button>
+      <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => void flow.zoomIn({ duration: 200 })}>
+        +
+      </button>
+    </div>
+  );
 }
 
 const TEXT_KEY = "stand.design.text";
@@ -272,7 +298,9 @@ export function DesignBoard(props: {
     });
   }, [laid, brainstorm.design]);
   const openAt = laid?.boxes.find((p) => p.box.id === openId)?.x ?? laid?.arrows.find((p) => p.arrow.id === openId)?.x ?? 0;
-  const view = laid && size.w ? fitView(laid, size, tall) : null;
+  // On the sketch the drawing keeps a margin from the board's edge.
+  const inset = props.bare ? (tall ? 12 : 40) : 0;
+  const view = laid && size.w ? fitInside(laid, size, tall, inset) : null;
   const board = useMemo(() => ({ text, only: props.only, openId, pick, onKeep: props.onKeep, onDrop: props.onDrop }), [text, props.only, openId, props.onKeep, props.onDrop]);
 
   return (
@@ -341,8 +369,9 @@ export function DesignBoard(props: {
                   onNodeClick={(e, n) => n.type === "box" && (e.stopPropagation(), pick(n.id))}
                   aria-label="Design diagram"
                 >
-                  <Fit laid={laid} size={size} tall={tall} />
-                  {!tall && <Controls showInteractive={false} position="bottom-left" fitViewOptions={{ padding: 0.04, maxZoom: 1.15 }} />}
+                  <Fit laid={laid} size={size} tall={tall} inset={inset} />
+                  {props.bare && !tall && <Zoom laid={laid} size={size} tall={tall} inset={inset} />}
+                  {!props.bare && !tall && <Controls showInteractive={false} position="bottom-left" fitViewOptions={{ padding: 0.04, maxZoom: 1.15 }} />}
                 </ReactFlow>
               </ReactFlowProvider>
             </Board.Provider>
