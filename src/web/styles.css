@@ -4735,3 +4735,22 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
    shorter than a name, three lines of goal and its foot, so the pinned group matches the rest. */
 .pj-grid { grid-auto-rows: 1fr; }
 .pj-grid > .sh-project { min-height: 156px; }
+/* An open project's row on a wide screen: its view pills where the name was (the trail in the tab row
+   names it, with the goal as its tooltip), then the counts. No rule under it. */
+.pj-head-slot { display: none; }
+@media (min-width: 821px) {
+  .pj-line.head:has(.pj-head-slot) { border-bottom: 0; margin-bottom: 6px; padding-bottom: 0; flex-wrap: wrap; row-gap: 4px; }
+  .pj-line.head .pj-head-slot { display: block; flex: 1 1 auto; min-width: 0; }
+  .pj-line.head .pj-head-slot .pj-views { margin: 0; }
+  .pj-line.head:has(.pj-head-slot) .pj-title { display: none; }
+}
+/* Four views on a phone: words and counts only, and the row scrolls sideways before the page does. */
+@media (max-width: 820px) {
+  .pj-views { overflow-x: auto; scrollbar-width: none; gap: 2px; }
+  .pj-view { flex: none; }
+  .pj-view > svg { display: none; }
+}
+/* The folded sidebar: only the space you are in keeps its color. The others are quiet grey tiles
+   until the pointer is on the rail, or a call is on in one. */
+.sp-shell.collapsed .sp-navrow:not(.active) .sp-space-tile:not(:has(.sp-side-dot.live)) { filter: grayscale(1); opacity: 0.4; transition: filter 120ms ease, opacity 120ms ease; }
+.sp-shell.collapsed .sp-side:hover .sp-navrow .sp-space-tile, .sp-shell.collapsed .sp-navrow:focus-visible .sp-space-tile { filter: none !important; opacity: 1 !important; }
