@@ -2,19 +2,36 @@
 // what it reported (the summary of what changed first, with its screenshots)
 // that opens under the to-do. Agents report through the Stand MCP.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import type { ActionWork, Snap } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { Markdown } from "./Markdown.tsx";
 import { SnapGallery } from "./Snaps.tsx";
 import { fmtAgo, linkLabel, fmtFull } from "./util.ts";
 
+// What was last read about each to-do, kept for the visit. A list that comes back on screen (another
+// tab and back, a project and back) starts from this instead of from nothing: the Projects tab orders
+// its cards by who is working on what, so starting from nothing drew them in one order and then moved
+// them when the answer landed.
+const known = new Map<string, ActionWork>();
+const asked = new Set<string>();
+const read = (ids: string[]) => {
+  const out: Record<string, ActionWork> = {};
+  for (const id of ids) {
+    const w = known.get(id);
+    if (w) out[id] = w;
+  }
+  return out;
+};
+/** Whether every one of these to-dos has been read at least once in this visit. */
+export const workKnown = (ids: string[]) => ids.every((id) => asked.has(id));
+
 /** Polls what agents are doing on these to-dos: often while one is working, rarely otherwise. */
 export function useWork(ids: string[]): Record<string, ActionWork> {
   const key = ids.join(",");
-  const [work, setWork] = useState<Record<string, ActionWork>>({});
+  const [read_, reads] = useState(0);
   useEffect(() => {
-    if (!key) return setWork({});
+    if (!key) return;
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
@@ -22,7 +39,12 @@ export function useWork(ids: string[]): Record<string, ActionWork> {
       let next: Record<string, ActionWork> | null = null;
       try {
         next = await api.work(key.split(","));
-        if (!stop) setWork(next);
+        for (const id of key.split(",")) {
+          asked.add(id);
+          if (next[id]) known.set(id, next[id]);
+          else known.delete(id);
+        }
+        if (!stop) reads((n) => n + 1);
       } catch {
         // Keep what's showing; the next poll tries again.
       }
@@ -38,7 +60,8 @@ export function useWork(ids: string[]): Record<string, ActionWork> {
       document.removeEventListener("visibilitychange", onFocus);
     };
   }, [key]);
-  return work;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => read(key ? key.split(",") : []), [key, read_]);
 }
 
 /** The pill after a to-do's text: "Working" with a spinner while an agent is on it, "Ready to ship"

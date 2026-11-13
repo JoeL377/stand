@@ -15,7 +15,7 @@ import { OwnerPicker } from "../OwnerPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
 import { partsTally, stateOf, withParts } from "../../shared/tasks.ts";
 import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
-import { useWork } from "../WorkLog.tsx";
+import { useWork, workKnown } from "../WorkLog.tsx";
 import { api, type RoomInfo } from "../api.ts";
 import { useAuth } from "../auth.tsx";
 import { FollowUpList, type FollowUpNote } from "../FollowUps.tsx";
@@ -273,6 +273,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
 
   // Archiving takes a row off the page right away; Archived at the bottom of its tab brings it back.
   const archived = feed?.archived ?? [];
+  // The archived rows this page offers to restore.
+  const restorable = archived.filter((a) => a.kind in ARCHIVED_KIND);
   const gone = new Set(archived.map((a) => a.ref));
   const restore = (ref: string) => {
     setFeed((f) => f && { ...f, archived: f.archived.filter((a) => a.ref !== ref) });
@@ -499,6 +501,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     <LinkIcon />
                     {copied ? "Link copied" : "Copy invite link"}
                   </button>
+                  {/* What was archived is out of the way here, not at the foot of every tab. */}
+                  {restorable.length > 0 && (
+                    <button type="button" role="menuitem" onClick={() => { setHeadMore(false); setShowArchived(true); }}>
+                      <ArchiveIcon />
+                      Archived
+                      <span className="count">{restorable.length}</span>
+                    </button>
+                  )}
                   {phone && !live && (
                     <button type="button" role="menuitem" onClick={() => { setHeadMore(false); talk(); }}>
                       <MicIcon />
@@ -750,14 +760,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             />
           )}
 
-          {/* What was archived: meetings under Meetings, everything else under the projects. */}
-          {tab !== "chat" && !mine && (tab !== "projects" || !pageOf || !hasProjects) && <ArchivedList
-            rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
-            open={showArchived}
-            onToggle={() => setShowArchived((v) => !v)}
-            onRestore={restore}
-          />}
         </section>
+        {showArchived && <ArchivedPop rows={restorable} onRestore={restore} onClose={() => setShowArchived(false)} />}
         {viewing && viewing.snaps[viewing.i] && (
           <SnapView
             snap={viewing.snaps[viewing.i]}
@@ -1202,7 +1206,16 @@ function TasksTab(props: {
   const isMine = (n: Note) => !!n.owner && firstName(n.owner) === me;
   const open = props.mine ? props.open.filter(isMine) : props.open;
   const closed = props.mine ? props.closed.filter(isMine) : props.closed;
-  const work = useWork(open.filter((n) => n.kind === "action").map((n) => n.id));
+  const workIds = open.filter((n) => n.kind === "action").map((n) => n.id);
+  const work = useWork(workIds);
+  // The cards are ordered by who is working on what, which is read after the page is up. On the first
+  // look of a visit they wait for it (under a second at most), so they are drawn once, in their final order.
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setWaited(true), 800);
+    return () => clearTimeout(t);
+  }, []);
+  const settled = waited || workKnown(workIds);
   // The comments that tag you, per task: newest first, so [0] is the latest.
   const tagged = new Map<string, TaskMention[]>();
   for (const m of props.mentions) tagged.set(m.noteId, [...(tagged.get(m.noteId) ?? []), m]);
@@ -1265,6 +1278,7 @@ function TasksTab(props: {
       .map((n) => ({ project: n.project, ts: n.ts, inProgress: stateOf(n, work[n.id]) === "doing", reportedAt: work[n.id]?.log[0]?.ts })),
   );
   const ordered = sort === "active" ? activeFirst(inView, activity) : inView;
+  const holding: React.CSSProperties | undefined = sort === "active" && !settled ? { opacity: 0 } : undefined;
   // Your pinned projects first, then the others; or the pinned ones alone.
   const sections = [...ordered.filter((p) => pins.has(p.id)), ...(onlyPinned ? [] : ordered.filter((p) => !pins.has(p.id)))];
   const firstUnpinned = pins.size > 0 ? sections.find((p) => !pins.has(p.id))?.id : undefined;
@@ -1783,8 +1797,8 @@ function TasksTab(props: {
       ) : (
         <>
           {/* A wide screen has the projects as cards, your pinned ones in a first group; a phone has rows that open in place. */}
-          {grid && pins.size > 0 && <div className="pj-grid pinned">{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
-          <div className={grid ? "pj-grid" : "pj-list"}>
+          {grid && pins.size > 0 && <div className="pj-grid pinned" style={holding}>{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
+          <div className={grid ? "pj-grid" : "pj-list"} style={holding}>
             {sections.filter((p) => !grid || !pins.has(p.id)).map(projectSection)}
             {(unassigned.length > 0 || props.loose) && !onlyPinned && (
               <section className={`sh-project unassigned`} aria-label="Unassigned">
@@ -2520,41 +2534,45 @@ function ArchiveButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Which archived rows each tab lists at its bottom. */
-const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
-  projects: ["todo", "question", "decision"],
-  chat: [],
-  meetings: ["meeting", "snap", "jot"],
-  mine: [],
-  activity: [],
-};
+/** The kinds of archived row the space page offers to restore, with the word shown beside each. */
+const ARCHIVED_KIND: Partial<Record<ArchivedKind, string>> = { todo: "To-do", question: "Question", decision: "Decision", meeting: "Meeting", snap: "Snap", jot: "Note" };
 
-/** A tab's archived rows, folded at its bottom like Done, each with Restore. */
-function ArchivedList(props: { rows: ArchivedRow[]; open: boolean; onToggle: () => void; onRestore: (ref: string) => void }) {
-  if (!props.rows.length) return null;
+/** Everything archived in the space, each with Restore. It opens from the menu behind the faces. */
+function ArchivedPop(props: { rows: ArchivedRow[]; onRestore: (ref: string) => void; onClose: () => void }) {
+  const { onClose } = props;
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onClose]);
   return (
-    <div className={props.open ? "sh-done archived open" : "sh-done archived"}>
-      <button className="sh-done-toggle" aria-expanded={props.open} onClick={props.onToggle}>
-        <ChevronIcon />
-        <ArchiveIcon size={13} />
-        Archived
-        <span className="count">{props.rows.length}</span>
-      </button>
-      {props.open && (
-        <ul className="sh-archived">
-          {props.rows.map((a) => (
-            <li key={a.ref}>
-              <span className="sh-archived-title">{a.kind === "meeting" ? `Meeting · ${fmtDate(a.ts)}` : a.title}</span>
-              <span className="sh-archived-by" title={`Archived ${fmtDate(a.at)} by ${a.by}`}>
-                {firstName(a.by)}
-              </span>
-              <button className="sh-archived-restore" onClick={() => props.onRestore(a.ref)}>
-                Restore
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog archived-pop" role="dialog" aria-modal="true" aria-label="Archived">
+        <header>
+          <h2>Archived</h2>
+          <button className="icon-btn" aria-label="Close" title="Close" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        {props.rows.length === 0 ? (
+          <p className="muted">Nothing is archived.</p>
+        ) : (
+          <ul className="sh-archived">
+            {props.rows.map((a) => (
+              <li key={a.ref}>
+                <span className="sh-archived-kind">{ARCHIVED_KIND[a.kind] ?? ""}</span>
+                <span className="sh-archived-title" title={a.title}>{a.kind === "meeting" ? fmtDate(a.ts) : a.title}</span>
+                <span className="sh-archived-by" title={`Archived ${fmtDate(a.at)} by ${a.by}`}>
+                  {firstName(a.by)}
+                </span>
+                <button className="sh-archived-restore" onClick={() => props.onRestore(a.ref)}>
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
