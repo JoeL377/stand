@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { LayoutGrid, Mic, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
@@ -7,6 +7,7 @@ import { ConxtLogo } from "../ConxtLogo.tsx";
 import { ProfileMenu } from "../ProfileMenu.tsx";
 import { SelectedTabWeld } from "../SideNavWeld.tsx";
 import { colorFor, initials } from "../util.ts";
+import { enter } from "../motion.ts";
 
 export const spaceHref = (id: string) => `/s/${id}`;
 /** Straight into talking in the space, past its overview page. */
@@ -131,8 +132,19 @@ function SpaceRow(props: { space: SpaceSummary; collapsed: boolean }) {
 /** The frame around the spaces pages, after Conxt's: the nav on a darker ground, and the page on
  *  an inset panel that lifts off it. The selected row welds to that panel. Conxt keeps its projects
  *  behind a switcher; here spaces are the main thing in the nav, so they're listed. */
+/** The page the shell last showed: going to another space (or All spaces) fades the new page in. */
+let shownPath: string | null = null;
+
 export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: React.ReactNode }) {
   const [creating, setCreating] = useState<string | null>(null);
+  // A new space's page comes in with a short fade and lift; the nav beside it holds still.
+  // Not on the first page of a visit, and not for a tab or project inside the same space.
+  const surface = useRef<HTMLDivElement>(null);
+  const { pathname } = useLocation();
+  useLayoutEffect(() => {
+    if (shownPath !== null && shownPath !== pathname) enter(surface.current, { y: 6 }, 200);
+    shownPath = pathname;
+  }, [pathname]);
   const [collapsed, toggle] = useCollapsed();
   // Folded, each item says what it is on hover.
   const tip = (label: string) => (collapsed ? label : undefined);
@@ -184,7 +196,7 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
           </div>
         </aside>
         <div className="sp-content">
-          <div className="sp-surface">{props.children}</div>
+          <div className="sp-surface" ref={surface}>{props.children}</div>
         </div>
         {creating !== null && <NewSpaceDialog initialName={creating} onClose={() => setCreating(null)} />}
       </div>

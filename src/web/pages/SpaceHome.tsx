@@ -4,12 +4,13 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 // (to-dos, decisions, open questions and the suggested agenda). Start talking, on the Meetings tab, turns it into the
 // meeting. It shows captures but doesn't make them: snaps and notes come from the Stand bar.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, QuestionSweep, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { activeFirst, matchesProject, projectActivity, type Project } from "../../shared/projects.ts";
 import { ProjectPicker } from "../ProjectPicker.tsx";
+import { enter, leave, useEnterOnChange, useTabInk } from "../motion.ts";
 import { OwnerPicker } from "../OwnerPicker.tsx";
 import { MentionText } from "../Mentions.tsx";
 import { partsTally, stateOf, withParts } from "../../shared/tasks.ts";
@@ -69,6 +70,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
       localStorage.setItem(DOCK_KEY, open ? "1" : "0");
     } catch {}
   };
+  // The chat column steps in from the right edge, and back out before it goes.
+  const dockRef = useRef<HTMLElement>(null);
+  const closeDock = () => void leave(dockRef.current, { x: 12 }, 120).then(() => showDock(false));
   // Each rise puts the cursor in the chat box.
   const [focusChat, setFocusChat] = useState(0);
   // On a wide screen the Projects tab's tools (Pinned, the sweep, its menu) sit in the tab row, not a row of their own.
@@ -161,7 +165,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   }, [chatLink, setParams]);
   // Command + J opens chat with the cursor in its box, and closes the dock again; typing in the box keeps it.
   const chatKey = useRef(() => {});
-  chatKey.current = () => (docked ? showDock(false) : toChat());
+  chatKey.current = () => (docked ? closeDock() : toChat());
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "j") return;
@@ -416,6 +420,21 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // The open project's name, shown after "Projects" in the tab row as the way back.
   const crumb = tab === "projects" && hasProjects && !mine && pageOf ? (pageOf === "none" ? "Unassigned" : (projects.find((x) => x.id === pageOf)?.name ?? null)) : null;
 
+  // Moving around the page: the line under the tabs slides to the one picked, and the panel
+  // below comes in. Into a project it comes from the right, and back out to all projects from
+  // the left; another tab only rises a few pixels. Data arriving never moves anything here.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  useTabInk(tabsRef, `${tab}|${crumb ?? ""}`);
+  const view = tab === "projects" && !mine ? `projects|${pageOf}` : tab;
+  useEnterOnChange(panelRef, view, (was, now) => {
+    const [a, from] = was.split("|");
+    const [b, to] = now.split("|");
+    if (a === "projects" && b === "projects") return from && !to ? { x: -12 } : { x: 12 };
+    return { y: 4 };
+  });
+  useEnterOnChange(dockRef, docked, (_, open) => (open ? { x: 12 } : null), 200);
+
   return (
   <PersonColors.Provider value={colorFor}>
     <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread, chatMentions: chat.mentions } : s))}>
@@ -492,7 +511,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                 className={docked ? "sh-invite sh-chat-toggle on" : "sh-invite sh-chat-toggle"}
                 aria-pressed={docked}
                 aria-label="Chat"
-                onClick={() => (docked ? showDock(false) : toChat())}
+                onClick={() => (docked ? closeDock() : toChat())}
                 title={`${docked ? "Hide" : "Show"} chat (${CHAT_SHORTCUT})`}
               >
                 <ChatIcon size={15} />
@@ -502,7 +521,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           </span>
         </header>
 
-        <div className="sh-tabs" role="tablist" aria-label="The space">
+        <div className="sh-tabs" role="tablist" aria-label="The space" ref={tabsRef}>
           {TABS.filter((t) => !(wide && t.key === "chat")).map((t) => (
             <button
               key={t.key}
@@ -544,6 +563,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         )}
 
         <section
+          ref={panelRef}
           className={tab === "projects" || mine ? "sh-panel tasks projects" : `sh-panel ${tab}`}
           role="tabpanel"
           // The name column is as wide as the longest meeting name on the list, so short names keep their numbers close.
@@ -831,11 +851,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         )}
       </main>
       {docked && (
-        <aside className="sh-dock" aria-label="Chat">
+        <aside className="sh-dock" aria-label="Chat" ref={dockRef}>
           <div className="sh-dock-head">
             <strong>Chat</strong>
             <ChatNotifyBell roomId={room.id} />
-            <button className="icon-btn" aria-label="Close chat" title={`Close chat (${CHAT_SHORTCUT})`} onClick={() => showDock(false)}>
+            <button className="icon-btn" aria-label="Close chat" title={`Close chat (${CHAT_SHORTCUT})`} onClick={closeDock}>
               <CloseIcon />
             </button>
           </div>
@@ -1123,6 +1143,14 @@ function TasksTab(props: {
   // On a wide screen an open project's Tasks / Questions / Decisions / Done pills sit in its own row,
   // before its counts, so the page has one rule under the tabs and no second one.
   const [headSlot, setHeadSlot] = useState<HTMLElement | null>(null);
+  // Another pill brings its list in with a quick fade; the pills themselves stay put.
+  const pageRef = useRef<HTMLElement>(null);
+  const shown = useRef(props.show);
+  useLayoutEffect(() => {
+    if (shown.current === props.show) return;
+    shown.current = props.show;
+    for (const el of pageRef.current?.children ?? []) if (!el.classList.contains("pj-views")) enter(el, {}, 140);
+  }, [props.show]);
   const [adding, setAdding] = useState(false);
   const phone = usePhone();
   // Your own pins. A click shows at once and saves behind it.
@@ -1702,7 +1730,7 @@ function TasksTab(props: {
             { key: "done", label: "Done", n: closedOf("action").done.length, icon: <DoneIcon /> },
           ];
           return (
-            <section className="sh-project open pj-page" aria-label={props.solo ? "Everything" : viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
+            <section ref={pageRef} className="sh-project open pj-page" aria-label={props.solo ? "Everything" : viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
               {(() => {
                 const pills = (
                   <div className="pj-views" role="tablist" aria-label="What to show">

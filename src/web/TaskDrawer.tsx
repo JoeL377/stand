@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { leave } from "./motion.ts";
 import { Link, useSearchParams } from "react-router-dom";
 import type { DesignReviewState } from "../shared/designReview.ts";
 import type { Note } from "../shared/protocol.ts";
@@ -25,7 +26,7 @@ import { useDismiss } from "./useDismiss.ts";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
 
-export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange, acts }: {
+export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, onListChange, acts }: {
   /** What a phone's row no longer shows (topic, drop, archive); the drawer shows it on phones only. */
   acts?: (note: Note) => React.ReactNode;
   id: string;
@@ -37,6 +38,14 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange
   onListChange?: () => void;
 }) {
   const { user } = useAuth();
+  // It slides back out to the edge it came from, then closes.
+  const drawerRef = useRef<HTMLElement>(null);
+  const closing = useRef(false);
+  const onClose = useCallback(() => {
+    if (closing.current) return;
+    closing.current = true;
+    void leave(drawerRef.current, { x: 16 }).then(closeNow);
+  }, [closeNow]);
   const [params, setParams] = useSearchParams();
   const planOpen = params.get("view") === "plan";
   const setPlanOpen = (open: boolean) => {
@@ -118,7 +127,7 @@ export function TaskDrawer({ id, onOpen, onClose, onMentionsChange, onListChange
   // On the body, so the page panel's own layering can't put the page over it.
   return createPortal(
     <>
-      <aside className={read ? "task-drawer read" : "task-drawer"} role="complementary" aria-label="Task">
+      <aside ref={drawerRef} className={read ? "task-drawer read" : "task-drawer"} role="complementary" aria-label="Task">
         <div className="td-head">
           {n && state && (
             <span className="td-kind">
