@@ -4,7 +4,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, Image as ImageIcon, List as ListIcon, Square, Type as WordsIcon } from "lucide-react";
+import { Image as ImageIcon, List as ListIcon, Square, Type as WordsIcon } from "lucide-react";
 import { UNTITLED_DESIGN, type BrainstormSummary, type BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
@@ -65,7 +65,7 @@ export function ViewPane(props: {
   const sketching = view === "sketch" && !!live;
   const switches = (
     <>
-      <AsMenu as={as} phone={props.phone} onPick={setPicked} />
+      <AsMenu as={as} onPick={setPicked} />
       {props.onStop && (
         <button type="button" className="rp-pill view-stop-btn" onClick={props.onStop} title="The sketch is kept on its page, and each diagram as a draft spec on a to-do. The call goes on.">
           <Square size={10} aria-hidden />
@@ -119,7 +119,7 @@ const AS: Array<{ key: SketchAs; label: string; Icon: typeof ImageIcon; title: s
 ];
 
 /** One pill for how the sketch is read. It names the reading on screen; its menu has the other two. */
-function AsMenu(props: { as: SketchAs; phone?: boolean; onPick: (as: SketchAs) => void }) {
+function AsMenu(props: { as: SketchAs; onPick: (as: SketchAs) => void }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -132,10 +132,8 @@ function AsMenu(props: { as: SketchAs; phone?: boolean; onPick: (as: SketchAs) =
   const on = AS.find((x) => x.key === props.as)!;
   return (
     <span className="sk-chip-wrap view-as-wrap" onClick={(e) => e.stopPropagation()}>
-      <button type="button" className={`rp-pill view-flip${open ? " on" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Shown as: ${on.label}`} title="Picture, list or words" onClick={() => setOpen((v) => !v)}>
-        <on.Icon size={13} aria-hidden />
-        {!props.phone && on.label}
-        <ChevronDown size={12} aria-hidden />
+      <button type="button" className={`rp-pill view-flip${open ? " on" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Shown as: ${on.label}`} title={`Shown as ${on.label.toLowerCase()}. Picture, list or words`} onClick={() => setOpen((v) => !v)}>
+        <on.Icon size={14} aria-hidden />
       </button>
       {open && (
         <span className="sk-menu" role="menu">

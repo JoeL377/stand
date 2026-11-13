@@ -4180,3 +4180,11 @@ a .mention { color: inherit; }
 .sketch .brain-words { padding-top: 24px; }
 .view-as-wrap .sk-menu { left: auto; right: 0; width: 170px; }
 .sk-bar .view-as-wrap { margin-left: auto; }
+/* A quiet row: the subject is plain text and the reading an icon. Only the board's pills and Stop keep a shape. */
+.sk-bar .sk-subject { border-color: transparent; background: none; padding: 0 6px; font-size: 13px; font-weight: 600; }
+.sk-bar .sk-subject:hover:not(:disabled), .sk-bar .sk-subject.on { background: var(--hover); border-color: transparent; box-shadow: none; }
+.sk-bar .sk-subject > .count, .sk-bar .sk-subject > svg:first-child { display: none; }
+.sk-bar .sk-subject > svg:last-child { color: var(--muted); }
+.sk-bar .view-flip { border-color: transparent; background: none; padding: 0; width: 26px; justify-content: center; color: var(--muted); }
+.sk-bar .view-flip:hover, .sk-bar .view-flip.on { background: var(--hover); color: var(--text); }
+@media (max-width: 760px) { .sk-bar .sk-subject { justify-content: flex-start; } }
