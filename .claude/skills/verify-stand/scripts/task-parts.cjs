@@ -175,11 +175,11 @@ const INVITE = "Invite support to the next review";
       await openTasks("Payments");
       const worker = family(await sections(), WORKER);
       check("the parent counts the new part, ticked", worker.parent?.count === "2/4 parts" && !worker.parts.some((p) => p.text === INVITE), worker);
-      await page.locator(".sh-done-toggle", { hasText: "Done" }).click();
-      const done = await rowsIn(".sh-done.open");
+      await page.locator(".pj-view", { hasText: "Done" }).click();
+      const done = await rowsIn(".pj-state.done");
       await openTasks("Guest checkout");
-      await page.locator(".sh-done-toggle", { hasText: "Done" }).click();
-      done.push(...(await rowsIn(".sh-done.open")));
+      await page.locator(".pj-view", { hasText: "Done" }).click();
+      done.push(...(await rowsIn(".pj-state.done")));
       check(
         "done parts name their parent under Done",
         [KEY, INVITE].every((t) => done.find((r) => r.text === t)?.partOf === `Part of: ${WORKER}`),

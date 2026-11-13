@@ -338,7 +338,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // The project whose page is open ("none" is Unassigned). A space with no projects is one page of everything.
   const pageOf = !hasProjects ? "none" : filtered ? "" : projectFilter;
   const inProject = (n: Note) => !hasProjects || matchesProject(n.project ?? null, pageOf);
-  const show: ProjectShow = params.get("show") === "questions" ? "questions" : params.get("show") === "decisions" ? "decisions" : "tasks";
+  const shown = params.get("show");
+  const show: ProjectShow = shown === "questions" || shown === "decisions" || shown === "done" ? shown : "tasks";
   const projectPicker = (n: Note, own?: boolean) => <ProjectPicker note={n} roomId={room.id} projects={projects} onSaved={load} own={own} />;
 
   const reviews = feed?.reviews ?? [];
@@ -500,7 +501,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               {t.key === "chat" ? (
                 <ChatMarks unread={chat.unread} mentions={chat.mentions} />
               ) : t.key === "projects" && crumb ? (
-                <span className="sh-crumb" dir="auto">
+                <span className="sh-crumb" dir="auto" title={projects.find((x) => x.id === pageOf)?.goal ?? undefined}>
                   <ChevronIcon size={11} />
                   {crumb}
                 </span>
@@ -1093,6 +1094,9 @@ function TasksTab(props: {
   const [showDeck, setShowDeck] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [showDropped, setShowDropped] = useState(false);
+  // On a wide screen an open project's Tasks / Questions / Decisions / Done pills sit in its own row,
+  // before its counts, so the page has one rule under the tabs and no second one.
+  const [headSlot, setHeadSlot] = useState<HTMLElement | null>(null);
   const [adding, setAdding] = useState(false);
   const phone = usePhone();
   // Your own pins. A click shows at once and saves behind it.
@@ -1608,6 +1612,7 @@ function TasksTab(props: {
       {viewing !== null && !plain && !props.solo && (
         <ProjectLine
           head
+          slot={phone ? undefined : setHeadSlot}
           project={viewing ? (projects.find((p) => p.id === viewing) ?? null) : null}
           {...lineOf(viewing)}
           onOpen={() => props.onProject("")}
@@ -1669,24 +1674,45 @@ function TasksTab(props: {
             { key: "tasks", label: "Tasks", n: withParts(todos).length, icon: <TodoIcon size={13} /> },
             { key: "questions", label: "Questions", n: asked.length, icon: <QuestionIcon size={13} /> },
             { key: "decisions", label: "Decisions", n: props.decisionCount, icon: <DecidedIcon size={13} /> },
+            // Finished to-dos are their own last view, so Tasks is only what is still open.
+            { key: "done", label: "Done", n: closedOf("action").done.length, icon: <DoneIcon /> },
           ];
           return (
             <section className="sh-project open pj-page" aria-label={props.solo ? "Everything" : viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
-              <div className="pj-views" role="tablist" aria-label="What to show">
-                {views.map((v) => (
-                  <button key={v.key} type="button" role="tab" aria-selected={props.show === v.key} className={props.show === v.key ? "pj-view on" : "pj-view"} onClick={() => props.onShow(v.key)}>
-                    {v.icon}
-                    {v.label}
-                    {v.n > 0 && <span className="count">{v.n}</span>}
-                  </button>
-                ))}
-              </div>
+              {(() => {
+                const pills = (
+                  <div className="pj-views" role="tablist" aria-label="What to show">
+                    {views.map((v) => (
+                      <button key={v.key} type="button" role="tab" aria-selected={props.show === v.key} className={props.show === v.key ? "pj-view on" : "pj-view"} onClick={() => props.onShow(v.key)}>
+                        {v.icon}
+                        {v.label}
+                        {v.n > 0 && <span className="count">{v.n}</span>}
+                      </button>
+                    ))}
+                  </div>
+                );
+                return !phone && !props.solo && headSlot ? createPortal(pills, headSlot) : pills;
+              })()}
               {props.show === "tasks" && (
                 <>
                   {todos.length > 0 ? byState(todos, viewing) : <p className="sh-card-empty">No open to-dos.</p>}
-                  {folds("action")}
                 </>
               )}
+              {props.show === "done" &&
+                (() => {
+                  const c = closedOf("action");
+                  return (
+                    <>
+                      {c.done.length > 0 ? <div className="sh-task-group pj-state done">{list(c.done, true)}</div> : <p className="sh-card-empty">Nothing done yet.</p>}
+                      {c.dropped.length > 0 && (
+                        <div className={showDropped ? "sh-done open" : "sh-done"}>
+                          {fold("Dropped", c.dropped.length, showDropped, () => setShowDropped((v) => !v), <CloseIcon size={13} />)}
+                          {showDropped && list(c.dropped, true)}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               {props.show === "questions" && (
                 <>
                   {asked.length > 0 ? <div className="sh-task-group pj-state questions">{list(asked, false, viewing)}</div> : <p className="sh-card-empty">No open questions.</p>}
@@ -1770,6 +1796,8 @@ function TaskMenu(props: { sort: "active" | "team"; onSort: (sort: "active" | "t
 function ProjectLine(props: {
   project: Project | null;
   head?: boolean;
+  /** On an open project's row: where its view pills go, in place of the name the tab row's trail already shows. */
+  slot?: (el: HTMLElement | null) => void;
   open: number;
   done: number;
   /** Open to-dos in it that someone is on now. */
@@ -1853,6 +1881,7 @@ function ProjectLine(props: {
           <GripIcon />
         </span>
       )}
+      {head && props.slot && <span className="pj-head-slot" ref={props.slot} />}
       <span className="pj-title">
         {head ? (
           <strong className="pj-name">{name}</strong>
@@ -2371,7 +2400,7 @@ const DoneIcon = () => (
 
 type TabKey = "projects" | "chat" | "meetings";
 /** What a project's page lists: one kind at a time. */
-type ProjectShow = "tasks" | "questions" | "decisions";
+type ProjectShow = "tasks" | "questions" | "decisions" | "done";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
