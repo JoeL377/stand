@@ -204,6 +204,16 @@ test("the brief with its transcript carries the timeline, in JSON and Markdown",
   assert.match(md, /## Timeline/);
   assert.match(md, /Huy \(chat\): the link/);
   assert.match(md, /Huy asked Stand: Who owns it\?\n {2}- Stand: Joe/);
+
+  // An ask to someone's own agent names that agent, not Stand, with its write-up under its answer.
+  const joeAgent = { kind: "agent" as const, person: "Joe", personId: "p1", agent: "opencode", connection: "tok1" };
+  const asked = buildTimeline({ ...base, segments: [], cards: [card({ id: "c2", question: "", at: 4000, note: "We are on SSO.", detail: "## More", agent: joeAgent, to: { personId: "p1", connection: "tok1" } })] });
+  const brief2 = buildBrief({ ...input, timeline: asked, withTranscript: true });
+  assert.deepEqual(
+    brief2.timeline?.map((e) => [e.kind, e.text, e.asked]),
+    [["ask", "(asked with no words: read the call)", "Joe's agent (opencode)"]],
+  );
+  assert.match(briefToMarkdown(brief2), /asked their agent: \(asked with no words: read the call\)\n {2}- Joe's agent \(opencode\): We are on SSO\.\n {2}- The full write-up:\n {4}## More/);
 });
 
 test("a question to Stand and an agent's report go under the item that was up", () => {

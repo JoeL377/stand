@@ -6,7 +6,7 @@ import type { AgentCard } from "../shared/protocol.ts";
 export const NOTICE_MS = 60_000;
 
 /** A card someone's own agent put in the call by itself (say_in_call), with nobody asking it there. */
-export const isSaid = (c: AgentCard) => !!c.agent && c.kind === "answer" && !c.question;
+export const isSaid = (c: AgentCard) => !!c.agent && !c.to && c.kind === "answer" && !c.question;
 
 /** The cards from agents that are on the board now: ready and not dismissed. */
 export const saidOnBoard = (cards: AgentCard[] | null | undefined) => (cards ?? []).filter((c) => isSaid(c) && c.status === "ready" && !c.dismissed);

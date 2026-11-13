@@ -72,6 +72,8 @@ export interface TimelineEntry {
   pending?: boolean;
   /** An answered question: Stand, with the model it ran. */
   answeredBy?: Actor;
+  /** A question to someone's own agent, not to Stand: that agent. */
+  asked?: Actor;
   /** A focus change: the item's short label ("Slide 3", "ENG-142" or the review slide's name). */
   label?: string | null;
   /** What the main view showed then. On a change of what's up, a capture, a question to Stand, an
@@ -258,7 +260,7 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
   for (const c of input.cards) {
     if (c.status === "listening") continue;
     // What someone's own agent said in the call over the MCP, with nobody asking it there: its own line.
-    if (c.agent && !c.question.trim()) {
+    if (c.agent && !c.to && !c.question.trim()) {
       if (c.note) add({ id: `agent:${c.id}`, kind: "agent", ts: c.at, ...by(known(c.agent)), text: c.note, itemId: itemAt(c.at), card: c.id, ...(c.detail && { detail: c.detail }), ...withShown(c.at) }, 2);
       continue;
     }
@@ -272,6 +274,11 @@ export function buildTimeline(input: TimelineInput): TimelineEntry[] {
       ...withShown(c.at),
     };
     if (c.kind === "answer") {
+      // An ask to someone's own agent: from inside the call, to that agent, which answers on the card.
+      if (c.to && c.agent) {
+        add({ id: `ask:${c.id}`, kind: "ask", ts: c.at, text: c.question.trim() || "(asked with no words: read the call)", answer: ready ? c.note : null, asked: known(c.agent), ...(ready && c.detail && { detail: c.detail }), ...rest }, 1);
+        continue;
+      }
       if (!c.question.trim()) continue;
       add({ id: `ask:${c.id}`, kind: "ask", ts: c.at, text: c.question, answer: ready ? c.note : null, ...rest }, 1);
     } else {

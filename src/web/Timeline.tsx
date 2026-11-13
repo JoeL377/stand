@@ -190,7 +190,7 @@ export function AskRow({ e, onShow }: { e: TimelineEntry; onShow?: () => void })
     <div className="seg capture-event capture-ask" role="note">
       <div className="capture-head">
         <strong>
-          <ActorTag actor={e.actor} /> asked Stand
+          <ActorTag actor={e.actor} /> {e.asked ? "asked their agent" : "asked Stand"}
         </strong>
         <span className="seg-time">{fmtTime(e.ts)}</span>
       </div>
@@ -203,7 +203,7 @@ export function AskRow({ e, onShow }: { e: TimelineEntry; onShow?: () => void })
           <Markdown className="capture-text" text={e.answer} breaks />
         </div>
       ) : (
-        <span className="capture-owner">{e.pending ? "Stand is working on it…" : "No answer"}</span>
+        <span className="capture-owner">{e.pending ? (e.asked ? "Their agent is working on it…" : "Stand is working on it…") : "No answer"}</span>
       )}
       <ShownChip shown={e.shown} />
       {onShow && (

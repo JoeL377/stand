@@ -9,7 +9,7 @@ import { type CapturedNote, HeuristicAgent, type ItemNotesDraft, type NotesOptio
 import type { ClientMessage, Item, Note, Segment, ServerMessage, User } from "../shared/protocol.ts";
 import { parseLinearInput } from "./linear.ts";
 import { RoomSession, mentionScore } from "./room.ts";
-import { AgentError, agentApi } from "./agents.ts";
+import { AgentError, agentApi, type LiveCall } from "./agents.ts";
 import { meetingTimeline } from "./timeline.ts";
 import { upNextView } from "./upNextPolish.ts";
 import { UploadLinks } from "./workLog.ts";
@@ -664,6 +664,19 @@ async function join(session: RoomSession, user: Pick<User, "id" | "name">, hello
 async function say(ws: FakeSocket, msg: ClientMessage) {
   ws.emit("message", Buffer.from(JSON.stringify(msg)));
   await new Promise((r) => setImmediate(r));
+}
+/** The call as services.ts wires it for people's own agents: there while the meeting runs. */
+function callOf(session: RoomSession): LiveCall | null {
+  return session.isEnded
+    ? null
+    : {
+        meetingId: session.meetingId,
+        startedAt: session.meetingStartedAt,
+        people: session.state().participants.map((p) => p.name),
+        tail: (since) => session.tail(since),
+        say: (actor, out, askId) => session.agentSay(actor, out, askId),
+        wait: (actor, ms, signal) => session.waitForAsk(actor, ms, signal),
+      };
 }
 
 test("a meeting the server was running when it stopped picks up where it was, host and all", async () => {
@@ -1988,10 +2001,7 @@ test("someone's own agent reads a running call from where it left off and puts a
     brief: () => ({}),
     suggested: (r) => upNextView(db, r, null),
     uploads: new UploadLinks(),
-    call: () =>
-      session.isEnded
-        ? null
-        : { meetingId: session.meetingId, startedAt: session.meetingStartedAt, people: session.state().participants.map((p) => p.name), tail: (since) => session.tail(since), say: (actor, out) => session.agentSay(actor, out) },
+    call: () => callOf(session),
   });
   const token = (scope: "read" | "write") => ({ id: "tok1", label: "opencode", scope, hint: "x", createdAt: 0, lastUsedAt: null });
   const agent = { user: joe, token: token("write"), model: "claude-fable-5-2" };
@@ -2084,4 +2094,107 @@ test("someone's own agent reads a running call from where it left off and puts a
   await session.end();
   assert.throws(() => api.liveCall(agent, { space: room.id }, base), /No call is running/);
   assert.throws(() => api.sayInCall(agent, { space: room.id, text: "Too late" }, base), /No call is running/);
+});
+
+test("your own agent waits in the call; you ask it with @agent, everyone sees the card, and its answer fills it", async (t) => {
+  const db = openDb(":memory:");
+  const joe = db.upsertUser({ googleSub: "g-joe", email: "joe@example.com", name: "Joe Liang", picture: null });
+  const andy = db.upsertUser({ googleSub: "g-andy", email: "andy@example.com", name: "Andy Li", picture: null });
+  const room = db.createRoom("Checkout v2", joe.id);
+  db.touchMembership(room.id, joe.id);
+  db.touchMembership(room.id, andy.id);
+  const session = new RoomSession(db, new AnsweringAgent(), room, () => {});
+  const api = agentApi({ db, notify: () => {}, brief: () => ({}), suggested: (r) => upNextView(db, r, null), uploads: new UploadLinks(), call: () => callOf(session) });
+  const token = (id: string, scope: "read" | "write" = "write") => ({ id, label: "opencode", scope, hint: "x", createdAt: 0, lastUsedAt: null });
+  const agent = { user: joe, token: token("tok1"), model: "claude-fable-5-2" };
+  const base = "https://stand.test";
+  const joeWs = await join(session, joe);
+  const andyWs = await join(session, andy);
+  const cardsOf = (ws: FakeSocket) => {
+    const m = ws.got.filter((x) => x.type === "agent").at(-1);
+    return m?.type === "agent" ? m.cards : [];
+  };
+  const errorsOf = (ws: FakeSocket) => ws.got.flatMap((x) => (x.type === "error" ? [x.message] : []));
+  const tick = () => new Promise((r) => setImmediate(r));
+
+  // Not attached: only Joe hears so, with what to tell his agent, and no card is made.
+  await say(joeWs, { type: "chat", text: "@agent which plan has SSO?" });
+  assert.match(errorsOf(joeWs).at(-1) ?? "", /not attached.*wait_for_ask/);
+  assert.deepEqual(errorsOf(andyWs), []);
+  assert.deepEqual(cardsOf(andyWs), []);
+  await assert.rejects(api.waitForAsk({ user: joe, token: token("tok1", "read") }, { space: room.id }, base), /read only/);
+  await assert.rejects(api.waitForAsk(agent, { space: room.id, since: "yesterday" }, base), /cursor/);
+
+  // Joe's agent waits. Andy can't ask it: only its person does.
+  const waiting = api.waitForAsk(agent, { space: "Checkout" }, base);
+  await say(andyWs, { type: "chat", text: "@agent what's on screen?" });
+  assert.match(errorsOf(andyWs).at(-1) ?? "", /not attached/);
+  session.addSpeech(joe.id, "Joe Liang", "We need SSO for the bank.", Date.now());
+  await say(joeWs, { type: "chat", text: "@agent which plan has SSO?" });
+  const got = await waiting;
+  assert.ok("ask_id" in got);
+  assert.deepEqual([got.question, got.asked_by], ["which plan has SSO?", "Joe Liang"]);
+  assert.match(got.do ?? "", /say_in_call \(ask_id: ag_\d+\)/);
+  assert.ok(got.call?.lines.some((l) => l.text === "We need SSO for the bank."));
+  // Everyone sees the ask at once, as working, under Joe's agent. It took no Pilot seat.
+  const asked = cardsOf(andyWs).at(-1)!;
+  assert.deepEqual([asked.id, asked.status, asked.question, asked.by, asked.agent?.agent, asked.to], [got.ask_id, "working", "which plan has SSO?", "Joe Liang", "opencode", { personId: joe.id, connection: "tok1" }]);
+  assert.ok(!joeWs.got.some((m) => m.type === "pilot" && m.pilot.id), "no Pilot seat taken");
+
+  // The answer fills that card for everyone. A card of its own right after is not held back by it.
+  const out = api.sayInCall(agent, { space: room.id, text: "Enterprise has SSO.", detail: "## Plans\nPro has none.", askId: got.ask_id }, base);
+  assert.equal(out.said.card, got.ask_id);
+  assert.match(out.answered ?? "", /Joe Liang's ask: "which plan has SSO\?"/);
+  await tick();
+  const answered = cardsOf(andyWs).find((c) => c.id === got.ask_id)!;
+  assert.deepEqual([answered.status, answered.note, answered.detail], ["ready", "Enterprise has SSO.", "## Plans\nPro has none."]);
+  assert.throws(() => api.sayInCall(agent, { space: room.id, text: "Again", askId: got.ask_id }, base), /answer already/);
+  assert.throws(() => api.sayInCall({ user: andy, token: token("tok9") }, { space: room.id, text: "Mine", askId: got.ask_id }, base), /No ask of yours/);
+  assert.notEqual(api.sayInCall(agent, { space: room.id, text: "And one more thing." }, base).said.card, got.ask_id);
+
+  // It is in the call's record as a question to Joe's agent, and other agents read it as an answer.
+  const line = meetingTimeline(db, session.meetingId).find((e) => e.id === `ask:${got.ask_id}`);
+  assert.deepEqual([line?.kind, line?.text, line?.answer, line?.asked?.agent], ["ask", "which plan has SSO?", "Enterprise has SSO.", "opencode"]);
+  const read = api.liveCall({ user: andy, token: token("tok2", "read") }, { space: room.id }, base).answers.find((a) => a.id === got.ask_id);
+  assert.deepEqual([read?.by, read?.asked_by], ["Joe Liang's agent (opencode)", "Joe Liang"]);
+
+  // A wait with no ask ends with nothing, and the agent stays attached while it calls again.
+  const huy = { kind: "agent" as const, person: "Joe Liang", personId: joe.id, agent: "opencode", connection: "tok1", model: "claude-fable-5-2" };
+  assert.deepEqual(await session.waitForAsk(huy, 10), { ask: null });
+  // @agent alone asks with no words; it waits for the next wait, which gets it at once.
+  await say(joeWs, { type: "chat", text: "@agent" });
+  const blank = await api.waitForAsk(agent, { space: room.id, since: got.call!.cursor }, base);
+  assert.ok("ask_id" in blank);
+  assert.equal(blank.question, null);
+  assert.match(blank.do ?? "", /no words/);
+  assert.equal(blank.call?.covers, "since your cursor");
+  api.sayInCall(agent, { space: room.id, text: "The call is on SSO.", askId: blank.ask_id }, base);
+
+  // Three open asks at the most. With no answer in 3 minutes an ask fails; a late answer still fills it.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const q of ["one", "two", "three", "four"]) await say(joeWs, { type: "chat", text: `@agent ${q}` });
+  assert.match(errorsOf(joeWs).at(-1) ?? "", /3 asks to answer/);
+  const open = cardsOf(joeWs).filter((c) => c.to && c.status === "working");
+  assert.deepEqual(open.map((c) => c.question), ["one", "two", "three"]);
+  t.mock.timers.tick(3 * 60_000);
+  const failed = cardsOf(joeWs).filter((c) => open.some((o) => o.id === c.id));
+  assert.deepEqual(failed.map((c) => [c.status, c.note]), Array(3).fill(["failed", "Joe's agent didn't answer. Is it still attached?"]));
+  t.mock.timers.reset();
+  api.sayInCall(agent, { space: room.id, text: "Late, but: one.", askId: open[0].id }, base);
+  await tick();
+  assert.equal(cardsOf(joeWs).find((c) => c.id === open[0].id)?.status, "ready");
+
+  // A second agent of Joe's replaces the first, which is told to stop; Joe's next ask goes to the second.
+  const first = session.waitForAsk(huy, 5_000);
+  const second = session.waitForAsk({ ...huy, agent: "Claude Code", connection: "tok2" }, 5_000);
+  assert.match((await first).stop ?? "", /Another of your agents/);
+  await say(joeWs, { type: "chat", text: "@agent and Pro?" });
+  const toSecond = await second;
+  assert.deepEqual([toSecond.ask?.question, toSecond.ask?.to?.connection, toSecond.ask?.agent?.agent], ["and Pro?", "tok2", "Claude Code"]);
+
+  // The call ends: a wait open then stops, and a new one finds no call.
+  const last = session.waitForAsk({ ...huy, connection: "tok2" }, 5_000);
+  await session.end();
+  assert.deepEqual(await last, { ask: null, stop: "The call ended." });
+  await assert.rejects(api.waitForAsk(agent, { space: room.id }, base), /No call is running/);
 });

@@ -33,7 +33,7 @@ import { SKETCH_LOOK_BACK_MS, SketchKeeper, askSketch, saveSketchSpecs } from ".
 import { PilotSeat } from "./pilot.ts";
 import { readSpaceHistory } from "./chatAgent.ts";
 import { repoTools } from "./sources.ts";
-import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, AskCapture, costOf, draftOf, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
+import { AgentKeeper, answerPrompt, ASK_MAX_MS, ASK_SETTLE_MS, ATTACHED_MS, AskCapture, type AskWait, costOf, draftOf, OWN_ASK_MS, OWN_ASKS_MAX, optionsPrompt, type SpaceHistory, toAnswer, toCard, typedAgentAsk, typedAsk } from "./meetingAgent.ts";
 import { capabilities, config } from "./config.ts";
 import type { DB, DraftDiscussion, OpenMeeting } from "./db.ts";
 import { type Agent, type ItemNotesDraft, NotesTrouble, type OnDraft, type RecapChapter, type RecapInput, type SettledTopic, type SnapMedia } from "./llm.ts";
@@ -130,6 +130,17 @@ export interface SpeechSink {
 
 export interface Transcriber {
   stop(): Promise<void>;
+}
+
+/** Someone's own agent attached to a call: it has a wait open, or ended one a moment ago. */
+interface OwnAgent {
+  agent: Actor;
+  since: number;
+  /** When its last wait ended; null while one is open. */
+  endedAt: number | null;
+  wait: { done: (r: AskWait) => void } | null;
+  /** The asks it hasn't been given yet, oldest first: card ids. */
+  queue: string[];
 }
 
 /** Text people typed, trimmed and capped. */
@@ -239,6 +250,11 @@ export class RoomSession implements SpeechSink {
   private list: ListKeeper | null = null;
   /** What Stand put on the board (meetingAgent.ts); null without a model to run it. */
   private agentCards: AgentKeeper | null = null;
+  /** People's own agents waiting in this call for their person to ask (wait_for_ask), by person. In
+   *  memory only: a restart drops the waits, and the agents call again. */
+  private ownAgents = new Map<string, OwnAgent>();
+  /** Each open ask to someone's own agent, until it fails for taking too long. */
+  private askTimers = new Map<string, NodeJS.Timeout>();
   private draftTimer: NodeJS.Timeout | null = null;
   /** Push-to-talk: what each person says while their Ask Stand button is down. */
   private asks = new AskCapture();
@@ -1120,15 +1136,126 @@ export class RoomSession implements SpeechSink {
   /** Someone's own agent says something in the call: a card on the board under its person's name, for
    *  everyone, kept with the meeting. It works without Stand's own model. Returns why not, in a line,
    *  when it can't. */
-  agentSay(agent: Actor, out: Parameters<AgentKeeper["say"]>[1]): AgentCard | string {
+  agentSay(agent: Actor, out: Parameters<AgentKeeper["say"]>[1], askId?: string | null): AgentCard | string {
     if (this.ended) return "That call has ended.";
     // With no Stand model the keeper starts here: from the cards kept with the meeting, so a restart loses none.
     this.agentCards ??= new AgentKeeper(this.db.meetingAgentCards(this.meetingId));
+    if (askId) {
+      const card = this.agentCards.answerAsk(askId, agent, out);
+      if (typeof card === "string") return card;
+      clearTimeout(this.askTimers.get(card.id));
+      this.askTimers.delete(card.id);
+      const own = this.ownAgents.get(card.to!.personId);
+      if (own) own.queue = own.queue.filter((id) => id !== card.id);
+      this.agentChanged();
+      return card;
+    }
     const why = this.agentCards.sayRefusal(agent);
     if (why) return why;
     const card = this.agentCards.say(agent, out);
     this.agentChanged();
     return card;
+  }
+
+  /** Someone's own agent waits for its person to ask it something in this call (wait_for_ask): the ask
+   *  as soon as there is one, nothing after `ms` (it calls again), or why it must stop. One agent per
+   *  person: a second one replaces the first, and takes the asks the first was not given. */
+  waitForAsk(agent: Actor, ms: number, signal?: AbortSignal): Promise<AskWait> {
+    if (this.ended) return Promise.resolve({ ask: null, stop: "The call ended." });
+    const who = agent.personId;
+    if (!who) return Promise.resolve({ ask: null, stop: "Only a person's own agent can wait for their asks." });
+    const now = Date.now();
+    let own = this.ownAgents.get(who);
+    if (own && own.agent.connection !== agent.connection) {
+      own.wait?.done({ ask: null, stop: "Another of your agents attached to this call, and it answers your asks now. Stop waiting." });
+      own = { agent, since: now, endedAt: null, wait: null, queue: own.queue };
+      // The asks the first agent wasn't given are the new one's to answer.
+      for (const id of own.queue) {
+        const c = this.agentCards?.get(id);
+        if (c?.to) Object.assign(c, { agent, model: agent.model ?? null, to: { ...c.to, connection: agent.connection ?? null } });
+      }
+      if (own.queue.length) this.agentChanged();
+    } else if (own) {
+      // The same agent again: a wait it left open is over (its client gave up on it).
+      own.wait?.done({ ask: null });
+      own.agent = agent;
+    } else own = { agent, since: now, endedAt: null, wait: null, queue: [] };
+    this.ownAgents.set(who, own);
+    const held = own;
+    const next = this.nextAsk(held);
+    if (next) {
+      held.endedAt = now;
+      return Promise.resolve({ ask: next });
+    }
+    if (signal?.aborted) {
+      held.endedAt = now;
+      return Promise.resolve({ ask: null });
+    }
+    return new Promise((resolve) => {
+      const wait = {
+        done: (r: AskWait) => {
+          if (held.wait !== wait) return;
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", gone);
+          held.wait = null;
+          held.endedAt = Date.now();
+          resolve(r);
+        },
+      };
+      const gone = () => wait.done({ ask: null });
+      const timer = setTimeout(gone, ms);
+      timer.unref?.();
+      signal?.addEventListener("abort", gone, { once: true });
+      held.wait = wait;
+    });
+  }
+
+  /** The person's own agent, while it's attached to this call. */
+  private attachedAgent(who: string): OwnAgent | null {
+    const own = this.ownAgents.get(who);
+    if (!own) return null;
+    return own.wait || (own.endedAt !== null && Date.now() - own.endedAt < ATTACHED_MS) ? own : null;
+  }
+
+  /** The oldest ask the agent wasn't given yet and that's still open, taken off its queue. */
+  private nextAsk(own: OwnAgent): AgentCard | null {
+    while (own.queue.length) {
+      const card = this.agentCards?.get(own.queue.shift()!);
+      if (card?.status === "working") return card;
+    }
+    return null;
+  }
+
+  /** Someone asks their own agent from inside the call (@agent in the chat): a card for everyone at
+   *  once, which the agent fills. Only the owner asks it, so it takes no Pilot seat, and Stand runs no
+   *  model for it. Not attached: only the asker hears so, and no card is made. */
+  private askOwnAgent(ws: WebSocket, conn: { participantId: string; name: string }, question: string) {
+    if (this.ended) return;
+    const own = this.attachedAgent(conn.participantId);
+    if (!own)
+      return this.send(ws, {
+        type: "error",
+        message: `Your agent is not attached to this call. Tell it: "Join my Stand call in ${this.roomName} and answer when I ask (wait_for_ask)."`,
+      });
+    this.agentCards ??= new AgentKeeper(this.db.meetingAgentCards(this.meetingId));
+    if (this.agentCards.openAsks(conn.participantId).length >= OWN_ASKS_MAX)
+      return this.send(ws, { type: "error", message: `Your agent has ${OWN_ASKS_MAX} asks to answer already. Ask again when it answers one.` });
+    const card = this.agentCards.askAgent(conn.name, conn.participantId, own.agent, question.slice(0, 1000));
+    own.queue.push(card.id);
+    const timer = setTimeout(() => {
+      this.askTimers.delete(card.id);
+      if (!this.agentCards?.expireAsk(card.id)) return;
+      const now = this.ownAgents.get(conn.participantId);
+      if (now) now.queue = now.queue.filter((id) => id !== card.id);
+      this.agentChanged();
+    }, OWN_ASK_MS);
+    timer.unref?.();
+    this.askTimers.set(card.id, timer);
+    this.agentChanged();
+    if (own.wait) {
+      const next = this.nextAsk(own);
+      if (next) own.wait.done({ ask: next });
+    }
   }
 
   nameOf(participantId: string) {
@@ -1306,6 +1433,12 @@ export class RoomSession implements SpeechSink {
         const text = clean(msg.text, 2000);
         if (!text) return;
         this.addSegment(conn.participantId, conn.name, "chat", text, Date.now());
+        // "@agent …" asks your own agent, attached over the MCP.
+        const mine = typedAgentAsk(text);
+        if (mine !== null) {
+          this.askOwnAgent(ws, conn, mine);
+          break;
+        }
         // "@stand add a step…" while a sketch is on changes the sketch; anything else to Stand is a question.
         if (this.sketchAsk(text, conn.name)) break;
         // Anyone writes to Stand in the chat; the pilot's seat only guards asking out loud and on a card.
@@ -2596,6 +2729,10 @@ export class RoomSession implements SpeechSink {
     if (this.nextWaiting) clearTimeout(this.nextWaiting);
     if (this.nextTimer) clearTimeout(this.nextTimer);
     if (this.pilotTimer) clearTimeout(this.pilotTimer);
+    for (const t of this.askTimers.values()) clearTimeout(t);
+    this.askTimers.clear();
+    for (const own of this.ownAgents.values()) own.wait?.done({ ask: null, stop: "The call ended." });
+    this.ownAgents.clear();
     for (const t of this.noteTimers.values()) clearTimeout(t);
     for (const passes of [this.boardPasses, this.listPasses, this.mapPasses]) passes.stop();
     this.noteTimers.clear();
