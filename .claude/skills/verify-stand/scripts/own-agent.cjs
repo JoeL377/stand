@@ -194,6 +194,79 @@ async function tool(name, args) {
       await snap("card-dismissed");
     });
 
+    // Step 1b: a card while a review slide has the middle of the screen reaches everyone, the presenter too.
+    let bo;
+    const BO_TEXT = "On this slide: **the invite links** still point at the old URL.";
+    await step("a second person joins, and a review slide takes the middle for everyone", async () => {
+      const boCtx = await browser.newContext({ viewport: { width: 1280, height: 860 }, permissions: ["microphone"] });
+      bo = await boCtx.newPage();
+      bo.on("pageerror", (e) => consoleErrors.push(`bo: ${e}`));
+      bo.on("dialog", (d) => d.accept());
+      await bo.goto(base);
+      await bo.getByPlaceholder("Your name").fill("Bo Tester");
+      await bo.getByPlaceholder("Work email").fill("bo@verify.test");
+      await bo.getByRole("button", { name: "Continue" }).click();
+      await bo.waitForLoadState("networkidle");
+      await bo.goto(spaceUrl);
+      await bo.getByRole("button", { name: "Join them" }).first().click();
+      const join = bo.getByRole("dialog", { name: "Join the call" }).getByRole("button", { name: "Join muted" });
+      if (await join.count()) await join.click();
+      await bo.getByRole("button", { name: "Leave", exact: true }).waitFor({ timeout: 30_000 });
+      const slide = await tool("add_review_slide", { space, title: "Invite links", summary: "The new invite URL." });
+      check("add_review_slide put a slide on the review", !slide.error, slide.error);
+      const started = await page.request.post(`${base}/api/rooms/${space}/review/start`);
+      check("the review started in the call", started.ok(), started.status());
+      await page.locator(".review-stage").waitFor({ timeout: 20_000 });
+      await bo.locator(".review-stage").waitFor({ timeout: 20_000 });
+      await page.waitForTimeout(800);
+      await snap("review-slide-up");
+    });
+
+    await step("a card arrives during the slide: everyone gets a notice, the presenter too", async () => {
+      const made = await tool("say_in_call", { space, text: BO_TEXT, detail: "## Why\nThe old links are in emails.", model: "claude-fable-5-2" });
+      check("say_in_call posted the card during the review", !made.error, made.error);
+      for (const [who, p] of [["presenter", page], ["Bo", bo]]) {
+        const notice = p.locator(".said-notice:visible");
+        await notice.waitFor({ timeout: 10_000 });
+        const text = await notice.innerText();
+        check(`${who}: the notice names whose agent and has the card's first line`, /Vera's agent/.test(text) && /the invite links still point/.test(text) && /Open/.test(text), text);
+        check(`${who}: the slide stays on the middle screen`, (await p.locator(".review-stage").count()) === 1 && (await p.locator(".board-tab").count()) === 0);
+      }
+      await snap("notice-presenter");
+      await bo.screenshot({ path: path.join(out, `${String(++shot).padStart(2, "0")}-notice-bo.png`) });
+    });
+
+    await step("the presenter opens it: the card shows on her screen only, and Bo's screen does not move", async () => {
+      await page.locator(".said-notice:visible").getByRole("button", { name: "Open" }).click();
+      const panel = page.locator(".said-panel .said-card");
+      await panel.waitFor({ timeout: 5_000 });
+      await panel.locator(".said-card-detail > summary").click();
+      await panel.getByText("The old links are in emails.").waitFor();
+      await snap("panel-presenter");
+      check("the panel has the whole card: words, write-up and dismiss", /the invite links/.test(await panel.innerText()) && (await page.locator(".said-panel").getByRole("button", { name: "Dismiss for everyone" }).count()) === 1);
+      check("the slide is still under the panel, and the notice is gone", (await page.locator(".review-stage").count()) === 1 && (await page.locator(".said-notice:visible").count()) === 0);
+      await bo.waitForTimeout(1_500);
+      check("Bo, who follows the presenter, has no panel and is still on the slide", (await bo.locator(".said-panel").count()) === 0 && (await bo.locator(".review-stage").count()) === 1 && (await bo.locator(".board-tab").count()) === 0);
+      check("Bo still has his notice", (await bo.locator(".said-notice:visible").count()) === 1);
+      await page.keyboard.press("Escape");
+      await page.locator(".said-panel").waitFor({ state: "detached", timeout: 5_000 });
+    });
+
+    await step("Bo closes his notice: the Board tab keeps its mark until he has seen the card", async () => {
+      await bo.locator(".said-notice:visible").getByRole("button", { name: "Close" }).click();
+      await bo.locator(".said-notice:visible").waitFor({ state: "detached", timeout: 5_000 });
+      // Longer than the 12 seconds the mark used to stay.
+      await bo.waitForTimeout(13_000);
+      const tab = bo.getByRole("tab", { name: /^Board/ });
+      check("13 s on, the Board tab still has its mark", (await tab.locator(".agent-tab-mark").count()) === 1);
+      await tab.click();
+      await bo.locator(".said-card", { hasText: "the invite links" }).waitFor({ timeout: 5_000 });
+      await bo.getByRole("tab", { name: "Slides" }).click();
+      await bo.locator(".review-stage").waitFor();
+      check("once seen, the mark is gone", (await bo.getByRole("tab", { name: /^Board/ }).locator(".agent-tab-mark").count()) === 0);
+      await bo.close();
+    });
+
     await step("end the meeting and open the recap", async () => {
       await page.getByRole("button", { name: "Leave", exact: true }).click();
       await page.getByRole("menuitem", { name: "End for everyone" }).click({ timeout: 1500 }).catch(() => {});

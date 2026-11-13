@@ -584,6 +584,8 @@ export function Meeting(props: {
           ending={writingUp}
           phone={phone}
           phoneViews={phoneViews}
+          covered={phone && !!sheet}
+          onUncover={() => setSheet(null)}
           livekit={caps.livekit}
           snapRef={stageSnap}
         />

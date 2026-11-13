@@ -32,6 +32,7 @@ import { SaidDonePill } from "../TaskMarks.tsx";
 import { unanswered } from "./CheckIn.tsx";
 import { PILOT_OPEN, PilotFoot, type PilotActs, PilotPill } from "./Pilot.tsx";
 import { type AgentActs, AgentStatus, AnswerPart, cardFor, FindOptions, isSaid, OptionsCard, READY_MS, SaidCard, SHOW_CARD } from "./AgentCard.tsx";
+import { saidLine } from "../agentNotice.ts";
 
 const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 
@@ -703,9 +704,7 @@ function signalOf(e: Entry, now: number): Entry["signal"] {
 
 /** A card from someone's own agent in the list of cards: the first line of what it said, without its markdown. */
 function saidTitle(c: AgentCard): string {
-  const line = (c.note ?? "").split("\n").find((l) => l.trim()) ?? "";
-  const plain = line.replace(/^[#>\-*\s]+/, "").replace(/[*_`]/g, "").trim();
-  return plain.length > 80 ? `${plain.slice(0, 79).trimEnd()}…` : plain || `From ${first(c.by)}'s agent`;
+  return saidLine(c) || `From ${first(c.by)}'s agent`;
 }
 
 /** What someone's own agent said in the call, as a card of its own in the stack (SaidCard). */

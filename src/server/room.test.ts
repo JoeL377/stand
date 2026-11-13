@@ -1946,6 +1946,21 @@ test("during a review Stand guesses and answers an ask like anywhere else; a map
   await session.end();
 });
 
+test("on a server with no Stand model, a card from an agent after a restart keeps the ones from before it", async () => {
+  const { db, session, meetingId } = setup();
+  const room = db.getRoom(session.roomId)!;
+  const huy = { kind: "agent" as const, person: "Huy", personId: "u2", agent: "opencode", connection: "tok1", model: "claude-fable-5-2" };
+  const first = session.agentSay(huy, { text: "Before the restart" });
+  assert.notEqual(typeof first, "string");
+  const [open] = db.openMeetings(room.id);
+  const again = new RoomSession(db, new HeuristicAgent(), room, () => {}, undefined, undefined, open);
+  const second = again.agentSay({ ...huy, connection: "tok2" }, { text: "After it" });
+  assert.notEqual(typeof second, "string");
+  assert.deepEqual(db.meetingAgentCards(meetingId)?.map((c) => c.note), ["Before the restart", "After it"]);
+  await again.end();
+  await session.end();
+});
+
 test("someone's own agent reads a running call from where it left off and puts a card in it for everyone", async () => {
   const db = openDb(":memory:");
   const joe = db.upsertUser({ googleSub: "g-joe", email: "joe@example.com", name: "Joe Liang", picture: null });
@@ -2036,8 +2051,8 @@ test("someone's own agent reads a running call from where it left off and puts a
   assert.equal(line?.card, card.id);
   assert.equal(line?.actor?.agent, "opencode");
   assert.deepEqual(
-    api.liveCall({ user: andy, token: { ...token("read"), id: "tok2" } }, { space: room.id }, base).answers.map((a) => [a.by, a.text]),
-    [["Joe Liang's agent (opencode)", "The plan misses **retries**."]],
+    api.liveCall({ user: andy, token: { ...token("read"), id: "tok2" } }, { space: room.id }, base).answers.map((a) => [a.id, a.by, a.text]),
+    [[card.id, "Joe Liang's agent (opencode)", "The plan misses **retries**."]],
   );
 
   // Nothing came of it until a person acted: Andy takes its next step as a to-do, then dismisses the card.
