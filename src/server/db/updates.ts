@@ -1,9 +1,18 @@
 // What people and agents post on a to-do: updates, comments, screenshots, and the mentions in them.
 import type { DatabaseSync } from "node:sqlite";
 import type { Actor } from "../../shared/actors.ts";
+import type { ActivityTarget } from "../../shared/activity.ts";
 import type { ItemUpdate, WorkShot } from "../../shared/protocol.ts";
 import { newId } from "../ids.ts";
 import { actorOfUpdate, type Row, toUpdate, toWorkShot } from "./rows.ts";
+
+export type AgentEventKind = "renamed" | "design" | "idea_review" | "project";
+/** What the Activity tab shows of it: the thing it is about, and what it folds (the meetings a rename named). */
+export interface AgentEventBody {
+  target: ActivityTarget | null;
+  items?: ActivityTarget[];
+  detail?: string;
+}
 
 export function updatesStore(db: DatabaseSync) {
   return {
@@ -40,6 +49,10 @@ export function updatesStore(db: DatabaseSync) {
         update.ts,
       );
       return update;
+    },
+    /** Keeps what an agent did when nothing else records who did it (the agent_events table). */
+    addAgentEvent(roomId: string, actor: Actor, kind: AgentEventKind, event: AgentEventBody, ts = Date.now()) {
+      db.prepare("INSERT INTO agent_events (id, room_id, ts, actor_json, kind, event_json) VALUES (?, ?, ?, ?, ?, ?)").run(newId(12), roomId, ts, JSON.stringify(actor), kind, JSON.stringify(event));
     },
     /** Updates in a space since a time, newest first. */
     roomUpdates(roomId: string, since = 0, limit = 200): ItemUpdate[] {

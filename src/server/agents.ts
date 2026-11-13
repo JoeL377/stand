@@ -833,6 +833,7 @@ export function agentApi(deps: AgentDeps) {
       try {
         const existed = db.findProject(room.id, args.name);
         const p = db.createProject(room.id, { name: args.name, goal: args.goal, fromItemId: args.itemId ?? null }, byOf(caller));
+        if (caller.token) db.addAgentEvent(room.id, actorOf(caller), "project", { target: { text: p.name, href: `/s/${room.id}?project=${p.id}` }, detail: p.goal ?? undefined });
         deps.notify(room.id, "followups");
         deps.projectsChanged?.(room.id);
         return {
@@ -1625,7 +1626,16 @@ export function agentApi(deps: AgentDeps) {
         const kind = meetingKindName(db, m.id);
         return { id: m.id, name: title ?? kind, was: m.title ?? kind, on: day(m.startedAt), url: `${baseUrl}/meetings/${m.id}` };
       });
-      for (const r of rooms) deps.notify(r, "followups");
+      for (const r of rooms) {
+        deps.notify(r, "followups");
+        if (!caller.token) continue;
+        const named = plan.filter((p) => p.m.roomId === r).map((p) => renamed.find((x) => x.id === p.m.id)!);
+        db.addAgentEvent(r, actorOf(caller), "renamed", {
+          target: named.length === 1 ? { text: named[0].name, href: `/meetings/${named[0].id}`, kind: "meeting" } : null,
+          items: named.map((x) => ({ text: x.name, href: `/meetings/${x.id}`, kind: "meeting" as const })),
+          detail: named.length === 1 ? `Was "${named[0].was}".` : undefined,
+        });
+      }
       return { renamed, shows_on: "The space's Meetings tab and each meeting's recap page in Stand." };
     },
 
@@ -1890,6 +1900,7 @@ export function agentApi(deps: AgentDeps) {
       if (!b) throw new AgentError(wanted ? `No brainstorm ${wanted} in ${room.name}. get_brainstorm lists the space's brainstorms.` : `No finished brainstorm with ideas in ${room.name} yet.`);
       try {
         const made = setUpIdeaReview(db, room.id, b.id, byOf(caller), args.ideas);
+        if (caller.token) db.addAgentEvent(room.id, actorOf(caller), "idea_review", { target: { text: b.prompt, href: `/s/${room.id}/review/${made.review.id}` } });
         deps.notify(room.id, "followups");
         const view = ideaReviewView(db, made.review.id, baseUrl);
         return {
@@ -2000,6 +2011,11 @@ export function agentApi(deps: AgentDeps) {
         }
         if (context.length > CONTEXT_MAX) throw new AgentError(`A design session holds up to ${CONTEXT_MAX} pieces of context. Put related notes in one piece.`);
         if (given.length) db.saveBrainstormContext(b.id, context);
+        if (caller.token && (!same || given.length))
+          db.addAgentEvent(room.id, actorOf(caller), "design", {
+            target: { text: b.prompt, href: `/s/${room.id}/brainstorm/${b.id}` },
+            detail: same ? `Added context: ${given.map((c) => c.title).join(", ")}.` : given.length ? `With context: ${given.map((c) => c.title).join(", ")}.` : undefined,
+          });
         deps.brainstormTouched?.(room.id);
         const live = deps.liveMeeting?.(room.id);
         const d = shownDiagram(db.getBrainstorm(b.id)?.diagram ?? diagram);
