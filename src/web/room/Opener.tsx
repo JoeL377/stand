@@ -14,6 +14,7 @@ import type { DoneDeck, DoneSlide, FollowUp, Snap } from "../../shared/protocol.
 import { SnapGallery } from "../Snaps.tsx";
 import { CHECKIN_IDLE_MS, CheckIn, type CheckInActs, checkInRows, unanswered } from "./CheckIn.tsx";
 import { Face } from "../RecapChapters.tsx";
+import { fmtDay } from "../util.ts";
 
 export interface OpenerActs extends CheckInActs {
   onPage: (page: number) => void;
@@ -27,7 +28,7 @@ type CheckInState = {
   held?: boolean;
 };
 
-const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+const day = (ts: number) => fmtDay(ts);
 
 /** The Kickoff card's tabs: the done pages, and the check-in when anything carried over. */
 export function openerPages(deck: DoneDeck | null | undefined, followUps: FollowUp[], meetingStartedAt: number) {

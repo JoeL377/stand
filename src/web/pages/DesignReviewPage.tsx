@@ -18,11 +18,12 @@ import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { errorToast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { joinHref, spaceHref } from "./SpacesShell.tsx";
+import { fmtDay } from "../util.ts";
 
 export const designReviewHref = (roomId: string, taskId?: string) => `/s/${roomId}/design-review${taskId ? `?spec=${taskId}` : ""}`;
 /** The page a design review that ran keeps. */
 export const designRecordHref = (roomId: string, reviewId: string) => `/s/${roomId}/design-review/${reviewId}`;
-const day = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" }) : "");
+const day = (ts: number | null) => (ts ? fmtDay(ts) : "");
 const TONE: Record<DesignOutcome, string> = { settled: "ship", open: "fixes", approve: "ship", changes: "fixes", not_yet: "not_yet" };
 
 /** How a review's specs ended, as small counts: "1 Approve · 1 Not yet". */

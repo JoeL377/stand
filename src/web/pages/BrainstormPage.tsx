@@ -13,9 +13,11 @@ import { useDismiss } from "../useDismiss.ts";
 import { BrainIdeas } from "./BrainIdeas.tsx";
 import { errorToast } from "../Toasts.tsx";
 import { joinHref, spaceHref } from "./SpacesShell.tsx";
+import { fmtDay } from "../util.ts";
+import { brainstormHref } from "./brainstormHref.ts";
 
-export const brainstormHref = (roomId: string, id: string) => `/s/${roomId}/brainstorm/${id}`;
-const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+export { brainstormHref };
+const day = (ts: number) => fmtDay(ts);
 export const brainCount = (b: { directions: number; ideas: number }) => `${b.ideas} idea${b.ideas === 1 ? "" : "s"} in ${b.directions} direction${b.directions === 1 ? "" : "s"}`;
 
 export const designCount = (d: { boxes: number; arrows: number }) => `${d.boxes} part${d.boxes === 1 ? "" : "s"}, ${d.arrows} arrow${d.arrows === 1 ? "" : "s"}`;

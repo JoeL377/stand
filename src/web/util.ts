@@ -1,8 +1,19 @@
 import type { Item, MeetingCost } from "../shared/protocol.ts";
 
-export const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-export const fmtDate = (ts: number) =>
-  new Date(ts).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+// One formatter per shape, made once. `toLocaleTimeString` with options builds a new one on every
+// call, which was the largest single cost of drawing a list of meetings or a chat thread.
+const TIME = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+const DATE = new Intl.DateTimeFormat([], { weekday: "short", month: "short", day: "numeric" });
+const DAY = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
+const FULL = new Intl.DateTimeFormat([], { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
+/** "4:46 PM" */
+export const fmtTime = (ts: number) => TIME.format(ts);
+/** "Wed, Nov 11" */
+export const fmtDate = (ts: number) => DATE.format(ts);
+/** "Nov 11" */
+export const fmtDay = (ts: number) => DAY.format(ts);
+/** The whole date and time, as `toLocaleString()` writes it: for a title that says exactly when. */
+export const fmtFull = (ts: number) => FULL.format(ts);
 export const fmtDuration = (ms: number) => {
   const m = Math.max(0, Math.round(ms / 60000));
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;

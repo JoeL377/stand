@@ -98,7 +98,8 @@ function SpaceRow(props: { space: SpaceSummary; collapsed: boolean }) {
   const { space: s, collapsed } = props;
   return (
     <div className="sp-spacerow">
-      <NavLink to={spaceHref(s.id)} className="sp-navrow" title={collapsed ? s.name : s.purpose || s.name} aria-label={s.name}>
+      {/* Pointing at a space reads it, so it is there by the time the click lands. */}
+      <NavLink to={spaceHref(s.id)} className="sp-navrow" title={collapsed ? s.name : s.purpose || s.name} aria-label={s.name} onPointerEnter={() => api.warm(s.id)} onFocus={() => api.warm(s.id)}>
         {({ isActive }) => (
           <>
             {isActive && <SelectedTabWeld />}

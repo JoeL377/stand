@@ -30,7 +30,7 @@ import { BarSlot } from "./barSlot.ts";
 import { Typed, useUpdated } from "./written.tsx";
 import type { AgentCard, Board, BoardDetail, BoardMove, BoardThread, DoneDeck, FollowUp, Item, ListNote, Note, Participant, Segment } from "../../shared/protocol.ts";
 import type { Interim } from "./useRoomSocket.ts";
-import { fmtDuration, initials, keyOf } from "../util.ts";
+import { fmtDuration, initials, keyOf, fmtDay } from "../util.ts";
 import { Opener, type OpenerActs, hasKickoff, kickoffEnd, openerPages, showOpener } from "./Opener.tsx";
 import { SaidDonePill } from "../TaskMarks.tsx";
 import { unanswered } from "./CheckIn.tsx";
@@ -38,7 +38,7 @@ import { PILOT_OPEN, PilotFoot, type PilotActs, PilotPill } from "./Pilot.tsx";
 import { type AgentActs, AgentStatus, AnswerPart, cardFor, FindOptions, isSaid, OptionsCard, READY_MS, SaidCard, SHOW_CARD } from "./AgentCard.tsx";
 import { saidLine } from "../agentNotice.ts";
 
-const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+const day = (ts: number) => fmtDay(ts);
 
 /** Talk older than this isn't "now" any more. */
 const NOW_MS = 120_000;
@@ -1286,7 +1286,7 @@ function useFresh(ids: string[], ms = NEW_MS): Set<string> {
   return new Set(fresh.keys());
 }
 
-const shortDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const shortDate = (ms: number) => fmtDay(ms);
 
 /** One tab's or column's lines: the topic on screen first, oldest at the top so a new line joins
  *  at the foot, then "Earlier" (folded) and "Done" (folded). To-dos get a box anyone can tick; the

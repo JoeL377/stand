@@ -10,6 +10,7 @@ import { ClosedPill, SaidDonePill } from "../TaskMarks.tsx";
 import { useWork } from "../WorkLog.tsx";
 import { Face } from "../RecapChapters.tsx";
 import { usePhoneViewer } from "../phone.ts";
+import { fmtDay } from "../util.ts";
 
 /** With the topic card up this long and nobody answering, the check-in gives the middle back. */
 export const CHECKIN_IDLE_MS = 3 * 60_000;
@@ -26,7 +27,7 @@ export interface CheckInActs {
 export const unanswered = (followUps: FollowUp[], meetingStartedAt: number) =>
   followUps.filter((f) => !f.doneAt && !((f.checkedAt ?? 0) >= meetingStartedAt));
 
-const day = (ts: number) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+const day = (ts: number) => fmtDay(ts);
 
 /** The tasks the check-in lists: still open, or answered on in this meeting. */
 export const checkInRows = (followUps: FollowUp[], meetingStartedAt: number) => followUps.filter((f) => !f.doneAt || f.doneAt >= meetingStartedAt);

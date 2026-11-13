@@ -73,9 +73,14 @@ pushRoutes(app, services);
 // Serve the built web app in production.
 const dist = path.resolve("dist");
 if (config.production && fs.existsSync(dist)) {
-  app.use(express.static(dist));
+  // Files under /assets carry a hash of their contents in their name, so a browser that has one never
+  // needs to ask about it again. The page itself is asked for each time, which is how a new build is found.
+  app.use("/assets", express.static(path.join(dist, "assets"), { immutable: true, maxAge: "365d" }));
+  // One that isn't there is from an older build: say so, don't answer with the page.
+  app.use("/assets", (_req, res) => void res.status(404).set("Cache-Control", "no-store").end());
+  app.use(express.static(dist, { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") }));
   // root: a path given whole is refused when a folder above it starts with a dot (a worktree under ~/.local).
-  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile("index.html", { root: dist }));
+  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile("index.html", { root: dist, headers: { "Cache-Control": "no-cache" } }));
 }
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

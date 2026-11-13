@@ -3,9 +3,6 @@
 // stream, and slides stay sharp at any size.
 
 import { useEffect, useRef, useState } from "react";
-// The legacy build: the default one needs JavaScript features that current
-// Safari and Chrome don't ship yet.
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import type { Deck, DeckTheme, Item, SlideContent, SlideLayout } from "../shared/protocol.ts";
 import { request } from "./api.ts";
@@ -13,13 +10,21 @@ import { request } from "./api.ts";
 /** A big PDF over a slow link takes a while; that isn't the network being down. */
 const SLOW_UPLOAD_MS = 120_000;
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+// The PDF reader is large and only an uploaded deck needs it, so it is fetched the first time one is
+// drawn. The legacy build: the default one needs JavaScript features that current Safari and Chrome
+// don't ship yet.
+let reader: Promise<typeof import("pdfjs-dist/legacy/build/pdf.mjs")> | null = null;
+const pdfReader = () =>
+  (reader ??= import("pdfjs-dist/legacy/build/pdf.mjs").then((pdfjs) => {
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+    return pdfjs;
+  }));
 
 const docs = new Map<string, Promise<PDFDocumentProxy>>();
 function loadDeck(deckId: string) {
   let p = docs.get(deckId);
   if (!p) {
-    p = pdfjs.getDocument({ url: `/api/decks/${deckId}/file`, withCredentials: true }).promise;
+    p = pdfReader().then((pdfjs) => pdfjs.getDocument({ url: `/api/decks/${deckId}/file`, withCredentials: true }).promise);
     p.catch(() => docs.delete(deckId));
     docs.set(deckId, p);
   }

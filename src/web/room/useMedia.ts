@@ -164,7 +164,10 @@ export function useMedia(opts: { roomId: string; livekit: boolean; enabled: bool
       .on(RoomEvent.TrackUnpublished, () => refreshScreen())
       .on(RoomEvent.ParticipantDisconnected, () => refreshScreen())
       .on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-        setSpeaking(new Set(speakers.map((s) => s.identity)));
+        // LiveKit says this several times a second while people talk, mostly with the same people:
+        // the same set is kept then, so the call screen isn't drawn again for nothing.
+        const now = speakers.map((s) => s.identity);
+        setSpeaking((was) => (was.size === now.length && now.every((id) => was.has(id)) ? was : new Set(now)));
       })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => setNeedsAudioUnlock(!room.canPlaybackAudio))
       .on(RoomEvent.LocalTrackPublished, (pub) => {

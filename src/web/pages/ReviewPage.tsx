@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { IDEA_OUTCOMES, REVIEW_OUTCOMES, type IdeaOutcome, type ReviewCaught, type ReviewOutcome, type ReviewSummary, type ReviewView } from "../../shared/protocol.ts";
 import { IdeaCard } from "../room/IdeaCard.tsx";
-import { brainstormHref } from "./BrainstormPage.tsx";
+import { brainstormHref } from "./brainstormHref.ts";
 import { api } from "../api.ts";
 import { ChevronIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
@@ -14,6 +14,7 @@ import { ShotZoom } from "../room/ReviewStage.tsx";
 import { errorToast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { joinHref, spaceHref } from "./SpacesShell.tsx";
+import { fmtDay } from "../util.ts";
 
 export const reviewHref = (roomId: string, reviewId: string, slide?: number) => `/s/${roomId}/review/${reviewId || "next"}${slide ? `?slide=${slide}` : ""}`;
 
@@ -23,7 +24,7 @@ const KINDS = [
   { kind: "question", label: "Open", Icon: QuestionIcon },
 ] as const;
 
-const day = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" }) : "");
+const day = (ts: number | null) => (ts ? fmtDay(ts) : "");
 const outcomeLabel = (o: ReviewOutcome | IdeaOutcome) => [...REVIEW_OUTCOMES, ...IDEA_OUTCOMES].find((x) => x.id === o)!.label;
 /** How a slide ended, in the words of its kind of review. */
 const endOf = (s: ReviewView["slides"][number]) => (s.idea ? { outcome: s.idea.outcome, by: s.idea.outcomeBy } : { outcome: s.outcome, by: s.outcomeBy });

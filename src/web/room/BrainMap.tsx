@@ -8,7 +8,7 @@ import { Typed } from "./written.tsx";
 import type { BrainCaught, BrainNode, BrainstormView } from "../../shared/protocol.ts";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { usePersonColors } from "../PersonColors.tsx";
-import { initials } from "../util.ts";
+import { initials, fmtTime } from "../util.ts";
 
 const FRESH_MS = 7_000;
 /** How long the pill for a new circle that landed off screen stays. */
@@ -16,7 +16,7 @@ const AWAY_MS = 20_000;
 /** The most a click on that pill leaves the map zoomed in. */
 const AWAY_ZOOM = 1.3;
 export const KIND = { action: { label: "To do", Icon: TodoIcon }, decision: { label: "Decided", Icon: DecidedIcon }, question: { label: "Open", Icon: QuestionIcon } } as const;
-export const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+export const clock = (ts: number) => fmtTime(ts);
 
 interface Placed {
   id: string;

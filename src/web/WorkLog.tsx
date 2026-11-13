@@ -7,7 +7,7 @@ import type { ActionWork, Snap } from "../shared/protocol.ts";
 import { api } from "./api.ts";
 import { Markdown } from "./Markdown.tsx";
 import { SnapGallery } from "./Snaps.tsx";
-import { fmtAgo, linkLabel } from "./util.ts";
+import { fmtAgo, linkLabel, fmtFull } from "./util.ts";
 
 /** Polls what agents are doing on these to-dos: often while one is working, rarely otherwise. */
 export function useWork(ids: string[]): Record<string, ActionWork> {
@@ -138,7 +138,7 @@ export function WorkCard({ work, noPlan }: { work: ActionWork; noPlan?: boolean 
       {work.plan && !noPlan && (
         <details className="wl-plan">
           <summary>
-            Plan <span className="wl-by">{work.plan.by}</span> <time title={new Date(work.plan.ts).toLocaleString()}>{fmtAgo(work.plan.ts)}</time>
+            Plan <span className="wl-by">{work.plan.by}</span> <time title={fmtFull(work.plan.ts)}>{fmtAgo(work.plan.ts)}</time>
           </summary>
           <Markdown className="wl-text" text={work.plan.text} />
         </details>
@@ -148,7 +148,7 @@ export function WorkCard({ work, noPlan }: { work: ActionWork; noPlan?: boolean 
           <div className="wl-head">
             <span className={`wl-status ${e.status}`}>{STATUS[e.status]}</span>
             <span className="wl-by">{e.by}</span>
-            <time title={new Date(e.ts).toLocaleString()}>{fmtAgo(e.ts)}</time>
+            <time title={fmtFull(e.ts)}>{fmtAgo(e.ts)}</time>
             {e.links.map((l) => (
               <a key={l} className="wl-link" href={l} target="_blank" rel="noreferrer">
                 {linkLabel(l)}

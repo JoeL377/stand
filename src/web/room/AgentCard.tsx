@@ -14,6 +14,7 @@ import type { AgentCard, AgentDraft } from "../../shared/protocol.ts";
 import { Markdown } from "../Markdown.tsx";
 import { usePersonColors } from "../PersonColors.tsx";
 import { isSaid, saidLine, saidNotice, saidOnBoard } from "../agentNotice.ts";
+import { fmtDay } from "../util.ts";
 
 export interface AgentActs {
   cards: AgentCard[];
@@ -25,7 +26,7 @@ export interface AgentActs {
   onTodo?: (cardId: string) => void;
 }
 
-const shortDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const shortDate = (ms: number) => fmtDay(ms);
 const host = (url: string) => {
   try {
     return new URL(url).hostname.replace(/^www\./, "");

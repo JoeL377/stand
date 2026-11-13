@@ -3,16 +3,8 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useParams } from "react-router-dom";
 import "./styles.css";
 import { Home } from "./pages/Home.tsx";
-import { ReviewPage } from "./pages/ReviewPage.tsx";
-import { DesignReviewPage } from "./pages/DesignReviewPage.tsx";
-import { BrainstormPage } from "./pages/BrainstormPage.tsx";
+import { BrainstormPage, ConnectAgentPage, DeckEditorPage, DeckHistoryPage, DesignReviewPage, ItemHistoryPage, ManageSpaces, RecapPage, ReviewPage, loadTheRest } from "./later.tsx";
 import { RoomPage } from "./pages/RoomPage.tsx";
-import { ManageSpaces } from "./pages/ManageSpaces.tsx";
-import { ItemHistoryPage } from "./pages/ItemHistoryPage.tsx";
-import { RecapPage } from "./pages/RecapPage.tsx";
-import { DeckHistoryPage } from "./pages/DeckHistoryPage.tsx";
-import { DeckEditorPage } from "./pages/DeckEditorPage.tsx";
-import { ConnectAgentPage } from "./pages/ConnectAgentPage.tsx";
 import { RefPage } from "./pages/RefPage.tsx";
 import { AuthGate, useAuth } from "./auth.tsx";
 import { MentionScope, useSpacePeople } from "./Mentions.tsx";
@@ -55,3 +47,5 @@ createRoot(document.getElementById("root")!).render(
     </BrowserRouter>
   </StrictMode>,
 );
+
+loadTheRest();
