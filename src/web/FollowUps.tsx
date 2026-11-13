@@ -72,7 +72,12 @@ export function FollowUpList(props: {
         const stands = !props.stateInBox || done ? null : w?.ready ? "ready" : w?.working || n.state === "doing" ? "doing" : null;
         const standsLabel = stands === "ready" ? "Ready to ship" : stands === "doing" ? "In progress" : null;
         return (
-          <li key={n.id} className={[done && "done", dropped && "dropped", props.openId === n.id && "opened", stands && `stands-${stands}`, props.rowClass?.(n)].filter(Boolean).join(" ") || undefined}>
+          <li
+            key={n.id}
+            className={[done && "done", dropped && "dropped", props.openId === n.id && "opened", stands && `stands-${stands}`, props.onOpen && "can-open", props.rowClass?.(n)].filter(Boolean).join(" ") || undefined}
+            // The whole row opens the to-do, not only its words; its own buttons and pills keep their clicks.
+            onClick={props.onOpen ? (e) => !(e.target as HTMLElement).closest("button, a, input, select, textarea, label, [role=menu]") && props.onOpen!(n) : undefined}
+          >
             <button
               className={mine && n.owner?.split(" ")[0] !== mine ? "check read" : "check"}
               role="checkbox"

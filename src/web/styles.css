@@ -4754,3 +4754,12 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
    until the pointer is on the rail, or a call is on in one. */
 .sp-shell.collapsed .sp-navrow:not(.active) .sp-space-tile:not(:has(.sp-side-dot.live)) { filter: grayscale(1); opacity: 0.4; transition: filter 120ms ease, opacity 120ms ease; }
 .sp-shell.collapsed .sp-side:hover .sp-navrow .sp-space-tile, .sp-shell.collapsed .sp-navrow:focus-visible .sp-space-tile { filter: none !important; opacity: 1 !important; }
+
+/* A to-do under the pointer on the space page: the row lifts, and a chevron after its words says it opens. */
+@media (hover: hover) and (min-width: 821px) {
+  .sh-panel .followups li.can-open { margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 8px; cursor: pointer; }
+  .sh-panel .followups li.can-open:hover, .sh-panel .followups li.can-open.opened { background: var(--hover); }
+  .sh-panel .followups li.can-open .fu-open::after { content: "›"; display: inline-block; margin-left: 8px; color: var(--muted); opacity: 0; transition: opacity 100ms ease, transform 100ms ease; }
+  .sh-panel .followups li.can-open:hover .fu-open::after { opacity: 1; transform: translateX(2px); }
+  .sh-panel .followups li.can-open:hover .fu-open { color: var(--text); text-decoration: none; }
+}
