@@ -3636,7 +3636,6 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 button.chat-caught-open { cursor: pointer; }
 button.chat-caught-open:hover .chat-caught-text { color: var(--text); text-decoration: underline; }
 .chat-caught-label { flex: none; font-weight: 500; color: var(--accent-text); }
-.chat-caught-label .agent-mark { font-size: 10px; }
 .chat-caught.decision .chat-caught-label { color: var(--ok-text); }
 .chat-caught.question .chat-caught-label { color: var(--warn-text); }
 .chat-caught-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3649,7 +3648,6 @@ button.chat-caught-open:hover .chat-caught-text { color: var(--text); text-decor
 .chat-recap { margin: 2px 8px 0 42px; font-size: 12px; min-width: 0; }
 .chat-recap-head { display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; min-height: 0; height: 20px; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; color: var(--muted); text-align: left; cursor: pointer; }
 .chat-recap-head:disabled { cursor: default; opacity: 1; }
-.chat-recap-head .agent-mark { flex: none; font-size: 10px; color: var(--muted); }
 .chat-recap-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--text); }
 .chat-recap-n { flex: none; white-space: nowrap; }
 .chat-recap-head svg { flex: none; opacity: 0.6; transition: transform var(--dur-ui) var(--ease-out); }

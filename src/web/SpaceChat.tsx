@@ -656,12 +656,7 @@ function CaughtRow(props: { line: CaughtLine; onOpen?: (id: string) => void; onR
   const said = `${CAUGHT_LABEL[line.kind]}: ${line.text}${line.owner ? ` · ${line.owner}` : ""}`;
   const inner = (
     <>
-      <strong className="chat-caught-label">
-        <span className="agent-mark" aria-hidden>
-          ✦{" "}
-        </span>
-        {CAUGHT_LABEL[line.kind]}
-      </strong>
+      <strong className="chat-caught-label">{CAUGHT_LABEL[line.kind]}</strong>
       <span className="chat-caught-text">{line.text}</span>
     </>
   );
@@ -695,9 +690,6 @@ function SessionRecap({ caught }: { caught: ChatCaught }) {
   return (
     <div className={open ? "chat-recap open" : "chat-recap"} role="note">
       <button type="button" className="chat-recap-head" aria-expanded={open} disabled={!caught.summary && !more.length} onClick={() => setOpen((o) => !o)}>
-        <span className="agent-mark" aria-hidden>
-          ✦
-        </span>
         <strong>{title}</strong>
         {more.length > 0 && <span className="chat-recap-n">+{more.length}</span>}
         {counts.length > 0 && <span className="chat-recap-n">· {counts.join(" · ")}</span>}
