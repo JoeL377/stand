@@ -4860,6 +4860,15 @@ button.sh-live:hover { background: color-mix(in srgb, var(--ok) 20%, transparent
 .ac-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .ac-who { color: var(--text); font-weight: 500; }
 .ac-who-short { display: none; }
+/* A run of rows by one agent: the face and the name once, the rest line up under the words. */
+.ac-face-gap { flex: none; width: 20px; }
+.ac-row.lead:not(:first-child) { margin-top: 4px; }
+.ac-row.follows .ac-line { min-height: 28px; }
+.ac-row.follows { contain-intrinsic-size: auto 28px; }
+/* The time shows on the row that starts a run, and on the one pointed at. */
+.ac-row.follows .ac-time { opacity: 0; }
+.ac-row.follows .ac-line:hover .ac-time, .ac-row.follows .ac-line:focus-visible .ac-time, .ac-row.follows.open .ac-time { opacity: 1; }
+.ac-steps { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ac-burst > li.ac-meta { margin: 4px 0 0 67px; }
 .ac-target { color: var(--text); text-decoration: none; }
 a.ac-target:hover { text-decoration: underline; }

@@ -109,16 +109,29 @@ function Detail({ event, onOpenTask, inBurst }: { event: ActivityEvent; onOpenTa
   );
 }
 
+const target0 = (row: ActivityRow) => burstTarget(row);
 const opens = (row: ActivityRow) => !!row.burst || !!row.event.detail || !!row.event.items?.length || !!row.event.links?.length;
 
-const Row = memo(function Row(props: { row: ActivityRow; who: ActivityWho | undefined; open: boolean; onToggle: (id: string) => void; onOpenTask: (id: string) => void }) {
-  const { row, who, open, onToggle, onOpenTask } = props;
+const Row = memo(function Row(props: {
+  row: ActivityRow;
+  who: ActivityWho | undefined;
+  /** The first of a run of rows by one agent: it carries the face and the name, and the rows under it don't repeat them. */
+  lead: boolean;
+  /** Who each step of a to-do was by, when more than one agent took them. */
+  whoOf: ReadonlyMap<string, ActivityWho>;
+  open: boolean;
+  onToggle: (id: string) => void;
+  onOpenTask: (id: string) => void;
+}) {
+  const { row, who, lead, whoOf, open, onToggle, onOpenTask } = props;
+  const mixed = !!row.burst && row.burst.some((e) => e.who !== row.who);
+  const sameTarget = !!row.burst && !!target0(row);
   const target = burstTarget(row);
   const can = opens(row);
-  // A burst is flagged when anything in it still waits.
-  const flag = row.burst ? row.burst.find((e) => e.flag)?.flag : row.event.flag;
+  // A burst is flagged when anything in it still waits; a to-do's steps only by the newest.
+  const flag = row.burst && !row.steps ? row.burst.find((e) => e.flag)?.flag : row.event.flag;
   return (
-    <li className={["ac-row", can && "can-open", open && "open"].filter(Boolean).join(" ")}>
+    <li className={["ac-row", lead ? "lead" : "follows", can && "can-open", open && "open"].filter(Boolean).join(" ")}>
       <div
         className="ac-line"
         role={can ? "button" : undefined}
@@ -127,16 +140,24 @@ const Row = memo(function Row(props: { row: ActivityRow; who: ActivityWho | unde
         onClick={can ? () => onToggle(row.id) : undefined}
         onKeyDown={can ? (e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), onToggle(row.id)) : undefined}
       >
-        <Face who={who} />
+        {lead ? <Face who={who} /> : <span className="ac-face-gap" aria-hidden />}
         <span className="ac-text">
-          <span className="ac-who" title={who?.name}>
-            <span className="ac-who-long">{who?.name ?? "An agent"}</span>
-            {/* A phone has the face for whose it is, so the name is the agent's alone. */}
-            <span className="ac-who-short">{who?.short ?? "An agent"}</span>
-          </span> <span className="ac-verb">{row.verb}</span>
+          {lead ? (
+            <>
+              <span className="ac-who" title={who?.name}>
+                <span className="ac-who-long">{who?.name ?? "An agent"}</span>
+                {/* A phone has the face for whose it is, so the name is the agent's alone. */}
+                <span className="ac-who-short">{who?.short ?? "An agent"}</span>
+              </span>{" "}
+            </>
+          ) : (
+            <span className="sr-only">{who?.name ?? "An agent"} </span>
+          )}
+          <span className="ac-verb">{row.verb}</span>
           {target && <> <Target target={target} onOpenTask={onOpenTask} /></>}
         </span>
         {flag && <span className="ac-flag" title={flag}><span>{flag}</span></span>}
+        {row.steps && <span className="ac-steps">{row.burst!.length} steps</span>}
         {can && <span className="ac-chev" aria-hidden><ChevronIcon size={11} /></span>}
         <time className="ac-time" dateTime={new Date(row.ts).toISOString()}>{fmtTime(row.ts)}</time>
       </div>
@@ -149,10 +170,11 @@ const Row = memo(function Row(props: { row: ActivityRow; who: ActivityWho | unde
                   <p className="ac-burst-line">
                     <time>{fmtTime(e.ts)}</time>
                     <span className="ac-text">
-                      <span className="ac-verb">{e.verb}</span>
-                      {e.target && <> <Target target={e.target} onOpenTask={onOpenTask} /></>}
+                      {mixed && <><span className="ac-who">{whoOf.get(e.who)?.name ?? "An agent"}</span> </>}
+                      <span className="ac-verb">{sameTarget ? e.verb.replace(/\s+(on|for|to|of)$|,? closing$|:$/, "") : e.verb}</span>
+                      {!sameTarget && e.target && <> <Target target={e.target} onOpenTask={onOpenTask} /></>}
                     </span>
-                    {e.flag && <span className="ac-flag"><span>{e.flag}</span></span>}
+                    {!row.steps && e.flag && <span className="ac-flag"><span>{e.flag}</span></span>}
                   </p>
                   <Detail event={e} onOpenTask={onOpenTask} inBurst />
                 </li>
@@ -274,8 +296,8 @@ export function ActivityTab({ roomId, onOpenTask }: { roomId: string; onOpenTask
             <span className="sh-day-short">{d.start === today ? "Today" : fmtDay(d.start)}</span>
           </h3>
           <ul className="ac-rows">
-            {d.rows.map((row) => (
-              <Row key={row.id} row={row} who={whoOf.get(row.who)} open={open.has(row.id)} onToggle={toggle} onOpenTask={onOpenTask} />
+            {d.rows.map((row, i) => (
+              <Row key={row.id} row={row} who={whoOf.get(row.who)} lead={i === 0 || d.rows[i - 1].who !== row.who} whoOf={whoOf} open={open.has(row.id)} onToggle={toggle} onOpenTask={onOpenTask} />
             ))}
           </ul>
         </section>
