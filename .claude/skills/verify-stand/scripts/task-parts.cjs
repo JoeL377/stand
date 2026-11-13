@@ -70,7 +70,7 @@ const INVITE = "Invite support to the next review";
         part: li.classList.contains("part"),
         count: li.querySelector(".task-parts")?.textContent ?? null,
         partOf: li.querySelector(".task-part-of")?.textContent ?? null,
-        owner: li.querySelector(".rc-name, .rc-face")?.getAttribute("title") ?? null,
+        owner: li.querySelector(".row-face, .rc-face")?.getAttribute("title") ?? null,
       })),
     );
   const sections = () => rowsIn(".sh-panel .sh-project");
@@ -132,8 +132,8 @@ const INVITE = "Invite support to the next review";
       await openTasks("Guest checkout");
       const checklist = family(await sections(), CHECKLIST);
       check("a part that is ready to ship stays under its parent in the project", checklist.parent?.count === "0/2 parts" && checklist.parts.map((p) => p.text).sort().join() === [LAUNCH_NOTE, TERMS].sort().join(), checklist);
-      check("the space has two tabs, Projects and Meetings", ((t) => t.length === 2 && /Projects/.test(t[0]) && /Meetings/.test(t[1]))(await page.getByRole("tablist", { name: "The space" }).getByRole("tab").allInnerTexts()), await page.getByRole("tablist", { name: "The space" }).getByRole("tab").allInnerTexts());
-      check("a project's page lists one kind at a time", (await page.getByRole("tablist", { name: "What to show" }).getByRole("tab").allInnerTexts()).map((t) => t.replace(/\s*\d+$/, "").trim()).join() === "Tasks,Questions,Decisions");
+      check("the space has three tabs: Projects, Meetings and Mine", ((t) => t.length === 3 && /Projects/.test(t[0]) && /Meetings/.test(t[1]) && /Mine/.test(t[2]))(await page.getByRole("tablist", { name: "The space" }).getByRole("tab").allInnerTexts()), await page.getByRole("tablist", { name: "The space" }).getByRole("tab").allInnerTexts());
+      check("a project's page lists one kind at a time", (await page.getByRole("tablist", { name: "What to show" }).getByRole("tab").allInnerTexts()).map((t) => t.replace(/\s*\d+$/, "").trim()).join() === "Tasks,Questions,Decisions,Done");
       await mine();
       check("Mine is one list with no projects in it", (await page.locator(".sh-project").count()) === 0 && (await rowsIn(".sh-task-group.by-owner")).length >= 1);
       const terms = (await forYou()).find((r) => r.text === TERMS);
@@ -176,9 +176,11 @@ const INVITE = "Invite support to the next review";
       const worker = family(await sections(), WORKER);
       check("the parent counts the new part, ticked", worker.parent?.count === "2/4 parts" && !worker.parts.some((p) => p.text === INVITE), worker);
       await page.locator(".pj-view", { hasText: "Done" }).click();
+      await page.locator(".pj-state.done li").first().waitFor();
       const done = await rowsIn(".pj-state.done");
       await openTasks("Guest checkout");
       await page.locator(".pj-view", { hasText: "Done" }).click();
+      await page.locator(".pj-state.done li").first().waitFor();
       done.push(...(await rowsIn(".pj-state.done")));
       check(
         "done parts name their parent under Done",

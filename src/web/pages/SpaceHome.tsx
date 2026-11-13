@@ -70,7 +70,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   };
   // Each rise puts the cursor in the chat box.
   const [focusChat, setFocusChat] = useState(0);
-  // On a wide screen the Projects tab's tools (Mine, the sweep, its menu) sit in the tab row, not a row of their own.
+  // On a wide screen the Projects tab's tools (Pinned, the sweep, its menu) sit in the tab row, not a row of their own.
   const [tabTools, setTabTools] = useState<HTMLSpanElement | null>(null);
   // Someone tags you in chat while it isn't on screen, or from another tab: a toast says so.
   const chatShown = useRef(false);
@@ -95,7 +95,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   }, { replace: true }), [setParams]);
   // ?project=<id> or ?project=none for Unassigned. Older ?topic= links show everything.
   const projectFilter = params.get("project") ?? "";
-  const mine = params.get("mine") === "1";
   const setParam = (key: string, value: string) => setParams((prev) => {
     const next = new URLSearchParams(prev);
     next.delete("topic");
@@ -110,6 +109,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const [picked, setTab] = useState<TabKey | "">(() => {
     if (openTask) return "projects";
     if (params.get("project")) return "projects";
+    // An older link to "only mine" opens the Mine tab.
+    if (params.get("mine") === "1") return "mine";
     try {
       const saved = localStorage.getItem(`stand.spaceTab.${room.id}`);
       // Tasks and Decisions are inside each project now: a saved one of those opens Projects.
@@ -126,6 +127,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // A wide screen has no Chat tab: one saved from a narrower screen shows Tasks, with the dock open.
   const home: TabKey = "projects";
   const tab: TabKey = picked === "" || (wide && picked === "chat") ? home : picked;
+  // Mine is its own tab: what is yours across every project, with what waits on you first.
+  const mine = tab === "mine";
   const docked = wide && dockOpen;
   chatShown.current = wide ? dockOpen : tab === "chat";
   const pickedChat = useRef(picked === "chat");
@@ -326,6 +329,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     projects: (room.projects ?? []).filter((p) => !p.archived).length,
     // Chat counts what you haven't read, not what is there.
     chat: chat.unread,
+    // Mine counts what is open and yours.
+    mine: [...todos, ...questions].filter((n) => !!n.owner && firstName(n.owner) === firstName(user.name)).length,
   };
   const deck = feed?.doneDeck ?? null;
   // Where each to-do came from, for its pill: the meeting and the chapter, as its recap files it.
@@ -510,7 +515,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               )}
             </button>
           ))}
-          {!phone && tab === "projects" && <span className="sh-tab-tools" ref={setTabTools} />}
+          {!phone && (tab === "projects" || mine) && <span className="sh-tab-tools" ref={setTabTools} />}
           {tab === "chat" && <span className="sh-chat-bell"><ChatNotifyBell roomId={room.id} /></span>}
         </div>
         </div>
@@ -522,7 +527,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         )}
 
         <section
-          className={tab === "projects" ? "sh-panel tasks projects" : `sh-panel ${tab}`}
+          className={tab === "projects" || mine ? "sh-panel tasks projects" : `sh-panel ${tab}`}
           role="tabpanel"
           // The name column is as wide as the longest meeting name on the list, so short names keep their numbers close.
           style={tab === "meetings" ? ({ "--sh-mname": `${Math.max(10, ...meetings.map((m) => (m.title ?? kindOf.get(m.id)?.name ?? "Meeting").length)) * 0.56 + 1}em` } as React.CSSProperties) : undefined}
@@ -642,7 +647,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             </>
           )}
 
-          {tab === "projects" && (
+          {(tab === "projects" || mine) && (
             <TasksTab
               key={mine ? "mine" : "projects"}
               mode={mine ? "tasks" : "projects"}
@@ -661,7 +666,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               projectFilter={mine ? "" : pageOf}
               solo={!hasProjects}
               loose={decisions.some((n) => !n.replacedBy && matchesProject(n.project ?? null, "none"))}
-              onProject={setProjectFilter}
+              onProject={(id) => {
+                // A project opened from Mine shows on the Projects tab.
+                if (mine) pickTab("projects");
+                setProjectFilter(id);
+              }}
               pinned={room.pinnedProjects ?? []}
               show={show}
               onShow={(v) => setParam("show", v === "tasks" ? "" : v)}
@@ -691,7 +700,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                 </>
               }
               mine={mine}
-              onMine={(on) => setParam("mine", on ? "1" : "")}
+              onMine={(on) => pickTab(on ? "mine" : "projects")}
               toolsIn={phone ? null : tabTools}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
               reload={load}
@@ -701,7 +710,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           )}
 
           {/* What was archived: meetings under Meetings, everything else under the projects. */}
-          {tab !== "chat" && (tab !== "projects" || (!pageOf && !mine) || !hasProjects) && <ArchivedList
+          {tab !== "chat" && !mine && (tab !== "projects" || !pageOf || !hasProjects) && <ArchivedList
             rows={archived.filter((a) => TAB_KINDS[tab].includes(a.kind))}
             open={showArchived}
             onToggle={() => setShowArchived((v) => !v)}
@@ -1265,11 +1274,12 @@ function TasksTab(props: {
     );
   const notSaid = (n: Note) => void api.setTask(props.roomId, n.id, { saidDone: false }).then(props.reload, errorToast("Couldn't change it"));
 
-  /** Who owns a row, as their first name in quiet text: a name reads faster than initials. */
+  /** Who owns a row, as their face: it takes less of the row than a name, and the name is its tooltip. */
   const face = (n: TaskNote) =>
     n.owner ? (
-      <span className="rc-name" title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`}>
-        {firstName(n.owner)}
+      <span className="row-face" title={`${n.owner}${n.doneAt && n.doneBy ? ` · ${n.state === "dropped" ? "dropped" : "done"} by ${n.doneBy}` : ""}`}>
+        <Avatar id={n.owner} name={n.owner} picture={props.pictured.find((x) => x.name === n.owner || firstName(x.name) === firstName(n.owner!))?.picture ?? null} size={20} />
+        <span className="rc-name">{firstName(n.owner)}</span>
       </span>
     ) : (
       <span className="rc-face none" title={n.kind === "question" ? "Anyone" : "Unassigned"}>
@@ -1342,24 +1352,24 @@ function TasksTab(props: {
           )}
         </>
       )}
+      noCopy
       tail={(n: TaskNote) => (
         <>
-          {(quietProject(n, section) || n.from) && (
-            <span className="row-quiet">
-              {quietProject(n, section) && props.projectPicker(n)}
-              {n.from && (
-                <span className="task-from">
-                  <FromChip from={n.from} />
-                </span>
-              )}
-            </span>
-          )}
-          {!closed && (
-            <button className="sh-archive sh-drop" aria-label="Drop: no longer wanted" title="Drop: no longer wanted" onClick={() => void move(n, "dropped")}>
-              <CloseIcon />
+          {/* The row is its box, its title and its owner. What can be done to it waits behind one button;
+              where it came from and its project are in the task itself, a click away. */}
+          <RowMore>
+            {!closed && (
+              <button type="button" role="menuitem" onClick={() => void move(n, "dropped")}>
+                <CloseIcon />
+                Drop
+              </button>
+            )}
+            <button type="button" role="menuitem" onClick={() => props.onArchive(n)}>
+              <ArchiveIcon />
+              Archive
             </button>
-          )}
-          <ArchiveButton onClick={() => props.onArchive(n)} />
+            <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} label />
+          </RowMore>
           {n.kind === "action" ? (
             <OwnerPicker note={n} roomId={props.roomId} people={props.people} me={props.me} onSaved={props.reload}>
               {face(n)}
@@ -1527,11 +1537,6 @@ function TasksTab(props: {
       </button>
     );
 
-  const mineButton = (
-    <button type="button" className={props.mine ? "rp-pill on" : "rp-pill"} aria-pressed={props.mine} onClick={() => props.onMine(!props.mine)} title="Only what is yours, across every project">
-      Mine
-    </button>
-  );
   const forYou = mentioned.length + waiting.length;
   const addProject = (
     <button type="button" className="pj-add" onClick={() => setAdding(true)}>
@@ -1545,7 +1550,6 @@ function TasksTab(props: {
           Pinned
         </button>
       )}
-      {(plain || viewing === null || props.solo) && mineButton}
     </>
   );
   const sweepButton = !plain && (viewing === null || props.solo) && sweep && (
@@ -2398,10 +2402,44 @@ const DoneIcon = () => (
   </svg>
 );
 
-type TabKey = "projects" | "chat" | "meetings";
+type TabKey = "projects" | "chat" | "meetings" | "mine";
 /** What a project's page lists: one kind at a time. */
 type ProjectShow = "tasks" | "questions" | "decisions" | "done";
 /** The space's tabs, in the order people look at them. */
+/** A row's "···": what can be done to it, in a small menu, so the row itself stays quiet. */
+function RowMore(props: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: Event) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  return (
+    <span className={open ? "row-more open" : "row-more"} ref={ref}>
+      <button type="button" className="row-more-btn" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+          <circle cx="3" cy="8" r="1.4" fill="currentColor" />
+          <circle cx="8" cy="8" r="1.4" fill="currentColor" />
+          <circle cx="13" cy="8" r="1.4" fill="currentColor" />
+        </svg>
+      </button>
+      {open && (
+        // A choice shuts the menu; Copy for agent stays a moment so its "Copied" can be read.
+        <div className="rp-menu row-menu" role="menu" onClick={(e) => setTimeout(() => setOpen(false), (e.target as HTMLElement).closest(".cfa") ? 1200 : 0)}>
+          {props.children}
+        </div>
+      )}
+    </span>
+  );
+}
+
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
   return (
@@ -2425,6 +2463,7 @@ const TAB_KINDS: Record<TabKey, ArchivedKind[]> = {
   projects: ["todo", "question", "decision"],
   chat: [],
   meetings: ["meeting", "snap", "jot"],
+  mine: [],
 };
 
 /** A tab's archived rows, folded at its bottom like Done, each with Restore. */
@@ -2507,6 +2546,7 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "projects", label: "Projects", icon: <ProjectsIcon /> },
   { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
+  { key: "mine", label: "Mine" },
 ];
 
 /** Decisions or open questions across the space's meetings, as the recap lists them. A decision a
