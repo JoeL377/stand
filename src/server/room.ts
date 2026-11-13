@@ -62,7 +62,7 @@ import { PassRunner } from "./passRunner.ts";
 const SUGGEST_MIN_CONFIDENCE = 0.55;
 /** The cost shown on the call is sent again at most this often. */
 const COST_EVERY_MS = 5_000;
-/** ✦ Stand's card as it streams goes out to everyone at most this often. */
+/** Stand's card as it streams goes out to everyone at most this often. */
 const DRAFT_EVERY_MS = 150;
 /** A dismissed item isn't suggested again for this long. */
 const DISMISS_QUIET_MS = 90_000;
@@ -237,12 +237,12 @@ export class RoomSession implements SpeechSink {
   private boardRanAt = 0;
   /** The board's running list (liveList.ts): one pass at a time, after each pause in the talk. Null without a model. */
   private list: ListKeeper | null = null;
-  /** What ✦ Stand put on the board (meetingAgent.ts); null without a model to run it. */
+  /** What Stand put on the board (meetingAgent.ts); null without a model to run it. */
   private agentCards: AgentKeeper | null = null;
   private draftTimer: NodeJS.Timeout | null = null;
   /** Push-to-talk: what each person says while their Ask Stand button is down. */
   private asks = new AskCapture();
-  /** Who drives ✦ Stand right now, and who's asking to (pilot.ts). */
+  /** Who drives Stand right now, and who's asking to (pilot.ts). */
   private pilot = new PilotSeat();
   private pilotTimer: ReturnType<typeof setTimeout> | null = null;
   /** The sketch running in this space, if one is (sketch.ts): its maps and diagrams, one pass at a time. */
@@ -1093,7 +1093,7 @@ export class RoomSession implements SpeechSink {
     // A line from before a restart has no time here: its own time stands in.
     const lines = this.db.meetingSegments(this.meetingId).filter((s) => (this.touched.get(s.id) ?? s.ts) > since);
     const caught = this.db.meetingNotes(this.meetingId).filter((n) => n.kind !== "summary" && n.ts >= since);
-    // What ✦ Stand and people's own agents answered since: not lines of the transcript, but said in the call.
+    // What Stand and people's own agents answered since: not lines of the transcript, but said in the call.
     const answers = (this.agentCards?.all() ?? []).filter((c) => c.kind === "answer" && c.status === "ready" && !!c.note && (c.readyAt ?? c.at) >= since);
     return { now, lines, caught, answers, showing: this.showing() };
   }
@@ -1118,11 +1118,11 @@ export class RoomSession implements SpeechSink {
   }
 
   /** Someone's own agent says something in the call: a card on the board under its person's name, for
-   *  everyone, kept with the meeting. It works without ✦ Stand's own model. Returns why not, in a line,
+   *  everyone, kept with the meeting. It works without Stand's own model. Returns why not, in a line,
    *  when it can't. */
   agentSay(agent: Actor, out: Parameters<AgentKeeper["say"]>[1]): AgentCard | string {
     if (this.ended) return "That call has ended.";
-    // With no ✦ Stand model the keeper starts here: from the cards kept with the meeting, so a restart loses none.
+    // With no Stand model the keeper starts here: from the cards kept with the meeting, so a restart loses none.
     this.agentCards ??= new AgentKeeper(this.db.meetingAgentCards(this.meetingId));
     const why = this.agentCards.sayRefusal(agent);
     if (why) return why;
@@ -2057,7 +2057,7 @@ export class RoomSession implements SpeechSink {
     this.broadcastState();
   }
 
-  /** ✦ Stand's options for an open question: the space's history and the talk so far, then the card. */
+  /** Stand's options for an open question: the space's history and the talk so far, then the card. */
   private async runOptions(cardId: string) {
     const cards = this.agentCards;
     const card = cards?.get(cardId);
@@ -2076,7 +2076,7 @@ export class RoomSession implements SpeechSink {
     this.agentChanged();
   }
 
-  /** What the space already has, for ✦ Stand to read: newest first. */
+  /** What the space already has, for Stand to read: newest first. */
   private spaceHistory(): SpaceHistory {
     return readSpaceHistory(this.db, this.roomId, this.roomName);
   }

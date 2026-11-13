@@ -63,9 +63,6 @@ export function NextCard(props: {
           {review ? "Add to recap" : busy ? "Opening…" : "Open Sketch"}
         </button>
       )}
-      <span className="agent-mark" aria-hidden>
-        ✦
-      </span>
       <span className="nudge-text">
         {next.guessed ? `Sounds like ${next.kind === "map" ? "a brainstorm" : "you're working out how something works"}. ` : ""}
         {review ? `${what}${next.topic ? " on " : ""}` : next.topic ? "Sketch " : "Sketch this"}

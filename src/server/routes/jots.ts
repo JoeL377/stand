@@ -12,7 +12,7 @@ export function jotRoutes(app: Express, ctx: Services) {
   /** Notes by the key their save carried, for a while: a retry of one that got through gets the same note back. */
   const jotKeys = new Map<string, string>();
 
-  // {text, itemId?, at?, key?}. With no item, the agent suggests one (✦) once it has read it.
+  // {text, itemId?, at?, key?}. With no item, the agent suggests one once it has read it.
   app.post(
     "/api/rooms/:id/jots",
     route((req, res) => {

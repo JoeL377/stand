@@ -1,4 +1,4 @@
-// ✦ Stand, the meeting's own agent: the reference for what an agent can do in a live call. Two
+// Stand, the meeting's own agent: the reference for what an agent can do in a live call. Two
 // things, each only when someone asks:
 // - On a click, an open question on the board's list ("where do we move off Railway?") gets a card
 //   of options, each with its tradeoff, and what the space already said about it. Anyone can take

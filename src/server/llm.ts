@@ -146,7 +146,7 @@ const siteOf = (url: string) => {
   }
 };
 
-/** A ✦ Stand run as it streams: the web searches so far, what it did in the space's repo, and the structured
+/** A Stand run as it streams: the web searches so far, what it did in the space's repo, and the structured
  *  answer so far (partial JSON). */
 export type OnDraft = (d: { searches: string[]; pages: string[]; code?: string[]; partial: unknown }) => void;
 
@@ -211,10 +211,10 @@ export interface Agent {
   designDiagram?(context: string, talk: string): Promise<DiagramAnswer | null>;
   /** The diagram a design session starts from, read out of notes someone pasted. */
   designSeed?(prompt: string, notes: string): Promise<DiagramAnswer | null>;
-  /** ✦ Stand's options for an open question (meetingAgent.ts), searching the web as it needs. Left out
+  /** Stand's options for an open question (meetingAgent.ts), searching the web as it needs. Left out
    *  without a model. */
   findOptions?(prompt: string, onDraft?: OnDraft): Promise<{ answer: OptionsAnswer | null; model: string; usage: RunUsage }>;
-  /** ✦ Stand's answer to a question someone asked it on the call (push-to-talk or @stand). Left out without a model. */
+  /** Stand's answer to a question someone asked it on the call (push-to-talk or @stand) or in the space's chat. Left out without a model. */
   answer?(prompt: string, onDraft?: OnDraft, repo?: RepoTools | null, system?: string): Promise<{ answer: Answer | null; model: string; usage: RunUsage }>;
   /** Across a space's meetings (spaceSettle.ts): which open questions a later decision answered or a later
    *  question asked again, and which decisions a later one replaced. Null without a model. */
@@ -322,7 +322,7 @@ const BOARD_TIMEOUT_MS = 25_000;
 /** The running list answers in about 2 s; past this the next pause tries again. */
 const LIST_TIMEOUT_MS = 15_000;
 const MAP_TIMEOUT_MS = 20_000;
-/** A run of ✦ Stand's options can search the web a few times; past this, the card says it couldn't. */
+/** A run of Stand's options can search the web a few times; past this, the card says it couldn't. */
 const AGENT_TIMEOUT_MS = 90_000;
 /** How long an answer may spend reading the repo before it has to answer. */
 const REPO_RUN_MS = 45_000;
@@ -1058,7 +1058,7 @@ When a capture fits the slide it is already under, answer with that slide. When 
     return this.searchRun("answer", AnswerSchema, system ?? ANSWER_SYSTEM, prompt, onDraft, repo ?? null);
   }
 
-  /** One ✦ Stand run that may search the web twice, with what it cost. With a space's repo it can also search
+  /** One Stand run that may search the web twice, with what it cost. With a space's repo it can also search
    *  and read the code (sources.ts RepoTools), up to REPO_TOOL_CALLS times. It streams: onDraft hears each web
    *  search as it starts, each repo step, and the answer as it's written (the JSON so far, read leniently). */
   private async searchRun<T extends z.ZodTypeAny>(

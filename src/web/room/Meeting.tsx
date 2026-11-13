@@ -348,7 +348,7 @@ export function Meeting(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Who pilots ✦ Stand, and asking it things (Pilot.tsx).
+  // Who pilots Stand, and asking it things (Pilot.tsx).
   const pilot: PilotActs = {
     view: room.pilot,
     me: participantId,
@@ -520,9 +520,6 @@ export function Meeting(props: {
           nobody misses what the rest of the call is deciding on. */}
       {phone && sheet && state.next && !state.ending && (
         <div className="phone-next" role="status">
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>
           <button type="button" className="phone-next-what" onClick={() => setSheet(null)}>
             {nextAsk(state.next)}
           </button>
@@ -657,7 +654,6 @@ export function Meeting(props: {
           </div>
           <ul className="phone-how">
             <li>Everything said is filed under the item named at the top. Tap it for the agenda and who is here.</li>
-            <li>✦ marks what Stand wrote or suggests.</li>
           </ul>
         </div>
       )}
@@ -1175,7 +1171,7 @@ function Shortcuts({ canSteer, onClose }: { canSteer: boolean; onClose: () => vo
       </div>
       <ul className="how">
         <li>The host picks the item on the left. Everything said is filed under it.</li>
-        <li>Notes appear after a short pause in the talk. ✦ marks what the agent wrote or suggests.</li>
+        <li>Notes appear after a short pause in the talk.</li>
         <li>Removed something by mistake? Undo is in the message at the bottom of the screen.</li>
         <li>If the connection drops, edits and to-do checks wait and go through when Stand is back.</li>
       </ul>
@@ -1201,7 +1197,7 @@ const ASK_TAP_MS = 350;
 /** After the button comes up, the mic stays on this long so the last words get through. */
 const ASK_TAIL_MS = 700;
 
-/** ✦ Ask Stand, push-to-talk: hold it (or Control + Space), say your question, let go. Stand answers
+/** Ask Stand, push-to-talk: hold it (or Control + Space), say your question, let go. Stand answers
  *  in the Chat. Muted, holding it unmutes you, so everyone hears the question too. */
 function AskStand(props: { pilot: PilotActs; send: (m: ClientMessage) => boolean; offline: boolean; micOn: boolean; canUnmute: boolean; toggleMic: () => Promise<unknown> | void }) {
   const [held, setHeld] = useState(false);
@@ -1297,9 +1293,6 @@ function AskStand(props: { pilot: PilotActs; send: (m: ClientMessage) => boolean
         }
       }}
     >
-      <span className="ask-mark" aria-hidden>
-        ✦
-      </span>
       <span>{held ? "Listening…" : locked ? (seat.place >= 0 ? `Asked ${seat.name}` : "Ask to pilot") : "Ask Stand"}</span>
     </button>
   );

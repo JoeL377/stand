@@ -384,9 +384,6 @@ export function BrainMap(props: {
             setAway(null);
           }}
         >
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>
           <span className="brain-new-what">New: {awayPill.node!.label}</span>
           <span aria-hidden>→</span>
         </button>
@@ -431,7 +428,7 @@ export function BrainMap(props: {
           <div className={`brain-node root${brainstorm.busy ? " busy" : ""}`} style={{ left: rootAt.x, top: rootAt.y }}>
             <span dir="auto">{brainstorm.prompt}</span>
             {!dirs.length && (
-              <small>{brainstorm.status !== "live" ? "Nothing came up in this one" : brainstorm.heard === "failed" ? "Stand couldn't read the talk just now. It tries again as you talk." : "✦ Ideas branch out here as people talk"}</small>
+              <small>{brainstorm.status !== "live" ? "Nothing came up in this one" : brainstorm.heard === "failed" ? "Stand couldn't read the talk just now. It tries again as you talk." : "Ideas branch out here as people talk"}</small>
             )}
           </div>
           {hubs

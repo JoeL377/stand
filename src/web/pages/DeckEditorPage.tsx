@@ -122,7 +122,7 @@ export function DeckEditorPage() {
             </option>
           ))}
         </select>
-        <button onClick={() => setOutlineOpen(true)}>{llm ? "✦ Draft with Claude" : "From outline"}</button>
+        <button onClick={() => setOutlineOpen(true)}>{llm ? "Draft with Claude" : "From outline"}</button>
         <span className={`save-state small ${status}`}>
           {status === "saving" ? "Saving…" : status === "dirty" ? "Editing" : status === "error" ? "Not saved" : "Saved"}
         </span>

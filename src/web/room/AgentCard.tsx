@@ -1,9 +1,9 @@
-// What ✦ Stand, the meeting's own agent (server/meetingAgent.ts), puts on the board: for now, a
-// card of options under an open question on the Open tab, asked for with "✦ Options" on that line.
+// What Stand, the meeting's own agent (server/meetingAgent.ts), puts on the board: for now, a
+// card of options under an open question on the Open tab, asked for with "Options" on that line.
 // Each option is one line with its tradeoff under it and the page it leans on; anyone can take it
 // as a decision or a to-do. What the space already had on the question sits under the options.
-// While a card is being worked on, everyone on the call sees a quiet "✦ Finding options" on the
-// card's top line (and on the Board tab beside a share); when it's back, "✦ Options ready" for a
+// While a card is being worked on, everyone on the call sees a quiet "Finding options" on the
+// card's top line (and on the Board tab beside a share); when it's back, "Options ready" for a
 // few seconds, which jumps to the card. A question asked out loud (push-to-talk) or typed (@stand)
 // gets a card of its own in the board's stack instead: AnswerPart is one question and its answer.
 // What someone's own agent says in the call over the MCP is a card in the stack too: SaidCard.
@@ -36,7 +36,7 @@ const host = (url: string) => {
 
 /** How often streamed-in words step on while they're typed out. */
 const REVEAL_TICK_MS = 35;
-/** How long "✦ Options ready" stays up after a card comes back. */
+/** How long "Options ready" stays up after a card comes back. */
 export const READY_MS = 12_000;
 /** Asks the board to show a card: its tab opens and it scrolls into view. */
 export const SHOW_CARD = "stand:agent-show";
@@ -49,7 +49,7 @@ export function showCard(id: string) {
 
 export { isSaid };
 
-/** A small ✦ on the Board tab beside a share: pulsing while ✦ Stand works, still for a moment once it's back,
+/** A small on the Board tab beside a share: pulsing while Stand works, still for a moment once it's back,
  *  and still for as long as a card from someone's own agent is there that this screen hasn't seen (`unseen`). */
 export function AgentTabMark({ cards, unseen = 0 }: { cards: AgentCard[] | null | undefined; unseen?: number }) {
   const { working, ready } = useAgentStatus(cards);
@@ -60,13 +60,12 @@ export function AgentTabMark({ cards, unseen = 0 }: { cards: AgentCard[] | null 
     <span
       className={working.length || asked ? "agent-tab-mark working" : "agent-tab-mark ready"}
       aria-label={asked ? "Stand is answering" : working.length ? "Stand is finding options" : last && isSaid(last) ? `New from ${last.by.split(" ")[0]}'s agent` : "Options ready"}
-    >
-      ✦
-    </span>
+      role="img"
+    />
   );
 }
 
-/** What ✦ Stand is up to, for everyone: cards being worked on, and ones that came back a moment ago. */
+/** What Stand is up to, for everyone: cards being worked on, and ones that came back a moment ago. */
 export function useAgentStatus(cards: AgentCard[] | null | undefined) {
   const [now, setNow] = useState(Date.now);
   // Answers have their own card on the board (AnswerPart); this is about options on open questions, and
@@ -86,7 +85,7 @@ export function useAgentStatus(cards: AgentCard[] | null | undefined) {
   return { working, ready };
 }
 
-/** The quiet line on the card's top line: "✦ Finding options" while a run is on, then "✦ Options ready". */
+/** The quiet line on the card's top line: "Finding options" while a run is on, then "Options ready". */
 export function AgentStatus({ cards, onShow }: { cards: AgentCard[] | null | undefined; onShow?: () => void }) {
   const { working, ready } = useAgentStatus(cards);
   const first = (n: string) => n.split(" ")[0];
@@ -104,9 +103,6 @@ export function AgentStatus({ cards, onShow }: { cards: AgentCard[] | null | und
           setTimeout(() => showCard(c.id), 0);
         }}
       >
-        <span className="agent-mark" aria-hidden>
-          ✦
-        </span>{" "}
         {said ? `New from ${first(c.by)}'s agent` : "Options ready"}
       </button>
     );
@@ -115,9 +111,6 @@ export function AgentStatus({ cards, onShow }: { cards: AgentCard[] | null | und
     const c = working.at(-1)!;
     return (
       <span className="agent-status working" title={`${c.question}\nAsked by ${first(c.by)}`} role="status">
-        <span className="agent-mark" aria-hidden>
-          ✦
-        </span>{" "}
         Finding options{working.length > 1 ? ` · ${working.length}` : ""}
       </span>
     );
@@ -130,14 +123,11 @@ export function cardFor(acts: AgentActs | undefined, noteId: string): AgentCard 
   return acts?.cards.filter((c) => c.kind === "options" && c.about === noteId && !c.dismissed).at(-1);
 }
 
-/** "✦ Options" at the end of an open question's line, while it has no card. */
+/** "Options" at the end of an open question's line, while it has no card. */
 export function FindOptions({ noteId, acts }: { noteId: string; acts: AgentActs }) {
   if (!acts.onFind) return null;
   return (
     <button type="button" className="agent-find" title="Ask Stand for options on this, with the tradeoffs" onClick={() => acts.onFind!(noteId)}>
-      <span className="agent-mark" aria-hidden>
-        ✦
-      </span>{" "}
       Options
     </button>
   );
@@ -153,9 +143,6 @@ export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }
   return (
     <div id={`agent-${card.id}`} className={["agent-card", card.status, fresh && "fresh"].filter(Boolean).join(" ")} aria-live="polite">
       <div className="agent-card-head">
-        <span className="agent-mark" aria-hidden>
-          ✦
-        </span>
         <span className="agent-card-title">{card.status === "working" ? "Finding options…" : "Options"}</span>
         <span className="agent-card-by" title={log}>
           for {card.by.split(" ")[0]}
@@ -223,7 +210,7 @@ export function OptionsCard({ card, acts }: { card: AgentCard; acts: AgentActs }
   );
 }
 
-/** ✦ Stand's answer to a question someone asked it (push-to-talk or @stand), as one turn of a chat on its
+/** Stand's answer to a question someone asked it (push-to-talk or @stand), as one turn of a chat on its
  *  card, the way an assistant app shows it: the question in a bubble on the right, then Stand's steps (the
  *  web searches and what it read, folded to one line once it's written) and the answer under them, then the
  *  pages it leans on, what the space already had, and a next step anyone can take as a to-do. */
@@ -386,9 +373,6 @@ export function SaidNotice({ card, more, line, onOpen, onClose }: { card: AgentC
   const who = `${card.by.split(" ")[0]}'s agent`;
   return (
     <div className={line ? "phone-next said-notice-line" : "nudge said-notice"} role="status" title={`${card.by}'s own agent put a card on the board`}>
-      <span className="agent-mark" aria-hidden>
-        ✦
-      </span>
       <span className="said-notice-who" style={{ color: colorFor(card.agent?.personId ?? card.by) }}>
         {who}
       </span>
@@ -527,7 +511,7 @@ function useReveal(text: string): { shown: string; typing: boolean } {
 
 /** Options as Stand writes them: each one slides in as it comes, the last one's tradeoff still being written. */
 function DraftOptions({ draft }: { draft: AgentDraft }) {
-  if (!draft.options.length && !draft.text) return draft.searches.length ? <div className="agent-card-note agent-draft-searching">✦ {doing(draft, "")}</div> : null;
+  if (!draft.options.length && !draft.text) return draft.searches.length ? <div className="agent-card-note agent-draft-searching">{doing(draft, "")}</div> : null;
   return (
     <>
       {draft.options.length > 0 && (

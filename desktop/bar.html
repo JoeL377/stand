@@ -289,16 +289,12 @@
       what.className = "what nudge";
       const go = document.createElement("button");
       go.className = "fix go";
-      const mark = document.createElement("span");
-      mark.className = "mark";
-      mark.textContent = "✦";
-      mark.ariaHidden = "true";
       const text = document.createElement("span");
       text.className = "t";
       // Beside "Not recording" there's room only for the item's name; it's still the Switch button.
       text.textContent = state.notRecording ? state.nudge : `Switch to ${state.nudge}`;
       go.ariaLabel = `Switch to ${state.nudge}`;
-      go.append(mark, text);
+      go.append(text);
       go.title = `The talk or the screen seems to be about ${state.nudge}. Switch the meeting to it.`;
       press(go, "switch");
       // Nothing being recorded still shows, in front.

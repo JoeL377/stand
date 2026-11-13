@@ -22,7 +22,7 @@ export function SidePanel(props: {
   notesBusy: string[];
   notes: Note[];
   list: ListNote[] | null;
-  /** What ✦ Stand was asked in this meeting, and what it answered. */
+  /** What Stand was asked in this meeting, and what it answered. */
   cards?: AgentCard[] | null;
   interims: Record<string, Interim>;
   send: (m: ClientMessage) => boolean;
@@ -347,11 +347,6 @@ function Transcript(props: {
             return (
               <div key={r.move!.key} className="seg board-move" role="note" title={`${r.move!.text}: ${r.move!.title}`}>
                 <span className="board-move-text">
-                  {!r.move!.by && (
-                    <span className="agent-mark" aria-hidden>
-                      ✦{" "}
-                    </span>
-                  )}
                   {r.move!.text} · <strong>{r.move!.title}</strong>
                 </span>
                 <span className="seg-time">{fmtTime(r.move!.ts)}</span>

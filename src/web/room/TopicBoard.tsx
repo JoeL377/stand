@@ -2,8 +2,8 @@ import { usePersonColors } from "../PersonColors.tsx";
 // The topic board: what the middle screen shows while nobody shares or presents. A stack of cards,
 // one in focus at a time: "Done since" (what the space closed since its last meeting, in every meeting
 // after a space's first, even when nothing closed), the check-in on what's still open from earlier, one
-// card per thread of discussion (server/board.ts), one per question asked to ✦ Stand (push-to-talk or
-// @stand), its follow-ups landing on the same card, and one per set of options ✦ Stand found. The card
+// card per thread of discussion (server/board.ts), one per question asked to Stand (push-to-talk or
+// @stand), its follow-ups landing on the same card, and one per set of options Stand found. The card
 // in focus follows the talk: the current topic, or an answer while it's being asked and for a few
 // minutes after it lands, unless the talk moves to a new topic meanwhile. A topic card has a title that
 // stays put, a paragraph Stand keeps up to date every 30 seconds, then the People/Decided/To do/Open tabs,
@@ -14,9 +14,9 @@ import { usePersonColors } from "../PersonColors.tsx";
 // card opens another on your own screen only (as it stood when it ended), until "Back to live" (which
 // names a new card that went live meanwhile), Escape, or a click on the live one. The right-hand side
 // stays folded. On a phone the list is a sheet behind a button over the card. The list says what's
-// happening as it happens, on the card's own line: "✦ New topic" (or "↩ Back to this") when the board
+// happening as it happens, on the card's own line: "New topic" (or "↩ Back to this") when the board
 // moves, a dashed line for the topic the board thinks the talk is moving to (a click takes the move),
-// and "✦ Finding an answer…" / "✦ Finding options…" while Stand works, then "ready" for a moment.
+// and "Finding an answer…" / "Finding options…" while Stand works, then "ready" for a moment.
 // The tabs keep the whole meeting: they read the running list (server/liveList.ts), which has a line up
 // about 5 s after it's said and never rewords or regroups it (the live notes when there's no list). The
 // current topic's lines come first, oldest at the top, so a new one joins at the foot of the list with a
@@ -82,13 +82,13 @@ export function moverText(m: BoardMove): string {
   return m.via === "agenda" ? `${who} changed the agenda item` : `${who} moved on`;
 }
 
-/** Who moved the board onto this thread: ✦ Stand by itself, or a person. */
+/** Who moved the board onto this thread: Stand by itself, or a person. */
 function MovedBy({ move, start, nameOf, idOf }: { move: BoardMove | null; start: number; nameOf: (n: string) => string; idOf: (n: string) => string }) {
   if (!move) return null;
   const title = `${move.by ? nameOf(move.by) : "Stand"} ${move.via === "agenda" ? "changed the agenda item" : move.via === "click" ? "took the move Stand offered" : "saw the talk had moved and moved the board by itself"} at ${clock(move.at - start)}`;
   return (
     <span className="topic-moved-by" title={title}>
-      {move.by ? <Dot id={idOf(move.by)} name={nameOf(move.by)} size={16} /> : <span className="agent-mark" aria-hidden>✦</span>}
+      {move.by && <Dot id={idOf(move.by)} name={nameOf(move.by)} size={16} />}
       {moverText(move)}
     </span>
   );
@@ -117,9 +117,9 @@ const PENDING = "pending";
 
 /** The Running list's id in the card list. */
 const RUNNING = "list";
-/** A new question to ✦ Stand, being typed: a card with only its box, on this screen. */
+/** A new question to Stand, being typed: a card with only its box, on this screen. */
 const NEW = "new";
-/** An answer from ✦ Stand stays the live card this long after it lands, unless the talk starts a new topic. */
+/** An answer from Stand stays the live card this long after it lands, unless the talk starts a new topic. */
 const ANSWER_HOLD_MS = 3 * 60_000;
 /** How far a wheel or trackpad has to push past the end of a card before the next one comes up. */
 const WHEEL_STEP = 120;
@@ -128,8 +128,8 @@ const WHEEL_REST_MS = 700;
 /** How far a finger has to move sideways before a swipe opens the next card. */
 const SWIPE_PX = 60;
 
-/** One card in the stack: Done since, the check-in, a topic of discussion, a question to ✦ Stand with its
- *  follow-ups, options ✦ Stand found on an open question, what someone's own agent said in the call, or
+/** One card in the stack: Done since, the check-in, a topic of discussion, a question to Stand with its
+ *  follow-ups, options Stand found on an open question, what someone's own agent said in the call, or
  *  the topic the board thinks the talk is moving to. */
 interface Entry {
   id: string;
@@ -142,7 +142,7 @@ interface Entry {
   meta: string;
   chain?: AgentCard[];
   card?: AgentCard;
-  /** Something happening on it right now, said in place of its meta: a topic change, ✦ Stand at work. */
+  /** Something happening on it right now, said in place of its meta: a topic change, Stand at work. */
   signal?: { text: string; tone: "move" | "working" | "ready" } | null;
 }
 
@@ -175,9 +175,9 @@ export function TopicBoard(props: {
   doneDeck?: DoneDeck | null;
   /** When the space's last meeting started: the "Done since" card counts from it. Null: the space's first. */
   lastMeetingAt?: number | null;
-  /** ✦ Stand's cards (options on open questions, answers to questions asked out loud), and acting on them. */
+  /** Stand's cards (options on open questions, answers to questions asked out loud), and acting on them. */
   agent?: AgentActs;
-  /** Who pilots ✦ Stand, and asking it things on an answer card (Pilot.tsx). */
+  /** Who pilots Stand, and asking it things on an answer card (Pilot.tsx). */
   pilot?: PilotActs;
   /** Following the host: the card they have open (null: live), by name. Unset: this screen goes its own way. */
   follow?: { rewind: Rewind | null; host: string } | null;
@@ -234,7 +234,7 @@ export function TopicBoard(props: {
     if (following) setRewind(rewind);
   };
   const start = Math.min(props.meetingStartedAt, cardSince ?? Infinity);
-  // Questions asked to ✦ Stand, each with its follow-ups: one card per first question.
+  // Questions asked to Stand, each with its follow-ups: one card per first question.
   const answers = (props.agent?.cards ?? []).filter((c) => c.kind === "answer" && !isSaid(c) && !(c.status === "failed" && !c.question));
   // What people's own agents said in the call, each a card of its own until someone dismisses it.
   const agentSaid = (props.agent?.cards ?? []).filter((c) => isSaid(c) && c.status === "ready" && !c.dismissed);
@@ -305,7 +305,7 @@ export function TopicBoard(props: {
       title: chain[0].question || `${first(chain[0].by)} is asking Stand…`,
       at: chain[0].at,
       asOf: now,
-      meta: [clock(chain[0].at - start), `✦ ${first(chain[0].by)}`, chain.length > 1 && `${chain.length} questions`].filter(Boolean).join(" · "),
+      meta: [clock(chain[0].at - start), `${first(chain[0].by)} asked`, chain.length > 1 && `${chain.length} questions`].filter(Boolean).join(" · "),
       chain,
     })),
     ...options.map((c) => ({
@@ -314,7 +314,7 @@ export function TopicBoard(props: {
       title: c.question || "Options",
       at: c.at,
       asOf: now,
-      meta: [clock(c.at - start), `✦ Options for ${first(c.by)}`].join(" · "),
+      meta: [clock(c.at - start), `Options for ${first(c.by)}`].join(" · "),
       card: c,
     })),
     ...agentSaid.map((c) => ({
@@ -323,27 +323,27 @@ export function TopicBoard(props: {
       title: saidTitle(c),
       at: c.at,
       asOf: now,
-      meta: [clock(c.at - start), `✦ ${first(c.by)}'s agent`].join(" · "),
+      meta: [clock(c.at - start), `${first(c.by)}'s agent`].join(" · "),
       card: c,
     })),
   ].sort((a, b) => a.at - b.at);
   const openingId = donePages && (props.checkIn?.page ?? 0) < donePages ? DONE : hasCheckIn ? KICKOFF : DONE;
   const liveId = liveChain ?? (checkingIn ? openingId : (current?.id ?? null));
   // What's happening on the list right now, so a glance at the left says it: the topic just changed (or
-  // the board thinks it's about to), ✦ Stand is answering a question or finding options, or just did.
+  // the board thinks it's about to), Stand is answering a question or finding options, or just did.
   for (const e of entries) e.signal = signalOf(e, now);
   if (current && arrival) {
     const e = entries.find((x) => x.id === current.id);
     const move = moveInto(board?.moves, current.id);
     const who = move?.by ? ` · ${first(move.by)} moved` : "";
-    if (e && !e.signal) e.signal = { text: arrival === "new" ? `✦ New topic${who}` : `↩ Back to this${who}`, tone: "move" };
+    if (e && !e.signal) e.signal = { text: arrival === "new" ? `New topic${who}` : `↩ Back to this${who}`, tone: "move" };
   }
   const pending = board?.pending ?? null;
   const pendingOn = pending ? entries.find((e) => e.kind === "topic" && e.title === pending.title && e.id !== current?.id) : undefined;
-  if (pending && pendingOn) pendingOn.signal = { text: "✦ Going back to this?", tone: "move" };
+  if (pending && pendingOn) pendingOn.signal = { text: "Going back to this?", tone: "move" };
   const ghost: Entry | null =
     pending && !pendingOn && !(current && current.title === pending.title)
-      ? { id: PENDING, kind: "pending", title: pending.title, at: now, asOf: now, meta: "", signal: { text: "✦ Sounds like a new topic", tone: "move" } }
+      ? { id: PENDING, kind: "pending", title: pending.title, at: now, asOf: now, meta: "", signal: { text: "Sounds like a new topic", tone: "move" } }
       : null;
   const fresh = useFresh(entries.map((e) => e.id));
   const busyNow = entries.some((e) => e.signal?.tone === "working") || !!ghost || !!pendingOn;
@@ -399,7 +399,7 @@ export function TopicBoard(props: {
     return () => window.removeEventListener(PILOT_OPEN, go);
   }, []);
   // "Show on the board" in the transcript, for what someone's own agent said: its card opens here.
-  // ✦ Stand's cards keep their own way there (the Open tab, under the question).
+  // Stand's cards keep their own way there (the Open tab, under the question).
   const showRef = useRef((_id: string) => {});
   showRef.current = (id) => {
     const e = entries.find((x) => x.kind === "said" && x.id === id);
@@ -624,7 +624,7 @@ export function TopicBoard(props: {
             title={e.title}
           >
             <span className="card-entry-mark" aria-hidden>
-              {e.kind === "answer" || e.kind === "options" || e.kind === "said" ? "✦" : e.kind === "kickoff" ? "↺" : e.kind === "done" ? "✓" : entries.slice(0, i + 1).filter((x) => x.kind === "topic").length}
+              {e.kind === "answer" || e.kind === "options" ? "?" : e.kind === "said" ? "@" : e.kind === "kickoff" ? "↺" : e.kind === "done" ? "✓" : entries.slice(0, i + 1).filter((x) => x.kind === "topic").length}
             </span>
             <span className="card-entry-body">
               <span className="card-entry-title">{e.title}</span>
@@ -679,9 +679,6 @@ export function TopicBoard(props: {
           <button type="button" className={movedOn ? "card-step live moved" : "card-step live"} onClick={() => setRewind(null)} title="Escape">
             {movedOn ? (
               <>
-                <span className="agent-mark" aria-hidden>
-                  ✦
-                </span>{" "}
                 New card: <strong>{movedOn.title}</strong> · Back to live ↓
               </>
             ) : following ? (
@@ -702,22 +699,22 @@ export function TopicBoard(props: {
   );
 }
 
-/** ✦ Stand at work on a card, or just back: what its line on the list says instead of its meta. */
+/** Stand at work on a card, or just back: what its line on the list says instead of its meta. */
 function signalOf(e: Entry, now: number): Entry["signal"] {
   const cards = e.chain ?? (e.card ? [e.card] : []);
   if (!cards.length) return null;
   const last = cards.at(-1)!;
-  if (last.status === "listening") return { text: `✦ ${first(last.by)} is asking…`, tone: "working" };
+  if (last.status === "listening") return { text: `${first(last.by)} is asking…`, tone: "working" };
   if (last.status === "working") {
     const d = last.draft;
-    if (d?.text || d?.options.length) return { text: "✦ Writing…", tone: "working" };
-    if (d?.code?.length) return { text: "✦ Reading the repo…", tone: "working" };
-    if (d?.pages?.length) return { text: "✦ Reading what it found…", tone: "working" };
-    if (d?.searches.length) return { text: "✦ Searching the web…", tone: "working" };
-    return { text: e.kind === "options" ? "✦ Finding options…" : "✦ Finding an answer…", tone: "working" };
+    if (d?.text || d?.options.length) return { text: "Writing…", tone: "working" };
+    if (d?.code?.length) return { text: "Reading the repo…", tone: "working" };
+    if (d?.pages?.length) return { text: "Reading what it found…", tone: "working" };
+    if (d?.searches.length) return { text: "Searching the web…", tone: "working" };
+    return { text: e.kind === "options" ? "Finding options…" : "Finding an answer…", tone: "working" };
   }
   if (last.status === "ready" && last.readyAt !== null && now - last.readyAt < READY_MS)
-    return { text: e.kind === "said" ? `✦ New from ${first(last.by)}'s agent` : e.kind === "options" ? "✦ Options ready" : "✦ Answer ready", tone: "ready" };
+    return { text: e.kind === "said" ? `New from ${first(last.by)}'s agent` : e.kind === "options" ? "Options ready" : "Answer ready", tone: "ready" };
   return null;
 }
 
@@ -731,7 +728,7 @@ function SaidView({ card, start, live, acts }: { card: AgentCard; start: number;
   return (
     <section className="topic-now said-view" aria-label={`From ${first(card.by)}'s agent`}>
       <div className="topic-now-head">
-        <span className="topic-now-label ask">✦ From an agent</span>
+        <span className="topic-now-label ask">From an agent</span>
         {live && <span className="topic-now-label live">Now</span>}
         <span className="topic-mins">at {clock(card.at - start)}</span>
       </div>
@@ -740,12 +737,12 @@ function SaidView({ card, start, live, acts }: { card: AgentCard; start: number;
   );
 }
 
-/** Options ✦ Stand found on an open question, as a card of their own in the stack. */
+/** Options Stand found on an open question, as a card of their own in the stack. */
 function OptionsView({ card, start, acts }: { card: AgentCard; start: number; acts: AgentActs }) {
   return (
     <section className="topic-now options-view" aria-label="Options">
       <div className="topic-now-head">
-        <span className="topic-now-label ask">✦ Options</span>
+        <span className="topic-now-label ask">Options</span>
         <span className="topic-mins">
           {first(card.by)} asked at {clock(card.at - start)}
         </span>
@@ -766,7 +763,7 @@ function RunningList(props: { tasks: Tasks; acts: TaskActs; idOf: (name: string)
         <span className="topic-now-label">Running list</span>
         <span className="topic-mins">The whole meeting so far</span>
         <span key={updatedAt ?? "idle"} className={updatedAt ? "topic-updating on done" : "topic-updating"} aria-hidden>
-          <span className="agent-mark">✦</span> Updated
+          Updated
         </span>
       </div>
       <div className="topic-sections columns">
@@ -786,7 +783,7 @@ function RunningList(props: { tasks: Tasks; acts: TaskActs; idOf: (name: string)
   );
 }
 
-/** A question to ✦ Stand as a card: the first question is its title, each follow-up lands under the last answer. */
+/** A question to Stand as a card: the first question is its title, each follow-up lands under the last answer. */
 function AnswerStack({ chain, live, onTodo, pilot, focus, onAsked }: { chain: AgentCard[]; live: boolean; onTodo?: (cardId: string) => void; pilot?: PilotActs; focus?: boolean; onAsked?: () => void }) {
   // The chat scrolls inside the card, box at its foot. Like a chat, it opens at the latest, a new question
   // (a follow-up) scrolls into view as it's asked, and an answer being written stays in view as it grows
@@ -817,7 +814,7 @@ function AnswerStack({ chain, live, onTodo, pilot, focus, onAsked }: { chain: Ag
   return (
     <section className={live ? "topic-now answer-stack live" : "topic-now answer-stack"} aria-label="A question to Stand">
       <div className="topic-now-head">
-        <span className="topic-now-label ask">{chain.length ? "✦ Ask Stand" : "✦ New question"}</span>
+        <span className="topic-now-label ask">{chain.length ? "Ask Stand" : "New question"}</span>
         {live && <span className="topic-now-label live">Now</span>}
         {pilot?.view && <PilotPill acts={pilot} />}
       </div>
@@ -832,7 +829,7 @@ function AnswerStack({ chain, live, onTodo, pilot, focus, onAsked }: { chain: Ag
         </div>
       ) : (
         <p className="topic-hint">
-          <span className="agent-mark small">✦</span> Hold Ask Stand to follow up; the answer lands here
+          Hold Ask Stand to follow up; the answer lands here
         </p>
       )}
     </section>
@@ -863,7 +860,7 @@ function Waiting(props: {
         </div>
       )}
       <p className={props.updating ? "topic-hint updating" : "topic-hint"}>
-        <span className="agent-mark small">✦</span> The topic shows up here as people talk
+        The topic shows up here as people talk
       </p>
     </div>
   );
@@ -882,9 +879,6 @@ export function BoardStrip({ board, focusItemId, onOpen }: { board: Board | null
       title={onOpen ? "Open the board" : t.card.summary.join(" ")}
       onClick={onOpen}
     >
-      <span className="agent-mark" aria-hidden>
-        ✦
-      </span>
       <strong className="topic-strip-title">{t.title}</strong>
       {text && (
         <span className="topic-strip-now">
@@ -957,7 +951,7 @@ function Card(props: {
         {spent(t) >= 60_000 && <span className="topic-mins">{fmtDuration(spent(t))}</span>}
         <MovedBy move={props.movedBy} start={props.meetingStart} nameOf={props.nameOf} idOf={props.idOf} />
         <span key={updatedAt && !props.updating ? updatedAt : "busy"} className={props.updating ? "topic-updating on" : updatedAt ? "topic-updating on done" : "topic-updating"} aria-hidden>
-          <span className="agent-mark">✦</span> {props.updating || !updatedAt ? "Updating" : "Updated"}
+          {props.updating || !updatedAt ? "Updating" : "Updated"}
         </span>
         {!props.rewoundAt && <AgentStatus cards={props.acts.agent?.cards} />}
       </div>
@@ -965,9 +959,6 @@ function Card(props: {
         {t.title}
       </h2>
       <p className="topic-summary" title="Stand writes this from the talk and keeps it up to date">
-        <span className="agent-mark" aria-hidden>
-          ✦
-        </span>{" "}
         {t.card.summary.map((x, i) => (
           <span key={i} className={mark(marks.get(`s${i}`))}>
             <Typed text={x} on={marks.has(`s${i}`)} />{" "}
@@ -984,9 +975,6 @@ function Card(props: {
           onClick={() => props.onAcceptMove?.(props.pending!.title)}
           title="Switch the board to it now, for everyone"
         >
-          <span className="agent-mark" aria-hidden>
-            ✦
-          </span>{" "}
           {props.pending.kind === "return" ? "Looks like you're back on " : "Looks like you've moved to "}
           <strong>{props.pending.title}</strong>
           <span className="topic-moving-go" aria-hidden>
@@ -1091,7 +1079,7 @@ function CardTabs(props: { t: BoardThread; marks: Map<string, Mark>; tasks: Task
       // Not remembered; it still switches.
     }
   };
-  // "✦ Options ready" opens the Open tab and brings the card into view.
+  // "Options ready" opens the Open tab and brings the card into view.
   useEffect(() => {
     const show = () => setTab("open");
     window.addEventListener(SHOW_CARD, show);
@@ -1334,9 +1322,6 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
         {line}
         {heard && (
           <li className="heard-row">
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>
             <span className="heard-label">Sounds settled:</span>
             <span className="heard-text">{heard.text}</span>
             <HeardActs id={heard.id} acts={props.acts} />
@@ -1368,8 +1353,8 @@ function TaskList(props: { kind: TaskKind; tasks: Tasks; acts: TaskActs; idOf: (
           onClick={() => props.acts.onDone?.(note.id, !note.doneAt)}
         />
       ) : (
-        <span className={opts.r?.heard ? "topic-note-mark agent-mark" : "topic-note-mark"} aria-label={opts.r?.leaving ? "Answered" : opts.r?.heard ? "Heard, not confirmed" : MARK_LABEL[props.kind]}>
-          {opts.r?.leaving ? "✓" : opts.r?.heard ? "✦" : MARK[props.kind]}
+        <span className={opts.r?.heard ? "topic-note-mark heard-mark" : "topic-note-mark"} aria-label={opts.r?.leaving ? "Answered" : opts.r?.heard ? "Heard, not confirmed" : MARK_LABEL[props.kind]}>
+          {opts.r?.leaving ? "✓" : opts.r?.heard ? "" : MARK[props.kind]}
         </span>
       )}
       <span className="topic-task-text">
@@ -1468,7 +1453,7 @@ function Warmup(props: {
         ))}
       </div>
       <p className={props.updating ? "topic-hint updating" : "topic-hint"}>
-        <span className="agent-mark small">✦</span> Working out the topic
+        Working out the topic
       </p>
     </section>
   );

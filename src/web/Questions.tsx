@@ -126,9 +126,6 @@ export function SweepPop(props: { roomId: string; count: number; sweep: Question
       <div className="dialog sweep-pop" role="dialog" aria-modal="true" aria-label="Sweep open questions">
         <div className="sweep-head">
           <h2>
-            <span className="agent-mark" aria-hidden>
-              ✦
-            </span>{" "}
             Sweep open questions
           </h2>
           <button className="icon-btn" aria-label="Close" title="Close (Esc)" onClick={onClose}>

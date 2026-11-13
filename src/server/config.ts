@@ -34,7 +34,7 @@ export const config = {
   listModel: env("LIST_MODEL") ?? "claude-sonnet-5-5",
   /** A brainstorm's map (brainstorm.ts), after every pause in the talk. */
   mapModel: env("MAP_MODEL") ?? "claude-sonnet-5-5",
-  /** ✦ Stand's options for an open question (meetingAgent.ts), with web search, on a click. */
+  /** Stand's options for an open question (meetingAgent.ts), with web search, on a click. */
   agentModel: env("AGENT_MODEL") ?? "claude-sonnet-5-5",
   /** Off for now (joe, 2026-11-11), to cut Claude calls between meetings. DONE_SINCE=on brings back
    *  the Done since pages (doneDeck.ts); SUGGESTED_AGENDA=on brings back the suggested agenda and its

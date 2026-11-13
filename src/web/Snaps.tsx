@@ -153,9 +153,6 @@ export function SnapGallery(props: {
               <div className="snap-text">
                 {snap.caption && (
                   <p className="snap-caption">
-                    <span className="snap-mark" aria-hidden>
-                      ✦
-                    </span>
                     {snap.caption}
                   </p>
                 )}
@@ -288,9 +285,6 @@ export function SnapFigures(props: { snaps: Snap[]; segments?: Segment[] }) {
             <figcaption>
               {s.caption && (
                 <span className="rc-shot-caption">
-                  <span className="snap-mark" aria-hidden>
-                    ✦
-                  </span>
                   {s.caption}
                 </span>
               )}
@@ -321,8 +315,8 @@ export function SnapStrip(props: { snaps: Snap[] }) {
         <button key={s.id} className="snap-thumb" onClick={() => setAt(k)} title={s.caption ?? `Snap by ${s.takenBy}`}>
           <img src={s.url} alt={s.caption ?? ""} loading="lazy" />
           {s.source === "agent" && (
-            <span className="snap-thumb-mark" aria-label="Kept by the agent">
-              ✦
+            <span className="snap-thumb-mark" title="Kept by Stand">
+              Stand
             </span>
           )}
         </button>
