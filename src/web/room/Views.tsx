@@ -10,6 +10,7 @@ import { api } from "../api.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { brainstormHref } from "../pages/BrainstormPage.tsx";
 import { errorToast } from "../Toasts.tsx";
+import { BarSlot } from "./barSlot.ts";
 import { SketchBoard, StyleChip, shownSubjects, subjectCount, type SketchActs, type SketchAs } from "./Sketch.tsx";
 
 export type ViewTab = "card" | "sketch";
@@ -49,6 +50,7 @@ export function ViewPane(props: {
 }) {
   const [picked, setPicked] = useState<SketchAs | null>(null);
   const as = picked ?? (props.phone ? "list" : "picture");
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
   const view = props.tabs ? props.view : "card";
   const pills = (
@@ -76,9 +78,14 @@ export function ViewPane(props: {
   );
   return (
     <div className="view-pane">
-      {props.tabs && !sketching && <div className="view-bar">{pills}</div>}
+      {props.tabs && !sketching && (
+        <div className="view-bar">
+          {pills}
+          {!props.phone && <span className="view-bar-slot" ref={setSlot} />}
+        </div>
+      )}
       {view !== "sketch" ? (
-        props.card
+        <BarSlot.Provider value={props.tabs && !props.phone ? slot : null}>{props.card}</BarSlot.Provider>
       ) : live ? (
         <SketchBoard brainstorm={live} acts={props.acts} phone={props.phone} as={as} subject={props.subject} onSubject={props.onSubject} heard={props.heard} lead={props.tabs ? pills : undefined} tail={switches} pageHref={brainstormHref(props.roomId, live.id)} />
       ) : props.stopped ? (

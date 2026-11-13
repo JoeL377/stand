@@ -13,6 +13,8 @@ import { Linkified } from "../Linkified.tsx";
 
 /** How long a chat message keeps the folded panel open. */
 const PEEK_MS = 12_000;
+/** How long a new message's preview stays beside the folded panel. */
+const PREVIEW_MS = 7_000;
 
 export function SidePanel(props: {
   state: RoomState;
@@ -95,12 +97,24 @@ export function SidePanel(props: {
   // pointer or the cursor is in it.
   const lastChats = useRef(othersChats);
   useEffect(() => {
-    if (othersChats > lastChats.current && props.folded) {
-      setTab("chat");
-      props.onPeek?.(true);
+    // Folded, a message from someone else shows as a small preview beside the rail. The panel itself
+    // stays shut, so nothing covers the board: opening it is the reader's choice.
+    if (othersChats > lastChats.current && props.folded && !props.phone) {
+      const last = chats.filter((c) => c.speakerId !== props.participantId).at(-1);
+      if (last) setPreview({ id: last.id, name: last.speakerName, text: last.text });
     }
     lastChats.current = othersChats;
   }, [othersChats]);
+  const [preview, setPreview] = useState<{ id: string; name: string; text: string } | null>(null);
+  const [previewHeld, setPreviewHeld] = useState(false);
+  useEffect(() => {
+    if (!preview || previewHeld) return;
+    const t = setTimeout(() => setPreview(null), PREVIEW_MS);
+    return () => clearTimeout(t);
+  }, [preview, previewHeld]);
+  useEffect(() => {
+    if (!shut) setPreview(null);
+  }, [shut]);
   const [holding, setHolding] = useState(false);
   useEffect(() => {
     if (!props.peeking || !props.folded || holding) return;
@@ -134,6 +148,23 @@ export function SidePanel(props: {
             </button>
           );
         })}
+        {preview && (
+          <button
+            type="button"
+            className="chat-preview"
+            aria-label={`New message from ${preview.name}. Open chat`}
+            onMouseEnter={() => setPreviewHeld(true)}
+            onMouseLeave={() => setPreviewHeld(false)}
+            onClick={() => {
+              setTab("chat");
+              setPreview(null);
+              props.onFold?.();
+            }}
+          >
+            <strong dir="auto">{preview.name}</strong>
+            <span dir="auto">{preview.text}</span>
+          </button>
+        )}
       </aside>
     );
 
@@ -145,47 +176,89 @@ export function SidePanel(props: {
       onFocus={() => setHolding(true)}
       onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHolding(false)}
     >
-      <div className="side-head">
-        <h2 className="side-head-title" title={focus?.title}>
-          {focus ? focus.title : "General / off-agenda"}
-        </h2>
-        <SnapsPill snaps={focusSnaps} me={props.participantId} isHost={isHost} className="side-head-snaps" />
-        {keyOf(focus) && <span className="side-head-key">{keyOf(focus)}</span>}
-        {props.onFold && (
-          <button
-            className="icon side-fold"
-            title={props.peeking && props.folded ? "Keep chat and transcript open" : "Hide chat and transcript"}
-            aria-label={props.peeking && props.folded ? "Keep open" : "Hide chat and transcript"}
-            onClick={props.onFold}
-          >
-            <PanelIcon open={!(props.peeking && props.folded)} right />
-          </button>
-        )}
-      </div>
-
-      <div className="side-toggle" role="tablist" aria-label="Discussion views">
-        <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
-          {props.phone ? "Chat only" : "Chat"}
-          {tab !== "chat" && chatUnseen > 0 && !props.phone && (
-            <span className="side-tab-badge" aria-label={`${chatUnseen} new`}>
-              {chatUnseen}
-            </span>
+      {/* The call's top bar already names what is being discussed, so on a wide screen the panel opens
+          on its tabs. A phone's sheet has no top bar over it and keeps the title. */}
+      {props.phone ? (
+        <>
+          <div className="side-head">
+            <h2 className="side-head-title" title={focus?.title}>
+              {focus ? focus.title : "General / off-agenda"}
+            </h2>
+            <SnapsPill snaps={focusSnaps} me={props.participantId} isHost={isHost} className="side-head-snaps" />
+            {keyOf(focus) && <span className="side-head-key">{keyOf(focus)}</span>}
+            {props.onFold && (
+              <button
+                className="icon side-fold"
+                title={props.peeking && props.folded ? "Keep chat and transcript open" : "Hide chat and transcript"}
+                aria-label={props.peeking && props.folded ? "Keep open" : "Hide chat and transcript"}
+                onClick={props.onFold}
+              >
+                <PanelIcon open={!(props.peeking && props.folded)} right />
+              </button>
+            )}
+          </div>
+          <div className="side-toggle" role="tablist" aria-label="Discussion views">
+            <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
+              {props.phone ? "Chat only" : "Chat"}
+              {tab !== "chat" && chatUnseen > 0 && !props.phone && (
+                <span className="side-tab-badge" aria-label={`${chatUnseen} new`}>
+                  {chatUnseen}
+                </span>
+              )}
+            </button>
+            <button
+              role="tab"
+              aria-selected={tab === "transcript"}
+              className={tab === "transcript" ? "on" : ""}
+              onClick={() => setTab("transcript")}
+            >
+              {props.phone ? "Everything" : "Transcript"}
+              {tab !== "transcript" && unseen > 0 && (
+                <span className="side-tab-badge" aria-label={`${unseen} new`}>
+                  {unseen}
+                </span>
+              )}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="side-top">
+          <div className="side-toggle" role="tablist" aria-label="Discussion views">
+            <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
+              {props.phone ? "Chat only" : "Chat"}
+              {tab !== "chat" && chatUnseen > 0 && !props.phone && (
+                <span className="side-tab-badge" aria-label={`${chatUnseen} new`}>
+                  {chatUnseen}
+                </span>
+              )}
+            </button>
+            <button
+              role="tab"
+              aria-selected={tab === "transcript"}
+              className={tab === "transcript" ? "on" : ""}
+              onClick={() => setTab("transcript")}
+            >
+              {props.phone ? "Everything" : "Transcript"}
+              {tab !== "transcript" && unseen > 0 && (
+                <span className="side-tab-badge" aria-label={`${unseen} new`}>
+                  {unseen}
+                </span>
+              )}
+            </button>
+          </div>
+          <SnapsPill snaps={focusSnaps} me={props.participantId} isHost={isHost} className="side-head-snaps" />
+          {props.onFold && (
+            <button
+              className="icon side-fold"
+              title={props.peeking && props.folded ? "Keep chat and transcript open" : "Hide chat and transcript"}
+              aria-label={props.peeking && props.folded ? "Keep open" : "Hide chat and transcript"}
+              onClick={props.onFold}
+            >
+              <PanelIcon open={!(props.peeking && props.folded)} right />
+            </button>
           )}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "transcript"}
-          className={tab === "transcript" ? "on" : ""}
-          onClick={() => setTab("transcript")}
-        >
-          {props.phone ? "Everything" : "Transcript"}
-          {tab !== "transcript" && unseen > 0 && (
-            <span className="side-tab-badge" aria-label={`${unseen} new`}>
-              {unseen}
-            </span>
-          )}
-        </button>
-      </div>
+        </div>
+      )}
       {/* The topics on the middle screen come from these notes, so a failure still says so here. */}
       {notesFailed && (
         <p className="notes-paused side-notes-paused" role="status">
