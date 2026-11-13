@@ -202,7 +202,14 @@ export function startServices() {
     call: (roomId) => {
       const s = live(roomId);
       return s
-        ? { meetingId: s.meetingId, startedAt: s.meetingStartedAt, people: s.state().participants.map((p) => p.name), tail: (since) => s.tail(since), say: (actor, out) => s.agentSay(actor, out) }
+        ? {
+            meetingId: s.meetingId,
+            startedAt: s.meetingStartedAt,
+            people: s.state().participants.map((p) => p.name),
+            tail: (since) => s.tail(since),
+            say: (actor, out, askId) => s.agentSay(actor, out, askId),
+            wait: (actor, ms, signal) => s.waitForAsk(actor, ms, signal),
+          }
         : null;
     },
     notify: (roomId, what) => {

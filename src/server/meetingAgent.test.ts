@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AGENT_MAX_RUNS, AgentKeeper, answerPrompt, AskCapture, costOf, draftOf, optionsPrompt, readPartial, SAY_EVERY_MS, SAY_MAX_CARDS, type SpaceHistory, toAnswer, toCard, typedAsk } from "./meetingAgent.ts";
+import { AGENT_MAX_RUNS, AgentKeeper, answerPrompt, AskCapture, costOf, draftOf, optionsPrompt, readPartial, SAY_EVERY_MS, SAY_MAX_CARDS, type SpaceHistory, toAnswer, toCard, typedAgentAsk, typedAsk } from "./meetingAgent.ts";
 import { type ListAnswer, ListKeeper } from "./liveList.ts";
 import type { Segment } from "../shared/protocol.ts";
 
@@ -145,6 +145,44 @@ test("@stand in the chat is a question for Stand", () => {
   assert.equal(typedAsk("@stand"), null);
   assert.equal(typedAsk("we should stand up a server"), null);
   assert.equal(typedAsk("@standup notes"), null);
+});
+
+test("@agent in the chat asks your own agent; alone it asks with no words", () => {
+  assert.equal(typedAgentAsk("@agent which plan has SSO?"), "which plan has SSO?");
+  assert.equal(typedAgentAsk("@Agent: read the spec"), "read the spec");
+  assert.equal(typedAgentAsk("@agent"), "");
+  assert.equal(typedAgentAsk("@agents are cool"), null);
+  assert.equal(typedAgentAsk("ask the @agent"), null);
+});
+
+test("an ask to someone's own agent: a card at once, filled by its answer, failed when late, and filled late too", () => {
+  const k = new AgentKeeper();
+  const joe = { kind: "agent" as const, person: "Joe Liang", personId: "p1", agent: "opencode", connection: "tok1", model: "claude-fable-5-2" };
+  const a = k.askAgent("Joe Liang", "p1", joe, "which plan has SSO?", T0);
+  assert.deepEqual([a.kind, a.status, a.question, a.agent?.agent, a.to], ["answer", "working", "which plan has SSO?", "opencode", { personId: "p1", connection: "tok1" }]);
+  assert.equal(k.canRun(), true);
+  assert.deepEqual(k.openAsks("p1").map((c) => c.id), [a.id]);
+  // Answering it is not a card of its own: no wait of 5 seconds, and it isn't counted.
+  assert.equal(k.sayRefusal(joe, T0 + 1), null);
+  assert.match(String(k.answerAsk(a.id, { ...joe, personId: "p2" }, { text: "Hi" })), /No ask of yours/);
+  const filled = k.answerAsk(a.id, joe, { text: "Enterprise has SSO.", detail: "## Plans" }, T0 + 20_000);
+  assert.notEqual(typeof filled, "string");
+  assert.deepEqual([a.status, a.note, a.detail, a.readyAt], ["ready", "Enterprise has SSO.", "## Plans", T0 + 20_000]);
+  assert.match(String(k.answerAsk(a.id, joe, { text: "Again" })), /answer already/);
+  assert.equal(k.expireAsk(a.id), null, "an answered ask doesn't fail");
+  assert.deepEqual(k.followUp(T0 + 30_000), [], "Stand doesn't follow up an agent's answer");
+
+  const late = k.askAgent("Joe Liang", "p1", joe, "", T0);
+  assert.ok(k.expireAsk(late.id, T0 + 180_000));
+  assert.deepEqual([late.status, late.note], ["failed", "Joe's agent didn't answer. Is it still attached?"]);
+  assert.deepEqual(k.openAsks("p1"), []);
+  assert.notEqual(typeof k.answerAsk(late.id, joe, { text: "Sorry, here it is." }), "string");
+  assert.equal(late.status, "ready");
+
+  const cut = k.askAgent("Joe Liang", "p1", joe, "and Pro?", T0);
+  const again = new AgentKeeper(k.all());
+  assert.deepEqual([again.get(cut.id)?.status, again.get(cut.id)?.note], ["failed", "Stand restarted before the agent answered. Ask again."]);
+  assert.equal(again.get(a.id)?.status, "ready");
 });
 
 test("an answer's prompt carries the asker, the question and what it follows up on", () => {

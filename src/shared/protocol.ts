@@ -526,6 +526,9 @@ export interface AgentCard {
   agent?: Actor;
   /** A card from someone's own agent: a longer write-up in markdown, folded under its words. */
   detail?: string;
+  /** An ask to someone's own agent from inside the call (wait_for_ask): whose agent, and the connection
+   *  it was attached through. `agent` is that agent; it fills the card with say_in_call (ask_id). */
+  to?: { personId: string; connection: string | null };
 }
 /** The Pilot seat: the one person who drives Stand (types or holds Ask Stand) right now. */
 export interface PilotView {

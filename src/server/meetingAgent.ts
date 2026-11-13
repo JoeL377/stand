@@ -38,6 +38,17 @@ export const ASK_MAX_MS = 60_000;
 const FOLLOW_MS = 5 * 60_000;
 /** A question typed to Stand in the chat. */
 const AT_STAND = /^@stand\b[\s,:]*/i;
+/** A question typed to your own agent in the chat. */
+const AT_AGENT = /^@agent\b[\s,:]*/i;
+/** Most asks one person may have open with their own agent, and how long one waits for its answer. */
+export const OWN_ASKS_MAX = 3;
+export const OWN_ASK_MS = 3 * 60_000;
+/** An agent counts as attached this long after its last wait ended: it is calling again. */
+export const ATTACHED_MS = 60_000;
+
+/** How a wait of someone's own agent for its person's ask ends (wait_for_ask): with the ask, with
+ *  nothing (call again), or with why it must stop. */
+export type AskWait = { ask: AgentCard; stop?: undefined } | { ask: null; stop?: string };
 /** How much recent talk a run reads. */
 const TALK_MS = 4 * 60_000;
 /** Most lines of each kind of space history a run is shown. */
@@ -197,6 +208,13 @@ export function typedAsk(text: string): string | null {
   return q.length >= 3 ? q : null;
 }
 
+/** A question typed to your own agent in the chat ("@agent which plan has SSO?"): its words, "" for
+ *  "@agent" alone (read the call and say what helps), or null when the message isn't one. */
+export function typedAgentAsk(text: string): string | null {
+  if (!AT_AGENT.test(text)) return null;
+  return text.replace(AT_AGENT, "").trim();
+}
+
 /** The prompt for one answer. `earlier`: the answers it may follow up on, oldest first. */
 export function answerPrompt(
   question: string,
@@ -303,6 +321,8 @@ export class AgentKeeper {
     this.n = Math.max(0, ...this.cards.map((c) => Number(c.id.slice(3)) || 0));
     // A question being taken down when the server restarted is lost with the hold.
     for (const c of this.cards) if (c.status === "listening") Object.assign(c, { status: "failed", readyAt: c.at, note: "Stand restarted while you were asking. Ask again." });
+    // So is an ask to someone's own agent: a restart drops the agent's wait, and with it the ask.
+    for (const c of this.cards) if (c.to && c.status === "working") Object.assign(c, { status: "failed", readyAt: c.at, note: "Stand restarted before the agent answered. Ask again." });
   }
 
   all(): AgentCard[] {
@@ -324,9 +344,10 @@ export class AgentKeeper {
     return this.cards.filter((c) => !c.agent).length < AGENT_MAX_RUNS;
   }
 
-  /** Why someone's own agent can't put a card in the call right now, or null when it can. */
+  /** Why someone's own agent can't put a card in the call right now, or null when it can. An answer to
+   *  its person's ask is not a card of its own, so it doesn't count. */
   sayRefusal(agent: Actor, at = Date.now()): string | null {
-    const mine = this.cards.filter((c) => c.agent && sameAgent(c.agent, agent));
+    const mine = this.cards.filter((c) => c.agent && !c.to && sameAgent(c.agent, agent));
     if (mine.length >= SAY_MAX_CARDS) return `This agent has put ${SAY_MAX_CARDS} cards in this call, which is the most one agent may.`;
     const last = mine.at(-1);
     if (last && at - last.at < SAY_EVERY_MS) return `One card every ${SAY_EVERY_MS / 1000} seconds. Wait a moment, and put what belongs together in one card.`;
@@ -347,6 +368,53 @@ export class AgentKeeper {
     card.model = agent.model ?? null;
     card.agent = agent;
     if (out.detail) card.detail = out.detail;
+    return card;
+  }
+
+  /** Someone asked their own agent from inside the call: a card for everyone at once, which the agent
+   *  fills when it answers (answerAsk). `question` is empty for an ask with no words. */
+  askAgent(by: string, who: string, agent: Actor, question: string, at = Date.now()): AgentCard {
+    const card = this.start(who, question, by, at);
+    card.kind = "answer";
+    card.sources = [];
+    card.todo = null;
+    card.follows = null;
+    card.model = agent.model ?? null;
+    card.agent = agent;
+    card.to = { personId: who, connection: agent.connection ?? null };
+    return card;
+  }
+
+  /** The asks to this person's agent it hasn't answered yet. */
+  openAsks(who: string): AgentCard[] {
+    return this.cards.filter((c) => c.to?.personId === who && c.status === "working");
+  }
+
+  /** The agent answers its person's ask: the card fills, even after it failed for taking too long. A
+   *  string: why not, in a line. */
+  answerAsk(id: string, agent: Actor, out: Parameters<AgentKeeper["say"]>[1], at = Date.now()): AgentCard | string {
+    const card = this.get(id);
+    if (!card?.to || card.to.personId !== agent.personId) return "No ask of yours has that ask_id in this call. Leave ask_id out to put a card of your own.";
+    if (card.status === "ready") return "That ask has its answer already. Leave ask_id out to put another card of your own.";
+    card.status = "ready";
+    card.readyAt = at;
+    card.note = out.text;
+    card.sources = out.sources ?? [];
+    card.todo = out.todo || null;
+    card.model = agent.model ?? null;
+    card.agent = agent;
+    if (out.detail) card.detail = out.detail;
+    else delete card.detail;
+    return card;
+  }
+
+  /** An ask nobody answered in time fails, with a line that says why. A later answer still fills it. */
+  expireAsk(id: string, at = Date.now()): AgentCard | null {
+    const card = this.get(id);
+    if (!card?.to || card.status !== "working") return null;
+    card.status = "failed";
+    card.readyAt = at;
+    card.note = `${card.by.split(" ")[0]}'s agent didn't answer. Is it still attached?`;
     return card;
   }
 
