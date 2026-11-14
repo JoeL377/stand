@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, QuestionSweep, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { activeFirst, matchesProject, projectActivity, type Project } from "../../shared/projects.ts";
 import { ProjectPicker } from "../ProjectPicker.tsx";
@@ -355,6 +355,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   };
 
   const made = useArtifacts(room.id);
+  // A sketch is its picture: a card goes straight to it. Specs, docs and decks open the panel first.
+  const navigate = useNavigate();
+  const pickArtifact = useCallback((id: string) => {
+    const a = made.artifacts?.find((x) => x.id === id);
+    if (a?.kind === "sketch" && a.href) navigate(a.href);
+    else showArtifact(id);
+  }, [made.artifacts, navigate, showArtifact]);
   const todos = room.followUps.filter((f) => !gone.has(`todo:${f.id}`));
   const questions = (feed?.open ?? []).filter((n) => !gone.has(`question:${n.id}`));
   const decisions = (feed?.decided ?? []).filter((n) => !gone.has(`decision:${n.id}`));
@@ -640,7 +647,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                 });
               }}
               selected={openArtifact}
-              onSelect={showArtifact}
+              onSelect={pickArtifact}
             />
           )}
           {tab === "meetings" && (
@@ -754,7 +761,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               onShow={(v) => setParam("show", v === "tasks" ? "" : v)}
               decisionCount={decisions.filter((n) => !n.replacedBy && inProject(n)).length}
               artifactCount={!hasProjects ? (made.artifacts?.length ?? 0) : (made.artifacts ?? []).filter((a) => (pageOf === "none" ? !a.projects.length : a.projects.includes(pageOf))).length}
-              artifacts={<ArtifactsView artifacts={made.artifacts} error={made.error} projects={projectNames} project={hasProjects ? pageOf || undefined : undefined} selected={openArtifact} onSelect={showArtifact} />}
+              artifacts={<ArtifactsView artifacts={made.artifacts} error={made.error} projects={projectNames} project={hasProjects ? pageOf || undefined : undefined} selected={openArtifact} onSelect={pickArtifact} />}
               decisions={
                 <>
                   <PointList
@@ -807,7 +814,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             meeting={madeOf.id}
             artifacts={made.artifacts}
             projects={projectNames}
-            onSelect={(id) => { setMadeOf(null); showArtifact(id); }}
+            onSelect={(id) => { setMadeOf(null); pickArtifact(id); }}
             onClose={() => setMadeOf(null)}
           />
         )}
