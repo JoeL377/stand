@@ -166,6 +166,7 @@ function decks(db: DB, roomId: string, r: Reading): Artifact[] {
         origin: plain,
         badge: plural(slides.length, "slide"),
         href: `/s/${roomId}/review/${v.id}`,
+        meetingId: v.meetingId ?? undefined,
         preview: { slides: slides.slice(0, 4).map((s) => (s.name || s.title).trim()) },
       });
     }
@@ -213,6 +214,7 @@ function sketches(db: DB, roomId: string, r: Reading): Artifact[] {
       origin: design ? "Design session" : "Brainstorm",
       badge: s.subjects && s.subjects.length > 1 ? plural(s.subjects.length, "subject") : diagram ? plural(held, "box", "boxes") : plural(s.ideas || held, "idea"),
       href: `/s/${roomId}/brainstorm/${b.id}`,
+      meetingId: b.meetingId ?? undefined,
       preview: { drawn: diagram ? "diagram" : "map" },
     }];
   });
@@ -234,6 +236,7 @@ function recaps(db: DB, roomId: string, r: Reading): Artifact[] {
     makers: [STAND],
     badge: `${Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000))} min`,
     href: `/meetings/${m.id}`,
+    meetingId: m.id,
     preview: { text: m.summary ? clip(m.summary, PREVIEW) : undefined, counts: { todos: m.todos, decided: m.decided, open: m.open } },
   }));
 }
@@ -290,6 +293,7 @@ function screenSets(db: DB, roomId: string, r: Reading): Array<{ artifact: Omit<
         makers: makers(rows.map((s) => makerOf({ kind: "person", person: s.taken_by as string }))),
         origin: meetingId ? "Snaps" : undefined,
         href: meetingId ? `/meetings/${meetingId}` : undefined,
+        meetingId: meetingId ?? undefined,
       },
       shots: rows.map((s) => ({ url: `/api/snaps/${s.id as string}.${s.ext as string}?v=${s.version as number}`, caption: ((s.caption as string) ?? (s.line as string) ?? null) || null, ts: s.ts as number })),
     });
@@ -395,7 +399,7 @@ export function artifactDetail(db: DB, roomId: string, id: string): ArtifactDeta
   if (a.kind === "recap") {
     const m = db.raw.prepare("SELECT summary FROM meetings WHERE id = ?").get(key) as Row | undefined;
     // What the meeting made: the other artifacts that came out of it.
-    const made = spaceArtifacts(db, roomId).artifacts.filter((x) => x.id !== a.id && x.href && (x.kind === "deck" || x.kind === "sketch") && madeIn(db, x) === key);
+    const made = spaceArtifacts(db, roomId).artifacts.filter((x) => x.id !== a.id && x.href && (x.kind === "deck" || x.kind === "sketch") && x.meetingId === key);
     for (const x of made) links.push({ text: x.title, note: x.origin?.toLowerCase(), href: x.href });
     return { ...a, body: ((m?.summary as string) ?? "").trim() || undefined, links };
   }
@@ -428,14 +432,6 @@ export function artifactDetail(db: DB, roomId: string, id: string): ArtifactDeta
     if (pr) links.push(pr);
   } else if (key.startsWith("m-")) meeting(key.slice(2), "the call they were taken in");
   return { ...a, images: (set?.shots ?? []).map((s) => ({ url: s.url, caption: s.caption })), links };
-}
-
-/** The meeting a deck or a sketch came out of. */
-function madeIn(db: DB, a: Artifact): string | null {
-  const key = a.id.slice(a.id.indexOf(":") + 1);
-  if (a.kind === "deck") return key.startsWith("u-") ? null : (db.getReview(key)?.meetingId ?? null);
-  if (a.kind === "sketch") return db.getBrainstorm(key)?.meetingId ?? null;
-  return null;
 }
 
 /** Where an artifact opens in the web app. */

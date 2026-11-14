@@ -121,14 +121,16 @@ export function ArtifactsView(props: {
   projects: Map<string, string>;
   /** Only this project's ("none": Unassigned). Its cards leave the project's name out. */
   project?: string;
+  /** Only what this meeting made, as plain rows with no filters. */
+  meeting?: string;
   /** The artifact that is open in the panel. */
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
-  const phone = usePhone();
+  const phone = usePhone() || !!props.meeting;
   const [kind, setKind] = useState<ArtifactKind | "">("");
   const [maker, setMaker] = useState("");
-  const scoped = useMemo(() => filterArtifacts(props.artifacts ?? [], { project: props.project }), [props.artifacts, props.project]);
+  const scoped = useMemo(() => filterArtifacts(props.artifacts ?? [], { project: props.project, meeting: props.meeting }), [props.artifacts, props.project, props.meeting]);
   const makers = useMemo(() => makersOf(scoped), [scoped]);
   const byMaker = useMemo(() => filterArtifacts(scoped, { maker }), [scoped, maker]);
   const counts = useMemo(() => {
@@ -157,7 +159,7 @@ export function ArtifactsView(props: {
     );
   return (
     <div className="af">
-      {(kinds.length > 1 || makers.length > 1) && (
+      {!props.meeting && (kinds.length > 1 || makers.length > 1) && (
         <div className="af-bar">
           <div className="sh-kinds af-kinds" role="group" aria-label="Which kind">
             <button type="button" className={kind === "" ? "rp-pill on" : "rp-pill"} aria-pressed={kind === ""} onClick={() => setKind("")}>All</button>
@@ -201,6 +203,29 @@ export function ArtifactsView(props: {
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/** What one meeting made, in a pop-up over the list of meetings: a row each, and a row opens it. */
+export function MeetingMade(props: { title: string; meeting: string; artifacts: Artifact[] | null; projects: Map<string, string>; onSelect: (id: string) => void; onClose: () => void }) {
+  const { onClose } = props;
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onClose]);
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog af-made" role="dialog" aria-modal="true" aria-label={`Made in ${props.title}`}>
+        <header>
+          <h2 dir="auto">{props.title}</h2>
+          <button className="icon-btn" aria-label="Close" title="Close" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        <ArtifactsView artifacts={props.artifacts} projects={props.projects} meeting={props.meeting} selected={null} onSelect={props.onSelect} />
+      </div>
     </div>
   );
 }

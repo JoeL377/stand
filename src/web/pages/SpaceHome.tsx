@@ -23,7 +23,7 @@ import { FromChip, QuoteMark } from "../RecapChapters.tsx";
 import { ArchiveIcon, CameraIcon, ChatIcon, ChevronIcon, CloseIcon, EditIcon, GripIcon, LinkIcon, MicIcon, PinIcon, TrashIcon } from "../icons.tsx";
 import { DecidedIcon, QuestionIcon, TodoIcon } from "../NoteIcons.tsx";
 import { ActivityTab } from "../Activity.tsx";
-import { ArtifactPanel, ArtifactsView, useArtifacts } from "../Artifacts.tsx";
+import { ArtifactPanel, ArtifactsView, MeetingMade, useArtifacts } from "../Artifacts.tsx";
 import { Avatar } from "../Avatar.tsx";
 import { removeSnap } from "../Snaps.tsx";
 import { AnswerForm, SweepPop, answeredToast } from "../Questions.tsx";
@@ -104,7 +104,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const closeTask = useCallback(() => setParams((prev) => {
     const next = new URLSearchParams(prev); next.delete("task"); next.delete("view"); return next;
   }, { replace: true }), [setParams]);
-  // ?artifact=<id>: the artifact open in the panel beside the grid.
+  // ?artifact=<id>: the artifact open in the panel, over whichever tab it was opened from.
   const openArtifact = params.get("artifact");
   const showArtifact = useCallback((id: string) => setParamsNow.current((prev) => {
     const next = new URLSearchParams(prev); next.set("artifact", id); return next;
@@ -128,8 +128,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const [picked, setTab] = useState<TabKey | "">(() => {
     if (openTask) return "projects";
     if (params.get("project")) return "projects";
-    // A link to an artifact opens the Artifacts tab on it.
-    if (params.get("artifact")) return "artifacts";
     // An older link to "only mine" opens the Mine tab.
     if (params.get("mine") === "1") return "mine";
     try {
@@ -367,7 +365,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     chat: chat.unread,
     // Mine counts what is open and yours.
     mine: [...todos, ...questions].filter((n) => !!n.owner && firstName(n.owner) === firstName(user.name)).length,
-    artifacts: made.artifacts?.length ?? 0,
     // A log has no number worth reading.
     activity: 0,
   };
@@ -385,12 +382,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const shown = params.get("show");
   const show: ProjectShow = shown === "questions" || shown === "decisions" || shown === "artifacts" || shown === "done" ? shown : "tasks";
   const projectNames = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
-  // A link to an artifact followed from another tab (an Activity row) shows it on the Artifacts tab.
-  const artifactsOpen = tab === "artifacts" || (tab === "projects" && show === "artifacts");
-  useEffect(() => {
-    if (openArtifact && !artifactsOpen) setTab("artifacts");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openArtifact]);
+  // What each meeting made besides its own recap (the row is the recap): its decks, sketches and snaps.
+  const madeIn = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const a of made.artifacts ?? []) if (a.meetingId && a.kind !== "recap") n.set(a.meetingId, (n.get(a.meetingId) ?? 0) + 1);
+    return n;
+  }, [made.artifacts]);
+  const [madeOf, setMadeOf] = useState<{ id: string; title: string } | null>(null);
   const projectPicker = (n: Note, own?: boolean) => <ProjectPicker note={n} roomId={room.id} projects={projects} onSaved={load} own={own} />;
 
   const reviews = feed?.reviews ?? [];
@@ -612,7 +610,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         >
           {tab === "chat" && <SpaceChat roomId={room.id} name={room.name} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
           {tab === "activity" && <ActivityTab roomId={room.id} onOpenTask={showTask} />}
-          {tab === "artifacts" && <ArtifactsView artifacts={made.artifacts} error={made.error} projects={projectNames} selected={openArtifact} onSelect={showArtifact} />}
           {tab === "meetings" && (
             <>
               {error && !feed && (
@@ -718,7 +715,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                           onArchive={() => archive(`jot:${e.jot.id}`)}
                         />
                       ) : (
-                        <MeetingRow key={e.meeting.id} m={e.meeting} kind={kindOf.get(e.meeting.id)} onArchive={() => archive(`meeting:${e.meeting.id}`)} />
+                        <MeetingRow key={e.meeting.id} m={e.meeting} kind={kindOf.get(e.meeting.id)} made={madeIn.get(e.meeting.id) ?? 0} onMade={(title) => setMadeOf({ id: e.meeting.id, title })} onArchive={() => archive(`meeting:${e.meeting.id}`)} />
                       ),
                     )}
                   </ul>
@@ -755,8 +752,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               show={show}
               onShow={(v) => setParam("show", v === "tasks" ? "" : v)}
               decisionCount={decisions.filter((n) => !n.replacedBy && inProject(n)).length}
-              artifactCount={hasProjects ? (made.artifacts ?? []).filter((a) => (pageOf === "none" ? !a.projects.length : a.projects.includes(pageOf))).length : 0}
-              artifacts={<ArtifactsView artifacts={made.artifacts} error={made.error} projects={projectNames} project={pageOf || undefined} selected={openArtifact} onSelect={showArtifact} />}
+              artifactCount={!hasProjects ? (made.artifacts?.length ?? 0) : (made.artifacts ?? []).filter((a) => (pageOf === "none" ? !a.projects.length : a.projects.includes(pageOf))).length}
+              artifacts={<ArtifactsView artifacts={made.artifacts} error={made.error} projects={projectNames} project={hasProjects ? pageOf || undefined : undefined} selected={openArtifact} onSelect={showArtifact} />}
               decisions={
                 <>
                   <PointList
@@ -803,7 +800,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             onDeleted={load}
           />
         )}
-        {openArtifact && artifactsOpen && (
+        {madeOf && (
+          <MeetingMade
+            title={madeOf.title}
+            meeting={madeOf.id}
+            artifacts={(made.artifacts ?? []).filter((a) => a.kind !== "recap")}
+            projects={projectNames}
+            onSelect={(id) => { setMadeOf(null); showArtifact(id); }}
+            onClose={() => setMadeOf(null)}
+          />
+        )}
+        {openArtifact && (
           <ArtifactPanel
             key={openArtifact}
             roomId={room.id}
@@ -1095,7 +1102,7 @@ function ItemPill(props: {
  * of it in three columns that line up down the list (to-dos, open questions, decisions), then the
  * page it left behind. No mark of its own: its name says what kind it was.
  */
-function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; kind?: { name: string; open: string; to: string }; onArchive: () => void }) {
+function MeetingRow({ m, kind, made, onMade, onArchive }: { m: SpaceFeed["meetings"][number]; kind?: { name: string; open: string; to: string }; made: number; onMade: (title: string) => void; onArchive: () => void }) {
   const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
   // In the tabs' order and colors. A kind with nothing keeps its column, empty.
@@ -1125,6 +1132,14 @@ function MeetingRow({ m, kind, onArchive }: { m: SpaceFeed["meetings"][number]; 
           )}
         </span>
       </Link>
+      <span className="sh-made">
+        {made > 0 && (
+          <button type="button" className="sh-made-btn" title={`${made} made in this meeting`} aria-label={`${made} made in this meeting`} onClick={() => onMade(m.title ?? kind?.name ?? "Meeting")}>
+            <ArtifactsIcon />
+            {made}
+          </button>
+        )}
+      </span>
       <span className="sh-end">
         {kind && (
           <Link className="rp-pill" to={kind.to}>
@@ -1163,7 +1178,7 @@ function TasksTab(props: {
   /** The decisions of the project whose page is open, as their list. */
   decisions: React.ReactNode;
   decisionCount: number;
-  /** What the project made, as its grid. A space with no projects has the Artifacts tab alone. */
+  /** What the project made, as its grid. A space with no projects shows everything it made. */
   artifacts: React.ReactNode;
   artifactCount: number;
   /** Which kind a project's page lists, and how to change it. */
@@ -1801,7 +1816,7 @@ function TasksTab(props: {
             { key: "tasks", label: "Tasks", n: withParts(todos).length, icon: <TodoIcon size={13} /> },
             { key: "questions", label: "Questions", n: asked.length, icon: <QuestionIcon size={13} /> },
             { key: "decisions", label: "Decisions", n: props.decisionCount, icon: <DecidedIcon size={13} /> },
-            ...(props.solo ? [] : [{ key: "artifacts" as const, label: "Artifacts", n: props.artifactCount, icon: <ArtifactsIcon /> }]),
+            { key: "artifacts", label: "Artifacts", n: props.artifactCount, icon: <ArtifactsIcon /> },
             // Finished to-dos are their own last view, so Tasks is only what is still open.
             { key: "done", label: "Done", n: closedOf("action").done.length, icon: <DoneIcon /> },
           ];
@@ -2545,7 +2560,7 @@ const ArtifactsIcon = () => (
   </svg>
 );
 
-type TabKey = "projects" | "chat" | "meetings" | "artifacts" | "mine" | "activity";
+type TabKey = "projects" | "chat" | "meetings" | "mine" | "activity";
 /** What a project's page lists: one kind at a time. */
 type ProjectShow = "tasks" | "questions" | "decisions" | "artifacts" | "done";
 /** The space's tabs, in the order people look at them. */
@@ -2694,8 +2709,6 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "projects", label: "Projects", icon: <ProjectsIcon /> },
   { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
-  // What the space made: specs, decks, sketches, recaps, screens and docs.
-  { key: "artifacts", label: "Artifacts" },
   { key: "mine", label: "Mine" },
   // What agents did in the space. People's changes can join it later, which is why it isn't "Agents".
   { key: "activity", label: "Activity" },

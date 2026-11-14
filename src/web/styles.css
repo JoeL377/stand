@@ -5059,3 +5059,12 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
   .pj-line.card .sh-project-grip { display: none; }
   .pj-ghost .sh-project-form { padding: 14px 16px; }
 }
+
+/* What a meeting made: a count on its row, which opens the list in a pop-up. */
+.sh-made { flex: none; width: 40px; display: inline-flex; justify-content: flex-end; }
+.sh-made-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; min-height: 0; padding: 0 6px; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--muted); font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.sh-made-btn:hover:not(:disabled), .sh-made-btn:focus-visible { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.dialog.af-made { width: min(480px, 100%); min-width: 0; max-width: calc(100vw - 32px); }
+.af-made header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.af-made h2 { margin: 0; font-size: 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-made .af-rows { max-height: min(60vh, 420px); overflow-y: auto; }
