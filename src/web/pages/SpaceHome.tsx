@@ -31,6 +31,7 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { usePhone } from "../phone.ts";
 import { fmtDate, fmtTime, fmtDay } from "../util.ts";
+import { isShortCall, periodLabel, whenLabel } from "../meetingList.ts";
 import { ModeNote } from "./RoomPage.tsx";
 import { brainstormHref } from "./brainstormHref.ts";
 import { VerdictCounts, designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
@@ -433,12 +434,16 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         ...meetings.map((meeting) => ({ kind: "meeting" as const, at: meeting.endedAt, meeting })),
       ].sort((a, b) => b.at - a.at)
     : [];
-  const days: Array<{ label: string; entries: Entry[] }> = [];
+  // The list reads in stretches (this week, last week, then months), not a heading a day.
+  const periods: Array<{ label: string; entries: Entry[]; short: Entry[] }> = [];
   for (const e of entries) {
-    const label = dayLabel(e.at);
-    if (days.at(-1)?.label !== label) days.push({ label, entries: [] });
-    days.at(-1)!.entries.push(e);
+    const label = periodLabel(e.at);
+    if (periods.at(-1)?.label !== label) periods.push({ label, entries: [], short: [] });
+    // A call of a minute or two that left nothing behind is a test: it folds away under its stretch.
+    if (e.kind === "meeting" && isShortCall(e.meeting, !!kindOf.get(e.meeting.id), madeIn.get(e.meeting.id) ?? 0)) periods.at(-1)!.short.push(e);
+    else periods.at(-1)!.entries.push(e);
   }
+  const [shortOpen, setShortOpen] = useState<ReadonlySet<string>>(new Set());
 
   // The open project's name, shown after "Projects" in the tab row as the way back.
   const crumb = tab === "projects" && hasProjects && !mine && pageOf ? (pageOf === "none" ? "Unassigned" : (projects.find((x) => x.id === pageOf)?.name ?? null)) : null;
@@ -605,8 +610,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           ref={panelRef}
           className={tab === "projects" || mine ? "sh-panel tasks projects" : `sh-panel ${tab}`}
           role="tabpanel"
-          // The name column is as wide as the longest meeting name on the list, so short names keep their numbers close.
-          style={tab === "meetings" ? ({ "--sh-mname": `${Math.max(10, ...meetings.map((m) => (m.title ?? kindOf.get(m.id)?.name ?? "Meeting").length)) * 0.56 + 1}em` } as React.CSSProperties) : undefined}
         >
           {tab === "chat" && <SpaceChat roomId={room.id} name={room.name} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
           {tab === "activity" && <ActivityTab roomId={room.id} onOpenTask={showTask} />}
@@ -684,43 +687,74 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     ))}
                 </ul>
               )}
-              {!kind && days.map((d) => (
-                <div key={d.label} className={d.label === "Today" ? "sh-day today" : "sh-day"}>
-                  {/* A phone has room for a short day only. */}
-                  <h3>
-                    <span className="sh-day-long">{d.label}</span>
-                    <span className="sh-day-short">{d.label === "Today" ? d.label : fmtDay(d.entries[0].at)}</span>
-                  </h3>
-                  <ul className="sh-rows">
-                    {d.entries.map((e) =>
-                      e.kind === "snap" ? (
-                        <SnapRow
-                          key={e.snap.id}
-                          snap={e.snap}
-                          room={room}
-                          me={user.id}
-                          onOpen={() => setViewing({ snaps: [e.snap], i: 0 })}
-                          onPick={(id) => pickItem(e.snap, id)}
-                          onArchive={() => archive(`snap:${e.snap.id}`)}
-                        />
-                      ) : e.kind === "jot" ? (
-                        <JotRow
-                          key={e.jot.id}
-                          jot={e.jot}
-                          room={room}
-                          me={user.id}
-                          onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
-                          onPick={(id) => pickJotItem(e.jot, id)}
-                          onDelete={() => deleteJot(e.jot)}
-                          onArchive={() => archive(`jot:${e.jot.id}`)}
-                        />
-                      ) : (
-                        <MeetingRow key={e.meeting.id} m={e.meeting} kind={kindOf.get(e.meeting.id)} made={madeIn.get(e.meeting.id) ?? 0} onMade={(title) => setMadeOf({ id: e.meeting.id, title })} onArchive={() => archive(`meeting:${e.meeting.id}`)} />
-                      ),
-                    )}
-                  </ul>
-                </div>
-              ))}
+              {!kind && periods.map((d) => {
+                const open = shortOpen.has(d.label);
+                const rows = open ? [...d.entries, ...d.short].sort((x, y) => y.at - x.at) : d.entries;
+                return (
+                  <section key={d.label} className="mt-sec">
+                    <h3 className="mt-head">
+                      {d.label}
+                      <span className="mt-head-n">{d.entries.length + d.short.length}</span>
+                    </h3>
+                    <ul className="sh-rows mt-rows">
+                      {rows.map((e) =>
+                        e.kind === "snap" ? (
+                          <SnapRow
+                            key={e.snap.id}
+                            snap={e.snap}
+                            room={room}
+                            me={user.id}
+                            when={whenLabel(e.at)}
+                            onOpen={() => setViewing({ snaps: [e.snap], i: 0 })}
+                            onPick={(id) => pickItem(e.snap, id)}
+                            onArchive={() => archive(`snap:${e.snap.id}`)}
+                          />
+                        ) : e.kind === "jot" ? (
+                          <JotRow
+                            key={e.jot.id}
+                            jot={e.jot}
+                            room={room}
+                            me={user.id}
+                            when={whenLabel(e.at)}
+                            onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
+                            onPick={(id) => pickJotItem(e.jot, id)}
+                            onDelete={() => deleteJot(e.jot)}
+                            onArchive={() => archive(`jot:${e.jot.id}`)}
+                          />
+                        ) : (
+                          <MeetingRow
+                            key={e.meeting.id}
+                            m={e.meeting}
+                            kind={kindOf.get(e.meeting.id)}
+                            made={madeIn.get(e.meeting.id) ?? 0}
+                            short={open && d.short.includes(e)}
+                            onMade={(title) => setMadeOf({ id: e.meeting.id, title })}
+                            onArchive={() => archive(`meeting:${e.meeting.id}`)}
+                          />
+                        ),
+                      )}
+                      {d.short.length > 0 && (
+                        <li className="mt-short">
+                          <button
+                            type="button"
+                            aria-expanded={open}
+                            onClick={() =>
+                              setShortOpen((was) => {
+                                const next = new Set(was);
+                                if (open) next.delete(d.label);
+                                else next.add(d.label);
+                                return next;
+                              })
+                            }
+                          >
+                            {open ? "Hide short calls" : `${d.short.length} short ${d.short.length === 1 ? "call" : "calls"}`}
+                          </button>
+                        </li>
+                      )}
+                    </ul>
+                  </section>
+                );
+              })}
             </>
           )}
 
@@ -941,19 +975,14 @@ function projectProblem(projects: Project[], filter: string) {
   return !!filter && filter !== "none" && !projects.some((p) => p.id === filter);
 }
 
-function dayLabel(ts: number) {
-  const day = (t: number) => new Date(t).toDateString();
-  if (day(ts) === day(Date.now())) return "Today";
-  if (day(ts) === day(Date.now() - 86_400_000)) return "Yesterday";
-  return fmtDate(ts);
-}
-
 const firstName = (name: string) => name.split(" ")[0];
 
 function SnapRow(props: {
   snap: Snap;
   room: RoomInfo;
   me: string;
+  /** The row's day, where the list groups by more than a day. */
+  when?: string;
   onOpen: () => void;
   onPick: (itemId: string | null) => void;
   onArchive: () => void;
@@ -962,7 +991,7 @@ function SnapRow(props: {
   const who = snap.takenById === props.me ? "You" : firstName(snap.takenBy);
   return (
     <li className="sh-row">
-      <time className="sh-time">{fmtTime(snap.ts)}</time>
+      <time className="sh-time">{props.when ?? fmtTime(snap.ts)}</time>
       <button className="sh-thumb" onClick={props.onOpen} aria-label="Open the snap">
         <img src={snap.url} alt="" loading="lazy" />
       </button>
@@ -990,6 +1019,8 @@ function JotRow(props: {
   jot: Jot;
   room: RoomInfo;
   me: string;
+  /** The row's day, where the list groups by more than a day. */
+  when?: string;
   onOpen: () => void;
   onPick: (itemId: string | null) => void;
   onDelete: () => void;
@@ -1002,7 +1033,7 @@ function JotRow(props: {
   const snaps = jot.snaps ?? [];
   return (
     <li className="sh-row">
-      <time className="sh-time">{fmtTime(jot.ts)}</time>
+      <time className="sh-time">{props.when ?? fmtTime(jot.ts)}</time>
       {snaps.length > 0 && (
         <button
           className="sh-thumb"
@@ -1100,56 +1131,52 @@ function ItemPill(props: {
 }
 
 /**
- * A meeting, on the same lines as every other row: when, what kind and how long, then what came out
- * of it in three columns that line up down the list (to-dos, open questions, decisions), then the
- * page it left behind. No mark of its own: its name says what kind it was.
+ * A meeting, one quiet line: its name, then how long and when, in muted columns at the end. What
+ * came out of it (to-dos, open questions, decisions), what it made and the page it left behind wait
+ * behind the pointer, so a list of thirty reads as thirty names.
  */
-function MeetingRow({ m, kind, made, onMade, onArchive }: { m: SpaceFeed["meetings"][number]; kind?: { name: string; open: string; to: string }; made: number; onMade: (title: string) => void; onArchive: () => void }) {
+function MeetingRow({ m, kind, made, short, onMade, onArchive }: { m: SpaceFeed["meetings"][number]; kind?: { name: string; open: string; to: string }; made: number; short?: boolean; onMade: (title: string) => void; onArchive: () => void }) {
   const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  // In the tabs' order and colors. A kind with nothing keeps its column, empty.
+  const name = m.title ?? kind?.name ?? "Meeting";
+  // In the tabs' order and colors.
   const counts = [
     { n: m.todos, kind: "todo", Icon: TodoIcon, label: plural(m.todos, "to-do") },
     { n: m.open, kind: "question", Icon: QuestionIcon, label: plural(m.open, "open question") },
     { n: m.decided, kind: "decided", Icon: DecidedIcon, label: plural(m.decided, "decision") },
-  ];
+  ].filter((c) => c.n > 0);
   return (
-    <li className="sh-row">
-      <Link to={`/meetings/${m.id}`} className="sh-row-link" title={m.summary ?? undefined}>
-        <time className="sh-time">{fmtTime(m.endedAt)}</time>
-        <span className="sh-row-text">
-          <span className="sh-who sh-mname">{m.title ?? kind?.name ?? "Meeting"}</span>
-          <span className="sh-what sh-len muted">{minutes} min</span>
-        </span>
-        <span className="sh-counts">
-          {counts.map(({ n, kind, Icon, label }) =>
-            n > 0 ? (
+    <li className={short ? "mt-row short" : "mt-row"}>
+      <Link to={`/meetings/${m.id}`} className="mt-link" title={m.summary ?? undefined}>
+        <span className="mt-name" dir="auto">{name}</span>
+        {counts.length > 0 && (
+          <span className="mt-counts">
+            {counts.map(({ n, kind, Icon, label }) => (
               <span key={kind} className={`sh-count ${kind}`} title={label} aria-label={label}>
-                <Icon size={13} />
+                <Icon size={12} />
                 {n}
               </span>
-            ) : (
-              <span key={kind} className="sh-count" aria-hidden />
-            ),
-          )}
-        </span>
+            ))}
+          </span>
+        )}
       </Link>
-      <span className="sh-made">
+      <span className="mt-extra">
         {/* A count only when the call made more than the one thing its pill opens. */}
         {made > (kind ? 1 : 0) && (
-          <button type="button" className="sh-made-btn" title={`${made} made in this meeting`} aria-label={`${made} made in this meeting`} onClick={() => onMade(m.title ?? kind?.name ?? "Meeting")}>
-            <ArtifactsIcon />
-            {made}
+          <button type="button" className="mt-made" title={`${made} made in this meeting`} aria-label={`${made} made in this meeting`} onClick={() => onMade(name)}>
+            {made} made
           </button>
         )}
-      </span>
-      <span className="sh-end">
         {kind && (
-          <Link className="rp-pill" to={kind.to}>
+          <Link className="mt-open" to={kind.to}>
             {kind.open}
           </Link>
         )}
       </span>
+      <span className="mt-len">{minutes} min</span>
+      <time className="mt-when" dateTime={new Date(m.endedAt).toISOString()} title={`${fmtDate(m.endedAt)}, ${fmtTime(m.endedAt)}`}>
+        {whenLabel(m.endedAt)}
+      </time>
       <ArchiveButton onClick={onArchive} />
     </li>
   );

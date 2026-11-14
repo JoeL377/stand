@@ -5098,3 +5098,53 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-panel .af-chips .af-move select { font-size: inherit; }
 .af-links-title { margin: 18px 0 8px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .af-move:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--line)); }
+
+/* ── Meetings tab: one quiet line a meeting ───────────────────────────────────────────────
+   Stretches (This week, Last week, October) instead of a heading a day; each row is its name,
+   then length and day in muted columns at the end. What came out of it, what it made and its
+   deck or sketch wait behind the pointer. Calls of a minute that left nothing fold away. */
+.mt-sec + .mt-sec { margin-top: 22px; }
+.mt-head { display: flex; align-items: baseline; gap: 7px; margin: 0 0 4px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.mt-head-n { font-size: 12px; font-variant-numeric: tabular-nums; opacity: 0.7; }
+.mt-rows { gap: 0; }
+.mt-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 8px; margin: 0 -8px; border-radius: 8px; }
+.mt-row:hover, .mt-row:focus-within { background: var(--hover); }
+.mt-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; align-self: stretch; color: inherit; text-decoration: none; }
+.mt-link:hover { text-decoration: none; }
+.mt-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.mt-row.short .mt-name { color: var(--muted); font-weight: 400; }
+.mt-counts { flex: none; display: inline-flex; align-items: center; gap: 10px; }
+.mt-counts .sh-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mt-counts .sh-count.todo svg { color: var(--accent); }
+.mt-counts .sh-count.question svg { color: var(--warn); }
+.mt-counts .sh-count.decided svg { color: var(--ok); }
+.mt-extra { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.mt-open, .mt-made { display: inline-flex; align-items: center; height: 22px; min-height: 0; padding: 0 9px; border: 0; border-radius: 999px; background: var(--panel-2); box-shadow: none; color: var(--muted); font: inherit; font-size: 12px; line-height: 1; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.mt-open:hover, .mt-made:hover:not(:disabled), .mt-open:focus-visible, .mt-made:focus-visible { color: var(--text); text-decoration: none; background: color-mix(in srgb, var(--text) 10%, transparent); }
+.mt-len, .mt-when { flex: none; font-size: 12.5px; line-height: 20px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.mt-len { width: 52px; }
+.mt-when { width: 68px; }
+.mt-row > .sh-archive { margin-right: -4px; }
+/* What came out of a meeting shows while the pointer is on it; a touch screen keeps its rows bare. */
+@media (hover: hover) {
+  .mt-counts, .mt-extra { opacity: 0; transition: opacity 120ms; }
+  .mt-row:hover :is(.mt-counts, .mt-extra), .mt-row:focus-within :is(.mt-counts, .mt-extra) { opacity: 1; }
+}
+@media (hover: none) { .mt-counts, .mt-extra { display: none; } }
+/* Bar notes and snaps sit in the same stretch, their day in the same last column. */
+.mt-rows > .sh-row { min-height: 40px; padding: 4px 8px; margin: 0 -8px; }
+.mt-rows > .sh-row > .sh-time { order: 5; width: 68px; text-align: right; font-size: 12.5px; }
+.mt-rows > .sh-row > .sh-archive { order: 6; }
+.mt-short button { height: 30px; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.mt-short button:hover:not(:disabled) { color: var(--text); background: none; }
+.mt-row.short { animation: mt-in 180ms ease-out both; }
+@keyframes mt-in { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .mt-row.short { animation: none; } }
+@media (max-width: 820px) {
+  .mt-sec + .mt-sec { margin-top: 18px; }
+  .mt-row { min-height: 44px; gap: 10px; }
+  .mt-len { display: none; }
+  .mt-when { width: auto; min-width: 44px; }
+  .mt-rows > .sh-row > .sh-time { display: inline; width: auto; min-width: 44px; }
+  .mt-rows > .sh-row :is(.sh-pill-wrap, .sh-row-del) { display: none; }
+}
