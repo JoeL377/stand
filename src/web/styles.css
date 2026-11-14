@@ -3483,6 +3483,21 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .sh-top.over .sh-tabs { border-bottom-color: color-mix(in srgb, var(--text) 22%, var(--line)); }
 .sh-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 18px 24px 48px; box-sizing: border-box; }
 .sh-home { display: none; }
+/* Phones: an open project is its own screen. The header names it, the arrow goes back to the space,
+   and its Tasks / Questions / Decisions / Artifacts are the one row of tabs, in the tabs' own style. */
+@media (max-width: 820px) {
+  .sh-home { position: relative; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; min-height: 0; margin-left: -8px; padding: 0; border: 0; border-radius: 8px; background: none; box-shadow: none; color: var(--text); }
+  .sh-home svg { transform: rotate(180deg); }
+  button.sh-home { display: inline-flex; }
+  .sh-main.focused .pj-line.head { display: none; }
+  .sh-main.focused .sh-tabs:not(.sh-pj-tabs) { display: none; }
+  .sh-pj-tabs .pj-view:hover, .sh-pj-tabs .pj-view:focus, .sh-pj-tabs .pj-view:active { background: none; box-shadow: none; }
+  .sh-pj-tabs .pj-views { display: flex; gap: 2px; margin: 0; }
+  .sh-pj-tabs .pj-view { flex: none; display: flex; align-items: center; gap: 6px; height: auto; min-height: 0; margin-bottom: -1px; padding: 8px 10px 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
+  .sh-pj-tabs .pj-view > svg { display: none; }
+  .sh-pj-tabs .pj-view.on { color: var(--text); border-bottom-color: var(--accent); }
+  .sh-pj-tabs .pj-view .count { font-size: 12px; }
+}
 /* Phones: the window scrolls, and the space's own header is the only one. The app's icon row steps
    aside (all spaces is the back arrow), and the name row and tabs stick together as one block. */
 @media (max-width: 760px) {
@@ -3493,8 +3508,7 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
   .sh-top { position: sticky; top: 0; z-index: 6; flex-direction: column; gap: 0; margin: 0 -16px; padding: env(safe-area-inset-top, 0px) 16px 0; background: var(--bg); }
   .sh-top .sh-head { height: 48px; gap: 4px; }
   .sh-top .sh-head h1 { font-size: 17px; }
-  .sh-home { display: inline-flex; position: relative; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; margin-left: -8px; border-radius: 8px; color: var(--text); }
-  .sh-home svg { transform: rotate(180deg); }
+  .sh-home { display: inline-flex; }
   .sh-home-dot { position: absolute; top: 6px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
   .sh-top .sh-people { width: 36px; height: 32px; padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 16px; letter-spacing: 1px; }
   .sh-tabs { margin: 0 -16px; padding: 0 16px; }
