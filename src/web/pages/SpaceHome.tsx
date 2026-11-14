@@ -365,6 +365,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     chat: chat.unread,
     // Mine counts what is open and yours.
     mine: [...todos, ...questions].filter((n) => !!n.owner && firstName(n.owner) === firstName(user.name)).length,
+    artifacts: made.artifacts?.length ?? 0,
     // A log has no number worth reading.
     activity: 0,
   };
@@ -610,6 +611,25 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         >
           {tab === "chat" && <SpaceChat roomId={room.id} name={room.name} me={user} chat={chat} onOpenTask={showTask} focus={focusChat} />}
           {tab === "activity" && <ActivityTab roomId={room.id} onOpenTask={showTask} />}
+          {tab === "artifacts" && (
+            <ArtifactsView
+              artifacts={made.artifacts}
+              error={made.error}
+              projects={projectNames}
+              groups={hasProjects ? [...projects.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name })), { id: "none", name: "Unassigned" }] : undefined}
+              onGroup={(id) => {
+                pickTab("projects");
+                setParams((prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.set("project", id);
+                  next.set("show", "artifacts");
+                  return next;
+                });
+              }}
+              selected={openArtifact}
+              onSelect={showArtifact}
+            />
+          )}
           {tab === "meetings" && (
             <>
               {error && !feed && (
@@ -2563,7 +2583,7 @@ const ArtifactsIcon = () => (
   </svg>
 );
 
-type TabKey = "projects" | "chat" | "meetings" | "mine" | "activity";
+type TabKey = "projects" | "chat" | "meetings" | "artifacts" | "mine" | "activity";
 /** What a project's page lists: one kind at a time. */
 type ProjectShow = "tasks" | "questions" | "decisions" | "artifacts" | "done";
 /** The space's tabs, in the order people look at them. */
@@ -2712,6 +2732,8 @@ const TABS: Array<{ key: TabKey; label: string; icon?: React.ReactNode }> = [
   { key: "projects", label: "Projects", icon: <ProjectsIcon /> },
   { key: "chat", label: "Chat", icon: <ChatIcon size={14} /> },
   { key: "meetings", label: "Meetings", icon: <MicIcon /> },
+  // Everything the space made on purpose, under its projects.
+  { key: "artifacts", label: "Artifacts" },
   { key: "mine", label: "Mine" },
   // What agents did in the space. People's changes can join it later, which is why it isn't "Agents".
   { key: "activity", label: "Activity" },
