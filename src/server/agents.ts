@@ -871,6 +871,81 @@ export function agentApi(deps: AgentDeps) {
       }
     },
 
+    /** Renames a project, changes its goal, archives it or brings it back. A project is named by its
+     *  ref, or by its name with the space. Archiving takes a project with no open to-dos in it. */
+    updateProject(caller: Caller, args: { project: string; space?: string; name?: string; goal?: string; archived?: boolean }, baseUrl = "") {
+      requireWrite(caller);
+      const ref = parseRef(args.project.trim());
+      let roomId: string;
+      if (ref?.kind === "project") {
+        const found = (db.raw.prepare("SELECT room_id FROM projects WHERE id = ?").get(ref.id) as { room_id: string } | undefined)?.room_id;
+        if (!found) throw new AgentError("That project doesn't exist any more.");
+        roomId = space(found, caller).id;
+      } else {
+        if (!args.space?.trim()) throw new AgentError("Give the project's ref (stand:project/<id>), or its name with space.");
+        roomId = findSpace(caller, args.space).id;
+      }
+      const id = projectFor(roomId, args.project);
+      if (!id) throw new AgentError("Unassigned is not a project. Name a project.");
+      const before = db.getProject(roomId, id)!;
+      const change: { name?: string; goal?: string; archived?: boolean } = {};
+      if (args.name !== undefined && args.name.trim() !== before.name) change.name = args.name;
+      if (args.goal !== undefined && (args.goal.trim() || null) !== (before.goal ?? null)) change.goal = args.goal;
+      if (args.archived !== undefined && args.archived !== !!before.archived) change.archived = args.archived;
+      if (!Object.keys(change).length) throw new AgentError("Nothing to change: give a new name, goal, or archived true or false.");
+      let p: Project;
+      try {
+        p = db.updateProject(roomId, id, change)!;
+      } catch (err) {
+        if (err instanceof ProjectError) throw new AgentError(err.message);
+        throw err;
+      }
+      const changed: string[] = [];
+      if (change.name !== undefined) changed.push(`Renamed from "${before.name}".`);
+      if (change.goal !== undefined) changed.push(p.goal ? `Goal: ${p.goal}` : "Took the goal off.");
+      if (change.archived !== undefined) changed.push(change.archived ? "Archived it." : "Brought it back from the archive.");
+      if (caller.token)
+        db.addAgentEvent(roomId, actorOf(caller), "project_edit", {
+          target: { text: p.name, href: `/s/${roomId}?project=${p.id}` },
+          detail: changed.join(" "),
+          change: change.archived !== undefined ? (change.archived ? "archived" : "restored") : change.name !== undefined ? "renamed" : "goal",
+        });
+      deps.notify(roomId, "followups");
+      deps.projectsChanged?.(roomId);
+      return {
+        updated: { ...projectRow(p, baseUrl), archived: p.archived || undefined },
+        changed,
+        next: p.archived
+          ? "It is off the Projects tab and out of list_spaces. update_project with archived false, or create_project with its name, brings it back."
+          : "list_spaces and the Projects tab show it as it is now.",
+      };
+    },
+
+    /** Files a to-do, open question or decision in a project, or takes it out (unassigned). */
+    moveToProject(caller: Caller, args: { ref: string; project: string }, baseUrl = "") {
+      requireWrite(caller);
+      const r = resolve(caller, args.ref.trim());
+      const kind = r.note?.kind;
+      if (!r.note || (kind !== "action" && kind !== "question" && kind !== "decision"))
+        throw new AgentError("Give a to-do, open question or decision: stand:action/<id>, stand:question/<id> or stand:decision/<id>.");
+      const project = projectFor(r.room.id, args.project);
+      const before = grouped(r.room.id, [r.note])[0];
+      if (before.project === project && !before.projectSuggested && r.note.projectSetBy != null)
+        throw new AgentError(`It is already in ${project ? `"${db.projectName(project)}"` : "Unassigned"}.`);
+      try {
+        db.setNoteProject(r.room.id, r.note.id, { projectId: project, by: byOf(caller) });
+      } catch (err) {
+        if (err instanceof ProjectError) throw new AgentError(err.message);
+        throw err;
+      }
+      const now = grouped(r.room.id, [db.getNote(r.note.id)!])[0];
+      deps.notify(r.room.id, "followups");
+      return {
+        moved: { ref: refOf(kind, now.id), text: now.text, project: projectInfo(now), url: refUrl(baseUrl, kind, now.id) },
+        was: projectInfo(before),
+      };
+    },
+
     /** Where a reference lives, for the web app's /ref/... links. */
     locate(caller: Caller, kind: string, id: string) {
       if (kind === "project") {
