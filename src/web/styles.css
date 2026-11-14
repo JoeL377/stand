@@ -2336,6 +2336,33 @@ li:hover > .sh-archive, li:focus-within > .sh-archive, .sh-archive:focus-visible
   .sh-panel.meetings .sh-end { width: 68px; }
   .sh-panel.meetings .sh-day .sh-pill-wrap, .sh-panel.meetings .sh-day .sh-row-del { display: none; }
 }
+/* A phone is too narrow for a meeting to read across in one thin line, so each row stacks: the day is a
+   heading over its rows, the name gets the whole width and wraps to two lines, and when, how long and
+   what came out of it sit on a quiet line under it. A note's words wrap the same way under who wrote it. */
+@media (max-width: 760px) {
+  .sh-panel.meetings .sh-day { display: block; }
+  .sh-panel.meetings .sh-day + .sh-day { margin-top: 10px; padding-top: 10px; }
+  .sh-panel.meetings .sh-day h3 { height: auto; margin: 0 0 2px; }
+  .sh-panel.meetings .sh-day .sh-day-long { display: inline; }
+  .sh-panel.meetings .sh-day .sh-day-short { display: none; }
+  .sh-panel.meetings .sh-row { align-items: center; padding: 8px 6px; gap: 10px; }
+  .sh-panel.meetings .sh-row-link { flex-wrap: wrap; align-items: center; row-gap: 3px; column-gap: 6px; }
+  .sh-panel.meetings .sh-row-text { flex-direction: column; align-items: stretch; gap: 2px; line-height: 1.35; }
+  .sh-panel.meetings .sh-row-text .sh-what { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .sh-panel.meetings .sh-row-text .sh-jot.open { display: block; -webkit-line-clamp: none; white-space: pre-wrap; }
+  /* A meeting's own row: the name, then a line of when, how long and its counts. */
+  .sh-panel.meetings .sh-row-link > .sh-row-text { order: 0; flex: 1 1 100%; }
+  .sh-panel.meetings .sh-day .sh-row-link > .sh-row-text { display: contents; }
+  .sh-panel.meetings .sh-day .sh-row-link .sh-mname { order: 0; flex: 1 1 100%; font-size: 15px; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .sh-panel.meetings .sh-row-link > .sh-time { display: inline; order: 1; width: auto; font-size: 12.5px; }
+  .sh-panel.meetings .sh-day .sh-row-link .sh-len { display: inline; order: 2; flex: none; font-size: 12.5px; }
+  .sh-panel.meetings .sh-day .sh-row-link .sh-len::before { content: "·"; margin-right: 6px; }
+  .sh-panel.meetings .sh-counts { display: inline-flex; order: 3; gap: 10px; margin-left: 8px; }
+  .sh-panel.meetings .sh-counts .sh-count { font-size: 12.5px; color: var(--muted); }
+  .sh-panel.meetings .sh-counts .sh-count:empty { display: none; }
+  .sh-panel.meetings .sh-made, .sh-panel.meetings .sh-end { width: auto; }
+  .sh-panel.meetings .sh-end:empty, .sh-panel.meetings .sh-made:empty { display: none; }
+}
 
 /* ---- phones ---- */
 @media (max-width: 760px) {
