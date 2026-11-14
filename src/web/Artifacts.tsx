@@ -381,28 +381,8 @@ export function ArtifactPanel(props: {
 
   return (
     <aside className="task-drawer af-panel" role="complementary" aria-label="Artifact">
-      <div className="td-head">
-        <span className="td-kind af-panel-kind">
-          {a && (
-            <>
-              <Dot kind={a.kind} />
-              {ARTIFACT_NAME[a.kind].one}
-              {versions.length > 1 ? (
-                <label>
-                  <span className="sr-only">Version</span>
-                  <select value={at} onChange={(e) => setVersion(Number(e.target.value))}>
-                    {versions.map((v, i) => (
-                      <option key={v.id} value={i}>{`v${i + 1} of ${versions.length}`}</option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                a.badge && <span>· {a.badge}</span>
-              )}
-              <span>· {whenLabel(versions[at]?.ts ?? a.ts)}, {fmtTime(versions[at]?.ts ?? a.ts)}</span>
-            </>
-          )}
-        </span>
+      <div className="td-head af-panel-head">
+        <h2 className="td-title" dir="auto">{a?.title}</h2>
         <button className="icon-btn td-close" aria-label="Close" title="Close" onClick={onClose}>
           <CloseIcon />
         </button>
@@ -411,16 +391,28 @@ export function ArtifactPanel(props: {
         {error && <p className="error">{error}</p>}
         {a && (
           <>
-            <h2 className="td-title" dir="auto">{a.title}</h2>
-            <div className="af-chips">
+            {/* One quiet line: what it is, which version, when, its project and who made it. */}
+            <p className="af-line">
+              <span><Dot kind={a.kind} />{ARTIFACT_NAME[a.kind].one}</span>
+              {versions.length > 1 && (
+                <label>
+                  <span className="sr-only">Version</span>
+                  <select value={at} onChange={(e) => setVersion(Number(e.target.value))}>
+                    {versions.map((v, i) => (
+                      <option key={v.id} value={i}>{`v${i + 1} of ${versions.length}`}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <span>{whenLabel(versions[at]?.ts ?? a.ts)}, {fmtTime(versions[at]?.ts ?? a.ts)}</span>
               {a.kind === "spec" ? (
-                // A spec is in its to-do's project: the pill goes there.
+                // A spec is in its to-do's project: the name goes there.
                 a.projects.map((p) => props.projects.get(p) && (
-                  <button key={p} type="button" className="rp-pill" onClick={() => props.onProject(p)}>{props.projects.get(p)}</button>
+                  <button key={p} type="button" className="af-line-link" onClick={() => props.onProject(p)}>{props.projects.get(p)}</button>
                 ))
               ) : (
                 props.moveTo.length > 0 && (
-                  <label className="rp-pill af-move">
+                  <label className="af-move">
                     <span className="sr-only">Project</span>
                     <select value={(movedTo === undefined ? a.projects[0] : movedTo) ?? ""} onChange={(e) => move(e.target.value || null)}>
                       <option value="">Unassigned</option>
@@ -431,35 +423,9 @@ export function ArtifactPanel(props: {
                   </label>
                 )
               )}
-              {a.makers.map((m) => (
-                <span key={m.key} className="rp-pill af-maker">{m.name}</span>
-              ))}
-              {a.origin && !a.makers.length && <span className="rp-pill af-maker">{a.origin}</span>}
-            </div>
-            {body ? (
-              <div className="af-doc"><Markdown text={body} /></div>
-            ) : (
-              a.kind === "sketch" && sketchAt(a) ? (
-                <div className="af-sketch-open">
-                  <Suspense fallback={null}><SketchPicture roomId={sketchAt(a)![1]} id={sketchAt(a)![2]} fallback={null} /></Suspense>
-                </div>
-              ) : (
-                (a.kind === "sketch" || a.kind === "deck") && <div className="af-doc af-doc-thumb"><Thumb a={a} /></div>
-              )
-            )}
-            {!!detail?.images?.length && (
-              <>
-                <h3 className="af-links-title">Screenshots</h3>
-                <div className="af-shots">
-                  {detail.images.map((im, i) => (
-                    <a key={i} href={im.url} target="_blank" rel="noreferrer" title={im.caption ?? undefined}>
-                      <img src={im.url} alt={im.caption ?? ""} loading="lazy" />
-                      {im.caption && <span>{im.caption}</span>}
-                    </a>
-                  ))}
-                </div>
-              </>
-            )}
+              {a.makers.length > 0 && <span>{a.makers.map((m) => m.name).join(", ")}</span>}
+              {a.origin && !a.makers.length && <span>{a.origin}</span>}
+            </p>
             <div className="af-actions">
               {a.href ? (
                 <Link className="af-btn primary" to={a.href}>Open</Link>
@@ -472,6 +438,26 @@ export function ArtifactPanel(props: {
                 <button type="button" className="af-btn" disabled={queued} onClick={bring}>{queued ? "On the next design review" : "Bring to a review"}</button>
               )}
             </div>
+            {!!detail?.images?.length && (
+              <div className="af-shots" role="group" aria-label="Screenshots">
+                {detail.images.map((im, i) => (
+                  <a key={i} href={im.url} target="_blank" rel="noreferrer" title={im.caption ?? "Screenshot"}>
+                    <img src={im.url} alt={im.caption ?? "Screenshot"} loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            )}
+            {body ? (
+              <div className="af-doc"><Markdown text={body} /></div>
+            ) : (
+              a.kind === "sketch" && sketchAt(a) ? (
+                <div className="af-sketch-open">
+                  <Suspense fallback={null}><SketchPicture roomId={sketchAt(a)![1]} id={sketchAt(a)![2]} fallback={null} /></Suspense>
+                </div>
+              ) : (
+                (a.kind === "sketch" || a.kind === "deck") && <div className="af-doc af-doc-thumb"><Thumb a={a} /></div>
+              )
+            )}
             {detail && detail.links.length > 0 && (
               <section className="af-links" aria-label="Where it came up">
                 <h3>Where it came up</h3>
