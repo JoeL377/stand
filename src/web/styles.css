@@ -5327,3 +5327,10 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 .af-sketch-open .sk-bar { display: none; }
 .af-panel .af-sketch-open { height: min(56vh, 480px); }
 .af-panel .af-line a.af-line-link { border: 0; padding: 0; height: auto; }
+/* A sketch runs to the panel's sides and foot: the picture is the panel. */
+.af-bleed { --pad-x: 20px; }
+@media (min-width: 761px) { .af-bleed { --pad-x: 24px; } }
+.af-bleed .td-body { display: flex; flex-direction: column; margin: 0 calc(-1 * var(--pad-x)); padding: 0 var(--pad-x); }
+.af-bleed .td-body > * { flex: none; }
+.af-panel.af-bleed .af-sketch-open { flex: 1 0 320px; height: auto; margin: 14px calc(-1 * var(--pad-x)) 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.af-bleed .af-links { padding-bottom: 16px; }

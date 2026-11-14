@@ -392,7 +392,7 @@ export function ArtifactPanel(props: {
   };
 
   return (
-    <aside className={`task-drawer td-panel af-panel${swapped ? " af-swap" : ""}`} role="complementary" aria-label="Artifact">
+    <aside className={`task-drawer td-panel af-panel${swapped ? " af-swap" : ""}${a?.kind === "sketch" && !body ? " af-bleed" : ""}`} role="complementary" aria-label="Artifact">
       <PanelResizer />
       <div className="td-head af-panel-head">
         <h2 className="td-title" dir="auto">{a?.title}</h2>
