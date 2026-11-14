@@ -8,7 +8,6 @@ import { Link } from "react-router-dom";
 import { ARTIFACT_KINDS, ARTIFACT_NAME, type Artifact, type ArtifactDetail, type ArtifactKind, type ArtifactLink, filterArtifacts, makersLine, makersOf } from "../shared/artifacts.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { Markdown } from "./Markdown.tsx";
-import { DecidedIcon, QuestionIcon, TodoIcon } from "./NoteIcons.tsx";
 import { api } from "./api.ts";
 import { CloseIcon } from "./icons.tsx";
 import { usePhone } from "./phone.ts";
@@ -76,12 +75,7 @@ function Thumb({ a, small }: { a: Artifact; small?: boolean }) {
   const p = a.preview;
   return (
     <span className={`af-thumb k-${a.kind}`}>
-      {a.kind === "screens" && p.images?.length ? (
-        <>
-          {!small && p.images[1] && <img className="af-shot back" src={p.images[1]} alt="" loading="lazy" />}
-          <img className="af-shot" src={p.images[0]} alt="" loading="lazy" />
-        </>
-      ) : a.kind === "sketch" ? (
+      {a.kind === "sketch" ? (
         (() => {
           const glyph = <SketchGlyph drawn={p.drawn ?? "map"} />;
           const at = sketchAt(a);
@@ -96,13 +90,6 @@ function Thumb({ a, small }: { a: Artifact; small?: boolean }) {
       ) : (
         <span className="af-text">
           {p.text && <span className="af-text-body">{p.text}</span>}
-          {!small && a.kind === "recap" && p.counts && (
-            <span className="af-counts">
-              {p.counts.todos > 0 && <span><TodoIcon size={11} />{p.counts.todos}</span>}
-              {p.counts.decided > 0 && <span><DecidedIcon size={11} />{p.counts.decided}</span>}
-              {p.counts.open > 0 && <span><QuestionIcon size={11} />{p.counts.open}</span>}
-            </span>
-          )}
         </span>
       )}
       {!small && (
@@ -163,7 +150,7 @@ export function ArtifactsView(props: {
   if (!scoped.length)
     return (
       <p className="sh-card-empty">
-        {props.project ? "Nothing made in this project yet." : "Nothing here yet. Specs, decks, sketches, recaps, screenshots and docs land here as the space makes them."}
+        {props.project ? "Nothing made in this project yet." : "Nothing here yet. Specs, docs, decks and sketches land here as the space makes them."}
       </p>
     );
   return (
@@ -295,8 +282,17 @@ export function ArtifactPanel(props: {
   onClose: () => void;
   onOpenTask: (id: string) => void;
   onProject: (id: string) => void;
+  /** The projects it can move to, in the space's order. */
+  moveTo: Array<{ id: string; name: string }>;
+  /** It was moved: the list is read again. */
+  onMoved: () => void;
 }) {
   const { roomId, id, onClose } = props;
+  const [movedTo, setMovedTo] = useState<string | null | undefined>(undefined);
+  const move = (to: string | null) => {
+    setMovedTo(to);
+    api.moveArtifact(roomId, id, to).then(props.onMoved, () => setMovedTo(undefined));
+  };
   const [detail, setDetail] = useState<ArtifactDetail | null>(null);
   const [error, setError] = useState("");
   const [version, setVersion] = useState<number | null>(null);
@@ -354,7 +350,7 @@ export function ArtifactPanel(props: {
                   </select>
                 </label>
               ) : (
-                a.badge && a.kind !== "screens" && <span>· {a.badge}</span>
+                a.badge && <span>· {a.badge}</span>
               )}
               <span>· {whenLabel(versions[at]?.ts ?? a.ts)}, {fmtTime(versions[at]?.ts ?? a.ts)}</span>
             </>
@@ -370,9 +366,24 @@ export function ArtifactPanel(props: {
           <>
             <h2 className="td-title" dir="auto">{a.title}</h2>
             <div className="af-chips">
-              {a.projects.map((p) => props.projects.get(p) && (
-                <button key={p} type="button" className="rp-pill" onClick={() => props.onProject(p)}>{props.projects.get(p)}</button>
-              ))}
+              {a.kind === "spec" ? (
+                // A spec is in its to-do's project: the pill goes there.
+                a.projects.map((p) => props.projects.get(p) && (
+                  <button key={p} type="button" className="rp-pill" onClick={() => props.onProject(p)}>{props.projects.get(p)}</button>
+                ))
+              ) : (
+                props.moveTo.length > 0 && (
+                  <label className="rp-pill af-move">
+                    <span className="sr-only">Project</span>
+                    <select value={(movedTo === undefined ? a.projects[0] : movedTo) ?? ""} onChange={(e) => move(e.target.value || null)}>
+                      <option value="">Unassigned</option>
+                      {props.moveTo.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )
+              )}
               {a.makers.map((m) => (
                 <span key={m.key} className="rp-pill af-maker">{m.name}</span>
               ))}
@@ -380,15 +391,6 @@ export function ArtifactPanel(props: {
             </div>
             {body ? (
               <div className="af-doc"><Markdown text={body} /></div>
-            ) : detail?.images?.length ? (
-              <div className="af-shots">
-                {detail.images.map((im, i) => (
-                  <a key={i} href={im.url} target="_blank" rel="noreferrer" title={im.caption ?? undefined}>
-                    <img src={im.url} alt={im.caption ?? ""} loading="lazy" />
-                    {im.caption && <span>{im.caption}</span>}
-                  </a>
-                ))}
-              </div>
             ) : (
               a.kind === "sketch" && sketchAt(a) ? (
                 <div className="af-sketch-open">
@@ -397,6 +399,19 @@ export function ArtifactPanel(props: {
               ) : (
                 (a.kind === "sketch" || a.kind === "deck") && <div className="af-doc af-doc-thumb"><Thumb a={a} /></div>
               )
+            )}
+            {!!detail?.images?.length && (
+              <>
+                <h3 className="af-links-title">Screenshots</h3>
+                <div className="af-shots">
+                  {detail.images.map((im, i) => (
+                    <a key={i} href={im.url} target="_blank" rel="noreferrer" title={im.caption ?? undefined}>
+                      <img src={im.url} alt={im.caption ?? ""} loading="lazy" />
+                      {im.caption && <span>{im.caption}</span>}
+                    </a>
+                  ))}
+                </div>
+              </>
             )}
             <div className="af-actions">
               {a.href ? (

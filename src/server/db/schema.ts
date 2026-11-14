@@ -492,6 +492,14 @@ CREATE TABLE IF NOT EXISTS docs (
   versions INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS docs_room ON docs(room_id, updated_at);
+CREATE TABLE IF NOT EXISTS artifact_projects (
+  room_id TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  project_id TEXT,
+  set_by TEXT NOT NULL,
+  set_at INTEGER NOT NULL,
+  PRIMARY KEY (room_id, artifact_id)
+);
 CREATE TABLE IF NOT EXISTS channel_reads (
   channel_id TEXT NOT NULL,
   user_id TEXT NOT NULL,

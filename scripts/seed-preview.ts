@@ -408,8 +408,8 @@ for (const [name, goal, match] of projects) {
   }
 }
 
-// What the space made beyond its to-dos, for the Artifacts tab: a spec with a second version, docs
-// two agents saved, and screenshots of finished work.
+// What the space made beyond its to-dos, for a project's Artifacts: a spec with a second version and
+// a screenshot on its to-do, and docs two agents saved.
 api.attachPlan(priyasAgent, {
   ref: ref(worker),
   plan: "# Payment retry worker\n\n## Goal\nFailed charges retry on the server, so a closed browser tab no longer loses the order.\n\n## Plan\n- Queue a retry job with the charge's idempotency key\n- Back off at 1, 5 and 30 minutes, then give up and email\n- Remove the browser retry path once the worker is live\n\n## Open question\nDo we retry cards the bank marked as stolen?",
@@ -464,6 +464,7 @@ api.saveDoc(samsAgent, {
     [alert, leo, "Codex", "The alert in the on-call channel", [229, 72, 77]],
     [alert, leo, "Codex", "Its threshold in settings", [45, 108, 223]],
     [key, priya, "Claude Code", "A retried charge with the same key", [22, 163, 74]],
+    [worker, priya, "Claude Code", "The retry queue after a failed charge", [124, 92, 214]],
   ] as const) {
     const s = db.addWorkShot({ roomId: room.id, noteId: note.id, userId: user.id, userName: user.name, client, caption, ext: "png" });
     saveShotFile(s.id, "png", shot([...accent]));

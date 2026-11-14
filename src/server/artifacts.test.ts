@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { filterArtifacts, makersOf } from "../shared/artifacts.ts";
 import { spaceActivity } from "./activity.ts";
 import { agentApi } from "./agents.ts";
-import { artifactDetail, makerOf, parseDocRef, plainPreview, spaceArtifacts } from "./artifacts.ts";
+import { artifactDetail, makerOf, moveArtifact, parseDocRef, plainPreview, spaceArtifacts } from "./artifacts.ts";
 import { openDb } from "./db.ts";
 import { upNextView } from "./upNextPolish.ts";
 import { UploadLinks } from "./workLog.ts";
@@ -52,14 +52,9 @@ test("a to-do's plan is a spec: named by its heading, with its versions, its pro
   assert.deepEqual(detail.links.map((l) => [l.text, l.note]), [["Move transcript capture to the server", "the to-do it is on"], ["PR #12", "the work so far"]]);
 });
 
-test("a meeting with a summary is a recap, filed under the project most of it was about", () => {
-  const { db, room, m, project } = setup();
-  const recap = spaceArtifacts(db, room.id).artifacts.find((a) => a.kind === "recap")!;
-  assert.equal(recap.id, `recap:${m.id}`);
-  assert.equal(recap.href, `/meetings/${m.id}`);
-  assert.deepEqual(recap.projects, [project.id]);
-  assert.deepEqual(recap.preview.counts, { todos: 2, decided: 1, open: 0 });
-  assert.equal(artifactDetail(db, room.id, recap.id)?.body, "Capture moves to the server; the web ships first.");
+test("a meeting's recap is the meeting, not an artifact", () => {
+  const { db, room } = setup();
+  assert.deepEqual(spaceArtifacts(db, room.id).artifacts, []);
 });
 
 test("save_doc keeps a write-up, saves it again as a new version, and shows in Activity", () => {
@@ -107,23 +102,41 @@ test("a doc can't be read or rewritten from outside its space", () => {
   void andy;
 });
 
-test("screenshots on a to-do are one set of screens, and list_artifacts reads them for an agent", () => {
-  const { db, api, room, notes, andy, codex } = setup();
+test("screenshots on a to-do are not a card: they show on its spec", () => {
+  const { db, api, room, notes, andy, claude, codex } = setup();
   for (const caption of ["Before", "After"]) db.addWorkShot({ roomId: room.id, noteId: notes[1].id, userId: andy.id, userName: andy.name, client: "Codex", caption, ext: "png" });
-  const list = api.listArtifacts(codex, { space: room.id, kind: "screens" }, "https://stand.test") as { count: number; artifacts: Array<{ id: string; title: string; made_by: string; size: string; todo: string }> };
+  assert.deepEqual(spaceArtifacts(db, room.id).artifacts, []);
+  api.attachPlan(claude, { ref: `stand:action/${notes[1].id}`, plan: "# Migration\n\nRun it." });
+  const list = api.listArtifacts(codex, { space: room.id, kind: "spec" }, "https://stand.test") as { count: number; artifacts: Array<{ id: string }> };
   assert.equal(list.count, 1);
-  assert.deepEqual([list.artifacts[0].title, list.artifacts[0].made_by, list.artifacts[0].size, list.artifacts[0].todo], ["Write the migration", "Andy’s Codex", "2", `stand:action/${notes[1].id}`]);
   const one = api.listArtifacts(codex, { space: room.id, ref: list.artifacts[0].id }, "https://stand.test") as { images: Array<{ url: string; caption: string }> };
   assert.deepEqual(one.images.map((i) => i.caption), ["Before", "After"]);
   assert.match(one.images[0].url, /^https:\/\/stand\.test\/api\/work-shots\/[a-z0-9]+\.png$/);
+  assert.throws(() => api.listArtifacts(codex, { space: room.id, kind: "screens" }), /Kinds are spec, doc, deck, sketch/);
 });
 
-test("an archived to-do or meeting takes its artifacts off the list", () => {
+test("a doc moves to the project someone picks and stays there; a spec follows its to-do", () => {
+  const { db, api, room, notes, claude, codex, project } = setup();
+  const saved = api.saveDoc(codex, { space: room.id, title: "Loose notes", text: "Nothing to file." }) as unknown as { saved: { ref: string } };
+  const id = `doc:${parseDocRef(saved.saved.ref)}`;
+  const of = () => spaceArtifacts(db, room.id).artifacts.find((a) => a.id === id)!.projects;
+  assert.deepEqual(of(), []);
+  assert.equal(moveArtifact(db, room.id, id, project.id, "Joe"), "ok");
+  assert.deepEqual(of(), [project.id]);
+  assert.equal(moveArtifact(db, room.id, id, null, "Joe"), "ok");
+  assert.deepEqual(of(), []);
+  assert.equal(moveArtifact(db, room.id, id, "nope", "Joe"), "project");
+  assert.equal(moveArtifact(db, room.id, "doc:missing", project.id, "Joe"), "missing");
+  api.attachPlan(claude, { ref: `stand:action/${notes[0].id}`, plan: "A plan." });
+  assert.equal(moveArtifact(db, room.id, `spec:${notes[0].id}`, null, "Joe"), "spec");
+});
+
+test("an archived to-do takes its spec off the list", () => {
   const { db, api, room, m, notes, claude } = setup();
   api.attachPlan(claude, { ref: `stand:action/${notes[0].id}`, plan: "A plan." });
-  assert.deepEqual(spaceArtifacts(db, room.id).artifacts.map((a) => a.kind).sort(), ["recap", "spec"]);
+  assert.deepEqual(spaceArtifacts(db, room.id).artifacts.map((a) => a.kind).sort(), ["spec"]);
   db.putArchived(room.id, { ref: `todo:${notes[0].id}`, title: "x", ts: Date.now(), by: "Joe" });
-  db.putArchived(room.id, { ref: `meeting:${m.id}`, title: "x", ts: Date.now(), by: "Joe" });
+  void m;
   assert.deepEqual(spaceArtifacts(db, room.id).artifacts, []);
 });
 
@@ -134,9 +147,8 @@ test("filters and makers", () => {
   const all = spaceArtifacts(db, room.id).artifacts;
   assert.deepEqual(filterArtifacts(all, { kind: "doc" }).map((a) => a.title), ["Loose notes"]);
   assert.deepEqual(filterArtifacts(all, { project: "none" }).map((a) => a.kind), ["doc"]);
-  assert.deepEqual(filterArtifacts(all, { project: project.id }).map((a) => a.kind).sort(), ["recap", "spec"]);
-  assert.deepEqual(filterArtifacts(all, { maker: "stand" }).map((a) => a.kind), ["recap"]);
-  assert.deepEqual(makersOf(all).map((m) => m.name).sort(), ["Andy’s Codex", "Joe’s Claude", "Stand"]);
+  assert.deepEqual(filterArtifacts(all, { project: project.id }).map((a) => a.kind).sort(), ["spec"]);
+  assert.deepEqual(makersOf(all).map((m) => m.name).sort(), ["Andy’s Codex", "Joe’s Claude"]);
 });
 
 test("names and previews", () => {

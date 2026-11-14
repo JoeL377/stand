@@ -73,7 +73,19 @@ export function docsStore(db: DatabaseSync) {
         now,
         id,
       );
+      // A project given on a save is the newest word on where it belongs.
+      if (d.projectId !== undefined) db.prepare("DELETE FROM artifact_projects WHERE room_id = ? AND artifact_id = ?").run(had.roomId, `doc:${id}`);
       return get(id);
+    },
+    /** Where people moved a doc, a deck or a sketch by hand, by artifact id. null: to Unassigned. */
+    artifactProjects(roomId: string): Map<string, string | null> {
+      const rows = db.prepare("SELECT artifact_id, project_id FROM artifact_projects WHERE room_id = ?").all(roomId) as Row[];
+      return new Map(rows.map((r) => [r.artifact_id as string, (r.project_id as string) ?? null]));
+    },
+    setArtifactProject(roomId: string, artifactId: string, projectId: string | null, by: string, now = Date.now()): void {
+      db.prepare(
+        "INSERT INTO artifact_projects (room_id, artifact_id, project_id, set_by, set_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (room_id, artifact_id) DO UPDATE SET project_id = excluded.project_id, set_by = excluded.set_by, set_at = excluded.set_at",
+      ).run(roomId, artifactId, projectId, by, now);
     },
   };
 }
