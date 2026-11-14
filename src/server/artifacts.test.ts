@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { filterArtifacts, makersOf } from "../shared/artifacts.ts";
+import { filterArtifacts, makersOf, ownerLine } from "../shared/artifacts.ts";
 import { spaceActivity } from "./activity.ts";
 import { agentApi } from "./agents.ts";
 import { artifactDetail, makerOf, moveArtifact, parseDocRef, plainPreview, spaceArtifacts } from "./artifacts.ts";
@@ -166,4 +166,12 @@ test("filterArtifacts keeps only what one meeting made", () => {
   const list = [a("deck:1", "m1"), a("deck:2", "m2"), a("deck:3")];
   assert.deepEqual(filterArtifacts(list, { meeting: "m1" }).map((x) => x.id), ["deck:1"]);
   assert.equal(filterArtifacts(list, {}).length, 3);
+});
+
+test("a card names the person behind an artifact, not their agent", () => {
+  assert.equal(ownerLine([{ key: "a:priya:claude code", name: "Priya’s Claude Code" }]), "Priya");
+  assert.equal(ownerLine([{ key: "p:sam", name: "Sam" }, { key: "a:sam:codex", name: "Sam’s Codex" }]), "Sam");
+  assert.equal(ownerLine([{ key: "p:sam", name: "Sam" }, { key: "a:leo:codex", name: "Leo’s Codex" }, { key: "p:maya", name: "Maya" }]), "Sam +2");
+  assert.equal(ownerLine([{ key: "stand", name: "Stand" }]), "Stand");
+  assert.equal(ownerLine([]), "");
 });
