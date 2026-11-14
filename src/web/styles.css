@@ -2237,7 +2237,7 @@ a.sh-pill:hover { text-decoration: none; }
 .td-foot { margin-top: 20px; }
 
 /* ---- space page: one page, a tab per kind of thing ---- */
-.sh-tabs { position: relative; display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.sh-tabs { position: relative; display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
 .sh-tab { flex: none; display: flex; align-items: center; gap: 6px; height: auto; min-height: 0; margin-bottom: -1px; padding: 8px 10px 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; font-size: 14px; color: var(--muted); cursor: pointer; }
 .sh-tab:hover { color: var(--text); }
 .sh-tab.on { color: var(--text); border-bottom-color: var(--accent); }
