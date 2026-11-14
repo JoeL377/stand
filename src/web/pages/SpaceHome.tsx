@@ -458,6 +458,10 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
 
   // The open project's name, shown after "Projects" in the tab row as the way back.
   const crumb = tab === "projects" && hasProjects && !mine && pageOf ? (pageOf === "none" ? "Unassigned" : (projects.find((x) => x.id === pageOf)?.name ?? null)) : null;
+  // Where an artifact's own page leads back to: the tab, or the project, it was opened from.
+  const backHere = { to: `${window.location.pathname}${window.location.search}`, label: crumb ?? TABS.find((t) => t.key === tab)?.label ?? room.name };
+  // Every card opens the panel; its Full button goes to the artifact's own page.
+  const pickArtifact = showArtifact;
 
   // Moving around the page: the line under the tabs slides to the one picked, and the panel
   // below comes in. Into a project it comes from the right, and back out to all projects from
@@ -640,7 +644,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                 });
               }}
               selected={openArtifact}
-              onSelect={showArtifact}
+              onSelect={pickArtifact}
             />
           )}
           {tab === "meetings" && (
@@ -754,7 +758,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               onShow={(v) => setParam("show", v === "tasks" ? "" : v)}
               decisionCount={decisions.filter((n) => !n.replacedBy && inProject(n)).length}
               artifactCount={!hasProjects ? (made.artifacts?.length ?? 0) : (made.artifacts ?? []).filter((a) => (pageOf === "none" ? !a.projects.length : a.projects.includes(pageOf))).length}
-              artifacts={<ArtifactsView artifacts={made.artifacts} error={made.error} projects={projectNames} project={hasProjects ? pageOf || undefined : undefined} selected={openArtifact} onSelect={showArtifact} />}
+              artifacts={<ArtifactsView artifacts={made.artifacts} error={made.error} projects={projectNames} project={hasProjects ? pageOf || undefined : undefined} selected={openArtifact} onSelect={pickArtifact} />}
               decisions={
                 <>
                   <PointList
@@ -807,7 +811,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             meeting={madeOf.id}
             artifacts={made.artifacts}
             projects={projectNames}
-            onSelect={(id) => { setMadeOf(null); showArtifact(id); }}
+            onSelect={(id) => { setMadeOf(null); pickArtifact(id); }}
             onClose={() => setMadeOf(null)}
           />
         )}
@@ -820,6 +824,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             projects={projectNames}
             onClose={closeArtifact}
             onOpenTask={showTask}
+            back={backHere}
             onOpenSpec={(id) => setParams((prev) => {
               const next = new URLSearchParams(prev);
               next.delete("artifact"); next.set("task", id); next.set("view", "plan");

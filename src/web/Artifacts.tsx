@@ -328,6 +328,8 @@ export function ArtifactPanel(props: {
   projects: Map<string, string>;
   onClose: () => void;
   onOpenTask: (id: string) => void;
+  /** Where the page Open leads to should lead back to. */
+  back?: { to: string; label: string };
   /** Open a spec where it lives: its to-do, on the spec. */
   onOpenSpec: (taskId: string) => void;
   onProject: (id: string) => void;
@@ -437,9 +439,9 @@ export function ArtifactPanel(props: {
             </p>
             <div className="af-actions">
               {a.href ? (
-                <Link className="af-btn primary" to={a.href}>Open</Link>
+                <Link className="af-btn primary" to={a.href} state={props.back ? { back: props.back } : undefined}>Full {a.kind}</Link>
               ) : (
-                taskId && <button type="button" className="af-btn primary" onClick={() => props.onOpenSpec(taskId)}>Open</button>
+                taskId && <button type="button" className="af-btn primary" onClick={() => props.onOpenSpec(taskId)}>Full spec</button>
               )}
               {a.kind === "spec" && taskId && <CopyForAgent kind="action" id={taskId} label />}
               {a.kind === "doc" && a.ref && <CopyDocRef docRef={a.ref} title={a.title} />}
