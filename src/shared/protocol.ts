@@ -1460,6 +1460,8 @@ export interface SpaceFeed {
     todos: number;
     decided: number;
     open: number;
+    /** Everyone who talked or wrote in it, by the name they had in the call. */
+    people: string[];
   }>;
   /** What agents and people reported through the MCP, newest first. */
   updates: ItemUpdate[];
