@@ -109,6 +109,18 @@ export function filterArtifacts(artifacts: Artifact[], f: { kind?: ArtifactKind 
   );
 }
 
+/** Whose it is, as a card says it: the person behind the first maker ("Priya", not "Priya’s Claude
+ *  Code"), "Stand" for Stand's own, and "+N" when other people made it too. Empty when no one is known. */
+export function ownerLine(makers: ArtifactMaker[]): string {
+  const owners: string[] = [];
+  for (const m of makers) {
+    const who = m.key.startsWith("a:") ? m.name.split(/’s |'s /)[0] : m.name;
+    if (who && !owners.includes(who)) owners.push(who);
+  }
+  if (!owners.length) return "";
+  return owners.length === 1 ? owners[0] : `${owners[0]} +${owners.length - 1}`;
+}
+
 /** "Sam, Leo’s Codex +2": the first two makers and how many more. */
 export function makersLine(makers: ArtifactMaker[]): string {
   if (makers.length <= 2) return makers.map((m) => m.name).join(", ");

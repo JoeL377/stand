@@ -5,7 +5,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ARTIFACT_KINDS, ARTIFACT_NAME, type Artifact, type ArtifactDetail, type ArtifactKind, type ArtifactLink, filterArtifacts, makersOf } from "../shared/artifacts.ts";
+import { ARTIFACT_KINDS, ARTIFACT_NAME, type Artifact, type ArtifactDetail, type ArtifactKind, type ArtifactLink, filterArtifacts, makersOf, ownerLine } from "../shared/artifacts.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { api } from "./api.ts";
@@ -97,10 +97,10 @@ function Thumb({ a, small }: { a: Artifact; small?: boolean }) {
   );
 }
 
-/** The quiet line under a name: when, after the dot of its kind. Its project and who made it are in
- *  the panel, the by-project layout and the "Made by" filter. */
+/** The quiet line under a name: when, then whose it is, after the dot of its kind. Its project is in
+ *  the panel and the by-project layout. */
 function metaOf(a: Artifact): string[] {
-  return [whenLabel(a.ts)];
+  return [whenLabel(a.ts), ownerLine(a.makers)].filter(Boolean);
 }
 
 /** How the Artifacts tab is laid out: one plain grid, or the same cards under their projects. */
