@@ -5359,6 +5359,11 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
   .af-panel .af-shots a { width: 76px; height: 48px; }
   .af-panel .af-shots { margin-bottom: 12px; }
 }
+/* On a phone the header is set apart from the body: a full-width hairline under it, and the body's section
+   headings drop to small quiet labels so the title is the one big line. */
 @media (max-width: 760px) {
-  .af-panel .td-head { margin-bottom: 10px; }
+  .af-panel { --pad-x: 20px; }
+  .af-panel .td-head { margin: 0 calc(-1 * var(--pad-x)) 16px; padding: 0 var(--pad-x) 12px; border-bottom: 1px solid var(--line); }
+  .af-panel .af-doc h1, .af-panel .af-doc h2, .af-panel .af-doc h3, .af-panel .af-doc h4 { margin: 18px 0 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .af-panel .af-doc > :first-child { margin-top: 0; }
 }
