@@ -256,6 +256,7 @@ export function spaceActivity(db: DB, roomId: string, opts: { before?: number; l
     design: { kind: "design", verb: (e) => (e.detail?.startsWith("Added context") ? "added context to the design session on" : "set up a design session on") },
     idea_review: { kind: "idea_review", verb: () => "set up an idea review of" },
     project: { kind: "project", verb: () => "made the project" },
+    doc: { kind: "doc", verb: (e) => (e.detail === "saved again" ? "rewrote the doc" : "saved the doc") },
   };
   const logged: Source = rows(
     "SELECT * FROM agent_events WHERE room_id = ? AND ts < ? ORDER BY ts DESC, rowid DESC LIMIT ?",

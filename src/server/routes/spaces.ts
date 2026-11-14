@@ -2,6 +2,7 @@
 import type { Express } from "express";
 import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS, type Note, type SpaceMembers } from "../../shared/protocol.ts";
 import { spaceActivity } from "../activity.ts";
+import { artifactDetail, spaceArtifacts } from "../artifacts.ts";
 import { archiveRow, restoreRow } from "../archive.ts";
 import { spaceFeed } from "../captures.ts";
 import { capabilities, config } from "../config.ts";
@@ -42,6 +43,25 @@ export function spaceRoutes(app: Express, ctx: Services) {
       const before = Number(req.query.before);
       const who = typeof req.query.who === "string" && req.query.who ? req.query.who.slice(0, 200) : undefined;
       res.json(spaceActivity(db, room.id, { before: Number.isFinite(before) && before > 0 ? before : undefined, who }));
+    }),
+  );
+  // The Artifacts tab: what the space made, newest first, and one of them opened.
+  app.get(
+    "/api/rooms/:id/artifacts",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      res.json(spaceArtifacts(db, room.id));
+    }),
+  );
+  app.get(
+    "/api/rooms/:id/artifacts/:artifactId",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      const detail = artifactDetail(db, room.id, String(req.params.artifactId).slice(0, 200));
+      if (!detail) return notFound(res, "That artifact isn't in this space any more.");
+      res.json(detail);
     }),
   );
   app.get(

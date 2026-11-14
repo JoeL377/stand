@@ -475,6 +475,23 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS projects_room ON projects(room_id, position);
+-- Docs (db/docs.ts): a write-up an agent or a person saved to a space, as markdown: research, a
+-- report, notes worth keeping. Saving one again replaces its text and counts a version.
+CREATE TABLE IF NOT EXISTS docs (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  title TEXT NOT NULL,
+  text TEXT NOT NULL,
+  project_id TEXT,
+  -- The to-do it was written for, if any.
+  note_id TEXT,
+  made_by TEXT NOT NULL,
+  made_actor_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  versions INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS docs_room ON docs(room_id, updated_at);
 CREATE TABLE IF NOT EXISTS channel_reads (
   channel_id TEXT NOT NULL,
   user_id TEXT NOT NULL,

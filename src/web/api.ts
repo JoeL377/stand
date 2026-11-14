@@ -2,6 +2,7 @@ import type { PlanReview, PlanThread } from "../shared/planReview.ts";
 import type { BriefChange, DesignReviewRan, DesignReviewRecord, DesignReviewState, DesignReviewView, DesignSpec, PlanBrief } from "../shared/designReview.ts";
 import type { ChatCaught, ChatMessage, ChatReport, ChatSession, ChatThread } from "../shared/chat.ts";
 import type { ActivityPage } from "../shared/activity.ts";
+import type { ArtifactDetail, ArtifactList } from "../shared/artifacts.ts";
 import type { DraftSlide } from "../shared/outline.ts";
 import type { Project } from "../shared/projects.ts";
 import type { ChatNotify, NotifyStatus } from "../shared/push.ts";
@@ -139,6 +140,9 @@ export const api = {
   /** A page of the space's Activity tab: what agents did, newest first. `before` is the last page's `next`. */
   activity: (roomId: string, opts: { who?: string; before?: number } = {}) =>
     call<ActivityPage>("GET", `/api/rooms/${roomId}/activity?${new URLSearchParams({ ...(opts.who ? { who: opts.who } : {}), ...(opts.before ? { before: String(opts.before) } : {}) })}`),
+  /** What the space made, newest first (the Artifacts tab), and one of them opened. */
+  artifacts: (roomId: string) => call<ArtifactList>("GET", `/api/rooms/${roomId}/artifacts`),
+  artifact: (roomId: string, id: string) => call<ArtifactDetail>("GET", `/api/rooms/${roomId}/artifacts/${encodeURIComponent(id)}`),
   tokens: () => call<AgentToken[]>("GET", "/api/tokens"),
   createToken: (label: string, scope: AgentToken["scope"]) => call<{ token: string; info: AgentToken }>("POST", "/api/tokens", { label, scope }),
   revokeToken: (id: string) => call<{ ok: true }>("DELETE", `/api/tokens/${id}`),
