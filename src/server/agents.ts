@@ -1,5 +1,7 @@
 import { meetingTimeline } from "./timeline.ts";
 import { archivedRows } from "./archive.ts";
+import { artifactDetail, artifactUrl, docRef, parseDocRef, spaceArtifacts } from "./artifacts.ts";
+import { ARTIFACT_KINDS, type ArtifactKind, DOC_TEXT_MAX, DOC_TITLE_MAX, filterArtifacts, makersLine } from "../shared/artifacts.ts";
 import { MEETING_TITLE_MAX, cleanMeetingTitle, meetingKindName } from "./meetingNames.ts";
 import { forgetMeetingFrom } from "./noteFrom.ts";
 import { changeReview, logThreadChange, quotePassage, reviewFor } from "./planReview.ts";
@@ -1343,6 +1345,87 @@ export function agentApi(deps: AgentDeps) {
       deps.specTouched?.(r.note);
       deps.notify(r.room.id, "updates");
       return { attached: updateInfo(update, baseUrl), versions: db.notePlan(r.note.id)?.versions, shows_on: "the to-do in Stand, and in get" };
+    },
+
+    /** Keeps a write-up in a space as a doc, or saves an earlier one again with new text. */
+    saveDoc(caller: Caller, args: { space?: string; title?: string; text: string; project?: string; ref?: string; doc?: string }, baseUrl = "") {
+      requireWrite(caller);
+      const text = args.text.trim();
+      if (!text) throw new AgentError("The doc is empty.");
+      if (text.length > DOC_TEXT_MAX) throw new AgentError(`That doc is ${text.length} characters. Stand keeps up to ${DOC_TEXT_MAX}.`);
+      const title = oneLine(args.title, DOC_TITLE_MAX);
+      const had = args.doc?.trim() ? db.getDoc(parseDocRef(args.doc) ?? args.doc.trim()) : null;
+      if (args.doc?.trim() && (!had || !db.isMember(had.roomId, caller.user.id))) throw new AgentError("No doc with that ref. list_artifacts with kind doc lists a space's docs.");
+      const room = had ? space(had.roomId, caller) : findSpace(caller, args.space ?? "");
+      // The to-do it was written for: the doc follows that to-do's project unless one is given.
+      let noteId: string | null | undefined;
+      if (args.ref?.trim()) {
+        const r = resolve(caller, args.ref.includes("/") ? args.ref : `stand:action/${args.ref}`);
+        if (!r.note || r.note.kind !== "action" || r.room.id !== room.id) throw new AgentError("A doc goes with a to-do of its own space (stand:action/...).");
+        noteId = r.note.id;
+      }
+      const projectId = args.project?.trim() ? projectFor(room.id, args.project) : undefined;
+      let doc;
+      if (had) doc = db.rewriteDoc(had.id, { title: title || undefined, text, projectId, noteId })!;
+      else {
+        if (!title) throw new AgentError("A doc needs a title: what it is, in a few words.");
+        doc = db.addDoc({ roomId: room.id, title, text, projectId: projectId ?? null, noteId: noteId ?? null, by: byOf(caller), actor: actorOf(caller) });
+      }
+      const url = artifactUrl(baseUrl, room.id, `doc:${doc.id}`);
+      if (caller.token) db.addAgentEvent(room.id, actorOf(caller), "doc", { target: { text: doc.title, href: artifactUrl("", room.id, `doc:${doc.id}`) }, detail: had ? "saved again" : undefined });
+      deps.notify(room.id, "updates");
+      return { [had ? "saved_again" : "saved"]: { ref: docRef(doc.id), title: doc.title, version: doc.versions, space: room.name, url }, shows_on: "the space's Artifacts tab in Stand, and its project's Artifacts" };
+    },
+
+    /** What a space made: its specs, decks, sketches, recaps, screens and docs, newest first. With a ref, one of them in full. */
+    listArtifacts(caller: Caller, args: { space?: string; kind?: string; project?: string; ref?: string; limit?: number }, baseUrl = "") {
+      if (args.ref?.trim()) {
+        const docId = parseDocRef(args.ref);
+        const d = docId ? db.getDoc(docId) : null;
+        const roomId = d?.roomId ?? (args.space?.trim() ? findSpace(caller, args.space).id : null);
+        if (!roomId) throw new AgentError("Give the space with an artifact's id, or a doc's ref (stand:doc/...).");
+        const room = space(roomId, caller);
+        const detail = artifactDetail(db, room.id, d ? `doc:${d.id}` : args.ref.trim());
+        if (!detail) throw new AgentError("No artifact with that id in this space. list_artifacts without ref lists them.");
+        return {
+          id: detail.id,
+          ref: detail.ref,
+          kind: detail.kind,
+          title: detail.title,
+          made_by: makersLine(detail.makers) || undefined,
+          changed: new Date(detail.ts).toISOString(),
+          text: detail.body,
+          versions: detail.versions?.length,
+          images: detail.images?.map((i) => ({ url: `${baseUrl}${i.url}`, caption: i.caption ?? undefined })),
+          links: detail.links.map((l) => ({ text: l.text, what: l.note, ref: l.taskId ? refOf("action", l.taskId) : undefined, url: l.href ? (l.href.startsWith("http") ? l.href : `${baseUrl}${l.href}`) : undefined })),
+          url: detail.href ? `${baseUrl}${detail.href}` : artifactUrl(baseUrl, room.id, detail.id),
+        };
+      }
+      const room = findSpace(caller, args.space ?? "");
+      const kind = args.kind?.trim().toLowerCase().replace(/s$/, "") ?? "";
+      if (kind && !ARTIFACT_KINDS.includes(kind as ArtifactKind) && kind !== "screen") throw new AgentError(`Kinds are ${ARTIFACT_KINDS.join(", ")}.`);
+      const project = args.project?.trim() ? (projectFor(room.id, args.project) ?? "none") : "";
+      const names = new Map(db.listProjects(room.id).map((p) => [p.id, p.name]));
+      const all = filterArtifacts(spaceArtifacts(db, room.id).artifacts, { kind: (kind === "screen" ? "screens" : kind) as ArtifactKind | "", project });
+      const limit = Math.min(100, Math.max(1, args.limit ?? 40));
+      return {
+        space: { id: room.id, name: room.name },
+        count: all.length,
+        artifacts: all.slice(0, limit).map((a) => ({
+          id: a.id,
+          ref: a.ref,
+          kind: a.kind,
+          title: a.title,
+          made_by: makersLine(a.makers) || undefined,
+          from: a.origin,
+          changed: new Date(a.ts).toISOString(),
+          projects: a.projects.length ? a.projects.map((id) => names.get(id) ?? id) : undefined,
+          todo: a.taskId ? refOf("action", a.taskId) : undefined,
+          size: a.badge,
+          url: a.href ? `${baseUrl}${a.href}` : artifactUrl(baseUrl, room.id, a.id),
+        })),
+        more: all.length > limit ? `${all.length - limit} more: narrow by kind or project, or raise limit` : undefined,
+      };
     },
 
     /** Puts a to-do's plan on the space's next design review, with the questions the team has to decide. */

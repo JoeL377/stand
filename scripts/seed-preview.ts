@@ -6,6 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 import type { ChapterRecap, DiscussionOutcome, Item, Note, NoteKind, Position, Quote, User } from "../src/shared/protocol.ts";
 import { agentApi } from "../src/server/agents.ts";
@@ -15,7 +16,7 @@ import { finishBrainstorm, startBrainstorm } from "../src/server/brainstorm.ts";
 import { Chat } from "../src/server/chat.ts";
 import type { BrainNode } from "../src/shared/protocol.ts";
 import { upNextView } from "../src/server/upNextPolish.ts";
-import { UploadLinks } from "../src/server/workLog.ts";
+import { UploadLinks, saveShotFile } from "../src/server/workLog.ts";
 
 const dir = path.resolve(process.env.DATA_DIR ?? "");
 if (!process.env.DATA_DIR || !path.basename(dir).includes("preview") || process.env.NODE_ENV === "production") {
@@ -404,6 +405,68 @@ for (const [name, goal, match] of projects) {
   const p = db.createProject(room.id, { name, goal }, sam.id);
   for (const n of [...db.openActions(room.id), ...db.spaceNotes(room.id, "question", 100), ...db.spaceNotes(room.id, "decision", 100)]) {
     if (!n.projectId && match.test(n.text)) db.setNoteProject(room.id, n.id, { projectId: p.id, by: sam.name });
+  }
+}
+
+// What the space made beyond its to-dos, for the Artifacts tab: a spec with a second version, docs
+// two agents saved, and screenshots of finished work.
+api.attachPlan(priyasAgent, {
+  ref: ref(worker),
+  plan: "# Payment retry worker\n\n## Goal\nFailed charges retry on the server, so a closed browser tab no longer loses the order.\n\n## Plan\n- Queue a retry job with the charge's idempotency key\n- Back off at 1, 5 and 30 minutes, then give up and email\n- Remove the browser retry path once the worker is live\n\n## Open question\nDo we retry cards the bank marked as stolen?",
+});
+api.saveDoc(leosAgent, {
+  space: room.id,
+  title: "Chargeback rules by card network",
+  ref: ref(alert),
+  text: "## What counts\nVisa and Mastercard both flag a merchant above **0.9%** of monthly orders. Amex has no fixed line and reviews by hand.\n\n| Network | Warning | Fine starts |\n| --- | --- | --- |\n| Visa | 0.65% | 0.9% |\n| Mastercard | 1.0% | 1.5% |\n\n## What it means for the alert\nPage at 1% of a day's orders, as built. A weekly digest at 0.5% would catch a slow climb.",
+});
+api.saveDoc(samsAgent, {
+  space: room.id,
+  title: "Guest checkout: what the first week of data says",
+  project: "Guest checkout",
+  text: "Guest orders were 31% of all orders in week one.\n\n- Completion is 8 points higher than signed-in checkout on phones\n- Refund requests are level\n- 1 in 5 guests makes an account from the confirmation email",
+});
+{
+  // A drawn screenshot, so a Screens card has a picture without any real one: flat boxes, as a PNG.
+  const shot = (accent: [number, number, number]) => {
+    const [w, h] = [480, 300];
+    const px = Buffer.alloc(h * (w * 3 + 1));
+    const box = (x: number, y: number, bw: number, bh: number, c: [number, number, number]) => {
+      for (let j = y; j < y + bh; j++) for (let i = x; i < x + bw; i++) px.set(c, j * (w * 3 + 1) + 1 + i * 3);
+    };
+    const ink: [number, number, number] = [47, 46, 43];
+    const line: [number, number, number] = [217, 216, 211];
+    box(0, 0, w, h, [246, 246, 244]);
+    box(0, 0, w, 28, [255, 255, 255]);
+    box(12, 10, 60, 8, ink);
+    box(12, 44, 300, 110, [255, 255, 255]);
+    box(24, 56, 110, 9, accent);
+    for (const [y, bw] of [[75, 260], [87, 230], [99, 190]]) box(24, y, bw, 5, line);
+    box(24, 125, 60, 17, accent);
+    box(328, 44, 140, 170, [255, 255, 255]);
+    box(340, 56, 70, 7, ink);
+    for (const [y, bw] of [[75, 116], [87, 100], [99, 108]]) box(340, y, bw, 5, line);
+    const chunk = (type: string, data: Buffer) => {
+      const body = Buffer.concat([Buffer.from(type), data]);
+      const len = Buffer.alloc(4);
+      len.writeUInt32BE(data.length);
+      const crc = Buffer.alloc(4);
+      crc.writeUInt32BE(zlib.crc32(body));
+      return Buffer.concat([len, body, crc]);
+    };
+    const head = Buffer.alloc(13);
+    head.writeUInt32BE(w, 0);
+    head.writeUInt32BE(h, 4);
+    head.set([8, 2, 0, 0, 0], 8);
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", head), chunk("IDAT", zlib.deflateSync(px)), chunk("IEND", Buffer.alloc(0))]);
+  };
+  for (const [note, user, client, caption, accent] of [
+    [alert, leo, "Codex", "The alert in the on-call channel", [229, 72, 77]],
+    [alert, leo, "Codex", "Its threshold in settings", [45, 108, 223]],
+    [key, priya, "Claude Code", "A retried charge with the same key", [22, 163, 74]],
+  ] as const) {
+    const s = db.addWorkShot({ roomId: room.id, noteId: note.id, userId: user.id, userName: user.name, client, caption, ext: "png" });
+    saveShotFile(s.id, "png", shot([...accent]));
   }
 }
 
