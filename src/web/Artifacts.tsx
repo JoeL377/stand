@@ -100,7 +100,7 @@ function Thumb({ a, small }: { a: Artifact; small?: boolean }) {
 /** The quiet line under a name: when, then whose it is, after the dot of its kind. Its project is in
  *  the panel and the by-project layout. */
 function metaOf(a: Artifact): string[] {
-  return [whenLabel(a.ts), ownerLine(a.makers)].filter(Boolean);
+  return [whenLabel(a.ts), a.owner ?? ownerLine(a.makers)].filter(Boolean);
 }
 
 /** How the Artifacts tab is laid out: one plain grid, or the same cards under their projects. */
@@ -328,6 +328,8 @@ export function ArtifactPanel(props: {
   projects: Map<string, string>;
   onClose: () => void;
   onOpenTask: (id: string) => void;
+  /** Open a spec where it lives: its to-do, on the spec. */
+  onOpenSpec: (taskId: string) => void;
   onProject: (id: string) => void;
   /** The projects it can move to, in the space's order. */
   moveTo: Array<{ id: string; name: string }>;
@@ -437,7 +439,7 @@ export function ArtifactPanel(props: {
               {a.href ? (
                 <Link className="af-btn primary" to={a.href}>Open</Link>
               ) : (
-                taskId && <button type="button" className="af-btn primary" onClick={() => props.onOpenTask(taskId)}>Open the to-do</button>
+                taskId && <button type="button" className="af-btn primary" onClick={() => props.onOpenSpec(taskId)}>Open</button>
               )}
               {a.kind === "spec" && taskId && <CopyForAgent kind="action" id={taskId} label />}
               {a.kind === "doc" && a.ref && <CopyDocRef docRef={a.ref} title={a.title} />}

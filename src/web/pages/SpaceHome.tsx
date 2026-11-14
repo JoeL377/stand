@@ -820,6 +820,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             projects={projectNames}
             onClose={closeArtifact}
             onOpenTask={showTask}
+            onOpenSpec={(id) => setParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("artifact"); next.set("task", id); next.set("view", "plan");
+              return next;
+            })}
             moveTo={projects.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name }))}
             onMoved={made.reload}
             onProject={(id) => {

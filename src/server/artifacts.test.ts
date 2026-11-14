@@ -175,3 +175,11 @@ test("a card names the person behind an artifact, not their agent", () => {
   assert.equal(ownerLine([{ key: "stand", name: "Stand" }]), "Stand");
   assert.equal(ownerLine([]), "");
 });
+
+test("a spec is its to-do owner's, whoever's agent wrote it", () => {
+  const { db, api, room, notes, codex } = setup();
+  api.attachPlan(codex, { ref: `stand:action/${notes[0].id}`, plan: "# Server capture\n\nFirst cut." });
+  const spec = spaceArtifacts(db, room.id).artifacts.find((a) => a.kind === "spec")!;
+  assert.equal(spec.owner, "Joe");
+  assert.deepEqual(spec.makers.map((m) => m.name), ["Andy’s Codex"]);
+});

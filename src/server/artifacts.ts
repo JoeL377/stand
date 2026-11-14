@@ -144,6 +144,7 @@ function specs(db: DB, roomId: string, r: Reading): Artifact[] {
       projects: project ? [project] : [],
       makers: makers([makerOf(x.made_actor_json ? (JSON.parse(x.made_actor_json as string) as Actor) : null, x.made_by as string)]),
       badge: `v${x.versions as number}`,
+      ...(note.owner ? { owner: first(note.owner) } : {}),
       taskId: note.id,
       preview: { text: plainPreview(head, title) },
     }];
@@ -216,6 +217,7 @@ function sketches(db: DB, roomId: string, r: Reading): Artifact[] {
       ts: b.endedAt ?? b.startedAt,
       projects,
       makers: [STAND],
+      ...(b.startedBy ? { owner: first(b.startedBy) } : {}),
       origin: design ? "Design session" : "Brainstorm",
       badge: s.subjects && s.subjects.length > 1 ? plural(s.subjects.length, "subject") : diagram ? plural(held, "box", "boxes") : plural(s.ideas || held, "idea"),
       href: `/s/${roomId}/brainstorm/${b.id}`,
