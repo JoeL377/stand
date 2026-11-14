@@ -256,6 +256,10 @@ export function spaceActivity(db: DB, roomId: string, opts: { before?: number; l
     design: { kind: "design", verb: (e) => (e.detail?.startsWith("Added context") ? "added context to the design session on" : "set up a design session on") },
     idea_review: { kind: "idea_review", verb: () => "set up an idea review of" },
     project: { kind: "project", verb: () => "made the project" },
+    project_edit: {
+      kind: "project",
+      verb: (e) => ({ renamed: "renamed the project", goal: "set the goal of", archived: "archived the project", restored: "brought back the project" })[e.change ?? "renamed"],
+    },
     doc: { kind: "doc", verb: (e) => (e.detail === "saved again" ? "rewrote the doc" : "saved the doc") },
   };
   const logged: Source = rows(

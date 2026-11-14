@@ -7,7 +7,7 @@ A project is a named group of a space's to-dos, open questions and decisions (`s
 - Space page → Tasks → `+ Project` under the list, or the project pill on any task row (`Change project: …`).
 - In a call: the agenda line's `Project for …` menu → `Make project`, `Link to project`, `Remove project link`.
 - A project's row on the Tasks tab, `?project=<id>` or `?project=none`, and `Mine` (`?mine=1`). The Decisions tab keeps the filter at the end of the tab row (`Filter by project`).
-- MCP: `list_spaces` (projects), `list_actions` (project filter), `get` with `stand:project/<id>`, `create_project`, `order_projects`, `project` on `create_action` and `update_action`.
+- MCP: `list_spaces` (projects), `list_actions` (project filter), `get` with `stand:project/<id>`, `create_project`, `update_project`, `move_to_project`, `order_projects`, `project` on `create_action` and `update_action`.
 - Order: the `⋯` menu (`Project order`) at the end of the tab row. `Active first` (the default) puts projects with a to-do in progress first, then the ones with the newest open to-dos; a row says `N in progress`. `Team order` is the space's one saved order, most important first: drag a project's card by the handle at its left edge (left half of another card drops before it, right half after), or use `Move up` / `Move down` in its `⋯` menu. A new project goes last. `list_spaces` and the project filter use the team's order; `list_spaces` adds `in_progress` and `latest_activity` to each project.
 
 ## Drive it

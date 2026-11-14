@@ -1230,6 +1230,66 @@ test("agents set the order of a space's projects by ref or name, and list_spaces
   assert.deepEqual(db.listProjects(room.id).map((p) => p.name), ["Gamma", "Alpha", "Beta"], "a refused order changes nothing");
 });
 
+test("agents rename a project, set its goal, archive it when empty and bring it back", () => {
+  const { api, db, joe, room, action } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const [mkt, busy] = ["Marketiing", "Busy"].map((name) => db.createProject(room.id, { name }, "Joe"));
+  db.setNoteProject(room.id, action.id, { projectId: busy.id, by: "Joe" });
+
+  const renamed = api.updateProject(agent, { project: `stand:project/${mkt.id}`, name: "Marketing and distribution", goal: "Get Stand in front of 0-to-1 teams" }, "http://stand.test");
+  assert.equal(renamed.updated.name, "Marketing and distribution");
+  assert.equal(renamed.updated.goal, "Get Stand in front of 0-to-1 teams");
+  assert.deepEqual(renamed.changed, ['Renamed from "Marketiing".', "Goal: Get Stand in front of 0-to-1 teams"]);
+  const logged = db.raw.prepare("SELECT kind, actor_json, event_json FROM agent_events WHERE room_id = ?").all(room.id) as Array<{ kind: string; actor_json: string; event_json: string }>;
+  assert.equal(logged.at(-1)?.kind, "project_edit");
+  assert.equal(JSON.parse(logged.at(-1)!.actor_json).model, "claude-opus-5-5", "who did it, with the model");
+
+  // By name with the space; a name another project has is refused.
+  assert.throws(() => api.updateProject(agent, { project: "marketing and distribution", name: "busy", space: room.id }), /already a project called Busy/);
+  assert.throws(() => api.updateProject(agent, { project: "Busy" }), /with space/);
+  assert.throws(() => api.updateProject(agent, { project: "Busy", space: room.id }), /Nothing to change/);
+
+  // Archiving needs it empty of open to-dos.
+  assert.throws(() => api.updateProject(agent, { project: "Busy", space: room.id, archived: true }), /1 open to-do/);
+  const archived = api.updateProject(agent, { project: "Marketing and distribution", space: room.id, archived: true });
+  assert.equal(archived.updated.archived, true);
+  assert.deepEqual(api.listSpaces(agent)[0].projects?.map((p) => p.name), ["Busy"]);
+  const back = api.updateProject(agent, { project: `stand:project/${mkt.id}`, archived: false });
+  assert.equal(back.updated.archived, undefined);
+  assert.deepEqual(api.listSpaces(agent)[0].projects?.map((p) => p.name), ["Marketing and distribution", "Busy"]);
+
+  assert.throws(() => api.updateProject({ user: joe, token: { ...token, scope: "read" as const } }, { project: `stand:project/${mkt.id}`, name: "X" }), /read only/);
+  const stranger = db.upsertUser({ googleSub: "g-x", email: "x@example.com", name: "Xavier", picture: null });
+  assert.throws(() => api.updateProject({ user: stranger, token: null }, { project: `stand:project/${mkt.id}`, name: "X" }), /not in that space/);
+});
+
+test("agents file an open question or a decision in a project, and take it out again", () => {
+  const { api, db, joe, room, notes } = setup();
+  const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };
+  const agent = { user: joe, token, model: "claude-opus-5-5" };
+  const mkt = db.createProject(room.id, { name: "Marketing" }, "Joe");
+  const question = notes.find((n) => n.kind === "question")!;
+  const decision = notes.find((n) => n.kind === "decision")!;
+
+  const moved = api.moveToProject(agent, { ref: `stand:question/${question.id}`, project: "marketing" }, "http://stand.test");
+  assert.deepEqual(moved.moved.project, { ref: `stand:project/${mkt.id}`, name: "Marketing" });
+  assert.equal(db.getNote(question.id)?.projectSetBy, "Joe Liang via Claude Code");
+  assert.deepEqual(
+    (api.listQuestions(agent, { space: room.id }, "x") as { questions: Array<{ ref: string; project: unknown }> }).questions.find((q) => q.ref === `stand:question/${question.id}`)?.project,
+    { ref: `stand:project/${mkt.id}`, name: "Marketing" },
+  );
+  assert.throws(() => api.moveToProject(agent, { ref: `stand:question/${question.id}`, project: "Marketing" }), /already in "Marketing"/);
+
+  const dec = api.moveToProject(agent, { ref: `stand:decision/${decision.id}`, project: `stand:project/${mkt.id}` });
+  assert.equal((dec.moved.project as { name: string }).name, "Marketing");
+  const out = api.moveToProject(agent, { ref: `stand:decision/${decision.id}`, project: "unassigned" });
+  assert.equal(out.moved.project, "unassigned");
+
+  assert.throws(() => api.moveToProject(agent, { ref: `stand:question/${question.id}`, project: "Nope" }), /No project called "Nope"/);
+  assert.throws(() => api.moveToProject({ user: joe, token: { ...token, scope: "read" as const } }, { ref: `stand:question/${question.id}`, project: "unassigned" }), /read only/);
+});
+
 test("list_spaces keeps the team's order and says where the work is: in_progress and latest_activity", () => {
   const { api, db, joe, room, action } = setup();
   const token = { id: "tok1", label: "Claude Code", scope: "write" as const, hint: "x", createdAt: 0, lastUsedAt: null };

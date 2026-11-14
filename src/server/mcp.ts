@@ -24,7 +24,7 @@ Before starting on a to-do, call start_work with its ref: one call marks it as y
 If the change shows on screen, attach screenshots before you report: screenshot_upload_url gives a link to curl them to, and they join your next report. When the work is in a PR, put the to-do's ref (stand:action/<id>) in the PR description and post_update with status ready, a short summary of what changed and the PR link: Stand shows it as ready to ship and checks the to-do off by itself when the PR merges, so you don't need to come back. When it's finished with nothing left to ship, complete_action with the summary. If you write a plan or spec for it, attach_plan keeps it on the to-do instead of in the repo. When your person asks for a review of that plan, or it has a question the team must decide, request_design_review puts it on the space's next design review with your questions; don't ask for one otherwise. If it needs another to-do done first, link_todos says so; that's a signal and blocks nothing. post_update for progress, a blocker, or something people need to decide. Reports show up on that to-do in Stand as its log.
 A to-do that never came up in a meeting -> create_action, with a summary and a status if there is one. Rewording a to-do, giving it to someone, or moving it to doing, done or dropped -> update_action. When you split a to-do into smaller to-dos, give each one parent, so they show as its parts and follow its project.
 A space's open questions -> list_questions. When you can answer one, or your person says one no longer matters -> close_question: an answer is kept as a decision linked to the question, and a drop takes a reason.
-A project is a named group of a space's to-dos, open questions and decisions: a feature or a workstream. list_spaces lists each space's projects. When one fits a new to-do, give it with create_action (project); move a to-do with update_action. When your person asks for a new project -> create_project. What's in one -> get with its ref, or list_actions with project. list_spaces lists projects in the team's order, most important first; when your person asks to change it -> order_projects. A project with suggested: true is Stand's suggestion; if it is right, confirm it with update_action (project).
+A project is a named group of a space's to-dos, open questions and decisions: a feature or a workstream. list_spaces lists each space's projects. When one fits a new to-do, give it with create_action (project); move a to-do with update_action. When your person asks for a new project -> create_project. What's in one -> get with its ref, or list_actions with project. list_spaces lists projects in the team's order, most important first; when your person asks to change it -> order_projects. Renaming a project, setting its goal, or archiving one that is empty or finished -> update_project. Filing an open question or a decision in a project (or a to-do, same as update_action) -> move_to_project. A project with suggested: true is Stand's suggestion; if it is right, confirm it with update_action (project).
 Stand keeps who did what: the person, their agent and its connection. When you write, pass model if you know which one you are, so people can see which agents did the work.
 When you finish something people should see, add_review_slide puts it on the space's next product review with its pictures; get_review shows what's on the next review and what the team said about each slide in the last one, and the same for design reviews: the verdict on each spec and how its questions ended.
 When your person wants to design something with the team in a call -> start_design_session, with the context they should have to hand.
@@ -728,6 +728,41 @@ export function buildMcpServer(api: AgentApi, caller: Caller, baseUrl: string) {
       annotations: WRITE,
     },
     ({ space, projects, model }) => run(() => api.orderProjects(as(model), { space, projects }, baseUrl)),
+  );
+
+  server.registerTool(
+    "update_project",
+    {
+      title: "Rename, set the goal of, or archive a Stand project",
+      description:
+        "Changes one project in a Stand space: its name, its goal, or whether it is archived. Only what you pass changes. Names stay unique in a space whatever the case. archived true takes it off the Projects tab and out of list_spaces; Stand refuses while open to-dos are still in it, so move or close them first. archived false brings it back. Call it when your person asks, or agrees to a tidy-up you suggest. Kept as done by this person via this agent.",
+      inputSchema: {
+        project: z.string().describe("The project: its ref (stand:project/<id>), or its name with space"),
+        space: z.string().optional().describe("The space's id or name, when project is a name"),
+        name: z.string().optional().describe("A new name, a few words, 80 characters at most"),
+        goal: z.string().optional().describe("A new goal, one line of 200 characters at most. Empty takes it off"),
+        archived: z.boolean().optional().describe("true archives it (it must have no open to-dos), false brings it back"),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ project, space, name, goal, archived, model }) => run(() => api.updateProject(as(model), { project, space, name, goal, archived }, baseUrl)),
+  );
+
+  server.registerTool(
+    "move_to_project",
+    {
+      title: "File a Stand question, decision or to-do in a project",
+      description:
+        "Puts one open question, decision or to-do in a project of its space, or takes it out with \"unassigned\". It is set by hand, so Stand's own suggestions no longer move it. Moving into an archived project brings that project back. Kept as moved by this person via this agent.",
+      inputSchema: {
+        ref: z.string().describe("stand:question/<id>, stand:decision/<id> or stand:action/<id>"),
+        project: z.string().describe("The project's ref (stand:project/<id>) or name, or \"unassigned\""),
+        model: modelField,
+      },
+      annotations: WRITE,
+    },
+    ({ ref, project, model }) => run(() => api.moveToProject(as(model), { ref, project }, baseUrl)),
   );
 
   server.registerTool(
