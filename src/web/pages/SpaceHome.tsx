@@ -518,7 +518,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     return () => window.removeEventListener("scroll", on);
   }, [phone]);
   // The way back to all spaces says when another space has something new or a call on.
-  const focused = phone && !!crumb;
+  // An open project is its own view: its name in the header and its own tabs, not the space's.
+  const focused = !!crumb;
   const [menu, setMenu] = useState(false);
   // This space in the nav (the sidebar, or the menu on a phone): your work, then its projects.
   const pinnedIds = room.pinnedProjects ?? [];
@@ -539,7 +540,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // Where the chat button goes back to.
   const beforeChat = useRef<TabKey>("projects");
   if (tab !== "chat") beforeChat.current = tab;
-  const [projectTabs, setProjectTabs] = useState<HTMLDivElement | null>(null);
+  const [projectTabs, setProjectTabs] = useState<HTMLElement | null>(null);
   const elsewhere = !!spaces?.some((s) => s.id !== room.id && (s.live || (s.unread ?? 0) > 0));
   const panelRef = useRef<HTMLElement>(null);
   useTabInk(tabsRef, `${tab}|${crumb ?? ""}`);
@@ -693,7 +694,12 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           />
         )}
         {/* On a phone an open project is its own screen: its name above, its own tabs in place of the space's. */}
-        {focused && <div className="sh-tabs sh-pj-tabs" ref={setProjectTabs} />}
+        {focused && (
+          <div className="sh-tabs sh-pj-tabs">
+            <span className="sh-pj-views" ref={setProjectTabs} />
+            {!phone && <span className="sh-tab-tools" ref={setTabTools} />}
+          </div>
+        )}
         <div className="sh-tabs" role="tablist" aria-label="The space" ref={tabsRef}>
           {TABS.filter((t) => !((wide || phone) && t.key === "chat") && !(phone && t.key === "mine")).map((t) => (
             <button
@@ -724,7 +730,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               )}
             </button>
           ))}
-          {!phone && (tab === "projects" || mine) && <span className="sh-tab-tools" ref={setTabTools} />}
+          {!phone && !focused && (tab === "projects" || mine) && <span className="sh-tab-tools" ref={setTabTools} />}
           {tab === "chat" && <span className="sh-chat-bell"><ChatNotifyBell roomId={room.id} /></span>}
         </div>
         </div>
