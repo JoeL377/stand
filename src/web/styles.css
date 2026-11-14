@@ -5334,3 +5334,5 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 .af-bleed .td-body > * { flex: none; }
 .af-panel.af-bleed .af-sketch-open { flex: 1 0 320px; height: auto; margin: 14px calc(-1 * var(--pad-x)) 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 .af-bleed .af-links { padding-bottom: 16px; }
+/* On a phone the panel is the whole screen, on the same ground as the wide-screen panel. */
+@media (max-width: 760px) { .td-panel { background: var(--bg); } }
