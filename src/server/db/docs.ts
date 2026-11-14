@@ -82,6 +82,14 @@ export function docsStore(db: DatabaseSync) {
       const rows = db.prepare("SELECT artifact_id, project_id FROM artifact_projects WHERE room_id = ?").all(roomId) as Row[];
       return new Map(rows.map((r) => [r.artifact_id as string, (r.project_id as string) ?? null]));
     },
+    /** The artifacts this person pinned in the space, newest pin first. A pin is theirs alone. */
+    pinnedArtifacts(roomId: string, userId: string): string[] {
+      return (db.prepare("SELECT artifact_id FROM artifact_pins WHERE room_id = ? AND user_id = ? ORDER BY rowid DESC").all(roomId, userId) as Row[]).map((r) => r.artifact_id as string);
+    },
+    pinArtifact(roomId: string, userId: string, artifactId: string, pinned: boolean): void {
+      if (pinned) db.prepare("INSERT OR IGNORE INTO artifact_pins (room_id, user_id, artifact_id) VALUES (?, ?, ?)").run(roomId, userId, artifactId);
+      else db.prepare("DELETE FROM artifact_pins WHERE room_id = ? AND user_id = ? AND artifact_id = ?").run(roomId, userId, artifactId);
+    },
     setArtifactProject(roomId: string, artifactId: string, projectId: string | null, by: string, now = Date.now()): void {
       db.prepare(
         "INSERT INTO artifact_projects (room_id, artifact_id, project_id, set_by, set_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (room_id, artifact_id) DO UPDATE SET project_id = excluded.project_id, set_by = excluded.set_by, set_at = excluded.set_at",

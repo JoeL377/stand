@@ -78,6 +78,8 @@ export interface Artifact {
 
 export interface ArtifactList {
   artifacts: Artifact[];
+  /** The ones the person looking pinned, newest pin first: theirs alone. */
+  pinned?: string[];
 }
 
 /** One artifact opened: the whole of it, and what it is tied to. */

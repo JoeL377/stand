@@ -5366,4 +5366,37 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
   .af-panel .td-head { margin: 0 calc(-1 * var(--pad-x)) 16px; padding: 0 var(--pad-x) 12px; border-bottom: 1px solid var(--line); }
   .af-panel .af-doc h1, .af-panel .af-doc h2, .af-panel .af-doc h3, .af-panel .af-doc h4 { margin: 18px 0 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
   .af-panel .af-doc > :first-child { margin-top: 0; }
+  /* Deck and sketch follow the same header: slide list headed like the spec's sections, the sketch starts right on the header's line. */
+  .af-panel .af-links h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .af-panel .td-body > .af-slides:first-child { margin-top: 0; }
+  .af-panel.af-bleed .td-head { margin-bottom: 0; }
+  .af-panel.af-bleed .af-sketch-open { margin-top: 0; border-top: 0; }
 }
+
+/* Pins on artifact cards: a quiet pin in the picture's corner. Pinned ones keep it, filled; the
+   others show it on hover. On a phone every card shows it, faint, the way project cards do. */
+.af-grid > li { position: relative; min-width: 0; }
+.af-pin { position: absolute; top: 8px; right: 8px; display: inline-grid; place-items: center; width: 26px; height: 26px; min-height: 0; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--panel) 88%, transparent); box-shadow: none; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
+.af-pin:hover:not(:disabled) { color: var(--text); background: var(--panel); }
+.af-pin.on { opacity: 1; color: var(--text); }
+.af-pin.on svg { fill: currentColor; fill-opacity: 0.25; }
+.af-grid > li:hover .af-pin, .af-pin:focus-visible { opacity: 1; }
+/* A phone: two cards a row, a shorter picture, the name on up to two lines. */
+.af-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 10px; }
+.af-grid.two .af-thumb { height: 92px; }
+.af-grid.two .af-words { padding: 8px 10px 10px; }
+.af-grid.two .af-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; min-height: 2.6em; white-space: normal; font-size: 13.5px; line-height: 1.3; }
+.af-grid.two .af-meta { margin-top: 3px; font-size: 12px; }
+.af-grid.two .af-text { inset: 10px 10px 0; }
+.af-grid.two .af-text-body { font-size: 8.5px; line-height: 1.5; -webkit-line-clamp: 6; }
+.af-grid.two .af-slide { gap: 3px; padding: 10px 10px 0; }
+.af-grid.two .af-slide-title { font-size: 11px; }
+.af-grid.two .af-pin { top: 6px; right: 6px; width: 24px; height: 24px; border: 0; background: none; opacity: 0.55; }
+.af-grid.two .af-pin.on { opacity: 1; background: color-mix(in srgb, var(--panel) 88%, transparent); }
+.af-grid.two .af-text { gap: 4px; }
+.af-grid.two .af-text-title { font-size: 11px; }
+.af-grid.two .af-text-body { -webkit-line-clamp: 4; }
+.af-grid.two .af-slide-line { font-size: 8.5px; }
+.af-grid.two .af-text, .af-grid.two .af-slide { right: 30px; padding-right: 0; }
+.af-grid.two .af-slide { inset: 0 30px 0 0; padding: 10px 0 0 10px; }
+.af-grid.two .af-text-body { font-size: 10px; -webkit-line-clamp: 5; }

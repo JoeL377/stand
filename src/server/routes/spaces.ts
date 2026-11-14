@@ -51,7 +51,22 @@ export function spaceRoutes(app: Express, ctx: Services) {
     route((req, res) => {
       const room = memberRoom(db, req, res);
       if (!room) return;
-      res.json(spaceArtifacts(db, room.id));
+      const list = spaceArtifacts(db, room.id);
+      const have = new Set(list.artifacts.map((a) => a.id));
+      res.json({ ...list, pinned: db.pinnedArtifacts(room.id, req.user!.id).filter((id) => have.has(id)) });
+    }),
+  );
+  // { pinned }: this person's own pin on an artifact. Nobody else's Artifacts tab changes.
+  app.put(
+    "/api/rooms/:id/artifacts/:artifactId/pin",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      if (typeof req.body?.pinned !== "boolean") return void res.status(400).json({ error: "Give pinned: true or false." });
+      const id = String(req.params.artifactId).slice(0, 200);
+      if (req.body.pinned && !spaceArtifacts(db, room.id).artifacts.some((a) => a.id === id)) return notFound(res, "That artifact isn't in this space any more.");
+      db.pinArtifact(room.id, req.user!.id, id, req.body.pinned);
+      res.json({ pinned: db.pinnedArtifacts(room.id, req.user!.id) });
     }),
   );
   app.get(

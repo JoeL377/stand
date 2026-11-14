@@ -679,6 +679,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               artifacts={made.artifacts}
               error={made.error}
               remember={placeKey}
+              pinned={made.pinned}
+              onPin={made.pin}
               projects={projectNames}
               groups={hasProjects ? [...projects.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name })), { id: "none", name: "Unassigned" }] : undefined}
               onGroup={(id) => {
@@ -805,7 +807,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               onShow={(v) => setParam("show", v === "tasks" ? "" : v)}
               decisionCount={decisions.filter((n) => !n.replacedBy && inProject(n)).length}
               artifactCount={!hasProjects ? (made.artifacts?.length ?? 0) : (made.artifacts ?? []).filter((a) => (pageOf === "none" ? !a.projects.length : a.projects.includes(pageOf))).length}
-              artifacts={<ArtifactsView artifacts={made.artifacts} error={made.error} projects={projectNames} project={hasProjects ? pageOf || undefined : undefined} selected={openArtifact} onSelect={pickArtifact} />}
+              artifacts={<ArtifactsView artifacts={made.artifacts} error={made.error} pinned={made.pinned} onPin={made.pin} projects={projectNames} project={hasProjects ? pageOf || undefined : undefined} selected={openArtifact} onSelect={pickArtifact} />}
               decisions={
                 <>
                   <PointList

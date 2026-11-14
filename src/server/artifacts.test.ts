@@ -183,3 +183,14 @@ test("a spec is its to-do owner's, whoever's agent wrote it", () => {
   assert.equal(spec.owner, "Joe");
   assert.deepEqual(spec.makers.map((m) => m.name), ["Andy’s Codex"]);
 });
+
+test("a pin on an artifact is one person's, newest pin first, and comes off again", () => {
+  const { db, joe, andy, room } = setup();
+  db.pinArtifact(room.id, joe.id, "doc:a", true);
+  db.pinArtifact(room.id, joe.id, "doc:b", true);
+  db.pinArtifact(room.id, joe.id, "doc:a", true);
+  assert.deepEqual(db.pinnedArtifacts(room.id, joe.id), ["doc:b", "doc:a"]);
+  assert.deepEqual(db.pinnedArtifacts(room.id, andy.id), []);
+  db.pinArtifact(room.id, joe.id, "doc:b", false);
+  assert.deepEqual(db.pinnedArtifacts(room.id, joe.id), ["doc:a"]);
+});
