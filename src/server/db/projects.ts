@@ -250,18 +250,6 @@ export function projectsStore(db: DatabaseSync) {
       return true;
     },
 
-    /** The paragraph on where a project stands (projectStatus.ts), as last written. */
-    getProjectStatus(id: string): { text: string; fingerprint: string; madeAt: number } | null {
-      const r = db.prepare("SELECT * FROM project_status WHERE project_id = ?").get(id) as Row | undefined;
-      return r ? { text: r.text as string, fingerprint: r.fingerprint as string, madeAt: r.made_at as number } : null;
-    },
-    setProjectStatus(id: string, s: { text: string; fingerprint: string; madeAt: number }) {
-      db.prepare("INSERT OR REPLACE INTO project_status (project_id, text, fingerprint, made_at) VALUES (?, ?, ?, ?)").run(id, s.text, s.fingerprint, s.madeAt);
-    },
-    clearProjectStatus(id: string) {
-      db.prepare("DELETE FROM project_status WHERE project_id = ?").run(id);
-    },
-
     /** Deletes a project. Its tasks and agenda items lose the link, and the tasks follow the rules again. */
     deleteProject(roomId: string, id: string): boolean {
       const r = row(id);
@@ -273,7 +261,6 @@ export function projectsStore(db: DatabaseSync) {
         db.prepare("UPDATE items SET project_id = NULL WHERE project_id = ? AND room_id = ?").run(id, roomId);
         db.prepare("DELETE FROM projects WHERE id = ?").run(id);
         db.prepare("DELETE FROM project_pins WHERE project_id = ?").run(id);
-        db.prepare("DELETE FROM project_status WHERE project_id = ?").run(id);
         db.exec("COMMIT");
       } catch (err) {
         db.exec("ROLLBACK");

@@ -530,13 +530,6 @@ CREATE TABLE IF NOT EXISTS project_pins (
   project_id TEXT NOT NULL,
   PRIMARY KEY (room_id, user_id, project_id)
 );
--- Where a project stands, as Claude last wrote it (projectStatus.ts), and a fingerprint of what it read.
-CREATE TABLE IF NOT EXISTS project_status (
-  project_id TEXT PRIMARY KEY,
-  text TEXT NOT NULL,
-  fingerprint TEXT NOT NULL,
-  made_at INTEGER NOT NULL
-);
 `;
 
 /** Makes the tables a new database needs, and adds what later versions added to an older one.
