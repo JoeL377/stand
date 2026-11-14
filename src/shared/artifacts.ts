@@ -56,6 +56,9 @@ export interface Artifact {
   /** The one project it is in. Empty: Unassigned. */
   projects: string[];
   makers: ArtifactMaker[];
+  /** Whose it is, as its source says: a spec's to-do owner, the person who started a sketch's call.
+   *  Left out where the source names no one (a deck), and the card falls back to who made it. */
+  owner?: string;
   /** Where it came from when that says more than who made it: "Design session", "Product review". */
   origin?: string;
   /** A few characters in the card's corner: "v3", "7 slides", "41 min". */

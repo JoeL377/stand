@@ -114,7 +114,7 @@ export function ReviewPage() {
         <Link className="rp-back" to={spaceHref(roomId)}>
           ← <span className="rp-back-name">{data.roomName}</span>
         </Link>
-        <strong>{ideas ? "Idea review" : "Product review"}</strong>
+        <strong>{ran ? "Deck" : ideas ? "Idea review" : "Product review"}</strong>
         {ideas ? (
           <>
             <span className="rp-pill">{ran ? day(review!.startedAt) : live ? "On now" : "Waiting"}</span>

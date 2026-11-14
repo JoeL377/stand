@@ -164,8 +164,8 @@ export function PlanReviewBody({ task, initial }: { task: string; initial?: { th
   if (!review || !plan) return <p className="td-plan-content" role="status">{error || "Loading plan…"}</p>;
   return (
     <div className={`td-review mobile-${mobilePanel}`}>
-      <div className="td-review-mobile-nav" role="group" aria-label="Plan view">
-        <button type="button" aria-pressed={mobilePanel === "plan"} onClick={() => setMobilePanel("plan")}>Plan</button>
+      <div className="td-review-mobile-nav" role="group" aria-label="Spec view">
+        <button type="button" aria-pressed={mobilePanel === "plan"} onClick={() => setMobilePanel("plan")}>Spec</button>
         <button type="button" aria-pressed={mobilePanel === "comments"} onClick={() => setMobilePanel("comments")}>
           Comments · {review.threads.filter((entry) => !entry.resolved).length}
         </button>
@@ -182,10 +182,10 @@ export function PlanReviewBody({ task, initial }: { task: string; initial?: { th
           <Markdown className="td-plan-document" text={plan.text} review={{ highlight, marked }} />
         </div>
       </div>
-      <aside className="td-review-comments" aria-label="Plan comments">
+      <aside className="td-review-comments" aria-label="Spec comments">
         <header className="td-review-heading">
           <h3><MessageSquare size={16} aria-hidden="true" /> Comments</h3>
-          <p>Select text in the plan to leave a comment.</p>
+          <p>Select text in the spec to leave a comment.</p>
         </header>
         {review.latest !== plan.id && <button className="small" type="button" disabled={busy} onClick={() => showVersion(review.latest)}>View latest version</button>}
         <div className="td-review-filters" role="group" aria-label="Filter comments">
@@ -261,7 +261,7 @@ export function PlanReviewBody({ task, initial }: { task: string; initial?: { th
             <div className="td-review-empty">
               {filter === "open" ? <MessageSquare size={22} aria-hidden="true" /> : <Check size={22} aria-hidden="true" />}
               <strong>{filter === "open" ? "No open comments" : "No resolved comments"}</strong>
-              <p>{filter === "open" ? "Select a passage in the plan to start a conversation." : "Threads you resolve will appear here. You can reopen them anytime."}</p>
+              <p>{filter === "open" ? "Select a passage in the spec to start a conversation." : "Threads you resolve will appear here. You can reopen them anytime."}</p>
             </div>
           )}
         </div>

@@ -115,7 +115,7 @@ const STATUS: Record<ActionWork["log"][number]["status"], string> = {
   added: "Added",
   note: "Note",
   comment: "Comment",
-  plan: "Plan attached",
+  plan: "Spec attached",
   linked: "Linked",
   shots: "Screenshots",
 };
@@ -161,7 +161,7 @@ export function WorkCard({ work, noPlan }: { work: ActionWork; noPlan?: boolean 
       {work.plan && !noPlan && (
         <details className="wl-plan">
           <summary>
-            Plan <span className="wl-by">{work.plan.by}</span> <time title={fmtFull(work.plan.ts)}>{fmtAgo(work.plan.ts)}</time>
+            Spec <span className="wl-by">{work.plan.by}</span> <time title={fmtFull(work.plan.ts)}>{fmtAgo(work.plan.ts)}</time>
           </summary>
           <Markdown className="wl-text" text={work.plan.text} />
         </details>

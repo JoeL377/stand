@@ -222,13 +222,13 @@ export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, on
             )}
 
             <section className="td-section">
-              <h3>Plan</h3>
+              <h3>Spec</h3>
               {task.work.plan ? (
                 <button type="button" className="td-plan-card" onClick={() => setPlanOpen(true)}>
-                  <strong>Open plan</strong>
+                  <strong>Open spec</strong>
                   <span className="muted">{task.work.plan.by} · {fmtAgo(task.work.plan.ts)}</span>
                 </button>
-              ) : <p className="muted">No plan yet.</p>}
+              ) : <p className="muted">No spec yet.</p>}
             </section>
 
             {!task.parts.length && (task.parent || task.parentChoices.length > 0) && <PartOf
@@ -326,13 +326,13 @@ function PlanViewer({ task, onClose }: { task: TaskDetail | null; onClose: () =>
     >
       <header className="td-plan-head">
         <div>
-          <h2 id="td-plan-title">Plan</h2>
+          <h2 id="td-plan-title">Spec</h2>
           {task && <p>{task.note.text}</p>}
         </div>
         <button type="button" onClick={onClose}>Back to task</button>
       </header>
       {plan && task ? <PlanReviewBody key={task.note.id} task={task.note.id} /> :
-        <div className="td-plan-content"><p className="muted">{task ? "No plan yet." : "This task couldn’t be loaded."}</p></div>}
+        <div className="td-plan-content"><p className="muted">{task ? "No spec yet." : "This task couldn’t be loaded."}</p></div>}
       {plan && (
         <footer className="td-plan-actions">
           <button type="button" onClick={() => void copyLink()}>Copy link</button>
@@ -371,7 +371,7 @@ function RequestReview({ taskId, roomId }: { taskId: string; roomId: string }) {
         type="button"
         className="primary"
         disabled={busy}
-        title="Put this plan on the space's next design review"
+        title="Put this spec on the space's next design review"
         onClick={async () => {
           setBusy(true);
           setError("");
