@@ -5080,5 +5080,5 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-move { padding: 0 4px 0 8px; cursor: pointer; }
 .af-move select { field-sizing: content; width: auto; height: 22px; padding: 0; appearance: auto; border: 0; background: none; box-shadow: none; font: inherit; color: inherit; cursor: pointer; }
 .af-panel .af-chips .af-move select { font-size: inherit; }
-.af-doc + .af-links-title { margin-top: 18px; }
+.af-links-title { margin: 18px 0 8px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .af-move:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--line)); }
