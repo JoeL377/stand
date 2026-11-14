@@ -5352,15 +5352,18 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 .brain:active { cursor: grabbing; }
 .brain .brain-node, .brain button { cursor: pointer; }
 
-/* A phone's artifact top: who and when, its project, and the way to the whole of it, on one line. */
-.af-top { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
-.af-top .af-line { flex: 1; min-width: 0; flex-wrap: nowrap; margin: 0; overflow: hidden; white-space: nowrap; }
-.af-top .af-line > * { flex: none; }
-.af-top .af-line > .af-proj { flex: 0 1 auto; min-width: 0; }
-.af-top .af-proj .af-line-link { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; line-height: 18px; }
-.af-top .af-btn { flex: none; height: 28px; padding: 0 10px; font-size: 12.5px; }
+/* A phone's artifact: a small button to the whole of it sits in the title row. */
+.af-head-full { flex: none; align-self: flex-start; margin-top: 2px; }
+.af-head-full .af-btn { height: 26px; padding: 0 9px; border-radius: 7px; font-size: 12px; }
 @media (max-width: 760px) {
   .af-panel .af-shots a { width: 76px; height: 48px; }
   .af-panel .af-shots { margin-bottom: 12px; }
 }
-.af-top .af-line:empty { display: none; }
+/* On a phone the header is set apart from the body: a full-width hairline under it, and the body's section
+   headings drop to small quiet labels so the title is the one big line. */
+@media (max-width: 760px) {
+  .af-panel { --pad-x: 20px; }
+  .af-panel .td-head { margin: 0 calc(-1 * var(--pad-x)) 16px; padding: 0 var(--pad-x) 12px; border-bottom: 1px solid var(--line); }
+  .af-panel .af-doc h1, .af-panel .af-doc h2, .af-panel .af-doc h3, .af-panel .af-doc h4 { margin: 18px 0 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .af-panel .af-doc > :first-child { margin-top: 0; }
+}
