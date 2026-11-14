@@ -4996,7 +4996,7 @@ a.ac-target:hover { text-decoration: underline; }
 .af-rows .af-slide { padding: 7px 7px 0; }
 .af-rows .af-slide-title { font-size: 6px; }
 /* One artifact opened: the task drawer's shell with the artifact in it. */
-.af-panel { width: min(560px, 100vw); }
+.af-panel { width: min(var(--af-w, 560px), 100vw); }
 .af-panel-kind { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .af-panel .af-panel-kind select { font-size: 12px; }
 .af-panel-kind select { field-sizing: content; width: auto; height: 20px; padding: 0; appearance: auto; border: 0; background: none; box-shadow: none; font: inherit; color: inherit; cursor: pointer; }
@@ -5147,8 +5147,10 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-panel .md th { background: none; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .af-panel .md tr:last-child td { border-bottom: 0; }
 @media (min-width: 1200px) {
-  .af-panel { background: var(--bg); box-shadow: none; animation: none; }
-  html[data-side-panel]:not([data-chat-dock]) .sp-content { padding-right: calc(min(560px, 100vw) + 16px); }
+  .af-panel { background: var(--bg); box-shadow: none; }
+  .sp-content { transition: padding-right 260ms var(--ease-out); }
+  html[data-resizing] .sp-content { transition: none; }
+  html[data-side-panel]:not([data-chat-dock]) .sp-content { padding-right: calc(min(var(--af-w, 560px), 100vw) + 16px); }
 }
 
 /* ── Meetings tab: a timeline and a preview ───────────────────────────────────────────────
@@ -5251,3 +5253,19 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 @media (max-width: 820px) {
   .tl-card .tl-kind { margin-top: 1px; }
 }
+
+/* The artifact panel's left edge drags to change its width. */
+.af-resize { position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; z-index: 2; cursor: col-resize; touch-action: none; }
+.af-resize::after { content: ""; position: absolute; top: 50%; left: 3px; width: 4px; height: 36px; translate: 0 -50%; border-radius: 4px; background: var(--line); opacity: 0; transition: opacity var(--dur-ui) var(--ease-out); }
+.af-resize:hover::after, .af-resize:focus-visible::after, html[data-resizing] .af-resize::after { opacity: 1; background: var(--muted); }
+.af-resize:focus-visible { outline: none; }
+html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user-select: none; }
+@media (max-width: 720px) { .af-resize { display: none; } }
+
+/* The panel opens by sliding in from the right while the page makes way beside it. */
+.af-panel { animation: af-in 260ms var(--ease-out); }
+@keyframes af-in { from { transform: translateX(48px); opacity: 0; } }
+.af-panel.af-swap { animation: none; }
+@keyframes af-in-sheet { from { transform: translateX(100%); } }
+@media (max-width: 720px) { .af-panel { animation-name: af-in-sheet; } }
+@media (prefers-reduced-motion: reduce) { .af-panel { animation: none; } .sp-content { transition: none !important; } }
