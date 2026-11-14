@@ -41,7 +41,8 @@ import { ShotZoom } from "../room/ReviewStage.tsx";
 import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { MOD } from "../shortcuts.ts";
-import { SpacesShell } from "./SpacesShell.tsx";
+import { PhoneMenu, SpacesShell } from "./SpacesShell.tsx";
+import { Menu as MenuIcon } from "lucide-react";
 import { TaskDrawer } from "../TaskDrawer.tsx";
 import { RowMore } from "../RowMore.tsx";
 import { ChatNotifyBell, SpaceChat, useSpaceChat } from "../SpaceChat.tsx";
@@ -518,6 +519,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   }, [phone]);
   // The way back to all spaces says when another space has something new or a call on.
   const focused = phone && !!crumb;
+  const [menu, setMenu] = useState(false);
   const [projectTabs, setProjectTabs] = useState<HTMLDivElement | null>(null);
   const elsewhere = !!spaces?.some((s) => s.id !== room.id && (s.live || (s.unread ?? 0) > 0));
   const panelRef = useRef<HTMLElement>(null);
@@ -552,10 +554,10 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               <ChevronIcon size={16} />
             </button>
           ) : (
-            <Link to="/" className="sh-home" aria-label="All spaces" title="All spaces">
-              <ChevronIcon size={16} />
+            <button type="button" className="sh-home menu" aria-label="Menu" aria-expanded={menu} onClick={() => setMenu(true)}>
+              <MenuIcon size={18} aria-hidden />
               {elsewhere && <span className="sh-home-dot" />}
-            </Link>
+            </button>
           )}
           <h1 title={focused ? (projects.find((x) => x.id === pageOf)?.goal ?? undefined) : room.purpose || undefined}>{focused ? crumb : room.name}</h1>
           <span className="sh-head-end">
@@ -644,6 +646,19 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           </span>
         </header>
 
+        {menu && (
+          <PhoneMenu
+            spaces={spaces}
+            current={{ id: room.id, name: room.name }}
+            projects={projects.filter((p) => !p.archived).sort((a, b) => Number((room.pinnedProjects ?? []).includes(b.id)) - Number((room.pinnedProjects ?? []).includes(a.id)) || a.position - b.position).map((p) => ({ id: p.id, name: p.name, pinned: (room.pinnedProjects ?? []).includes(p.id) }))}
+            openProject={tab === "projects" ? pageOf : null}
+            onProject={(id) => {
+              pickTab("projects");
+              setProjectFilter(id);
+            }}
+            onClose={() => setMenu(false)}
+          />
+        )}
         {/* On a phone an open project is its own screen: its name above, its own tabs in place of the space's. */}
         {focused && <div className="sh-tabs sh-pj-tabs" ref={setProjectTabs} />}
         <div className="sh-tabs" role="tablist" aria-label="The space" ref={tabsRef}>
