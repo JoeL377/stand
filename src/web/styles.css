@@ -5184,3 +5184,11 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-line-link:hover:not(:disabled), .af-line .af-move:hover select { background: none; color: var(--text); }
 .af-panel .af-actions { margin: 0 0 16px; }
 .af-panel .af-links { margin-top: 24px; }
+
+/* The side panel is a card like the page beside it: same inset, same border all round, same corners. */
+@media (min-width: 761px) {
+  .task-drawer { top: 8px; right: 8px; bottom: 8px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+}
+@media (min-width: 1360px) {
+  [data-chat-dock] .task-drawer { right: 377px; }
+}
