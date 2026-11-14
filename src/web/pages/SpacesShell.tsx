@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { LayoutGrid, Mic, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { ChevronDown, LayoutGrid, Mic, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { ConxtLogo } from "../ConxtLogo.tsx";
@@ -275,6 +275,8 @@ export function PhoneMenu(props: {
   const others = [...(props.spaces ?? [])]
     .filter((s) => s.id !== props.current.id)
     .sort((a, b) => Number(!!b.live) - Number(!!a.live) || a.name.localeCompare(b.name));
+  const [switching, setSwitching] = useState(false);
+  const elsewhere = others.some((s) => s.live || (s.unread ?? 0) > 0);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
     window.addEventListener("keydown", onKey);
@@ -292,12 +294,37 @@ export function PhoneMenu(props: {
   return (
     <div className="pm-wrap" onClick={props.onClose}>
       <nav className="pm" aria-label="Menu" onClick={(e) => e.stopPropagation()}>
-        <div className="pm-head">
+        {/* The space's name is the switcher: tap it for your other spaces. */}
+        <button type="button" className="pm-head" aria-expanded={switching} onClick={() => setSwitching((v) => !v)}>
           <span className="sp-space-tile" style={{ background: colorFor(props.current.id) }} aria-hidden>
             {initials(props.current.name)}
           </span>
           <strong>{props.current.name}</strong>
-        </div>
+          {elsewhere && !switching && <span className="pm-new" aria-label="Something new in another space" />}
+          <ChevronDown size={16} aria-hidden className={switching ? "pm-caret open" : "pm-caret"} />
+        </button>
+        {switching && (
+          <div className="pm-switch">
+            {others.map((s) => (
+              <Link key={s.id} to={spaceHref(s.id)} className="pm-row" onClick={props.onClose}>
+                <span className="sp-space-tile" style={{ background: colorFor(s.id) }} aria-hidden>
+                  {initials(s.name)}
+                  {s.live && <span className="sp-side-dot live" />}
+                </span>
+                <span className="pm-text">{s.name}</span>
+                {(s.unread ?? 0) > 0 && <span className="pm-new" aria-label="New messages" />}
+              </Link>
+            ))}
+            <Link to="/" className="pm-row" onClick={props.onClose}>
+              <LayoutGrid size={16} aria-hidden />
+              <span className="pm-text">All spaces</span>
+            </Link>
+            <button type="button" className="pm-row" onClick={go(() => newSpace(""))}>
+              <Plus size={16} aria-hidden />
+              <span className="pm-text">New space</span>
+            </button>
+          </div>
+        )}
         <p className="pm-label">Projects</p>
         <button type="button" className={props.openProject === "" ? "pm-row on" : "pm-row"} onClick={go(() => props.onProject(""))}>
           <LayoutGrid size={16} aria-hidden />
@@ -309,26 +336,7 @@ export function PhoneMenu(props: {
             <span className="pm-text">{p.name}</span>
           </button>
         ))}
-        {others.length > 0 && <p className="pm-label">Spaces</p>}
-        {others.map((s) => (
-          <Link key={s.id} to={spaceHref(s.id)} className="pm-row" onClick={props.onClose}>
-            <span className="sp-space-tile" style={{ background: colorFor(s.id) }} aria-hidden>
-              {initials(s.name)}
-              {s.live && <span className="sp-side-dot live" />}
-            </span>
-            <span className="pm-text">{s.name}</span>
-            {(s.unread ?? 0) > 0 && <span className="pm-new" aria-label="New messages" />}
-          </Link>
-        ))}
         <div className="pm-foot">
-          <Link to="/" className="pm-row" onClick={props.onClose}>
-            <LayoutGrid size={16} aria-hidden />
-            <span className="pm-text">All spaces</span>
-          </Link>
-          <button type="button" className="pm-row" onClick={go(() => newSpace(""))}>
-            <Plus size={16} aria-hidden />
-            <span className="pm-text">New space</span>
-          </button>
           {FOOT_ROWS.map(({ label, icon: Icon, to }) => (
             <Link key={to} to={to} className="pm-row" onClick={props.onClose}>
               <Icon size={16} aria-hidden />
