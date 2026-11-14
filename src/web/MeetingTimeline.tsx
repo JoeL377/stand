@@ -101,7 +101,7 @@ const minutes = (m: Meeting) => Math.max(1, Math.round((m.endedAt - m.startedAt)
 
 /**
  * The meeting under the pointer, in order of what matters: its name, what was said, what came of it,
- * then who talked and for how long. The day and kind are already on the timeline, so they stay there.
+ * then who talked. The day, kind and length are already on the timeline, so they stay there.
  */
 function Preview({ m, name, kind, me, onArchive }: { m: Meeting; name: string; kind?: Kind; me: string; onArchive: () => void }) {
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -116,7 +116,6 @@ function Preview({ m, name, kind, me, onArchive }: { m: Meeting; name: string; k
       <h2 dir="auto">{name}</h2>
       <p className="tl-people">
         {m.people.length > 0 && <span>{m.people.map((p) => p.split(" ")[0]).join(", ")}</span>}
-        <span>{minutes(m)} min</span>
         {missed && <span className="tl-missed">you weren't in it</span>}
       </p>
       {m.summary && <p className="tl-sum" dir="auto">{m.summary}</p>}
