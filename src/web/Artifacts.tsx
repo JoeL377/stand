@@ -382,7 +382,9 @@ export function ArtifactPanel(props: {
   const body = whole && a ? whole.replace(/^\s*#{1,3}\s+(.+?)\s*#*\s*(\n|$)/, (line, h: string) => (h.replace(/[*_`]/g, "").trim().toLowerCase() === a.title.toLowerCase() ? "" : line)) : whole;
   const taskId = a?.taskId;
   const slides = detail?.links.filter((l) => l.slide) ?? [];
-  const cameUp = detail?.links.filter((l) => !l.slide) ?? [];
+  // The call it came from goes on the quiet line, as on a to-do; the rest are listed under it.
+  const call = detail?.links.find((l) => !l.slide && l.href?.startsWith("/meetings/"));
+  const cameUp = detail?.links.filter((l) => !l.slide && l !== call) ?? [];
   const bring = () => {
     if (!taskId) return;
     setQueued(true);
@@ -443,6 +445,7 @@ export function ArtifactPanel(props: {
                   </label>
                 )
               )}
+              {call?.href && <span><Link className="af-line-link" to={call.href} title={call.text}>Call</Link></span>}
               {a.makers.length > 0 && <span title={a.makers.map((m) => m.name).join(", ")}>{a.owner ?? ownerLine(a.makers)}</span>}
               {a.origin && !a.makers.length && <span>{a.origin}</span>}
             </p>

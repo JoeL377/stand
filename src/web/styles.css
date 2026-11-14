@@ -5323,3 +5323,7 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 .row-menu > .af-btn:hover { background: var(--panel-2); }
 /* A deck's slides, each with how the review ended it. */
 .af-slides .af-link-note { color: var(--text); }
+/* A sketch in its panel is the picture: no second title row, and it takes the height the panel has. */
+.af-sketch-open .sk-bar { display: none; }
+.af-panel .af-sketch-open { height: min(56vh, 480px); }
+.af-panel .af-line a.af-line-link { border: 0; padding: 0; height: auto; }
