@@ -5098,59 +5098,6 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-move:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--line)); }
 
 
-/* ── Meetings tab: the calendar ───────────────────────────────────────────────────────────
-   A week (three days on a phone) the way a calendar app draws one: days across, hours down, each
-   meeting a soft block as tall as it ran, colored by kind. Today's number sits in a blue circle and
-   a red line marks now. Notes from the bar are a small count on their day. */
-.cal { --cal-line: color-mix(in srgb, var(--line) 80%, transparent); --cal-gut: 52px; }
-.cal.phone { --cal-gut: 40px; }
-.cal-nav { display: flex; align-items: center; gap: 4px; margin: 0 0 10px; }
-.cal-today { height: 30px; min-height: 0; padding: 0 14px; margin-right: 8px; border: 1px solid var(--line); border-radius: 999px; background: none; box-shadow: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
-.cal-today:hover:not(:disabled) { background: var(--hover); }
-.cal-step { width: 30px; height: 30px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 999px; background: none; box-shadow: none; color: var(--text); cursor: pointer; }
-.cal-step.back svg { transform: scaleX(-1); }
-.cal-step:hover:not(:disabled) { background: var(--hover); }
-.cal-step:disabled { opacity: 0.3; cursor: default; }
-.cal-title { margin: 0 0 0 8px; font-size: 18px; font-weight: 500; letter-spacing: -0.01em; }
-.cal-head, .cal-body { display: grid; grid-template-columns: var(--cal-gut) repeat(var(--cal-days), minmax(0, 1fr)); }
-.cal-head { position: sticky; top: 0; z-index: 3; background: var(--bg, var(--panel)); }
-.cal-dayhead { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0 8px; border-left: 1px solid transparent; }
-.cal-wd { font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.cal-dn { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; font-size: 20px; font-weight: 400; font-variant-numeric: tabular-nums; }
-.cal-dayhead.today .cal-wd { color: var(--accent); }
-.cal-dayhead.today .cal-dn { background: var(--accent); color: #fff; font-weight: 500; }
-.cal-notes { position: absolute; top: 6px; right: 6px; display: inline-flex; align-items: center; gap: 3px; height: 20px; min-height: 0; padding: 0 7px; border: 0; border-radius: 999px; background: var(--panel-2); box-shadow: none; color: var(--muted); font: inherit; font-size: 11.5px; font-variant-numeric: tabular-nums; cursor: pointer; }
-.cal-notes:hover:not(:disabled), .cal-notes[aria-expanded="true"] { color: var(--text); background: color-mix(in srgb, var(--text) 10%, transparent); }
-.cal-notes-pop { position: absolute; top: calc(100% - 4px); left: 50%; z-index: 5; width: min(420px, 86vw); max-height: 320px; overflow-y: auto; transform: translateX(-50%); padding: 6px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 12px 32px rgb(0 0 0 / 0.28); }
-.cal-head > :nth-last-child(-n + 2) .cal-notes-pop { left: auto; right: 0; transform: none; }
-.cal-head > :nth-child(2) .cal-notes-pop { left: 0; transform: none; }
-.cal-notes-pop .sh-row { margin: 0; }
-.cal-body { position: relative; border-top: 1px solid var(--cal-line); }
-.cal-body > .cal-gutter { position: relative; }
-.cal-hour { position: absolute; right: 8px; transform: translateY(-50%); font-size: 10.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.cal-day { position: relative; border-left: 1px solid var(--cal-line); background-image: linear-gradient(var(--cal-line) 1px, transparent 1px); background-size: 100% var(--cal-hour); }
-.cal-day:last-child { border-right: 1px solid var(--cal-line); }
-.cal-block { --c: var(--accent); position: absolute; z-index: 1; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; overflow: hidden; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--c) 24%, var(--panel)); color: var(--text); text-decoration: none; transition: background 120ms, box-shadow 120ms; }
-.cal-block:hover { text-decoration: none; z-index: 2; background: color-mix(in srgb, var(--c) 30%, var(--panel)); box-shadow: 0 4px 14px rgb(0 0 0 / 0.22); }
-.cal-block.t-review { --c: #8b5cf6; }
-.cal-block.t-brainstorm { --c: #14b8a6; }
-.cal-block.t-design { --c: #ec4899; }
-.cal-block.t-idea { --c: #f59e0b; }
-.cal-block.short { --c: var(--muted); background: color-mix(in srgb, var(--muted) 12%, var(--panel)); }
-.cal-block.short .cal-name { color: var(--muted); font-weight: 400; }
-.cal-name { font-size: 12px; font-weight: 550; line-height: 15px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; overflow-wrap: anywhere; flex: none; }
-.cal-when { font-size: 11px; line-height: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cal-block.slim { flex-direction: row; align-items: center; gap: 6px; padding-top: 0; padding-bottom: 0; }
-.cal-block.slim .cal-name { -webkit-line-clamp: 1; flex: 0 1 auto; min-width: 0; white-space: nowrap; text-overflow: ellipsis; display: block; }
-.cal-block.slim .cal-when { flex: 1 1 0; min-width: 0; }
-.cal-now { position: absolute; left: -1px; right: 0; z-index: 2; height: 2px; background: var(--danger); pointer-events: none; }
-.cal-now::before { content: ""; position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 999px; background: var(--danger); }
-.cal.phone .cal-title { font-size: 16px; }
-.cal.phone .cal-block { padding: 3px 5px; }
-.cal.phone .cal-name { font-size: 11.5px; }
-.cal.phone .cal-block.slim .cal-when { display: none; }
-.cal.phone .cal-notes { top: 2px; right: 2px; min-width: 18px; height: 18px; padding: 0 5px; justify-content: center; font-size: 10.5px; }
-.cal.phone .cal-notes svg { display: none; }
 /* The Artifacts tab: the same cards under one quiet line per project. The line opens the project. */
 .af-group + .af-group { margin-top: 22px; }
 .af-group h3 { margin: 0 0 10px; font-size: inherit; font-weight: inherit; }
@@ -5168,3 +5115,56 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-view button { display: inline-grid; place-items: center; width: 26px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--muted); cursor: pointer; }
 .af-view button:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 .af-view button.on { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+
+/* ── Meetings tab: an inbox of meetings ───────────────────────────────────────────────────
+   People come here to find a meeting or catch up on one. Each row is its name, then what came out
+   of it in a quieter voice on the same line, then the day. One you weren't in has a dot and a
+   bolder name, like unread mail. A search box looks through names, summaries and who talked. */
+.mt-search { flex: 0 1 220px; min-width: 120px; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
+.mt-search:focus-within { color: var(--text); box-shadow: 0 0 0 1px var(--line); }
+.mt-search svg { flex: none; }
+.mt-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: none; box-shadow: none; color: var(--text); font: inherit; font-size: 13px; }
+.mt-search input::placeholder { color: var(--muted); }
+.mt-search input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.6; cursor: pointer; }
+.mt-none { margin: 18px 0; font-size: 13.5px; }
+.mt-sec + .mt-sec { margin-top: 20px; }
+.mt-head { margin: 0 0 2px; padding-left: 16px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.mt-rows { gap: 0; }
+.mt-row { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 8px; margin: 0 -8px; border-radius: 8px; }
+.mt-row:hover, .mt-row:focus-within { background: var(--hover); }
+.mt-link { flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
+.mt-link:hover { text-decoration: none; }
+.mt-dot { flex: none; width: 6px; height: 6px; border-radius: 999px; }
+.mt-row.missed .mt-dot { background: var(--accent); }
+.mt-text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.mt-name { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 450; }
+.mt-row.missed .mt-name { font-weight: 650; }
+.mt-sum { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--muted); }
+.mt-row.short .mt-name { color: var(--muted); font-weight: 400; }
+.mt-when { flex: none; min-width: 64px; text-align: right; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mt-row.missed .mt-when { color: var(--text); }
+.mt-row > .sh-archive { margin-right: -4px; }
+/* Bar notes and snaps sit in the same stretch, their day in the same last column. */
+.mt-rows > .sh-row { min-height: 40px; padding: 4px 8px 4px 24px; margin: 0 -8px; }
+.mt-rows > .sh-row > .sh-time { order: 5; width: 64px; text-align: right; font-size: 12.5px; }
+.mt-rows > .sh-row > .sh-archive { order: 6; margin-right: -4px; }
+.mt-short { padding-left: 16px; }
+.mt-short button { height: 30px; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.mt-short button:hover:not(:disabled) { color: var(--text); background: none; }
+.mt-row.short { animation: mt-in 180ms ease-out both; }
+@keyframes mt-in { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .mt-row.short { animation: none; } }
+@media (max-width: 820px) {
+  /* A phone reads it like mail: the name, the summary on a second line, the day at the top right. */
+  .sh-meet-bar { flex-wrap: wrap; }
+  .mt-search { order: -1; flex: 1 1 100%; height: 36px; }
+  .mt-search input { font-size: 16px; }
+  .mt-row { padding-top: 8px; padding-bottom: 8px; }
+  .mt-link { align-items: flex-start; }
+  .mt-dot { margin-top: 7px; }
+  .mt-text { flex-direction: column; align-items: stretch; gap: 1px; }
+  .mt-sum { flex: none; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; line-height: 18px; }
+  .mt-when { min-width: 0; padding-top: 1px; }
+  .mt-rows > .sh-row > .sh-time { display: inline; width: auto; }
+  .mt-rows > .sh-row :is(.sh-pill-wrap, .sh-row-del) { display: none; }
+}
