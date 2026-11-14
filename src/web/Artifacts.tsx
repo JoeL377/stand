@@ -5,6 +5,8 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { PanelResizer, useSidePanel } from "./panelWidth.tsx";
+import { RowMore } from "./RowMore.tsx";
 import { ARTIFACT_KINDS, ARTIFACT_NAME, type Artifact, type ArtifactDetail, type ArtifactKind, type ArtifactLink, filterArtifacts, makersOf, ownerLine } from "../shared/artifacts.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -370,18 +372,7 @@ export function ArtifactPanel(props: {
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
   // With room for both, the page makes way for the panel and its grid reflows beside it.
-  useEffect(() => {
-    const root = document.documentElement;
-    root.dataset.sidePanel = "";
-    const w = savedPanelWidth();
-    if (w) root.style.setProperty("--af-w", `${w}px`);
-    return () => {
-      delete root.dataset.sidePanel;
-      root.style.removeProperty("--af-w");
-    };
-  }, []);
-  // Opening slides in; moving from one artifact to the next only changes what's inside (the panel before it is still up).
-  const [swapped] = useState(() => "sidePanel" in document.documentElement.dataset);
+  const swapped = useSidePanel();
 
   const a: Artifact | ArtifactDetail | undefined = detail ?? props.known;
   const versions = detail?.versions ?? [];
@@ -390,6 +381,8 @@ export function ArtifactPanel(props: {
   // The panel's title is the text's own first heading: it isn't said twice.
   const body = whole && a ? whole.replace(/^\s*#{1,3}\s+(.+?)\s*#*\s*(\n|$)/, (line, h: string) => (h.replace(/[*_`]/g, "").trim().toLowerCase() === a.title.toLowerCase() ? "" : line)) : whole;
   const taskId = a?.taskId;
+  const slides = detail?.links.filter((l) => l.slide) ?? [];
+  const cameUp = detail?.links.filter((l) => !l.slide) ?? [];
   const bring = () => {
     if (!taskId) return;
     setQueued(true);
@@ -397,11 +390,20 @@ export function ArtifactPanel(props: {
   };
 
   return (
-    <aside className={`task-drawer af-panel${swapped ? " af-swap" : ""}`} role="complementary" aria-label="Artifact">
+    <aside className={`task-drawer td-panel af-panel${swapped ? " af-swap" : ""}`} role="complementary" aria-label="Artifact">
       <PanelResizer />
       <div className="td-head af-panel-head">
         <h2 className="td-title" dir="auto">{a?.title}</h2>
-        <button className="icon-btn td-close" aria-label="Close" title="Close" onClick={onClose}>
+        {a && ((a.kind === "spec" && taskId) || (a.kind === "doc" && a.ref)) && (
+          <RowMore className="td-more">
+            {a.kind === "spec" && taskId && <CopyForAgent kind="action" id={taskId} label />}
+            {a.kind === "doc" && a.ref && <CopyDocRef docRef={a.ref} title={a.title} />}
+            {a.kind === "spec" && taskId && queued !== null && (
+              <button type="button" role="menuitem" disabled={queued} onClick={bring}>{queued ? "On the next design review" : "Bring to a review"}</button>
+            )}
+          </RowMore>
+        )}
+        <button className="icon-btn td-close" aria-label="Close" title="Close (Esc)" onClick={onClose}>
           <CloseIcon />
         </button>
       </div>
@@ -426,7 +428,7 @@ export function ArtifactPanel(props: {
               {a.kind === "spec" ? (
                 // A spec is in its to-do's project: the name goes there.
                 a.projects.map((p) => props.projects.get(p) && (
-                  <button key={p} type="button" className="af-line-link" onClick={() => props.onProject(p)}>{props.projects.get(p)}</button>
+                  <span key={p}><button type="button" className="af-line-link" onClick={() => props.onProject(p)}>{props.projects.get(p)}</button></span>
                 ))
               ) : (
                 props.moveTo.length > 0 && (
@@ -441,21 +443,18 @@ export function ArtifactPanel(props: {
                   </label>
                 )
               )}
-              {a.makers.length > 0 && <span>{a.makers.map((m) => m.name).join(", ")}</span>}
+              {a.makers.length > 0 && <span title={a.makers.map((m) => m.name).join(", ")}>{a.owner ?? ownerLine(a.makers)}</span>}
               {a.origin && !a.makers.length && <span>{a.origin}</span>}
             </p>
-            <div className="af-actions">
-              {a.href ? (
-                <Link className="af-btn primary" to={a.href} state={props.back ? { back: props.back } : undefined}>Full {a.kind}</Link>
-              ) : (
-                taskId && <button type="button" className="af-btn primary" onClick={() => props.onOpenSpec(taskId)}>Full spec</button>
-              )}
-              {a.kind === "spec" && taskId && <CopyForAgent kind="action" id={taskId} label />}
-              {a.kind === "doc" && a.ref && <CopyDocRef docRef={a.ref} title={a.title} />}
-              {a.kind === "spec" && taskId && queued !== null && (
-                <button type="button" className="af-btn" disabled={queued} onClick={bring}>{queued ? "On the next design review" : "Bring to a review"}</button>
-              )}
-            </div>
+            {(a.href || (a.kind === "spec" && taskId)) && (
+              <div className="af-actions">
+                {a.href ? (
+                  <Link className="af-btn primary" to={a.href} state={props.back ? { back: props.back } : undefined}>Full {a.kind}</Link>
+                ) : (
+                  taskId && <button type="button" className="af-btn primary" onClick={() => props.onOpenSpec(taskId)}>Full spec</button>
+                )}
+              </div>
+            )}
             {!!detail?.images?.length && (
               <div className="af-shots" role="group" aria-label="Screenshots">
                 {detail.images.map((im, i) => (
@@ -473,13 +472,21 @@ export function ArtifactPanel(props: {
                   <Suspense fallback={null}><SketchPicture roomId={sketchAt(a)![1]} id={sketchAt(a)![2]} fallback={null} /></Suspense>
                 </div>
               ) : (
-                (a.kind === "sketch" || a.kind === "deck") && <div className="af-doc af-doc-thumb"><Thumb a={a} /></div>
+                (a.kind === "sketch" || (a.kind === "deck" && !slides.length)) && <div className="af-doc af-doc-thumb"><Thumb a={a} /></div>
               )
             )}
-            {detail && detail.links.length > 0 && (
+            {slides.length > 0 && (
+              <section className="af-links af-slides" aria-label="Slides">
+                <h3>Slides</h3>
+                {slides.map((l, i) => (
+                  <LinkRow key={i} link={l} onOpenTask={props.onOpenTask} />
+                ))}
+              </section>
+            )}
+            {cameUp.length > 0 && (
               <section className="af-links" aria-label="Where it came up">
                 <h3>Where it came up</h3>
-                {detail.links.map((l, i) => (
+                {cameUp.map((l, i) => (
                   <LinkRow key={i} link={l} onOpenTask={props.onOpenTask} />
                 ))}
               </section>
@@ -491,49 +498,3 @@ export function ArtifactPanel(props: {
   );
 }
 
-// The panel's width is yours to drag, from its left edge; it is kept for next time. A double-click puts it back.
-const PANEL_W = "stand.artifacts.panelWidth";
-const clampWidth = (w: number) => Math.round(Math.max(380, Math.min(w, window.innerWidth - 360, 1400)));
-function savedPanelWidth(): number | null {
-  try {
-    const w = Number(localStorage.getItem(PANEL_W));
-    return w > 0 ? clampWidth(w) : null;
-  } catch {
-    return null;
-  }
-}
-function PanelResizer() {
-  const root = document.documentElement;
-  const set = (w: number | null) => {
-    if (w) root.style.setProperty("--af-w", `${w}px`);
-    else root.style.removeProperty("--af-w");
-    try {
-      if (w) localStorage.setItem(PANEL_W, String(w));
-      else localStorage.removeItem(PANEL_W);
-    } catch {
-      /* kept for this visit only */
-    }
-  };
-  const start = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const panel = e.currentTarget.parentElement!;
-    const right = panel.getBoundingClientRect().right;
-    root.dataset.resizing = "";
-    const move = (m: PointerEvent) => set(clampWidth(right - m.clientX));
-    const end = () => {
-      delete root.dataset.resizing;
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", end);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end);
-  };
-  const key = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const now = e.currentTarget.parentElement!.getBoundingClientRect().width;
-    set(clampWidth(now + (e.key === "ArrowLeft" ? 40 : -40)));
-  };
-  return <div className="af-resize" role="separator" aria-orientation="vertical" aria-label="Panel width" tabIndex={0} title="Drag to resize" onPointerDown={start} onKeyDown={key} onDoubleClick={() => set(null)} />;
-}

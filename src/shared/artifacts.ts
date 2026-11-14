@@ -34,6 +34,8 @@ export interface ArtifactLink {
   href?: string;
   /** A to-do: it opens in the drawer. */
   taskId?: string;
+  /** One of a deck's slides, with how the review ended it as its note. */
+  slide?: boolean;
 }
 
 /** What a card draws for its kind, small. */

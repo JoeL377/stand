@@ -43,6 +43,7 @@ import { CopyForAgent } from "../CopyForAgent.tsx";
 import { MOD } from "../shortcuts.ts";
 import { SpacesShell } from "./SpacesShell.tsx";
 import { TaskDrawer } from "../TaskDrawer.tsx";
+import { RowMore } from "../RowMore.tsx";
 import { ChatNotifyBell, SpaceChat, useSpaceChat } from "../SpaceChat.tsx";
 import { Opener } from "../room/Opener.tsx";
 
@@ -850,13 +851,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             id={openTask}
             onOpen={showTask}
             onClose={closeTask}
-            // A phone's rows carry only the title, so what the row's pills and icons do is offered here.
-            acts={(n) => (
+            project={(n) => projectPicker(n)}
+            menu={(n) => (
               <>
-                {projectPicker(n)}
                 {!n.doneAt && (
                   <button
                     type="button"
+                    role="menuitem"
                     onClick={() =>
                       void api.setTask(room.id, n.id, { state: "dropped" }).then(() => {
                         closeTask();
@@ -870,6 +871,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                 )}
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     closeTask();
                     archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`);
@@ -2563,40 +2565,6 @@ type TabKey = "projects" | "chat" | "meetings" | "artifacts" | "mine" | "activit
 /** What a project's page lists: one kind at a time. */
 type ProjectShow = "tasks" | "questions" | "decisions" | "artifacts" | "done";
 /** The space's tabs, in the order people look at them. */
-/** A row's "···": what can be done to it, in a small menu, so the row itself stays quiet. */
-function RowMore(props: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: Event) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", away);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("pointerdown", away);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
-  return (
-    <span className={open ? "row-more open" : "row-more"} ref={ref}>
-      <button type="button" className="row-more-btn" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-          <circle cx="3" cy="8" r="1.4" fill="currentColor" />
-          <circle cx="8" cy="8" r="1.4" fill="currentColor" />
-          <circle cx="13" cy="8" r="1.4" fill="currentColor" />
-        </svg>
-      </button>
-      {open && (
-        // A choice shuts the menu; Copy for agent stays a moment so its "Copied" can be read.
-        <div className="rp-menu row-menu" role="menu" onClick={(e) => setTimeout(() => setOpen(false), (e.target as HTMLElement).closest(".cfa") ? 1200 : 0)}>
-          {props.children}
-        </div>
-      )}
-    </span>
-  );
-}
-
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
   return (
