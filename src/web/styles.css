@@ -3511,6 +3511,9 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
   .sh-top .sh-head h1 { font-size: 17px; }
   .sh-home { display: inline-flex; }
   .sh-home-dot { position: absolute; top: 6px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+  .sh-top .sh-chat-toggle { position: relative; width: 36px; height: 32px; min-height: 0; padding: 0; justify-content: center; border-radius: 8px; }
+  .sh-top .sh-chat-toggle .chat-marks { position: absolute; top: 0; right: -2px; pointer-events: none; }
+  .sh-top .sh-chat-toggle .chat-marks .count { display: inline-block; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; line-height: 16px; box-shadow: 0 0 0 2px var(--bg); }
   .sh-top .sh-people { width: 36px; height: 32px; padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 16px; letter-spacing: 1px; }
   .sh-tabs { margin: 0 -16px; padding: 0 16px; }
 }
