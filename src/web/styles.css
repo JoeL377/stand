@@ -4597,6 +4597,13 @@ footer.controls .control.pill { padding: 7px 16px; }
 .pj-now.ready::before { background: var(--ok); }
 .pj-line.card .pj-moving { visibility: hidden; }
 
+/* Where an opened project stands: Claude's short paragraph above its lists. Quiet, and three lines on phones (a tap shows it all). */
+.pj-status { margin: 6px 0 14px; max-width: 76ch; color: var(--muted); font-size: 13.5px; line-height: 1.55; animation: pj-status-in var(--dur-ui) var(--ease-out); }
+@keyframes pj-status-in { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 820px) {
+  .pj-status { margin: 4px 0 10px; font-size: 13px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; cursor: pointer; }
+  .pj-status.full { display: block; }
+}
 /* A project's page: to-dos on the left, its open questions and decisions on the right, one line each. */
 .pj-page.with-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 32px; align-items: start; }
 .pj-page.with-side .pj-side { border-left: 1px solid var(--line); padding-left: 28px; min-width: 0; }

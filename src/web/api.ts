@@ -239,6 +239,9 @@ export const api = {
   createProject: (roomId: string, input: { name: string; goal?: string; fromItemId?: string }) => call<Project>("POST", `/api/rooms/${roomId}/projects`, input),
   updateProject: (roomId: string, projectId: string, change: { name?: string; goal?: string | null; position?: number; archived?: boolean }) =>
     call<Project>("PATCH", `/api/rooms/${roomId}/projects/${projectId}`, change),
+  /** Where a project stands, as Claude last wrote it. pending: a newer paragraph is on its way. */
+  projectStatus: (roomId: string, projectId: string) =>
+    call<{ text: string | null; at: number | null; pending: boolean }>("GET", `/api/rooms/${roomId}/projects/${projectId}/status`),
   pinProject: (roomId: string, projectId: string, pinned: boolean) => call<{ pinned: string[] }>("PUT", `/api/rooms/${roomId}/projects/${projectId}/pin`, { pinned }),
   deleteProject: (roomId: string, projectId: string) => call<{ ok: true }>("DELETE", `/api/rooms/${roomId}/projects/${projectId}`),
   /** A project's id, null for Unassigned, or "auto" to follow the rules again. */

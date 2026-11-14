@@ -1842,6 +1842,7 @@ function TasksTab(props: {
           ];
           return (
             <section ref={pageRef} className="sh-project open pj-page" aria-label={props.solo ? "Everything" : viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
+              {viewing && !props.solo && <ProjectStatusLine roomId={props.roomId} projectId={viewing} />}
               {(() => {
                 const pills = (
                   <div className="pj-views" role="tablist" aria-label="What to show">
@@ -1939,6 +1940,38 @@ function TasksTab(props: {
 }
 
 /** The order of the projects, in a menu at the end of the tab row. */
+/** Where an opened project stands: a short paragraph Claude wrote from what is in it (projectStatus.ts).
+ *  Nothing shows until there is one. While a newer one is being written the last one stays, and the
+ *  page asks again a few times. */
+function ProjectStatusLine({ roomId, projectId }: { roomId: string; projectId: string }) {
+  const [status, setStatus] = useState<{ id: string; text: string | null } | null>(null);
+  useEffect(() => {
+    let gone = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ask = (tries: number) =>
+      api.projectStatus(roomId, projectId).then(
+        (s) => {
+          if (gone) return;
+          setStatus({ id: projectId, text: s.text });
+          if (s.pending && tries < 8) timer = setTimeout(() => ask(tries + 1), 4000);
+        },
+        () => undefined,
+      );
+    ask(0);
+    return () => {
+      gone = true;
+      clearTimeout(timer);
+    };
+  }, [roomId, projectId]);
+  const [full, setFull] = useState(false);
+  const text = status?.id === projectId ? status.text : null;
+  return text ? (
+    <p className={full ? "pj-status full" : "pj-status"} onClick={() => setFull((v) => !v)}>
+      {text}
+    </p>
+  ) : null;
+}
+
 function TaskMenu(props: { sort: "active" | "team"; onSort: (sort: "active" | "team") => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
