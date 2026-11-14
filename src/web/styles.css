@@ -5068,3 +5068,16 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-made header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .af-made h2 { margin: 0; font-size: 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .af-made .af-rows { max-height: min(60vh, 420px); overflow-y: auto; }
+
+/* A sketch artifact drawn as itself. On a card the board is laid out four times the card's size and
+   shrunk to fit, so it reads as the sketch from a distance; nothing on it can be pressed. */
+.af-sketch { position: absolute; inset: 0; display: block; overflow: hidden; }
+.af-sketch-fit { display: flex; width: 100%; height: 100%; }
+.af-sketch.small { pointer-events: none; }
+.af-sketch.small .af-sketch-fit { width: 320%; height: 320%; transform: scale(0.3125); transform-origin: 0 0; }
+.af-rows .af-sketch.small .af-sketch-fit { width: 800%; height: 800%; transform: scale(0.125); }
+.af-sketch.small .sk-bar, .af-sketch.small .brain-zoom, .af-sketch.small .design-top, .af-sketch.small .react-flow__panel { display: none; }
+.af-sketch.small .sketch { background: none; }
+.af-sketch.small .sketch .sk-canvas { margin: 0; border: 0; border-radius: 0; }
+.af-sketch-open { position: relative; height: min(52vh, 440px); margin: 14px 0 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.af-sketch-open .sketch .sk-canvas { margin: 0; border: 0; border-radius: 0; }
