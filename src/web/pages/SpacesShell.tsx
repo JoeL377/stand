@@ -276,9 +276,18 @@ export function PhoneMenu(props: {
     .filter((s) => s.id !== props.current.id)
     .sort((a, b) => Number(!!b.live) - Number(!!a.live) || a.name.localeCompare(b.name));
   const [switching, setSwitching] = useState(false);
+  // Out the way it came: the panel slides back left and the shade fades, then it unmounts.
+  const [closing, setClosing] = useState(false);
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const close = () => {
+    if (closing) return;
+    if (reduced) return props.onClose();
+    setClosing(true);
+    window.setTimeout(props.onClose, 180);
+  };
   const elsewhere = others.some((s) => s.live || (s.unread ?? 0) > 0);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     window.addEventListener("keydown", onKey);
     const was = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -288,11 +297,11 @@ export function PhoneMenu(props: {
     };
   }, []);
   const go = (fn: () => void) => () => {
-    props.onClose();
+    close();
     fn();
   };
   return (
-    <div className="pm-wrap" onClick={props.onClose}>
+    <div className={closing ? "pm-wrap closing" : "pm-wrap"} onClick={close}>
       <nav className="pm" aria-label="Menu" onClick={(e) => e.stopPropagation()}>
         {/* The space's name is the switcher: tap it for your other spaces. */}
         <button type="button" className="pm-head" aria-expanded={switching} onClick={() => setSwitching((v) => !v)}>
@@ -306,7 +315,7 @@ export function PhoneMenu(props: {
         {switching && (
           <div className="pm-switch">
             {others.map((s) => (
-              <Link key={s.id} to={spaceHref(s.id)} className="pm-row" onClick={props.onClose}>
+              <Link key={s.id} to={spaceHref(s.id)} className="pm-row" onClick={close}>
                 <span className="sp-space-tile" style={{ background: colorFor(s.id) }} aria-hidden>
                   {initials(s.name)}
                   {s.live && <span className="sp-side-dot live" />}
@@ -315,7 +324,7 @@ export function PhoneMenu(props: {
                 {(s.unread ?? 0) > 0 && <span className="pm-new" aria-label="New messages" />}
               </Link>
             ))}
-            <Link to="/" className="pm-row" onClick={props.onClose}>
+            <Link to="/" className="pm-row" onClick={close}>
               <LayoutGrid size={16} aria-hidden />
               <span className="pm-text">All spaces</span>
             </Link>
@@ -338,7 +347,7 @@ export function PhoneMenu(props: {
         ))}
         <div className="pm-foot">
           {FOOT_ROWS.map(({ label, icon: Icon, to }) => (
-            <Link key={to} to={to} className="pm-row" onClick={props.onClose}>
+            <Link key={to} to={to} className="pm-row" onClick={close}>
               <Icon size={16} aria-hidden />
               <span className="pm-text">{label}</span>
             </Link>

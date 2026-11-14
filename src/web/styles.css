@@ -5399,8 +5399,9 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 
 /* The phone menu (SpacesShell PhoneMenu): from the left, over the page. This space's projects first,
    then the other spaces, then the app's own pages and you. */
-.pm-wrap { position: fixed; inset: 0; z-index: 60; background: rgb(0 0 0 / 0.35); animation: pm-fade 160ms ease-out; }
-.pm { position: absolute; top: 0; bottom: 0; left: 0; width: min(300px, 84vw); display: flex; flex-direction: column; gap: 1px; overflow-y: auto; padding: calc(10px + env(safe-area-inset-top, 0px)) 10px calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--panel); box-shadow: var(--shadow); animation: pm-in 200ms var(--ease-out, ease-out); }
+.pm-wrap { position: fixed; inset: 0; z-index: 60; background: rgb(0 0 0 / 0.35); animation: pm-shade 220ms ease-out; }
+@keyframes pm-shade { from { background: rgb(0 0 0 / 0); } }
+.pm { position: absolute; top: 0; bottom: 0; left: 0; width: min(300px, 84vw); display: flex; flex-direction: column; gap: 1px; overflow-y: auto; padding: calc(10px + env(safe-area-inset-top, 0px)) 10px calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--panel); box-shadow: var(--shadow); animation: pm-in 220ms var(--ease-out, ease-out); }
 .pm .pm-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; height: auto; padding: 0 8px; border: 0; border-radius: 8px; background: none; box-shadow: none; color: var(--text); font: inherit; font-size: 16px; text-align: left; cursor: pointer; }
 .pm .pm-head:hover, .pm .pm-head[aria-expanded="true"] { background: var(--panel-2); }
 .pm-caret { flex: none; margin-left: auto; color: var(--muted); transition: transform 160ms ease; }
@@ -5423,6 +5424,10 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 .pm-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 1px; }
 .pm-user { padding: 6px 0 0; }
 .pm-user .sp-profile-pop { bottom: calc(100% + 6px); top: auto; left: 0; right: auto; }
-@keyframes pm-in { from { transform: translateX(-24px); opacity: 0; } }
+.pm-wrap.closing { animation: pm-fade-out 180ms ease-in forwards; }
+.pm-wrap.closing .pm { animation: pm-out 180ms ease-in forwards; }
+@keyframes pm-in { from { transform: translateX(-100%); } }
+@keyframes pm-out { to { transform: translateX(-100%); } }
+@keyframes pm-fade-out { to { background: rgb(0 0 0 / 0); } }
 @keyframes pm-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .pm, .pm-wrap { animation: none; } }
