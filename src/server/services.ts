@@ -19,7 +19,6 @@ import { labeled } from "./usage.ts";
 import { PlanBriefs } from "./planBrief.ts";
 import { Push } from "./push.ts";
 import { ProjectSuggester, SUGGEST_AFTER_CHANGE_MS, SUGGEST_AFTER_PROJECT_MS } from "./projectSuggest.ts";
-import { ProjectStatuses } from "./projectStatus.ts";
 import { QuestionSweeper } from "./questionSweep.ts";
 import { Sources, setSources } from "./sources.ts";
 import { RoomSession } from "./room.ts";
@@ -66,8 +65,6 @@ export function startServices() {
   );
   // Stand's project suggestions for to-dos nobody filed (projectSuggest.ts).
   const projectSuggester = new ProjectSuggester(db, agent, (roomId) => live(roomId)?.followUpsChanged());
-  // Where each project stands, written when someone opens a project that changed (projectStatus.ts).
-  const projectStatuses = new ProjectStatuses(db, agent);
   // Stand's sweep of open questions, after enough new ones or new decisions (questionSweep.ts).
   const questionSweeper = new QuestionSweeper(db, agent);
 
@@ -322,7 +319,6 @@ export function startServices() {
     polisher,
     doneDecks,
     projectSuggester,
-    projectStatuses,
     githubApp,
     shipWatch,
     sources,

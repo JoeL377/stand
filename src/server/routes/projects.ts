@@ -8,7 +8,7 @@ import type { Services } from "../services.ts";
 import { memberRoom, notFound, route } from "./http.ts";
 
 export function projectRoutes(app: Express, ctx: Services) {
-  const { db, sessions, afterItemsChange, projectSuggester, projectStatuses } = ctx;
+  const { db, sessions, afterItemsChange, projectSuggester } = ctx;
   /** Runs a change and turns a mistake in what was asked into a 400 with its words. */
   const attempt = (res: Response, fn: () => void) => {
     try {
@@ -60,17 +60,6 @@ export function projectRoutes(app: Express, ctx: Services) {
         if (name !== undefined || goal !== undefined || archived === false) projectSuggester.schedule(room.id, SUGGEST_AFTER_PROJECT_MS);
         res.json(project);
       });
-    }),
-  );
-
-  // Where the project stands: { text, at, pending }. pending: a newer paragraph is being written.
-  app.get(
-    "/api/rooms/:id/projects/:projectId/status",
-    route((req, res) => {
-      const room = memberRoom(db, req, res);
-      if (!room) return;
-      if (!db.getProject(room.id, req.params.projectId)) return notFound(res, "No such project in this space");
-      res.json(projectStatuses.get(room.id, req.params.projectId));
     }),
   );
 
