@@ -1631,23 +1631,30 @@ function TasksTab(props: {
       </div>
     );
   };
-  /** Who has a project's open work, as their faces: a picture where they have one, else their initials
-   *  on their own colour. The counts are in each face's tooltip. */
-  const ownerFaces = (notes: TaskNote[]) => {
-    const groups = ownerGroups(notes).filter((g) => g.key);
+  /** Everyone who has worked on a project, as their faces: a picture where they have one, else their
+   *  initials on their own colour. Who has open work comes first; who only has finished work is faded.
+   *  The counts are in each face's tooltip. */
+  const ownerFaces = (openNotes: TaskNote[], doneNotes: TaskNote[]) => {
+    const onIt = ownerGroups(openNotes).filter((g) => g.key);
+    const doneBy = new Map(ownerGroups(doneNotes).filter((g) => g.key).map((g) => [g.key, g.notes] as const));
+    const past = [...doneBy.entries()].filter(([k]) => !onIt.some((g) => g.key === k)).map(([key, notes]) => ({ key, notes }));
+    const faces = [...onIt.map((g) => ({ ...g, past: false })), ...past.map((g) => ({ ...g, past: true }))];
+    if (!faces.length) return null;
     const person = (owner: string) => props.pictured.find((m) => m.name === owner) ?? props.pictured.find((m) => firstName(m.name) === firstName(owner));
     return (
       <span className="pj-faces">
-        {groups.slice(0, 5).map((g) => {
+        {faces.slice(0, 5).map((g) => {
           const owner = g.notes[0].owner!;
           const who = person(owner);
+          const done = doneBy.get(g.key)?.length ?? 0;
+          const counts = [!g.past && `${g.notes.length} open`, done && `${done} done`].filter(Boolean).join(", ");
           return (
-            <span key={g.key} className="pj-face" title={`${g.key === me ? "You" : (who?.name ?? owner)} · ${g.notes.length}`}>
+            <span key={g.key} className={g.past ? "pj-face past" : "pj-face"} title={`${g.key === me ? "You" : (who?.name ?? owner)} · ${counts}`}>
               <Avatar id={who?.name ?? owner} name={who?.name ?? owner} picture={who?.picture} size={22} />
             </span>
           );
         })}
-        {groups.length > 5 && <span className="pj-faces-more">+{groups.length - 5}</span>}
+        {faces.length > 5 && <span className="pj-faces-more">+{faces.length - 5}</span>}
       </span>
     );
   };
@@ -1657,7 +1664,7 @@ function TasksTab(props: {
     done: doneIn.get(id)?.length ?? 0,
     ready: readyIn.get(id)?.length ?? 0,
     inProgress: doingIn(id).length,
-    owners: openIn.has(id) && ownerFaces(openIn.get(id)!),
+    owners: ownerFaces(openIn.get(id) ?? [], doneIn.get(id) ?? []),
   });
   /** What someone is on now in a project, the latest report first. */
   const doingIn = (id: string) =>
