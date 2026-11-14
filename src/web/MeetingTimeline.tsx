@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import type { SpaceFeed } from "../shared/protocol.ts";
 import { ArchiveIcon } from "./icons.tsx";
 import { dayLabel, isShortCall, wasIn } from "./meetingList.ts";
-import { fmtDate } from "./util.ts";
 
 type Meeting = SpaceFeed["meetings"][number];
 type Kind = { name: string; open: string; to: string };
@@ -101,8 +100,8 @@ function KindTag({ name }: { name: string }) {
 const minutes = (m: Meeting) => Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
 
 /**
- * The meeting under the pointer: enough to know what it was without opening it. One line of facts,
- * the name, who talked, what was said, what came of it, and the way in. Color only on the kind.
+ * The meeting under the pointer, in order of what matters: its name, what was said, what came of it,
+ * then who talked and for how long. The day and kind are already on the timeline, so they stay there.
  */
 function Preview({ m, name, kind, me, onArchive }: { m: Meeting; name: string; kind?: Kind; me: string; onArchive: () => void }) {
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -114,18 +113,12 @@ function Preview({ m, name, kind, me, onArchive }: { m: Meeting; name: string; k
   const missed = m.people.length > 0 && !wasIn(m.people, me);
   return (
     <aside className="tl-preview" key={m.id} aria-live="polite">
-      <p className="tl-meta">
-        {kind && name !== kind.name && <span className={`tl-meta-kind t-${TONE[kind.name] ?? "review"}`}>{kind.name}</span>}
-        <span>{fmtDate(m.endedAt)}</span>
-        <span>{minutes(m)} min</span>
-      </p>
       <h2 dir="auto">{name}</h2>
-      {m.people.length > 0 && (
-        <p className="tl-people">
-          {m.people.map((p) => p.split(" ")[0]).join(", ")}
-          {missed && <span className="tl-missed"> · you weren't in it</span>}
-        </p>
-      )}
+      <p className="tl-people">
+        {m.people.length > 0 && <span>{m.people.map((p) => p.split(" ")[0]).join(", ")}</span>}
+        <span>{minutes(m)} min</span>
+        {missed && <span className="tl-missed">you weren't in it</span>}
+      </p>
       {m.summary && <p className="tl-sum" dir="auto">{m.summary}</p>}
       {came.length > 0 && <p className="tl-came">{came.join(" · ")}</p>}
       <p className="tl-go">
