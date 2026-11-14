@@ -3,7 +3,7 @@
 // thing, its name and one quiet line. A card opens a panel beside the grid with the whole of it and
 // what it is tied to. On a phone the grid is one-line rows.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ARTIFACT_KINDS, ARTIFACT_NAME, type Artifact, type ArtifactDetail, type ArtifactKind, type ArtifactLink, filterArtifacts, makersLine, makersOf } from "../shared/artifacts.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
@@ -13,6 +13,11 @@ import { api } from "./api.ts";
 import { CloseIcon } from "./icons.tsx";
 import { usePhone } from "./phone.ts";
 import { fmtDay, fmtTime } from "./util.ts";
+
+// The board is a heavy picture (maps and diagrams): it loads when a sketch is first shown.
+const SketchPicture = lazy(() => import("./SketchPicture.tsx"));
+/** The space and the sketch behind a sketch artifact, from the page it opens. */
+const sketchAt = (a: Artifact) => /^\/s\/([^/]+)\/brainstorm\/([^/?]+)/.exec(a.href ?? "");
 
 /** How often the list is read again while it is on screen. */
 const REFRESH_MS = 60_000;
@@ -50,7 +55,7 @@ export function whenLabel(ts: number, now = Date.now()): string {
 
 const Dot = ({ kind }: { kind: ArtifactKind }) => <i className={`af-dot k-${kind}`} aria-hidden />;
 
-/** A sketch has no picture to shrink, so its card says how it is drawn. */
+/** What a sketch's card shows until its own picture is drawn: how it is drawn. */
 function SketchGlyph({ drawn }: { drawn: "map" | "diagram" }) {
   return drawn === "diagram" ? (
     <svg className="af-glyph" viewBox="0 0 260 128" aria-hidden>
@@ -77,7 +82,11 @@ function Thumb({ a, small }: { a: Artifact; small?: boolean }) {
           <img className="af-shot" src={p.images[0]} alt="" loading="lazy" />
         </>
       ) : a.kind === "sketch" ? (
-        <SketchGlyph drawn={p.drawn ?? "map"} />
+        (() => {
+          const glyph = <SketchGlyph drawn={p.drawn ?? "map"} />;
+          const at = sketchAt(a);
+          return at ? <Suspense fallback={glyph}><SketchPicture roomId={at[1]} id={at[2]} small fallback={glyph} /></Suspense> : glyph;
+        })()
       ) : a.kind === "deck" ? (
         <span className="af-slide">
           {(p.slides?.length ? p.slides : [a.title]).slice(0, small ? 1 : 4).map((s, i) => (
@@ -381,7 +390,13 @@ export function ArtifactPanel(props: {
                 ))}
               </div>
             ) : (
-              (a.kind === "sketch" || a.kind === "deck") && <div className="af-doc af-doc-thumb"><Thumb a={a} /></div>
+              a.kind === "sketch" && sketchAt(a) ? (
+                <div className="af-sketch-open">
+                  <Suspense fallback={null}><SketchPicture roomId={sketchAt(a)![1]} id={sketchAt(a)![2]} fallback={null} /></Suspense>
+                </div>
+              ) : (
+                (a.kind === "sketch" || a.kind === "deck") && <div className="af-doc af-doc-thumb"><Thumb a={a} /></div>
+              )
             )}
             <div className="af-actions">
               {a.href ? (
