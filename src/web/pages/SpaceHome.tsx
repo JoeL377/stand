@@ -124,7 +124,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const setProjectFilter = (value: string) => setParam("project", value);
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [showReview, setShowReview] = useState(false);
-  const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session">("");
+  const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session" | "notes">("");
   // Nothing saved: Projects when the space has any, otherwise Tasks.
   const [picked, setTab] = useState<TabKey | "">(() => {
     if (openTask) return "projects";
@@ -403,6 +403,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     { key: "design" as const, label: "Design reviews", n: designReviews.length },
     { key: "brainstorm" as const, label: "Brainstorms", n: brainstorms.length },
     { key: "session" as const, label: "Design sessions", n: sessions.length },
+    // What people saved from the bar between calls: off the meeting cards, one pill away.
+    { key: "notes" as const, label: "Notes", n: feed ? feed.captures.filter((x) => !gone.has(`snap:${x.id}`)).length + (feed.jots ?? []).filter((x) => !gone.has(`jot:${x.id}`)).length : 0 },
   ].filter((k) => k.n > 0);
   /** What a meeting was, with the page it left behind. */
   const kindOf = new Map<string, { name: string; open: string; to: string }>();
@@ -445,14 +447,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
       : e.kind === "jot"
         ? matchesSearch(search, [e.jot.text, e.jot.by])
         : matchesSearch(search, [e.snap.line, e.snap.caption, e.snap.takenBy]);
-  const periods: Array<{ label: string; entries: Entry[]; short: Entry[] }> = [];
+  type MeetingEntry = Extract<Entry, { kind: "meeting" }>;
+  const periods: Array<{ label: string; entries: MeetingEntry[]; short: MeetingEntry[] }> = [];
   for (const e of searching ? entries.filter(found) : entries) {
+    if (e.kind !== "meeting") continue;
     const label = periodLabel(e.at);
     if (periods.at(-1)?.label !== label) periods.push({ label, entries: [], short: [] });
     // A call of a minute or two that left nothing behind is a test: it folds away under its stretch.
-    if (!searching && e.kind === "meeting" && isShortCall(e.meeting, !!kindOf.get(e.meeting.id), madeIn.get(e.meeting.id) ?? 0)) periods.at(-1)!.short.push(e);
+    if (!searching && isShortCall(e.meeting, !!kindOf.get(e.meeting.id), madeIn.get(e.meeting.id) ?? 0)) periods.at(-1)!.short.push(e);
     else periods.at(-1)!.entries.push(e);
   }
+  const notes = entries.filter((e) => e.kind !== "meeting" && (!searching || found(e)));
   const [shortOpen, setShortOpen] = useState<ReadonlySet<string>>(new Set());
 
   // The open project's name, shown after "Projects" in the tab row as the way back.
@@ -672,7 +677,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     aria-label="Search meetings"
                     onChange={(e) => {
                       setSearch(e.target.value);
-                      if (kind) setKind("");
+                      if (kind && kind !== "notes") setKind("");
                     }}
                     onKeyDown={(e) => e.key === "Escape" && setSearch("")}
                   />
@@ -730,67 +735,73 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     ))}
                 </ul>
               )}
-              {!kind && searching && !periods.length && <p className="mt-none muted">No meeting matches “{search.trim()}”.</p>}
+              {(kind === "notes" ? !notes.length : !kind && !periods.length) && searching && <p className="mt-none muted">Nothing matches “{search.trim()}”.</p>}
+              {kind === "notes" && (
+                <ul className="sh-rows mt-notes">
+                  {notes.map((e) =>
+                    e.kind === "snap" ? (
+                      <SnapRow
+                        key={e.snap.id}
+                        snap={e.snap}
+                        room={room}
+                        me={user.id}
+                        when={whenLabel(e.at)}
+                        onOpen={() => setViewing({ snaps: [e.snap], i: 0 })}
+                        onPick={(id) => pickItem(e.snap, id)}
+                        onArchive={() => archive(`snap:${e.snap.id}`)}
+                      />
+                    ) : e.kind === "jot" ? (
+                      <JotRow
+                        key={e.jot.id}
+                        jot={e.jot}
+                        room={room}
+                        me={user.id}
+                        when={whenLabel(e.at)}
+                        onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
+                        onPick={(id) => pickJotItem(e.jot, id)}
+                        onDelete={() => deleteJot(e.jot)}
+                        onArchive={() => archive(`jot:${e.jot.id}`)}
+                      />
+                    ) : null,
+                  )}
+                </ul>
+              )}
               {!kind && periods.map((d) => {
                 const open = shortOpen.has(d.label);
-                const rows = open ? [...d.entries, ...d.short].sort((x, y) => y.at - x.at) : d.entries;
+                const cards = open ? [...d.entries, ...d.short].sort((x, y) => y.at - x.at) : d.entries;
                 return (
                   <section key={d.label} className="mt-sec">
-                    <h3 className="mt-head">{d.label}</h3>
-                    <ul className="sh-rows mt-rows">
-                      {rows.map((e) =>
-                        e.kind === "snap" ? (
-                          <SnapRow
-                            key={e.snap.id}
-                            snap={e.snap}
-                            room={room}
-                            me={user.id}
-                            when={whenLabel(e.at)}
-                            onOpen={() => setViewing({ snaps: [e.snap], i: 0 })}
-                            onPick={(id) => pickItem(e.snap, id)}
-                            onArchive={() => archive(`snap:${e.snap.id}`)}
-                          />
-                        ) : e.kind === "jot" ? (
-                          <JotRow
-                            key={e.jot.id}
-                            jot={e.jot}
-                            room={room}
-                            me={user.id}
-                            when={whenLabel(e.at)}
-                            onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
-                            onPick={(id) => pickJotItem(e.jot, id)}
-                            onDelete={() => deleteJot(e.jot)}
-                            onArchive={() => archive(`jot:${e.jot.id}`)}
-                          />
-                        ) : (
-                          <MeetingRow
-                            key={e.meeting.id}
-                            m={e.meeting}
-                            name={e.meeting.title ?? kindOf.get(e.meeting.id)?.name ?? "Meeting"}
-                            missed={!wasIn(e.meeting.people, user.name)}
-                            short={d.short.includes(e)}
-                            onArchive={() => archive(`meeting:${e.meeting.id}`)}
-                          />
-                        ),
-                      )}
+                    <h3 className="mt-head">
+                      {d.label}
                       {d.short.length > 0 && (
-                        <li className="mt-short">
-                          <button
-                            type="button"
-                            aria-expanded={open}
-                            onClick={() =>
-                              setShortOpen((was) => {
-                                const next = new Set(was);
-                                if (open) next.delete(d.label);
-                                else next.add(d.label);
-                                return next;
-                              })
-                            }
-                          >
-                            {open ? "Hide short calls" : `${d.short.length} short ${d.short.length === 1 ? "call" : "calls"}`}
-                          </button>
-                        </li>
+                        <button
+                          type="button"
+                          className="mt-short"
+                          aria-expanded={open}
+                          onClick={() =>
+                            setShortOpen((was) => {
+                              const next = new Set(was);
+                              if (open) next.delete(d.label);
+                              else next.add(d.label);
+                              return next;
+                            })
+                          }
+                        >
+                          {open ? "Hide short calls" : `+${d.short.length} short`}
+                        </button>
                       )}
+                    </h3>
+                    <ul className="mt-grid">
+                      {cards.map((e) => (
+                        <MeetingCard
+                          key={e.meeting.id}
+                          m={e.meeting}
+                          name={e.meeting.title ?? kindOf.get(e.meeting.id)?.name ?? "Meeting"}
+                          missed={!wasIn(e.meeting.people, user.name)}
+                          short={d.short.includes(e)}
+                          onArchive={() => archive(`meeting:${e.meeting.id}`)}
+                        />
+                      ))}
                     </ul>
                   </section>
                 );
@@ -1171,21 +1182,24 @@ function ItemPill(props: {
 }
 
 /**
- * A meeting, the way an inbox shows a message: its name, then what came out of it in a quieter
- * voice on the same line, and the day at the end. One you weren't in reads like unread mail: a dot
- * and a bolder name.
+ * A meeting as a card, like a project's: its name, two lines of what came out of it, and the day
+ * and length in a quiet foot. One you weren't in has a dot before its name.
  */
-function MeetingRow({ m, name, missed, short, onArchive }: { m: SpaceFeed["meetings"][number]; name: string; missed: boolean; short: boolean; onArchive: () => void }) {
+function MeetingCard({ m, name, missed, short, onArchive }: { m: SpaceFeed["meetings"][number]; name: string; missed: boolean; short: boolean; onArchive: () => void }) {
   const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
+  const unseen = missed && !short;
   return (
-    <li className={`mt-row${missed && !short ? " missed" : ""}${short ? " short" : ""}`}>
-      <Link to={`/meetings/${m.id}`} className="mt-link" title={`${fmtDate(m.endedAt)}, ${fmtTime(m.startedAt)} · ${minutes} min${m.people.length ? ` · ${m.people.join(", ")}` : ""}`}>
-        <span className="mt-dot" title={missed && !short ? "You weren't in this one" : undefined} aria-label={missed && !short ? "You weren't in this one" : undefined} />
-        <span className="mt-text">
-          <span className="mt-name" dir="auto">{name}</span>
-          {m.summary && <span className="mt-sum" dir="auto">{m.summary}</span>}
+    <li className={`mt-card${unseen ? " missed" : ""}${short ? " short" : ""}`}>
+      <Link to={`/meetings/${m.id}`} className="mt-link" title={`${fmtDate(m.endedAt)}, ${fmtTime(m.startedAt)}${m.people.length ? ` · ${m.people.join(", ")}` : ""}`}>
+        <span className="mt-name" dir="auto">
+          {unseen && <span className="mt-dot" title="You weren't in this one" aria-label="You weren't in this one" />}
+          {name}
         </span>
-        <time className="mt-when" dateTime={new Date(m.endedAt).toISOString()}>{whenLabel(m.endedAt)}</time>
+        {m.summary && !short && <span className="mt-sum" dir="auto">{m.summary}</span>}
+        <span className="mt-foot">
+          <time dateTime={new Date(m.endedAt).toISOString()}>{whenLabel(m.endedAt)}</time>
+          <span>{minutes} min</span>
+        </span>
       </Link>
       <ArchiveButton onClick={onArchive} />
     </li>
