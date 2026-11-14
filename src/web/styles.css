@@ -5068,6 +5068,13 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 @media (max-width: 820px) {
   .sh-panel .pj-line.card .pj-pin { top: 14px; right: 8px; }
   .pj-line.card .pj-open { padding: 2px 8px; border-radius: 999px; background: var(--hover); font-weight: 500; }
+  /* Every phone card is the same height: the name on one line, the goal clamped to two (its room
+     kept when there is none) and the foot row always there, faces or not. */
+  .pj-line.card { grid-template-rows: auto 26px; align-content: space-between; height: 124px; overflow: hidden; }
+  .pj-line.card .pj-title { min-width: 0; width: 100%; }
+  .sh-panel .pj-line.card .pj-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pj-line.card .pj-goal { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; white-space: normal; }
+  .pj-line.card .pj-faces, .pj-line.card .pj-moving, .pj-line.card .pj-open { align-self: center; }
 }
 
 /* What a meeting made: a count on its row, which opens the list in a pop-up. */
