@@ -27,6 +27,8 @@ export function ProjectPresentation(props: {
   const [project, setProject] = useState<Project | null>(null);
   const [notes, setNotes] = useState<Note[] | null>(null);
   const [decided, setDecided] = useState<Note[]>([]);
+  // Its finished to-dos, newest first, so a project whose work is all done doesn't look empty.
+  const [finished, setFinished] = useState<Note[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
@@ -40,6 +42,7 @@ export function ProjectPresentation(props: {
       if (!active) return;
       setNotes([...room.followUps, ...(feed.open ?? [])].filter((n) => n.project === projectId && !n.doneAt && n.state !== "dropped"));
       setDecided((feed.decided ?? []).filter((n) => n.project === projectId && !n.replacedBy));
+      setFinished((room.doneFollowUps ?? []).filter((n) => n.project === projectId && n.kind === "action" && n.state !== "dropped"));
     }, (e) => active && setError(e.message));
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,7 +96,22 @@ export function ProjectPresentation(props: {
         <div className="pp-body">
           <div className="pp-main">
             {group("To-dos", "todo", [...ready, ...doing, ...rest])}
-            {!todos.length && <p className="muted">No open to-dos.</p>}
+            {!todos.length && !finished.length && <p className="muted">No to-dos yet.</p>}
+            {finished.length > 0 && (
+              <div className="pp-group done">
+                <p className="pp-label">
+                  Done · {finished.length}
+                </p>
+                <ul>
+                  {finished.slice(0, todos.length ? 4 : 12).map((n) => (
+                    <li key={n.id}>
+                      <span>{n.text}</span>
+                      {n.owner && <span className="pp-owner">{n.owner.split(" ")[0]}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
           {(asked.length > 0 || decided.length > 0) && (
             <div className="pp-side">
