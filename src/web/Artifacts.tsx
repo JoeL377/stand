@@ -371,11 +371,17 @@ export function ArtifactPanel(props: {
   }, [onClose]);
   // With room for both, the page makes way for the panel and its grid reflows beside it.
   useEffect(() => {
-    document.documentElement.dataset.sidePanel = "";
+    const root = document.documentElement;
+    root.dataset.sidePanel = "";
+    const w = savedPanelWidth();
+    if (w) root.style.setProperty("--af-w", `${w}px`);
     return () => {
-      delete document.documentElement.dataset.sidePanel;
+      delete root.dataset.sidePanel;
+      root.style.removeProperty("--af-w");
     };
   }, []);
+  // Opening slides in; moving from one artifact to the next only changes what's inside (the panel before it is still up).
+  const [swapped] = useState(() => "sidePanel" in document.documentElement.dataset);
 
   const a: Artifact | ArtifactDetail | undefined = detail ?? props.known;
   const versions = detail?.versions ?? [];
@@ -391,7 +397,8 @@ export function ArtifactPanel(props: {
   };
 
   return (
-    <aside className="task-drawer af-panel" role="complementary" aria-label="Artifact">
+    <aside className={`task-drawer af-panel${swapped ? " af-swap" : ""}`} role="complementary" aria-label="Artifact">
+      <PanelResizer />
       <div className="td-head af-panel-head">
         <h2 className="td-title" dir="auto">{a?.title}</h2>
         <button className="icon-btn td-close" aria-label="Close" title="Close" onClick={onClose}>
@@ -482,4 +489,51 @@ export function ArtifactPanel(props: {
       </div>
     </aside>
   );
+}
+
+// The panel's width is yours to drag, from its left edge; it is kept for next time. A double-click puts it back.
+const PANEL_W = "stand.artifacts.panelWidth";
+const clampWidth = (w: number) => Math.round(Math.max(380, Math.min(w, window.innerWidth - 360, 1400)));
+function savedPanelWidth(): number | null {
+  try {
+    const w = Number(localStorage.getItem(PANEL_W));
+    return w > 0 ? clampWidth(w) : null;
+  } catch {
+    return null;
+  }
+}
+function PanelResizer() {
+  const root = document.documentElement;
+  const set = (w: number | null) => {
+    if (w) root.style.setProperty("--af-w", `${w}px`);
+    else root.style.removeProperty("--af-w");
+    try {
+      if (w) localStorage.setItem(PANEL_W, String(w));
+      else localStorage.removeItem(PANEL_W);
+    } catch {
+      /* kept for this visit only */
+    }
+  };
+  const start = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const panel = e.currentTarget.parentElement!;
+    const right = panel.getBoundingClientRect().right;
+    root.dataset.resizing = "";
+    const move = (m: PointerEvent) => set(clampWidth(right - m.clientX));
+    const end = () => {
+      delete root.dataset.resizing;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+  };
+  const key = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const now = e.currentTarget.parentElement!.getBoundingClientRect().width;
+    set(clampWidth(now + (e.key === "ArrowLeft" ? 40 : -40)));
+  };
+  return <div className="af-resize" role="separator" aria-orientation="vertical" aria-label="Panel width" tabIndex={0} title="Drag to resize" onPointerDown={start} onKeyDown={key} onDoubleClick={() => set(null)} />;
 }
