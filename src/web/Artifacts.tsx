@@ -407,8 +407,8 @@ export function ArtifactPanel(props: {
     api.requestDesignReview(taskId).then((s) => setQueued(s.queued), () => setQueued(false));
   };
 
-  // On a phone the top is only what it takes to place it and open it: its project and the way to the whole
-  // of it, on one line. Who made it, when, the kind, screenshots and where it came up wait for a wider screen.
+  // On a phone the top is one row: the title, a small button to the whole of it, ⋯ and close. Its project,
+  // who made it, when, the kind, screenshots and where it came up wait for a wider screen.
   const phone = usePhone();
   const full = a && (a.href ? (
     <Link className="af-btn primary" to={a.href} state={props.back ? { back: props.back } : undefined}>Full {a.kind}</Link>
@@ -420,6 +420,7 @@ export function ArtifactPanel(props: {
       <PanelResizer />
       <div className="td-head af-panel-head">
         <h2 className="td-title" dir="auto">{a?.title}</h2>
+        {phone && full && <span className="af-head-full">{full}</span>}
         {a && ((a.kind === "spec" && taskId) || (a.kind === "doc" && a.ref)) && (
           <RowMore className="td-more">
             {a.kind === "spec" && taskId && <CopyForAgent kind="action" id={taskId} label />}
@@ -437,16 +438,7 @@ export function ArtifactPanel(props: {
         {error && <p className="error">{error}</p>}
         {a && (
           <>
-            {phone ? (
-              (full || a.projects.some((p) => props.projects.get(p))) && <div className="af-top">
-                <p className="af-line af-line-phone">
-                  {a.projects.map((p) => props.projects.get(p) && (
-                    <span key={p} className="af-proj"><button type="button" className="af-line-link" onClick={() => props.onProject(p)}>{props.projects.get(p)}</button></span>
-                  ))}
-                </p>
-                {full}
-              </div>
-            ) : (
+            {phone ? null : (
             <>
             {/* One quiet line: what it is, which version, when, its project and who made it. */}
             <p className="af-line">
