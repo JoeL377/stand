@@ -225,7 +225,8 @@ export function meetingsStore(db: DatabaseSync) {
             `SELECT m.id, m.started_at, m.ended_at, m.summary, m.title,
                (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'action') AS todos,
                (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'decision') AS decided,
-               (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'question') AS open
+               (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.kind = 'question') AS open,
+               (SELECT json_group_array(name) FROM (SELECT DISTINCT s.speaker_name AS name FROM segments s WHERE s.meeting_id = m.id)) AS people
              FROM meetings m
              WHERE m.room_id = ? AND m.kind IS NULL AND m.ended_at IS NOT NULL AND EXISTS (SELECT 1 FROM segments s WHERE s.meeting_id = m.id)
              ORDER BY m.started_at DESC LIMIT ?`,
@@ -240,6 +241,7 @@ export function meetingsStore(db: DatabaseSync) {
         todos: r.todos as number,
         decided: r.decided as number,
         open: r.open as number,
+        people: JSON.parse((r.people as string) ?? "[]") as string[],
       }));
     },
     /** The last finished meeting in a space before a time that more than one person talked in, so a

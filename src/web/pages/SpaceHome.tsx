@@ -31,8 +31,8 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { usePhone } from "../phone.ts";
 import { fmtDate, fmtTime, fmtDay } from "../util.ts";
-import { midnight } from "../meetingList.ts";
-import { MeetingCalendar } from "../MeetingCalendar.tsx";
+import { matchesSearch, whenLabel } from "../meetingList.ts";
+import { MeetingTimeline } from "../MeetingTimeline.tsx";
 import { ModeNote } from "./RoomPage.tsx";
 import { brainstormHref } from "./brainstormHref.ts";
 import { VerdictCounts, designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
@@ -125,7 +125,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const setProjectFilter = (value: string) => setParam("project", value);
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [showReview, setShowReview] = useState(false);
-  const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session">("");
+  const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session" | "notes">("");
   // Nothing saved: Projects when the space has any, otherwise Tasks.
   const [picked, setTab] = useState<TabKey | "">(() => {
     if (openTask) return "projects";
@@ -404,6 +404,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     { key: "design" as const, label: "Design reviews", n: designReviews.length },
     { key: "brainstorm" as const, label: "Brainstorms", n: brainstorms.length },
     { key: "session" as const, label: "Design sessions", n: sessions.length },
+    // What people saved from the bar between calls: off the meeting cards, one pill away.
+    { key: "notes" as const, label: "Notes", n: feed ? feed.captures.filter((x) => !gone.has(`snap:${x.id}`)).length + (feed.jots ?? []).filter((x) => !gone.has(`jot:${x.id}`)).length : 0 },
   ].filter((k) => k.n > 0);
   /** What a meeting was, with the page it left behind. */
   const kindOf = new Map<string, { name: string; open: string; to: string }>();
@@ -436,8 +438,18 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         ...meetings.map((meeting) => ({ kind: "meeting" as const, at: meeting.endedAt, meeting })),
       ].sort((a, b) => b.at - a.at)
     : [];
-  // Notes and snaps from the bar, by the day they were saved, for the calendar's day heads.
-  const notesOn = (day: number) => entries.filter((e) => e.kind !== "meeting" && midnight(e.at) === day);
+  // The list reads in stretches (this week, last week, then months). A search looks through every
+  // meeting's name, what came out of it and who talked, and every note's text.
+  const [search, setSearch] = useState("");
+  const searching = search.trim().length > 0;
+  const found = (e: Entry) =>
+    e.kind === "meeting"
+      ? matchesSearch(search, [e.meeting.title, kindOf.get(e.meeting.id)?.name, e.meeting.summary, ...e.meeting.people])
+      : e.kind === "jot"
+        ? matchesSearch(search, [e.jot.text, e.jot.by])
+        : matchesSearch(search, [e.snap.line, e.snap.caption, e.snap.takenBy]);
+  const shownMeetings = searching ? meetings.filter((m) => found({ kind: "meeting", at: m.endedAt, meeting: m })) : meetings;
+  const notes = entries.filter((e) => e.kind !== "meeting" && (!searching || found(e)));
 
   // The open project's name, shown after "Projects" in the tab row as the way back.
   const crumb = tab === "projects" && hasProjects && !mine && pageOf ? (pageOf === "none" ? "Unassigned" : (projects.find((x) => x.id === pageOf)?.name ?? null)) : null;
@@ -647,6 +659,20 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               )}
               {/* Starting a call lives with the calls: here, and on the mic beside the space's name in the sidebar. */}
               <div className="sh-meet-bar">
+                <label className="mt-search">
+                  <SearchIcon />
+                  <input
+                    type="search"
+                    value={search}
+                    placeholder="Search meetings"
+                    aria-label="Search meetings"
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      if (kind && kind !== "notes") setKind("");
+                    }}
+                    onKeyDown={(e) => e.key === "Escape" && setSearch("")}
+                  />
+                </label>
                 {kinds.length > 0 && (
                 <div className="sh-kinds" role="group" aria-label="Kind of meeting">
                   {[{ key: "" as const, label: "All", n: 0 }, ...kinds].map((k) => (
@@ -700,40 +726,39 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     ))}
                 </ul>
               )}
-              {!kind && (
-                <MeetingCalendar
-                  meetings={meetings.filter((m): m is typeof m & { endedAt: number } => m.endedAt != null)}
-                  kindOf={kindOf}
-                  madeIn={madeIn}
-                  phone={phone}
-                  notesOn={(day) => notesOn(day).length}
-                  renderNotes={(day) =>
-                    notesOn(day).map((e) =>
-                      e.kind === "snap" ? (
-                        <SnapRow
-                          key={e.snap.id}
-                          snap={e.snap}
-                          room={room}
-                          me={user.id}
-                          onOpen={() => setViewing({ snaps: [e.snap], i: 0 })}
-                          onPick={(id) => pickItem(e.snap, id)}
-                          onArchive={() => archive(`snap:${e.snap.id}`)}
-                        />
-                      ) : e.kind === "jot" ? (
-                        <JotRow
-                          key={e.jot.id}
-                          jot={e.jot}
-                          room={room}
-                          me={user.id}
-                          onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
-                          onPick={(id) => pickJotItem(e.jot, id)}
-                          onDelete={() => deleteJot(e.jot)}
-                          onArchive={() => archive(`jot:${e.jot.id}`)}
-                        />
-                      ) : null,
-                    )
-                  }
-                />
+              {(kind === "notes" ? !notes.length : !kind && !shownMeetings.length) && searching && <p className="mt-none muted">Nothing matches “{search.trim()}”.</p>}
+              {kind === "notes" && (
+                <ul className="sh-rows mt-notes">
+                  {notes.map((e) =>
+                    e.kind === "snap" ? (
+                      <SnapRow
+                        key={e.snap.id}
+                        snap={e.snap}
+                        room={room}
+                        me={user.id}
+                        when={whenLabel(e.at)}
+                        onOpen={() => setViewing({ snaps: [e.snap], i: 0 })}
+                        onPick={(id) => pickItem(e.snap, id)}
+                        onArchive={() => archive(`snap:${e.snap.id}`)}
+                      />
+                    ) : e.kind === "jot" ? (
+                      <JotRow
+                        key={e.jot.id}
+                        jot={e.jot}
+                        room={room}
+                        me={user.id}
+                        when={whenLabel(e.at)}
+                        onOpen={() => setViewing({ snaps: e.jot.snaps ?? [], i: 0, jot: e.jot })}
+                        onPick={(id) => pickJotItem(e.jot, id)}
+                        onDelete={() => deleteJot(e.jot)}
+                        onArchive={() => archive(`jot:${e.jot.id}`)}
+                      />
+                    ) : null,
+                  )}
+                </ul>
+              )}
+              {!kind && shownMeetings.length > 0 && (
+                <MeetingTimeline meetings={shownMeetings} kindOf={kindOf} madeIn={madeIn} me={user.name} phone={phone} showShort={searching} onArchive={(id) => archive(`meeting:${id}`)} />
               )}
             </>
           )}
@@ -961,6 +986,8 @@ function SnapRow(props: {
   snap: Snap;
   room: RoomInfo;
   me: string;
+  /** The row's day, where the list groups by more than a day. */
+  when?: string;
   onOpen: () => void;
   onPick: (itemId: string | null) => void;
   onArchive: () => void;
@@ -969,7 +996,7 @@ function SnapRow(props: {
   const who = snap.takenById === props.me ? "You" : firstName(snap.takenBy);
   return (
     <li className="sh-row">
-      <time className="sh-time">{fmtTime(snap.ts)}</time>
+      <time className="sh-time">{props.when ?? fmtTime(snap.ts)}</time>
       <button className="sh-thumb" onClick={props.onOpen} aria-label="Open the snap">
         <img src={snap.url} alt="" loading="lazy" />
       </button>
@@ -997,6 +1024,8 @@ function JotRow(props: {
   jot: Jot;
   room: RoomInfo;
   me: string;
+  /** The row's day, where the list groups by more than a day. */
+  when?: string;
   onOpen: () => void;
   onPick: (itemId: string | null) => void;
   onDelete: () => void;
@@ -1009,7 +1038,7 @@ function JotRow(props: {
   const snaps = jot.snaps ?? [];
   return (
     <li className="sh-row">
-      <time className="sh-time">{fmtTime(jot.ts)}</time>
+      <time className="sh-time">{props.when ?? fmtTime(jot.ts)}</time>
       {snaps.length > 0 && (
         <button
           className="sh-thumb"
@@ -1105,6 +1134,13 @@ function ItemPill(props: {
     </span>
   );
 }
+
+const SearchIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-3.5-3.5" />
+  </svg>
+);
 
 type TaskNote = FollowUpNote & { from?: NoteFrom; answeredBy?: string };
 
