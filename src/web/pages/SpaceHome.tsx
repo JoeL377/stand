@@ -382,10 +382,10 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const shown = params.get("show");
   const show: ProjectShow = shown === "questions" || shown === "decisions" || shown === "artifacts" || shown === "done" ? shown : "tasks";
   const projectNames = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
-  // What each meeting made besides its own recap (the row is the recap): its decks, sketches and snaps.
+  // The decks and sketches each meeting made.
   const madeIn = useMemo(() => {
     const n = new Map<string, number>();
-    for (const a of made.artifacts ?? []) if (a.meetingId && a.kind !== "recap") n.set(a.meetingId, (n.get(a.meetingId) ?? 0) + 1);
+    for (const a of made.artifacts ?? []) if (a.meetingId) n.set(a.meetingId, (n.get(a.meetingId) ?? 0) + 1);
     return n;
   }, [made.artifacts]);
   const [madeOf, setMadeOf] = useState<{ id: string; title: string } | null>(null);
@@ -404,10 +404,10 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   ].filter((k) => k.n > 0);
   /** What a meeting was, with the page it left behind. */
   const kindOf = new Map<string, { name: string; open: string; to: string }>();
-  for (const b of brainstorms) if (b.meetingId) kindOf.set(b.meetingId, { name: "Brainstorm", open: "Map", to: brainstormHref(room.id, b.id) });
-  for (const b of sessions) if (b.meetingId) kindOf.set(b.meetingId, { name: "Design session", open: "Diagram", to: brainstormHref(room.id, b.id) });
+  for (const b of brainstorms) if (b.meetingId) kindOf.set(b.meetingId, { name: "Brainstorm", open: "Sketch", to: brainstormHref(room.id, b.id) });
+  for (const b of sessions) if (b.meetingId) kindOf.set(b.meetingId, { name: "Design session", open: "Sketch", to: brainstormHref(room.id, b.id) });
   for (const r of designReviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Design review", open: "Spec", to: designRecordHref(room.id, r.id) });
-  for (const r of reviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Product review", open: "Slides", to: reviewHref(room.id, r.id) });
+  for (const r of reviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Product review", open: "Deck", to: reviewHref(room.id, r.id) });
   for (const r of feed?.ideaReviews ?? []) if (r.meetingId && r.status === "done") kindOf.set(r.meetingId, { name: "Idea review", open: "Ideas", to: reviewHref(room.id, r.id) });
   const startReview = async () => {
     try {
@@ -742,7 +742,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               projects={projects}
               projectFilter={mine ? "" : pageOf}
               solo={!hasProjects}
-              loose={decisions.some((n) => !n.replacedBy && matchesProject(n.project ?? null, "none"))}
+              loose={decisions.some((n) => !n.replacedBy && matchesProject(n.project ?? null, "none")) || (made.artifacts ?? []).some((a) => !a.projects.length)}
               onProject={(id) => {
                 // A project opened from Mine shows on the Projects tab.
                 if (mine) pickTab("projects");
@@ -804,7 +804,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           <MeetingMade
             title={madeOf.title}
             meeting={madeOf.id}
-            artifacts={(made.artifacts ?? []).filter((a) => a.kind !== "recap")}
+            artifacts={made.artifacts}
             projects={projectNames}
             onSelect={(id) => { setMadeOf(null); showArtifact(id); }}
             onClose={() => setMadeOf(null)}
@@ -819,6 +819,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             projects={projectNames}
             onClose={closeArtifact}
             onOpenTask={showTask}
+            moveTo={projects.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name }))}
+            onMoved={made.reload}
             onProject={(id) => {
               pickTab("projects");
               setParams((prev) => {
@@ -1133,7 +1135,8 @@ function MeetingRow({ m, kind, made, onMade, onArchive }: { m: SpaceFeed["meetin
         </span>
       </Link>
       <span className="sh-made">
-        {made > 0 && (
+        {/* A count only when the call made more than the one thing its pill opens. */}
+        {made > (kind ? 1 : 0) && (
           <button type="button" className="sh-made-btn" title={`${made} made in this meeting`} aria-label={`${made} made in this meeting`} onClick={() => onMade(m.title ?? kind?.name ?? "Meeting")}>
             <ArtifactsIcon />
             {made}
@@ -1186,7 +1189,7 @@ function TasksTab(props: {
   onShow: (show: ProjectShow) => void;
   /** A space with no projects: one page of everything, with no project line over it. */
   solo: boolean;
-  /** There are decisions in no project, so Unassigned has something to show even with no open work. */
+  /** There are decisions or artifacts in no project, so Unassigned has something to show even with no open work. */
   loose: boolean;
   /** Only the tasks of the person looking (?mine=1). */
   mine: boolean;

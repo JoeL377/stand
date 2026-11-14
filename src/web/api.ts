@@ -143,6 +143,8 @@ export const api = {
   /** What the space made, newest first (the Artifacts tab), and one of them opened. */
   artifacts: (roomId: string) => call<ArtifactList>("GET", `/api/rooms/${roomId}/artifacts`),
   artifact: (roomId: string, id: string) => call<ArtifactDetail>("GET", `/api/rooms/${roomId}/artifacts/${encodeURIComponent(id)}`),
+  /** Moves a doc, a deck or a sketch to a project; null is Unassigned. */
+  moveArtifact: (roomId: string, id: string, project: string | null) => call<{ ok: true }>("PUT", `/api/rooms/${roomId}/artifacts/${encodeURIComponent(id)}/project`, { project }),
   tokens: () => call<AgentToken[]>("GET", "/api/tokens"),
   createToken: (label: string, scope: AgentToken["scope"]) => call<{ token: string; info: AgentToken }>("POST", "/api/tokens", { label, scope }),
   revokeToken: (id: string) => call<{ ok: true }>("DELETE", `/api/tokens/${id}`),

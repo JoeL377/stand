@@ -1377,7 +1377,7 @@ export function agentApi(deps: AgentDeps) {
       return { [had ? "saved_again" : "saved"]: { ref: docRef(doc.id), title: doc.title, version: doc.versions, space: room.name, url }, shows_on: "the space's Artifacts tab in Stand, and its project's Artifacts" };
     },
 
-    /** What a space made: its specs, decks, sketches, recaps, screens and docs, newest first. With a ref, one of them in full. */
+    /** What a space made: its specs, docs, decks and sketches, newest first. With a ref, one of them in full. */
     listArtifacts(caller: Caller, args: { space?: string; kind?: string; project?: string; ref?: string; limit?: number }, baseUrl = "") {
       if (args.ref?.trim()) {
         const docId = parseDocRef(args.ref);
@@ -1403,10 +1403,10 @@ export function agentApi(deps: AgentDeps) {
       }
       const room = findSpace(caller, args.space ?? "");
       const kind = args.kind?.trim().toLowerCase().replace(/s$/, "") ?? "";
-      if (kind && !ARTIFACT_KINDS.includes(kind as ArtifactKind) && kind !== "screen") throw new AgentError(`Kinds are ${ARTIFACT_KINDS.join(", ")}.`);
+      if (kind && !ARTIFACT_KINDS.includes(kind as ArtifactKind)) throw new AgentError(`Kinds are ${ARTIFACT_KINDS.join(", ")}.`);
       const project = args.project?.trim() ? (projectFor(room.id, args.project) ?? "none") : "";
       const names = new Map(db.listProjects(room.id).map((p) => [p.id, p.name]));
-      const all = filterArtifacts(spaceArtifacts(db, room.id).artifacts, { kind: (kind === "screen" ? "screens" : kind) as ArtifactKind | "", project });
+      const all = filterArtifacts(spaceArtifacts(db, room.id).artifacts, { kind: kind as ArtifactKind | "", project });
       const limit = Math.min(100, Math.max(1, args.limit ?? 40));
       return {
         space: { id: room.id, name: room.name },

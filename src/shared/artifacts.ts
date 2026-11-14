@@ -1,20 +1,17 @@
-// Artifacts: the things a space made that people open again and reuse. Records (to-dos, decisions,
-// questions) stay in their project and events stay in Activity; this is the library of what was made.
-// Five kinds are read from what Stand already keeps (server/artifacts.ts): a to-do's plan, a review's
-// deck, a brainstorm's or design session's sketch, a meeting's recap, and the screenshots on a to-do
-// or the snaps of a meeting. The sixth, a doc, is a write-up an agent or a person saved (db/docs.ts).
-// The server and the browser share this file.
+// Artifacts: the documents a space made on purpose and opens again. Four kinds: a to-do's plan (spec),
+// a write-up saved to the space (doc, db/docs.ts), a review's or an uploaded deck, and a brainstorm's
+// or design session's sketch. Each is in one project, or in none. Records (to-dos, decisions,
+// questions) stay in their project, a meeting's recap stays the meeting, and screenshots are
+// attachments: a to-do's show on its spec. The server and the browser share this file.
 
-export type ArtifactKind = "spec" | "deck" | "sketch" | "recap" | "screens" | "doc";
+export type ArtifactKind = "spec" | "doc" | "deck" | "sketch";
 
-export const ARTIFACT_KINDS: ArtifactKind[] = ["spec", "deck", "sketch", "recap", "screens", "doc"];
+export const ARTIFACT_KINDS: ArtifactKind[] = ["spec", "doc", "deck", "sketch"];
 /** What each kind is called: on a card, and on its filter. */
 export const ARTIFACT_NAME: Record<ArtifactKind, { one: string; many: string }> = {
   spec: { one: "Spec", many: "Specs" },
   deck: { one: "Deck", many: "Decks" },
   sketch: { one: "Sketch", many: "Sketches" },
-  recap: { one: "Recap", many: "Recaps" },
-  screens: { one: "Screens", many: "Screens" },
   doc: { one: "Doc", many: "Docs" },
 };
 
@@ -41,14 +38,10 @@ export interface ArtifactLink {
 
 /** What a card draws for its kind, small. */
 export interface ArtifactPreview {
-  /** Spec, doc, recap: its first lines, as plain text. */
+  /** Spec, doc: its first lines, as plain text. */
   text?: string;
-  /** Screens, and a deck with pictures: the first few images. */
-  images?: string[];
   /** Deck: its slides' names. */
   slides?: string[];
-  /** Recap: what the meeting kept. */
-  counts?: { todos: number; decided: number; open: number };
   /** Sketch: how it is drawn. */
   drawn?: "map" | "diagram";
 }
@@ -60,7 +53,7 @@ export interface Artifact {
   title: string;
   /** When it was made or last changed. */
   ts: number;
-  /** The projects it belongs to, most of it first. Empty: Unassigned. */
+  /** The one project it is in. Empty: Unassigned. */
   projects: string[];
   makers: ArtifactMaker[];
   /** Where it came from when that says more than who made it: "Design session", "Product review". */
@@ -69,9 +62,9 @@ export interface Artifact {
   badge?: string;
   /** The page it has already, when it has one. */
   href?: string;
-  /** The to-do it is on (a spec, its screenshots): Open shows that to-do. */
+  /** A spec's to-do: Open shows that to-do. */
   taskId?: string;
-  /** The meeting it came out of: its recap, the deck or sketch of a call, the snaps taken in it. */
+  /** The meeting it came out of: the deck or sketch of a call. */
   meetingId?: string;
   /** A doc's reference, for agents. */
   ref?: string;
@@ -84,11 +77,11 @@ export interface ArtifactList {
 
 /** One artifact opened: the whole of it, and what it is tied to. */
 export interface ArtifactDetail extends Artifact {
-  /** Spec and doc: the text, as markdown. Recap: the summary. */
+  /** Spec and doc: the text, as markdown. */
   body?: string;
   /** Spec: every version, oldest first. */
   versions?: Array<{ id: string; ts: number; by: string; text: string }>;
-  /** Screens: every picture. */
+  /** Spec: the screenshots on its to-do. */
   images?: Array<{ url: string; caption: string | null }>;
   links: ArtifactLink[];
 }

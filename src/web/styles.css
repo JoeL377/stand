@@ -4952,15 +4952,13 @@ a.ac-target:hover { text-decoration: underline; }
 
 /* Artifacts (Artifacts.tsx): what a space made, as a grid of small pictures. One row of filters, then
    cards: the picture, a name and one quiet line. Each kind keeps one colour, as a dot. */
-.af { --af-spec: #4c8df6; --af-deck: #d98a12; --af-sketch: #9a6fe0; --af-recap: #2f9e6b; --af-screens: #d9577f; --af-doc: #2c9aa6; }
-[data-theme="dark"] .af, [data-theme="dark"] .af-panel { --af-spec: #8fb5fa; --af-deck: #f0a92e; --af-sketch: #b48cf2; --af-recap: #4fc38a; --af-screens: #ef7fa8; --af-doc: #7fd0d8; }
-.af-panel { --af-spec: #4c8df6; --af-deck: #d98a12; --af-sketch: #9a6fe0; --af-recap: #2f9e6b; --af-screens: #d9577f; --af-doc: #2c9aa6; }
+.af { --af-spec: #4c8df6; --af-deck: #d98a12; --af-sketch: #9a6fe0; --af-doc: #2c9aa6; }
+[data-theme="dark"] .af, [data-theme="dark"] .af-panel { --af-spec: #8fb5fa; --af-deck: #f0a92e; --af-sketch: #b48cf2; --af-doc: #7fd0d8; }
+.af-panel { --af-spec: #4c8df6; --af-deck: #d98a12; --af-sketch: #9a6fe0; --af-doc: #2c9aa6; }
 .af-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 3px; background: var(--muted); }
 .af-dot.k-spec { background: var(--af-spec); }
 .af-dot.k-deck { background: var(--af-deck); }
 .af-dot.k-sketch { background: var(--af-sketch); }
-.af-dot.k-recap { background: var(--af-recap); }
-.af-dot.k-screens { background: var(--af-screens); }
 .af-dot.k-doc { background: var(--af-doc); }
 .af-meta .af-dot { margin-right: 5px; }
 .af-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
@@ -4982,13 +4980,9 @@ a.ac-target:hover { text-decoration: underline; }
 /* What each kind's picture holds. */
 .af-text { position: absolute; inset: 36px 14px 0; display: flex; flex-direction: column; gap: 8px; }
 .af-text-body { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; font-size: 11px; line-height: 1.45; color: var(--muted); }
-.af-thumb.k-recap .af-text-body { -webkit-line-clamp: 3; }
-.af-counts { display: flex; gap: 10px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.af-counts span { display: inline-flex; align-items: center; gap: 4px; }
 .af-slide { position: absolute; inset: 36px 22px 12px; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .af-slide-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 600; }
 .af-slide-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--muted); }
-.af-shot { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .af-glyph { position: absolute; inset: 0; width: 100%; height: 100%; }
 .af-glyph-lines { fill: none; stroke: color-mix(in srgb, var(--text) 26%, transparent); stroke-width: 1.2; }
 .af-glyph-boxes { fill: var(--panel); stroke: color-mix(in srgb, var(--text) 24%, transparent); stroke-width: 1.2; }
@@ -5081,3 +5075,10 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-sketch.small .sketch .sk-canvas { margin: 0; border: 0; border-radius: 0; }
 .af-sketch-open { position: relative; height: min(52vh, 440px); margin: 14px 0 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .af-sketch-open .sketch .sk-canvas { margin: 0; border: 0; border-radius: 0; }
+
+/* Where an artifact is filed, as a pill that is also the picker to move it. */
+.af-move { padding: 0 4px 0 8px; cursor: pointer; }
+.af-move select { field-sizing: content; width: auto; height: 22px; padding: 0; appearance: auto; border: 0; background: none; box-shadow: none; font: inherit; color: inherit; cursor: pointer; }
+.af-panel .af-chips .af-move select { font-size: inherit; }
+.af-doc + .af-links-title { margin-top: 18px; }
+.af-move:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--line)); }

@@ -2,7 +2,7 @@
 import type { Express } from "express";
 import { type ItemHistory, MAX_SYNTHESIS_INSTRUCTIONS, type Note, type SpaceMembers } from "../../shared/protocol.ts";
 import { spaceActivity } from "../activity.ts";
-import { artifactDetail, spaceArtifacts } from "../artifacts.ts";
+import { artifactDetail, moveArtifact, spaceArtifacts } from "../artifacts.ts";
 import { archiveRow, restoreRow } from "../archive.ts";
 import { spaceFeed } from "../captures.ts";
 import { capabilities, config } from "../config.ts";
@@ -62,6 +62,20 @@ export function spaceRoutes(app: Express, ctx: Services) {
       const detail = artifactDetail(db, room.id, String(req.params.artifactId).slice(0, 200));
       if (!detail) return notFound(res, "That artifact isn't in this space any more.");
       res.json(detail);
+    }),
+  );
+  // Move a doc, a deck or a sketch to a project ({ project: "<id>" }) or to Unassigned ({ project: null }).
+  app.put(
+    "/api/rooms/:id/artifacts/:artifactId/project",
+    route((req, res) => {
+      const room = memberRoom(db, req, res);
+      if (!room) return;
+      const project = typeof req.body?.project === "string" && req.body.project ? req.body.project.slice(0, 40) : null;
+      const moved = moveArtifact(db, room.id, String(req.params.artifactId).slice(0, 200), project, req.user!.name);
+      if (moved === "missing") return notFound(res, "That artifact isn't in this space any more.");
+      if (moved === "spec") return void res.status(400).json({ error: "A spec is in its to-do's project. Move the to-do." });
+      if (moved === "project") return void res.status(400).json({ error: "That project isn't in this space." });
+      res.json({ ok: true });
     }),
   );
   app.get(

@@ -1,6 +1,7 @@
-// The space's Artifacts (shared/artifacts.ts): everything it made that people open again, newest
-// first. Nothing here is stored twice: each kind is read from the table that already keeps it
-// (task_plans, reviews, brainstorms, meetings, work_shots, snaps), and docs from their own.
+// The space's Artifacts (shared/artifacts.ts): the documents it made on purpose, newest first.
+// Specs, decks and sketches are read from the tables that already keep them (task_plans, reviews,
+// brainstorms) and docs from their own, so nothing is stored twice. Each is in one project: a spec
+// in its to-do's, the others where most of them points until someone moves them (artifact_projects).
 // A row archived off the space page is left out, as it is everywhere else.
 
 import { type Actor, parseActor } from "../shared/actors.ts";
@@ -17,7 +18,6 @@ import { prOf, shotUrl } from "./workLog.ts";
 
 /** How much of a text a card can show. */
 const PREVIEW = 420;
-const MAX_IMAGES = 3;
 
 const clip = (s: string, max: number) => {
   const one = s.replace(/\s+/g, " ").trim();
@@ -66,6 +66,9 @@ const headingOf = (markdown: string): string | null => {
   return m ? clip(m[1].replace(/[*_`]/g, ""), 120) : null;
 };
 
+/** A deck with no name of its own, named for what it shows: "One-page checkout +2". */
+const deckName = (slides: string[]): string | null => (slides[0] ? clip(slides.length > 1 ? `${slides[0]} +${slides.length - 1}` : slides[0], 120) : null);
+
 /** The ids, most frequent first. */
 const byCount = (ids: Array<string | null | undefined>): string[] => {
   const n = new Map<string, number>();
@@ -105,7 +108,8 @@ function reading(db: DB, roomId: string) {
     }
     return name;
   };
-  return { graph, live, gone, projectOfNote, projectOfItem, meetingName };
+  const meetingTitled = (id: string) => !!((db.raw.prepare("SELECT title FROM meetings WHERE id = ?").get(id) as Row | undefined)?.title as string | undefined)?.trim();
+  return { graph, live, gone, projectOfNote, projectOfItem, meetingName, meetingTitled };
 }
 type Reading = ReturnType<typeof reading>;
 
@@ -154,12 +158,13 @@ function decks(db: DB, roomId: string, r: Reading): Artifact[] {
       if (v.meetingId && r.gone.has(`meeting:${v.meetingId}`)) continue;
       const slides = db.reviewSlides(v.id);
       if (!slides.length) continue;
-      const named = v.meetingId ? r.meetingName(v.meetingId) : null;
+      // A call named by hand names its deck; one still called by its kind does not.
+      const named = v.meetingId && r.meetingTitled(v.meetingId) ? r.meetingName(v.meetingId) : null;
       const plain = kind === "product" ? "Product review" : "Idea review";
       out.push({
         id: `deck:${v.id}`,
         kind: "deck",
-        title: v.title?.trim() || named || plain,
+        title: v.title?.trim() || deckName(slides.map((x) => (x.name || x.title).trim())) || named || plain,
         ts: v.endedAt ?? v.startedAt ?? v.createdAt,
         projects: byCount(slides.map((s) => r.projectOfNote(s.noteId))),
         makers: makers(slides.map((s) => makerOf(null, s.addedBy))),
@@ -220,95 +225,10 @@ function sketches(db: DB, roomId: string, r: Reading): Artifact[] {
   });
 }
 
-function recaps(db: DB, roomId: string, r: Reading): Artifact[] {
-  const meetings = db.feedMeetings(roomId, 100).filter((m) => !r.gone.has(`meeting:${m.id}`) && (m.summary?.trim() || m.todos + m.decided + m.open > 0));
-  if (!meetings.length) return [];
-  const kept = db.raw
-    .prepare(`SELECT id, meeting_id FROM notes WHERE kind IN ('action', 'decision', 'question') AND meeting_id IN (${meetings.map(() => "?").join(",")})`)
-    .all(...meetings.map((m) => m.id)) as Row[];
-  return meetings.map((m): Artifact => ({
-    id: `recap:${m.id}`,
-    kind: "recap",
-    title: m.title?.trim() || meetingKindName(db, m.id),
-    ts: m.endedAt,
-    // A meeting touches many projects; its recap is filed under the one most of it was about.
-    projects: byCount(kept.filter((n) => n.meeting_id === m.id).map((n) => r.projectOfNote(n.id as string))).slice(0, 1),
-    makers: [STAND],
-    badge: `${Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000))} min`,
-    href: `/meetings/${m.id}`,
-    meetingId: m.id,
-    preview: { text: m.summary ? clip(m.summary, PREVIEW) : undefined, counts: { todos: m.todos, decided: m.decided, open: m.open } },
-  }));
-}
-
-interface Shot {
-  url: string;
-  caption: string | null;
-  ts: number;
-}
-const DAY = 86_400_000;
-
-/** The pictures behind every Screens artifact of a space, by the artifact's id. */
-function screenSets(db: DB, roomId: string, r: Reading): Array<{ artifact: Omit<Artifact, "preview" | "badge" | "ts">; shots: Shot[] }> {
-  const out: Array<{ artifact: Omit<Artifact, "preview" | "badge" | "ts">; shots: Shot[] }> = [];
-
-  // What agents attached to a to-do's log. A review slide's own pictures ("review:…") stay with its deck.
-  const work = (db.raw.prepare("SELECT * FROM work_shots WHERE room_id = ? AND note_id NOT LIKE 'review:%' ORDER BY ts").all(roomId) as Row[]).map((x) => ({
-    noteId: x.note_id as string,
-    maker: makerOf(x.client ? { kind: "agent", person: x.user_name as string, agent: x.client as string } : { kind: "person", person: x.user_name as string }),
-    shot: { url: shotUrl({ id: x.id as string, ext: x.ext as string }), caption: (x.caption as string) ?? null, ts: x.ts as number },
-  }));
-  const notes = tasks(db, r, work.map((w) => w.noteId));
-  for (const [noteId, note] of notes) {
-    const mine = work.filter((w) => w.noteId === noteId);
-    const project = r.projectOfNote(noteId);
-    out.push({
-      artifact: { id: `screens:t-${noteId}`, kind: "screens", title: clip(note.text, 120), projects: project ? [project] : [], makers: makers(mine.map((w) => w.maker)), taskId: noteId },
-      shots: mine.map((w) => w.shot),
-    });
-  }
-
-  // Snaps: of a meeting, pinned to a note from the bar, or saved to the space on their own.
-  const snaps = (db.raw.prepare("SELECT * FROM snaps WHERE room_id = ? ORDER BY ts").all(roomId) as Row[]).filter((s) => !r.gone.has(`snap:${s.id as string}`));
-  const groups = new Map<string, Row[]>();
-  for (const s of snaps) {
-    const key = s.meeting_id ? `m-${s.meeting_id as string}` : s.jot_id ? `j-${s.jot_id as string}` : `d-${Math.floor((s.ts as number) / DAY)}-${((s.taken_by_id as string) ?? (s.taken_by as string)).toLowerCase()}`;
-    groups.set(key, [...(groups.get(key) ?? []), s]);
-  }
-  for (const [key, rows] of groups) {
-    const head = rows[0];
-    const meetingId = (head.meeting_id as string) ?? null;
-    const jotId = (head.jot_id as string) ?? null;
-    if ((meetingId && r.gone.has(`meeting:${meetingId}`)) || (jotId && r.gone.has(`jot:${jotId}`))) continue;
-    const jot = jotId ? (db.raw.prepare("SELECT text, item_id FROM jots WHERE id = ?").get(jotId) as Row | undefined) : undefined;
-    const said = rows.map((s) => ((s.caption as string) ?? (s.line as string) ?? "").trim()).find(Boolean);
-    const title = meetingId ? r.meetingName(meetingId) : clip(((jot?.text as string) ?? "").trim() || said || "Snaps", 120);
-    const project = byCount(rows.map((s) => r.projectOfNote(s.note_id as string | null) ?? r.projectOfItem(s.item_id as string | null)));
-    out.push({
-      artifact: {
-        id: `screens:${key}`,
-        kind: "screens",
-        title,
-        projects: project.slice(0, 2),
-        makers: makers(rows.map((s) => makerOf({ kind: "person", person: s.taken_by as string }))),
-        origin: meetingId ? "Snaps" : undefined,
-        href: meetingId ? `/meetings/${meetingId}` : undefined,
-        meetingId: meetingId ?? undefined,
-      },
-      shots: rows.map((s) => ({ url: `/api/snaps/${s.id as string}.${s.ext as string}?v=${s.version as number}`, caption: ((s.caption as string) ?? (s.line as string) ?? null) || null, ts: s.ts as number })),
-    });
-  }
-  return out;
-}
-
-function screens(db: DB, roomId: string, r: Reading): Artifact[] {
-  return screenSets(db, roomId, r).map(({ artifact, shots }) => ({
-    ...artifact,
-    ts: shots[shots.length - 1].ts,
-    badge: String(shots.length),
-    // The newest pictures are the ones worth seeing first.
-    preview: { images: shots.slice(-MAX_IMAGES).reverse().map((s) => s.url) },
-  }));
+/** The screenshots agents attached to a to-do's log, oldest first. A review slide's own pictures stay with its deck. */
+function todoShots(db: DB, roomId: string, noteId: string): Array<{ url: string; caption: string | null }> {
+  const rows = db.raw.prepare("SELECT id, ext, caption FROM work_shots WHERE room_id = ? AND note_id = ? ORDER BY ts").all(roomId, noteId) as Row[];
+  return rows.map((x) => ({ url: shotUrl({ id: x.id as string, ext: x.ext as string }), caption: (x.caption as string) ?? null }));
 }
 
 function docArtifact(d: DocRow, r: Reading): Artifact {
@@ -333,10 +253,14 @@ export function spaceArtifacts(db: DB, roomId: string): ArtifactList {
     ...specs(db, roomId, r),
     ...decks(db, roomId, r),
     ...sketches(db, roomId, r),
-    ...recaps(db, roomId, r),
-    ...screens(db, roomId, r),
     ...db.roomDocs(roomId).map((d) => docArtifact(d, r)),
   ];
+  // One project each: where someone moved it, else the one most of it is about.
+  const moved = db.artifactProjects(roomId);
+  for (const a of all) {
+    const to = a.kind === "spec" ? undefined : moved.get(a.id);
+    a.projects = to === null ? [] : to && r.live.has(to) ? [to] : a.projects.slice(0, 1);
+  }
   return { artifacts: all.sort((a, b) => b.ts - a.ts) };
 }
 
@@ -386,7 +310,8 @@ export function artifactDetail(db: DB, roomId: string, id: string): ArtifactDeta
       if (b.taskId === key || b.sketch?.subjects?.some((s) => s.taskId === key)) links.push({ text: clip(b.prompt, 160), note: "the sketch it came from", href: `/s/${roomId}/brainstorm/${b.id}` });
     const pr = note ? prLink(db, note) : null;
     if (pr) links.push(pr);
-    return { ...a, body: versions[versions.length - 1]?.text ?? "", versions, links };
+    const images = todoShots(db, roomId, key);
+    return { ...a, body: versions[versions.length - 1]?.text ?? "", versions, ...(images.length ? { images } : {}), links };
   }
 
   if (a.kind === "doc") {
@@ -394,14 +319,6 @@ export function artifactDetail(db: DB, roomId: string, id: string): ArtifactDeta
     if (!d) return null;
     todo(d.noteId, "the to-do it was written for");
     return { ...a, body: d.text, links };
-  }
-
-  if (a.kind === "recap") {
-    const m = db.raw.prepare("SELECT summary FROM meetings WHERE id = ?").get(key) as Row | undefined;
-    // What the meeting made: the other artifacts that came out of it.
-    const made = spaceArtifacts(db, roomId).artifacts.filter((x) => x.id !== a.id && x.href && (x.kind === "deck" || x.kind === "sketch") && x.meetingId === key);
-    for (const x of made) links.push({ text: x.title, note: x.origin?.toLowerCase(), href: x.href });
-    return { ...a, body: ((m?.summary as string) ?? "").trim() || undefined, links };
   }
 
   if (a.kind === "deck") {
@@ -424,14 +341,17 @@ export function artifactDetail(db: DB, roomId: string, id: string): ArtifactDeta
     return { ...a, links };
   }
 
-  // Screens.
-  const set = screenSets(db, roomId, r).find((s) => s.artifact.id === id);
-  if (a.taskId) {
-    const note = todo(a.taskId, "the to-do they show");
-    const pr = note ? prLink(db, note) : null;
-    if (pr) links.push(pr);
-  } else if (key.startsWith("m-")) meeting(key.slice(2), "the call they were taken in");
-  return { ...a, images: (set?.shots ?? []).map((s) => ({ url: s.url, caption: s.caption })), links };
+  return null;
+}
+
+/** Moves a doc, a deck or a sketch to a project, or to Unassigned (null). A spec follows its to-do. */
+export function moveArtifact(db: DB, roomId: string, id: string, projectId: string | null, by: string): "ok" | "missing" | "spec" | "project" {
+  const a = spaceArtifacts(db, roomId).artifacts.find((x) => x.id === id);
+  if (!a) return "missing";
+  if (a.kind === "spec") return "spec";
+  if (projectId && !db.listProjects(roomId).some((p) => p.id === projectId && !p.archived)) return "project";
+  db.setArtifactProject(roomId, id, projectId, by);
+  return "ok";
 }
 
 /** Where an artifact opens in the web app. */
