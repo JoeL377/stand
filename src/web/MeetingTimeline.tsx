@@ -75,7 +75,6 @@ export function MeetingTimeline(props: {
                       <span className="tl-card">
                         <span className="tl-name" dir="auto">{nameOf(m)}</span>
                         {kindOf.get(m.id) && m.title && <KindTag name={kindOf.get(m.id)!.name} />}
-                        <span className="tl-len">{minutes(m)} min</span>
                       </span>
                     </Link>
                   </li>
@@ -97,7 +96,6 @@ function KindTag({ name }: { name: string }) {
   return <span className={`tl-kind t-${TONE[name] ?? "review"}`}>{name}</span>;
 }
 
-const minutes = (m: Meeting) => Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
 
 /**
  * The meeting under the pointer, in order of what matters: its name, what was said, what came of it,
