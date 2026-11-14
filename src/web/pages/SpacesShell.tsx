@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { ChevronDown, LayoutGrid, Mic, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { ChevronDown, LayoutGrid, Mic, User, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { ConxtLogo } from "../ConxtLogo.tsx";
@@ -268,6 +268,8 @@ export function PhoneMenu(props: {
   current: { id: string; name: string };
   projects: Array<{ id: string; name: string; pinned: boolean }>;
   openProject: string | null;
+  /** Your own open work in this space, across its projects. */
+  mine: { on: boolean; count: number; open: () => void };
   onProject: (id: string) => void;
   onClose: () => void;
 }) {
@@ -335,6 +337,11 @@ export function PhoneMenu(props: {
           </div>
         )}
         <p className="pm-label">Projects</p>
+        <button type="button" className={props.mine.on ? "pm-row on" : "pm-row"} onClick={go(props.mine.open)}>
+          <User size={16} aria-hidden />
+          <span className="pm-text">Mine</span>
+          {props.mine.count > 0 && <span className="pm-count">{props.mine.count}</span>}
+        </button>
         <button type="button" className={props.openProject === "" ? "pm-row on" : "pm-row"} onClick={go(() => props.onProject(""))}>
           <LayoutGrid size={16} aria-hidden />
           <span className="pm-text">All projects</span>

@@ -671,6 +671,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             current={{ id: room.id, name: room.name }}
             projects={projects.filter((p) => !p.archived).sort((a, b) => Number((room.pinnedProjects ?? []).includes(b.id)) - Number((room.pinnedProjects ?? []).includes(a.id)) || a.position - b.position).map((p) => ({ id: p.id, name: p.name, pinned: (room.pinnedProjects ?? []).includes(p.id) }))}
             openProject={tab === "projects" ? pageOf : null}
+            mine={{ on: mine, count: counts.mine, open: () => pickTab("mine") }}
             onProject={(id) => {
               pickTab("projects");
               setProjectFilter(id);
@@ -681,7 +682,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         {/* On a phone an open project is its own screen: its name above, its own tabs in place of the space's. */}
         {focused && <div className="sh-tabs sh-pj-tabs" ref={setProjectTabs} />}
         <div className="sh-tabs" role="tablist" aria-label="The space" ref={tabsRef}>
-          {TABS.filter((t) => !((wide || phone) && t.key === "chat")).map((t) => (
+          {TABS.filter((t) => !((wide || phone) && t.key === "chat") && !(phone && t.key === "mine")).map((t) => (
             <button
               key={t.key}
               role="tab"

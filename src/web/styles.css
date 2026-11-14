@@ -5420,6 +5420,7 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 .pm-dot.pinned::before { background: var(--muted); }
 .pm .sp-profile-btn { justify-content: flex-start; width: 100%; height: 40px; padding: 0 8px; gap: 10px; }
 .pm .sp-profile-btn .sp-side-text { display: inline; font-size: 15px; }
+.pm-count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .pm-new { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .pm-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 1px; }
 .pm-user { padding: 6px 0 0; }
