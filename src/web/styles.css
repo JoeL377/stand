@@ -4969,7 +4969,7 @@ a.ac-target:hover { text-decoration: underline; }
 .af-card { display: block; width: 100%; height: auto; min-height: 0; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .af-card:hover:not(:disabled), .af-card:focus { background: var(--panel); }
 .af-card:hover:not(:disabled), .af-card:focus-visible { border-color: color-mix(in srgb, var(--text) 28%, var(--line)); }
-.af-card.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.af-card.on, .af-card.on:hover:not(:disabled) { border-color: var(--accent); }
 /* The picture runs to the card's own edges: no frame or colour of ours around it. */
 .af-thumb { position: relative; display: block; height: 148px; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .af-words { display: block; padding: 10px 14px 12px; min-width: 0; }
@@ -5005,15 +5005,18 @@ a.ac-target:hover { text-decoration: underline; }
 .af-chips button.rp-pill { cursor: pointer; }
 .af-chips button.rp-pill:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--line)); }
 .af-maker { color: var(--muted); }
-.af-doc { max-height: min(52dvh, 560px); overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); font-size: 13.5px; }
+/* The text flows down the panel: one scroll, no box of its own. */
+.af-doc { font-size: 13.5px; }
+.af-doc .md th, .af-doc .md td { overflow-wrap: normal; word-break: normal; }
+.af-doc .md th:first-child, .af-doc .md td:first-child { white-space: nowrap; }
 .af-doc .md > :first-child { margin-top: 0; }
 .af-doc .md > :last-child { margin-bottom: 0; }
-.af-doc-thumb { padding: 0; border: 0; background: none; }
 .af-doc-thumb .af-thumb { height: 190px; }
 .af-doc-thumb .af-thumb { border: 1px solid var(--line); border-radius: 10px; }
-.af-shots { display: grid; gap: 12px; }
-.af-shots a { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); text-decoration: none; }
-.af-shots img { width: 100%; border: 1px solid var(--line); border-radius: 8px; }
+.af-shots { display: flex; gap: 8px; margin: 0 0 16px; overflow-x: auto; scrollbar-width: thin; }
+.af-shots a { flex: none; display: block; width: 104px; height: 66px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.af-shots a:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--line)); }
+.af-shots img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .af-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 .af-btn { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: none; font: inherit; font-size: 13px; font-weight: 500; color: var(--text); text-decoration: none; cursor: pointer; }
 .af-btn.primary { border-color: transparent; background: var(--accent); color: #fff; }
@@ -5115,6 +5118,39 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-view button { display: inline-grid; place-items: center; width: 26px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--muted); cursor: pointer; }
 .af-view button:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 .af-view button.on { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+
+/* The panel's top: the title beside Close, then one quiet line and the actions. */
+.af-panel-head { align-items: flex-start; }
+.af-panel-head .td-title { flex: 1; min-width: 0; margin: 0 0 6px; }
+.af-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; margin: 0 0 12px; font-size: 12.5px; color: var(--muted); }
+.af-line > * { display: inline-flex; align-items: center; gap: 6px; }
+.af-line > *:not(:last-child)::after { content: "·"; margin-right: 6px; }
+.af-panel .af-line select { field-sizing: content; width: auto; height: 20px; padding: 0; appearance: auto; border: 0; background: none; box-shadow: none; font: inherit; font-size: inherit; color: inherit; cursor: pointer; }
+.af-line .af-move { padding: 0; }
+.af-line-link { height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; color: inherit; cursor: pointer; }
+.af-line-link:hover:not(:disabled), .af-line .af-move:hover select { background: none; color: var(--text); }
+.af-panel .af-actions { margin: 0 0 16px; }
+.af-panel .af-links { margin-top: 24px; }
+
+/* The side panel is a card like the page beside it: same inset, same border all round, same corners. */
+@media (min-width: 761px) {
+  .task-drawer { top: 8px; right: 8px; bottom: 8px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+}
+@media (min-width: 1360px) {
+  [data-chat-dock] .task-drawer { right: 377px; }
+}
+
+/* The artifact panel follows the page's own rules: it sits beside the page, not over it, on the
+   same ground, with the page's padding and its hairline tables. */
+.af-panel { padding: 16px 24px 0; }
+.af-panel .md table { display: table; width: 100%; }
+.af-panel .md th, .af-panel .md td { padding: 7px 12px 7px 0; border: 0; border-bottom: 1px solid var(--line); }
+.af-panel .md th { background: none; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.af-panel .md tr:last-child td { border-bottom: 0; }
+@media (min-width: 1200px) {
+  .af-panel { background: var(--bg); box-shadow: none; animation: none; }
+  html[data-side-panel]:not([data-chat-dock]) .sp-content { padding-right: calc(min(560px, 100vw) + 16px); }
+}
 
 /* ── Meetings tab: a timeline and a preview ───────────────────────────────────────────────
    People come here to see which meetings happened and what they were about. A line runs down the
