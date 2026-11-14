@@ -117,6 +117,10 @@ export function ArtifactsView(props: {
   projects: Map<string, string>;
   /** Only this project's ("none": Unassigned). Its cards leave the project's name out. */
   project?: string;
+  /** The whole space, under a header per project: the projects in order, "none" for Unassigned last. */
+  groups?: Array<{ id: string; name: string }>;
+  /** A group's header was pressed: its project opens. */
+  onGroup?: (id: string) => void;
   /** Only what this meeting made, as plain rows with no filters. */
   meeting?: string;
   /** The artifact that is open in the panel. */
@@ -153,6 +157,31 @@ export function ArtifactsView(props: {
         {props.project ? "Nothing made in this project yet." : "Nothing here yet. Specs, docs, decks and sketches land here as the space makes them."}
       </p>
     );
+  const cards = (items: Artifact[], inProject: boolean) => (
+      <ul className={phone ? "af-rows" : "af-grid"}>
+        {items.map((a) => {
+          const meta = metaOf(a, projectName, inProject);
+          return (
+            <li key={a.id}>
+              <button type="button" className={props.selected === a.id ? "af-card on" : "af-card"} aria-current={props.selected === a.id ? "true" : undefined} onClick={() => props.onSelect(a.id)}>
+                <Thumb a={a} small={phone} />
+                <span className="af-words">
+                  <span className="af-title" dir="auto" title={a.title}>{a.title}</span>
+                  <span className="af-meta">
+                    {phone && <><Dot kind={a.kind} />{ARTIFACT_NAME[a.kind].one} · </>}
+                    {(phone ? meta.filter((_, i) => i !== 1 || meta.length < 3) : meta).join(" · ")}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+  );
+  // By project, in the space's order, then what is in none. A project with nothing shown is left out.
+  const groups = props.groups
+    ?.map((g) => ({ ...g, items: shown.filter((x) => (g.id === "none" ? !x.projects.length || !props.groups!.some((o) => o.id === x.projects[0]) : x.projects[0] === g.id)) }))
+    .filter((g) => g.items.length > 0);
   return (
     <div className="af">
       {!props.meeting && (kinds.length > 1 || makers.length > 1) && (
@@ -180,25 +209,19 @@ export function ArtifactsView(props: {
           )}
         </div>
       )}
-      <ul className={phone ? "af-rows" : "af-grid"}>
-        {shown.map((a) => {
-          const meta = metaOf(a, projectName, !!props.project);
-          return (
-            <li key={a.id}>
-              <button type="button" className={props.selected === a.id ? "af-card on" : "af-card"} aria-current={props.selected === a.id ? "true" : undefined} onClick={() => props.onSelect(a.id)}>
-                <Thumb a={a} small={phone} />
-                <span className="af-words">
-                  <span className="af-title" dir="auto" title={a.title}>{a.title}</span>
-                  <span className="af-meta">
-                    {phone && <><Dot kind={a.kind} />{ARTIFACT_NAME[a.kind].one} · </>}
-                    {(phone ? meta.filter((_, i) => i !== 1 || meta.length < 3) : meta).join(" · ")}
-                  </span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      {groups
+        ? groups.map((g) => (
+            <section key={g.id} className="af-group" aria-label={g.name}>
+              <h3>
+                <button type="button" className="af-group-name" onClick={() => props.onGroup?.(g.id)}>
+                  <span dir="auto">{g.name}</span>
+                  <span className="muted">{g.items.length}</span>
+                </button>
+              </h3>
+              {cards(g.items, true)}
+            </section>
+          ))
+        : cards(shown, !!props.project)}
     </div>
   );
 }

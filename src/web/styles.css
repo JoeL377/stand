@@ -5098,3 +5098,15 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .af-panel .af-chips .af-move select { font-size: inherit; }
 .af-links-title { margin: 18px 0 8px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .af-move:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--line)); }
+
+/* The Artifacts tab: the same cards under one quiet line per project. The line opens the project. */
+.af-group + .af-group { margin-top: 22px; }
+.af-group h3 { margin: 0 0 10px; font-size: inherit; font-weight: inherit; }
+.af-group-name { display: inline-flex; align-items: baseline; gap: 8px; height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
+.af-group-name:hover:not(:disabled), .af-group-name:focus-visible { background: none; text-decoration: underline; text-underline-offset: 3px; }
+.af-group-name .muted { font-size: 12.5px; font-weight: 400; }
+@media (max-width: 720px) {
+  .af-group + .af-group { margin-top: 14px; }
+  .af-group h3 { margin-bottom: 2px; }
+  .af-bar + .af-group { margin-top: 12px; }
+}
