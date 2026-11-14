@@ -10,8 +10,8 @@ type Meeting = SpaceFeed["meetings"][number];
 type Kind = { name: string; open: string; to: string };
 
 /**
- * The space's meetings as a timeline: a line down the left with a point for each meeting and only
- * its name beside it, under the day it happened. The one under the pointer (the latest, to begin
+ * The space's meetings as a timeline: a line down the left with a point for each meeting and a slim
+ * card of its name beside it, under the day it happened. The one under the pointer (the latest, to begin
  * with) shows on the right: when, who talked, what came out of it and the way in. A list of names
  * to scan, and one summary to read at a time. A phone has the line alone.
  */
@@ -74,8 +74,10 @@ export function MeetingTimeline(props: {
                   <li key={m.id} className={`tl-row${m.id === shown?.id && !props.phone ? " on" : ""}${missed ? " missed" : ""}${short ? " short" : ""}`}>
                     <Link to={`/meetings/${m.id}`} onMouseEnter={() => setPicked(m.id)} onFocus={() => setPicked(m.id)}>
                       <span className="tl-dot" title={missed ? "You weren't in this one" : undefined} />
-                      <span className="tl-name" dir="auto">{nameOf(m)}</span>
-                      <span className="tl-len">{minutes(m)} min</span>
+                      <span className="tl-card">
+                        <span className="tl-name" dir="auto">{nameOf(m)}</span>
+                        <span className="tl-len">{minutes(m)} min</span>
+                      </span>
                     </Link>
                   </li>
                 );
