@@ -35,7 +35,7 @@ import { matchesSearch, whenLabel } from "../meetingList.ts";
 import { MeetingTimeline } from "../MeetingTimeline.tsx";
 import { ModeNote } from "./RoomPage.tsx";
 import { brainstormHref } from "./brainstormHref.ts";
-import { VerdictCounts, designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
+import { designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
 import { OutcomeCounts, reviewHref } from "./ReviewPage.tsx";
 import { ShotZoom } from "../room/ReviewStage.tsx";
 import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
@@ -125,7 +125,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const setProjectFilter = (value: string) => setParam("project", value);
   // The tab someone last looked at in this space; a new space opens on Tasks, and so does a link to a task.
   const [showReview, setShowReview] = useState(false);
-  const [kind, setKind] = useState<"" | "review" | "design" | "brainstorm" | "session" | "notes">("");
+  const [kind, setKind] = useState<MeetingKind | "">("");
   // Nothing saved: Projects when the space has any, otherwise Tasks.
   const [picked, setTab] = useState<TabKey | "">(() => {
     if (openTask) return "projects";
@@ -399,14 +399,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const ran = (feed?.brainstorms ?? []).filter((b) => b.status === "done");
   const brainstorms = ran.filter((b) => !b.design);
   const sessions = ran.filter((b) => b.design);
-  const kinds = [
-    { key: "review" as const, label: "Product reviews", n: reviews.length },
-    { key: "design" as const, label: "Design reviews", n: designReviews.length },
-    { key: "brainstorm" as const, label: "Brainstorms", n: brainstorms.length },
-    { key: "session" as const, label: "Design sessions", n: sessions.length },
-    // What people saved from the bar between calls: off the meeting cards, one pill away.
-    { key: "notes" as const, label: "Notes", n: feed ? feed.captures.filter((x) => !gone.has(`snap:${x.id}`)).length + (feed.jots ?? []).filter((x) => !gone.has(`jot:${x.id}`)).length : 0 },
-  ].filter((k) => k.n > 0);
   /** What a meeting was, with the page it left behind. */
   const kindOf = new Map<string, { name: string; open: string; to: string }>();
   for (const b of brainstorms) if (b.meetingId) kindOf.set(b.meetingId, { name: "Brainstorm", open: "Sketch", to: brainstormHref(room.id, b.id) });
@@ -414,6 +406,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   for (const r of designReviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Design review", open: "Spec", to: designRecordHref(room.id, r.id) });
   for (const r of reviews) if (r.meetingId) kindOf.set(r.meetingId, { name: "Product review", open: "Deck", to: reviewHref(room.id, r.id) });
   for (const r of feed?.ideaReviews ?? []) if (r.meetingId && r.status === "done") kindOf.set(r.meetingId, { name: "Idea review", open: "Ideas", to: reviewHref(room.id, r.id) });
+  /** The kinds the filter beside search offers: each a kind of call, counted by the meetings it ran in. */
+  const KIND_NAME = { review: "Product review", design: "Design review", brainstorm: "Brainstorm", session: "Design session" } as const;
+  const ofKind = (k: keyof typeof KIND_NAME) => meetings.filter((m) => kindOf.get(m.id)?.name === KIND_NAME[k]).length;
+  const kinds = [
+    { key: "review" as const, label: "Product reviews", n: ofKind("review") },
+    { key: "design" as const, label: "Design reviews", n: ofKind("design") },
+    { key: "brainstorm" as const, label: "Brainstorms", n: ofKind("brainstorm") },
+    { key: "session" as const, label: "Design sessions", n: ofKind("session") },
+    // What people saved from the bar between calls: off the timeline, one pick away.
+    { key: "notes" as const, label: "Notes", n: feed ? feed.captures.filter((x) => !gone.has(`snap:${x.id}`)).length + (feed.jots ?? []).filter((x) => !gone.has(`jot:${x.id}`)).length : 0 },
+  ].filter((k) => k.n > 0);
   const startReview = async () => {
     try {
       await api.startReview(room.id);
@@ -448,7 +451,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
       : e.kind === "jot"
         ? matchesSearch(search, [e.jot.text, e.jot.by])
         : matchesSearch(search, [e.snap.line, e.snap.caption, e.snap.takenBy]);
-  const shownMeetings = searching ? meetings.filter((m) => found({ kind: "meeting", at: m.endedAt, meeting: m })) : meetings;
+  const shownMeetings = meetings.filter(
+    (m) => (!searching || found({ kind: "meeting", at: m.endedAt, meeting: m })) && (!kind || kind === "notes" || kindOf.get(m.id)?.name === KIND_NAME[kind]),
+  );
   const notes = entries.filter((e) => e.kind !== "meeting" && (!searching || found(e)));
 
   // The open project's name, shown after "Projects" in the tab row as the way back.
@@ -467,8 +472,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
     if (a === "projects" && b === "projects") return from && !to ? { x: -12 } : { x: 12 };
     return { y: 4 };
   });
-  // On Meetings, another kind (All, Product reviews, Brainstorms…) fades its list in; the pills and
-  // the Start button stay put.
+  // On Meetings, another kind (All, Product reviews, Brainstorms…) fades its list in; the search,
+  // filter and Start button stay put.
   const shownKind = useRef(kind);
   useLayoutEffect(() => {
     if (shownKind.current === kind) return;
@@ -668,21 +673,11 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     aria-label="Search meetings"
                     onChange={(e) => {
                       setSearch(e.target.value);
-                      if (kind && kind !== "notes") setKind("");
                     }}
                     onKeyDown={(e) => e.key === "Escape" && setSearch("")}
                   />
                 </label>
-                {kinds.length > 0 && (
-                <div className="sh-kinds" role="group" aria-label="Kind of meeting">
-                  {[{ key: "" as const, label: "All", n: 0 }, ...kinds].map((k) => (
-                    <button key={k.key} type="button" className={kind === k.key ? "rp-pill on" : "rp-pill"} aria-pressed={kind === k.key} onClick={() => setKind(k.key)}>
-                      {k.label}
-                      {k.n > 0 && <span className="muted">{k.n}</span>}
-                    </button>
-                  ))}
-                </div>
-                )}
+                {kinds.length > 0 && <KindFilter kinds={kinds} kind={kind} onPick={setKind} />}
                 <StartMenu
                   label={wrapping ? "Join" : live ? "Join them" : "Start talking"}
                   review={feed?.review ?? null}
@@ -693,40 +688,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                   onReview={() => setShowReview(true)}
                 />
               </div>
-              {kind && (
-                <ul className="sh-rows">
-                  {kind === "review" &&
-                    reviews.map((r) => (
-                      <KindRow key={r.id} to={reviewHref(room.id, r.id)} name="Product review" at={r.startedAt}>
-                        <span className="sh-what" dir="auto">{reviewName(r.titles ?? [], r.slides)}</span>
-                        <span className="sh-what sh-count muted">{r.slides} {r.slides === 1 ? "slide" : "slides"}</span>
-                        <OutcomeCounts outcomes={r.outcomes} />
-                      </KindRow>
-                    ))}
-                  {kind === "design" &&
-                    designReviews.map((r) => (
-                      <KindRow key={r.id} to={designRecordHref(room.id, r.id)} name="Design review" at={r.startedAt}>
-                        <span className="sh-what muted" dir="auto">{r.titles.join(" · ")}</span>
-                        <VerdictCounts verdicts={r.verdicts} />
-                      </KindRow>
-                    ))}
-                  {kind === "session" &&
-                    sessions.map((b) => (
-                      <KindRow key={b.id} to={brainstormHref(room.id, b.id)} name="Design session" at={b.startedAt}>
-                        <span className="sh-what muted" dir="auto">{b.prompt}</span>
-                        <span className="sh-what muted">{b.design!.boxes} {b.design!.boxes === 1 ? "part" : "parts"}</span>
-                      </KindRow>
-                    ))}
-                  {kind === "brainstorm" &&
-                    brainstorms.map((b) => (
-                      <KindRow key={b.id} to={brainstormHref(room.id, b.id)} name="Brainstorm" at={b.startedAt}>
-                        <span className="sh-what muted" dir="auto">{b.prompt}</span>
-                        <span className="sh-what muted">{b.ideas} {b.ideas === 1 ? "idea" : "ideas"}</span>
-                      </KindRow>
-                    ))}
-                </ul>
-              )}
-              {(kind === "notes" ? !notes.length : !kind && !shownMeetings.length) && searching && <p className="mt-none muted">Nothing matches “{search.trim()}”.</p>}
+              {(kind === "notes" ? !notes.length : !shownMeetings.length) && searching && <p className="mt-none muted">Nothing matches “{search.trim()}”.</p>}
               {kind === "notes" && (
                 <ul className="sh-rows mt-notes">
                   {notes.map((e) =>
@@ -757,7 +719,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                   )}
                 </ul>
               )}
-              {!kind && shownMeetings.length > 0 && (
+              {kind !== "notes" && shownMeetings.length > 0 && (
                 <MeetingTimeline meetings={shownMeetings} kindOf={kindOf} madeIn={madeIn} me={user.name} phone={phone} showShort={searching} onArchive={(id) => archive(`meeting:${id}`)} />
               )}
             </>
@@ -1134,6 +1096,62 @@ function ItemPill(props: {
     </span>
   );
 }
+
+type MeetingKind = "review" | "design" | "brainstorm" | "session" | "notes";
+
+/**
+ * One small button beside search that narrows the Meetings tab to one kind (or to the notes saved
+ * from the bar). Off, it is an icon; on, it names the kind and clears with a tap on its ×.
+ */
+function KindFilter(props: { kinds: Array<{ key: MeetingKind; label: string; n: number }>; kind: MeetingKind | ""; onPick: (k: MeetingKind | "") => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const on = props.kinds.find((k) => k.key === props.kind);
+  const pick = (k: MeetingKind | "") => {
+    setOpen(false);
+    props.onPick(k);
+  };
+  return (
+    <div className="mt-filter" ref={box}>
+      <button
+        type="button"
+        className={on ? "mt-filter-btn on" : "mt-filter-btn"}
+        aria-label={on ? `Showing ${on.label}. Change filter` : "Filter meetings"}
+        title={on ? undefined : "Filter"}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <FilterIcon />
+        {on && <span>{on.label}</span>}
+      </button>
+      {on && (
+        <button type="button" className="mt-filter-clear" aria-label="Show all meetings" title="Show all" onClick={() => pick("")}>
+          <CloseIcon size={12} />
+        </button>
+      )}
+      {open && (
+        <div className="rp-menu mt-filter-menu" role="menu">
+          <button type="button" role="menuitemradio" aria-checked={!on} className={on ? "" : "on"} onClick={() => pick("")}>
+            <strong>All meetings</strong>
+          </button>
+          {props.kinds.map((k) => (
+            <button key={k.key} type="button" role="menuitemradio" aria-checked={k.key === props.kind} className={k.key === props.kind ? "on" : ""} onClick={() => pick(k.key)}>
+              <strong>{k.label}</strong>
+              <span className="muted">{k.n}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const FilterIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+    <path d="M4 7h16M7 12h10M10 17h4" />
+  </svg>
+);
 
 const SearchIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -2438,25 +2456,6 @@ export function DesignSessionPop(props: { todos: Array<{ id: string; text: strin
 
 /** A review or brainstorm that ran, as a row that opens its page. */
 /** A product review has no name of its own: its first slides say which one it is. */
-const reviewName = (titles: Array<string | null | undefined>, slides: number) => {
-  const shown = titles.map((t) => (t ?? "").trim()).filter(Boolean).slice(0, 3);
-  return shown.join(" · ") + (slides > shown.length && shown.length ? ` +${slides - shown.length}` : "");
-};
-
-function KindRow(props: { to: string; name: string; at: number | null; children: React.ReactNode }) {
-  return (
-    <li className="sh-row">
-      <Link to={props.to} className="sh-row-link">
-        <time className="sh-time">{reviewDay(props.at)}</time>
-        <span className="sh-row-text">
-          <span className="sh-who">{props.name}</span>
-          {props.children}
-        </span>
-      </Link>
-    </li>
-  );
-}
-
 /** The next product review's slides, and the button that starts the call on the first one. */
 const reviewDay = (ts: number | null) => (ts ? fmtDay(ts) : "");
 

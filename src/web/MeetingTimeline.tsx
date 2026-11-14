@@ -76,6 +76,7 @@ export function MeetingTimeline(props: {
                       <span className="tl-dot" title={missed ? "You weren't in this one" : undefined} />
                       <span className="tl-card">
                         <span className="tl-name" dir="auto">{nameOf(m)}</span>
+                        {kindOf.get(m.id) && m.title && <KindTag name={kindOf.get(m.id)!.name} />}
                         <span className="tl-len">{minutes(m)} min</span>
                       </span>
                     </Link>
@@ -89,6 +90,13 @@ export function MeetingTimeline(props: {
       {!props.phone && shown && <Preview m={shown} name={nameOf(shown)} kind={kindOf.get(shown.id)} me={props.me} onArchive={() => props.onArchive(shown.id)} />}
     </div>
   );
+}
+
+/** Each kind of call keeps its own color, so a review or a brainstorm stands out in the line. */
+const TONE: Record<string, string> = { "Product review": "review", "Design review": "design", "Design session": "design", Brainstorm: "brainstorm", "Idea review": "idea" };
+
+function KindTag({ name }: { name: string }) {
+  return <span className={`tl-kind t-${TONE[name] ?? "review"}`}>{name}</span>;
 }
 
 const minutes = (m: Meeting) => Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
@@ -105,6 +113,7 @@ function Preview({ m, name, kind, me, onArchive }: { m: Meeting; name: string; k
   return (
     <aside className="tl-preview" key={m.id} aria-live="polite">
       <p className="tl-meta">
+        {kind && name !== kind.name && <KindTag name={kind.name} />}
         {fmtDate(m.endedAt)} · {fmtTime(m.startedAt)} · {minutes(m)} min
       </p>
       <h2 dir="auto">{name}</h2>
