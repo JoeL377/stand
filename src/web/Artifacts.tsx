@@ -141,10 +141,26 @@ export function ArtifactsView(props: {
   /** The artifact that is open in the panel. */
   selected: string | null;
   onSelect: (id: string) => void;
+  /** A key to keep its filters under, so they are as they were when it shows again. */
+  remember?: string;
 }) {
   const phone = usePhone() || !!props.meeting;
-  const [kind, setKind] = useState<ArtifactKind | "">("");
-  const [maker, setMaker] = useState("");
+  const filtersKey = props.remember && `${props.remember}.filters`;
+  const saved = useMemo(() => {
+    try {
+      return filtersKey ? (JSON.parse(sessionStorage.getItem(filtersKey) ?? "{}") as { kind?: ArtifactKind | ""; maker?: string }) : {};
+    } catch {
+      return {};
+    }
+  }, [filtersKey]);
+  const [kind, setKind] = useState<ArtifactKind | "">(saved.kind ?? "");
+  const [maker, setMaker] = useState(saved.maker ?? "");
+  useEffect(() => {
+    if (!filtersKey) return;
+    try {
+      sessionStorage.setItem(filtersKey, JSON.stringify({ kind, maker }));
+    } catch {}
+  }, [filtersKey, kind, maker]);
   const [grouped, setGrouped] = useState(savedGrouped);
   const pickGrouped = (on: boolean) => {
     setGrouped(on);

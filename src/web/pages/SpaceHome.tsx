@@ -463,6 +463,45 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const backHere = { to: `${window.location.pathname}${window.location.search}`, label: crumb ?? TABS.find((t) => t.key === tab)?.label ?? room.name };
   // Every card opens the panel; its Full button goes to the artifact's own page.
   const pickArtifact = showArtifact;
+  // The Artifacts tab keeps its place: leaving it closes the artifact open over it, and coming back opens that
+  // artifact again at the same scroll, for this space, until the browser tab closes.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const placeKey = `stand.artifactsPlace.${room.id}`;
+  const lastTab = useRef<TabKey | null>(null);
+  useEffect(() => {
+    const was = lastTab.current;
+    lastTab.current = tab;
+    if (tab === "artifacts") {
+      if (was !== "artifacts" && !openArtifact) {
+        const id = readPlace(placeKey).artifact;
+        if (id && (!made.artifacts || made.artifacts.some((a) => a.id === id))) {
+          setParams((prev) => {
+            const next = new URLSearchParams(prev); next.set("artifact", id); return next;
+          }, { replace: true });
+          return;
+        }
+      }
+      writePlace(placeKey, { artifact: openArtifact });
+    } else if (was === "artifacts" && openArtifact) closeArtifact();
+  }, [tab, openArtifact]);
+  // The list scrolls in its own box, or with the whole page on a phone.
+  const scroller = () => (bodyRef.current && getComputedStyle(bodyRef.current).display !== "contents" ? bodyRef.current : document.scrollingElement);
+  const tabNow = useRef(tab);
+  tabNow.current = tab;
+  useEffect(() => {
+    if (tab !== "artifacts") return;
+    const onScroll = (e: Event) => {
+      const el = scroller();
+      if (tabNow.current !== "artifacts" || !el || (e.target !== el && e.target !== document)) return;
+      writePlace(placeKey, { scroll: el.scrollTop });
+    };
+    document.addEventListener("scroll", onScroll, true);
+    return () => document.removeEventListener("scroll", onScroll, true);
+  }, [tab, placeKey]);
+  useLayoutEffect(() => {
+    const el = scroller();
+    if (tab === "artifacts" && el) el.scrollTop = readPlace(placeKey).scroll ?? 0;
+  }, [tab, placeKey, !!made.artifacts]);
 
   // Moving around the page: the line under the tabs slides to the one picked, and the panel
   // below comes in. Into a project it comes from the right, and back out to all projects from
@@ -616,7 +655,13 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
         </div>
         </div>
         {/* The lists scroll in here, under the header, which is a fixed part of the page. */}
-        <div className={tab === "chat" ? "sh-body chat" : "sh-body"} onScroll={(e) => e.currentTarget.previousElementSibling?.classList.toggle("over", e.currentTarget.scrollTop > 2)}>
+        <div
+          ref={bodyRef}
+          className={tab === "chat" ? "sh-body chat" : "sh-body"}
+          onScroll={(e) => {
+            e.currentTarget.previousElementSibling?.classList.toggle("over", e.currentTarget.scrollTop > 2);
+          }}
+        >
 
         {showReview && feed?.review && (
           <ReviewPop roomId={room.id} review={feed.review} reviews={reviews} onStart={startReview} onRemove={removeSlide} onClose={() => setShowReview(false)} />
@@ -633,6 +678,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             <ArtifactsView
               artifacts={made.artifacts}
               error={made.error}
+              remember={placeKey}
               projects={projectNames}
               groups={hasProjects ? [...projects.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name })), { id: "none", name: "Unassigned" }] : undefined}
               onGroup={(id) => {
@@ -2892,4 +2938,19 @@ function SnapView(props: {
       </div>
     </div>
   );
+}
+
+/** Where someone was on a space's Artifacts tab: the artifact open over it and how far down it was. */
+type ArtifactsPlace = { artifact?: string | null; scroll?: number };
+function readPlace(key: string): ArtifactsPlace {
+  try {
+    return JSON.parse(sessionStorage.getItem(key) ?? "{}") as ArtifactsPlace;
+  } catch {
+    return {};
+  }
+}
+function writePlace(key: string, part: ArtifactsPlace) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ ...readPlace(key), ...part }));
+  } catch {}
 }
