@@ -407,15 +407,14 @@ export function ArtifactPanel(props: {
     api.requestDesignReview(taskId).then((s) => setQueued(s.queued), () => setQueued(false));
   };
 
-  // On a phone the top is ranked: who made it and when, its project, then the way to the whole of it, on
-  // one line; the kind (the button names it), the clock time and the call link wait for a wider screen.
+  // On a phone the top is only what it takes to place it and open it: its project and the way to the whole
+  // of it, on one line. Who made it, when, the kind, screenshots and where it came up wait for a wider screen.
   const phone = usePhone();
   const full = a && (a.href ? (
     <Link className="af-btn primary" to={a.href} state={props.back ? { back: props.back } : undefined}>Full {a.kind}</Link>
   ) : (
     a.kind === "spec" && taskId ? <button type="button" className="af-btn primary" onClick={() => props.onOpenSpec(taskId)}>Full spec</button> : null
   ));
-  const when = a ? (versions[at]?.ts ?? a.ts) : 0;
   return (
     <aside className={`task-drawer td-panel af-panel${swapped ? " af-swap" : ""}${a?.kind === "sketch" && !body ? " af-bleed" : ""}`} role="complementary" aria-label="Artifact">
       <PanelResizer />
@@ -439,20 +438,8 @@ export function ArtifactPanel(props: {
         {a && (
           <>
             {phone ? (
-              <div className="af-top">
+              (full || a.projects.some((p) => props.projects.get(p))) && <div className="af-top">
                 <p className="af-line af-line-phone">
-                  {a.makers.length > 0 ? <span>{a.owner ?? ownerLine(a.makers)}</span> : a.origin && <span>{a.origin}</span>}
-                  <span>{whenLabel(when)}</span>
-                  {versions.length > 1 && (
-                    <label>
-                      <span className="sr-only">Version</span>
-                      <select value={at} onChange={(e) => setVersion(Number(e.target.value))}>
-                        {versions.map((v, i) => (
-                          <option key={v.id} value={i}>{`v${i + 1}`}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
                   {a.projects.map((p) => props.projects.get(p) && (
                     <span key={p} className="af-proj"><button type="button" className="af-line-link" onClick={() => props.onProject(p)}>{props.projects.get(p)}</button></span>
                   ))}
@@ -500,7 +487,7 @@ export function ArtifactPanel(props: {
             {full && <div className="af-actions">{full}</div>}
             </>
             )}
-            {!!detail?.images?.length && (
+            {!phone && !!detail?.images?.length && (
               <div className="af-shots" role="group" aria-label="Screenshots">
                 {detail.images.map((im, i) => (
                   <a key={i} href={im.url} target="_blank" rel="noreferrer" title={im.caption ?? "Screenshot"}>
@@ -528,7 +515,7 @@ export function ArtifactPanel(props: {
                 ))}
               </section>
             )}
-            {cameUp.length > 0 && (
+            {!phone && cameUp.length > 0 && (
               <section className="af-links" aria-label="Where it came up">
                 <h3>Where it came up</h3>
                 {cameUp.map((l, i) => (

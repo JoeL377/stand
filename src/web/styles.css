@@ -5363,3 +5363,4 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
   .af-panel .af-shots a { width: 76px; height: 48px; }
   .af-panel .af-shots { margin-bottom: 12px; }
 }
+.af-top .af-line:empty { display: none; }
