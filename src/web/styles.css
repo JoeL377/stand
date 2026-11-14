@@ -4653,6 +4653,8 @@ footer.controls .control.pill { padding: 7px 16px; }
 .pp-group li > button:hover:not(:disabled) { color: var(--accent-text); }
 .pp-group li > span:first-child { flex: 1; min-width: 0; }
 .pp-owner { flex: none; color: var(--muted); font-size: 12px; }
+/* What is already done sits under the open work, quieter. */
+.pp-group.done li { color: var(--muted); font-size: 14px; padding: 4px 0; }
 .task-picker-list .tp-kind { margin: 8px 10px 2px; font-size: 11px; font-weight: 600; color: var(--muted); }
 @media (max-width: 700px) {
   .pp-body:has(.pp-side) { grid-template-columns: minmax(0, 1fr); }

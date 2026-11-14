@@ -1912,7 +1912,17 @@ function TasksTab(props: {
               })()}
               {props.show === "tasks" && (
                 <>
-                  {todos.length > 0 ? byState(todos, viewing) : <p className="sh-card-empty">No open to-dos.</p>}
+                  {todos.length > 0 ? (
+                    byState(todos, viewing)
+                  ) : closedOf("action").done.length > 0 ? (
+                    // All its work is done: the done to-dos show here rather than an empty page.
+                    <>
+                      <p className="sh-card-empty">Nothing open. Done:</p>
+                      <div className="sh-task-group pj-state done">{list(closedOf("action").done, true)}</div>
+                    </>
+                  ) : (
+                    <p className="sh-card-empty">No open to-dos.</p>
+                  )}
                 </>
               )}
               {props.show === "done" &&
