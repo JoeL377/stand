@@ -384,7 +384,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const pageOf = !hasProjects ? "none" : filtered ? "" : projectFilter;
   const inProject = (n: Note) => !hasProjects || matchesProject(n.project ?? null, pageOf);
   const shown = params.get("show");
-  const show: ProjectShow = shown === "questions" || shown === "decisions" || shown === "artifacts" || shown === "done" ? shown : "tasks";
+  const show: ProjectShow = shown === "questions" || shown === "decisions" || shown === "artifacts" ? shown : "tasks";
   const projectNames = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
   // The decks and sketches each meeting made.
   const madeIn = useMemo(() => {
@@ -1890,8 +1890,6 @@ function TasksTab(props: {
             { key: "questions", label: "Questions", n: asked.length, icon: <QuestionIcon size={13} /> },
             { key: "decisions", label: "Decisions", n: props.decisionCount, icon: <DecidedIcon size={13} /> },
             { key: "artifacts", label: "Artifacts", n: props.artifactCount, icon: <ArtifactsIcon /> },
-            // Finished to-dos are their own last view, so Tasks is only what is still open.
-            { key: "done", label: "Done", n: closedOf("action").done.length, icon: <DoneIcon /> },
           ];
           return (
             <section ref={pageRef} className="sh-project open pj-page" aria-label={props.solo ? "Everything" : viewing ? (nameOf(viewing) ?? "Project") : "Unassigned"}>
@@ -1912,34 +1910,27 @@ function TasksTab(props: {
               })()}
               {props.show === "tasks" && (
                 <>
+                  {/* What is done sits folded under what is open; with nothing open, it is the list. */}
                   {todos.length > 0 ? (
-                    byState(todos, viewing)
-                  ) : closedOf("action").done.length > 0 ? (
-                    // All its work is done: the done to-dos show here rather than an empty page.
                     <>
-                      <p className="sh-card-empty">Nothing open. Done:</p>
-                      <div className="sh-task-group pj-state done">{list(closedOf("action").done, true)}</div>
+                      {byState(todos, viewing)}
+                      {folds("action")}
                     </>
-                  ) : (
-                    <p className="sh-card-empty">No open to-dos.</p>
-                  )}
-                </>
-              )}
-              {props.show === "done" &&
-                (() => {
-                  const c = closedOf("action");
-                  return (
+                  ) : closedOf("action").done.length > 0 ? (
                     <>
-                      {c.done.length > 0 ? <div className="sh-task-group pj-state done">{list(c.done, true)}</div> : <p className="sh-card-empty">Nothing done yet.</p>}
-                      {c.dropped.length > 0 && (
+                      <div className="sh-task-group pj-state done">{list(closedOf("action").done, true)}</div>
+                      {closedOf("action").dropped.length > 0 && (
                         <div className={showDropped ? "sh-done open" : "sh-done"}>
-                          {fold("Dropped", c.dropped.length, showDropped, () => setShowDropped((v) => !v), <CloseIcon size={13} />)}
-                          {showDropped && list(c.dropped, true)}
+                          {fold("Dropped", closedOf("action").dropped.length, showDropped, () => setShowDropped((v) => !v), <CloseIcon size={13} />)}
+                          {showDropped && list(closedOf("action").dropped, true)}
                         </div>
                       )}
                     </>
-                  );
-                })()}
+                  ) : (
+                    <p className="sh-card-empty">No to-dos yet.</p>
+                  )}
+                </>
+              )}
               {props.show === "questions" && (
                 <>
                   {asked.length > 0 ? <div className="sh-task-group pj-state questions">{list(asked, false, viewing)}</div> : <p className="sh-card-empty">No open questions.</p>}
@@ -2659,7 +2650,7 @@ const ArtifactsIcon = () => (
 
 type TabKey = "projects" | "chat" | "meetings" | "artifacts" | "mine" | "activity";
 /** What a project's page lists: one kind at a time. */
-type ProjectShow = "tasks" | "questions" | "decisions" | "artifacts" | "done";
+type ProjectShow = "tasks" | "questions" | "decisions" | "artifacts";
 /** The space's tabs, in the order people look at them. */
 /** Shows on a row while the pointer is on it (always on touch screens). */
 function ArchiveButton({ onClick }: { onClick: () => void }) {
