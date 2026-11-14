@@ -1542,8 +1542,9 @@ function TasksTab(props: {
     return first ? { text: first.text, face: face(first), more: more.length, onOpen: () => props.onOpen(first.id) } : undefined;
   };
 
-  const grid = !phone;
-  /** One project in the list: a card on a wide screen, a row that opens in place on a phone. */
+  // The projects are cards on every screen: side by side on a wide one, one under the other on a phone.
+  const grid = true;
+  /** One project in the list, as a card. */
   const projectSection = (p: Project) => {
     const i = sections.indexOf(p);
     const drop = dropAt?.id === p.id && dragging !== p.id ? (dropAt.after ? " drop-after" : " drop-before") : "";
@@ -1805,7 +1806,7 @@ function TasksTab(props: {
         })()
       ) : (
         <>
-          {/* A wide screen has the projects as cards, your pinned ones in a first group; a phone has rows that open in place. */}
+          {/* The projects as cards, your pinned ones in a first group. */}
           {grid && pins.size > 0 && <div className="pj-grid pinned" style={holding}>{sections.filter((p) => pins.has(p.id)).map(projectSection)}</div>}
           <div className={grid ? "pj-grid" : "pj-list"} style={holding}>
             {sections.filter((p) => !grid || !pins.has(p.id)).map(projectSection)}
