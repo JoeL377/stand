@@ -530,6 +530,13 @@ CREATE TABLE IF NOT EXISTS project_pins (
   project_id TEXT NOT NULL,
   PRIMARY KEY (room_id, user_id, project_id)
 );
+-- The artifacts someone pinned in a space: theirs alone, first on their Artifacts tab.
+CREATE TABLE IF NOT EXISTS artifact_pins (
+  room_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id, artifact_id)
+);
 `;
 
 /** Makes the tables a new database needs, and adds what later versions added to an older one.

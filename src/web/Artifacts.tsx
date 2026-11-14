@@ -1,7 +1,8 @@
 // Artifacts: the things a space made that people open again (shared/artifacts.ts). The space's
 // Artifacts tab and a project's Artifacts list are the same grid: a card is a small picture of the
 // thing, its name and one quiet line. A card opens a panel beside the grid with the whole of it and
-// what it is tied to. On a phone the grid is one-line rows.
+// what it is tied to. On a phone the grid is two cards a row; a meeting's list is one-line rows.
+// Anyone can pin an artifact for themselves: pinned ones come first, for them alone.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -11,7 +12,7 @@ import { ARTIFACT_KINDS, ARTIFACT_NAME, type Artifact, type ArtifactDetail, type
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { api } from "./api.ts";
-import { CloseIcon } from "./icons.tsx";
+import { CloseIcon, PinIcon } from "./icons.tsx";
 import { usePhone } from "./phone.ts";
 import { fmtDay, fmtTime } from "./util.ts";
 
@@ -25,13 +26,15 @@ const REFRESH_MS = 60_000;
 const DAY = 86_400_000;
 
 /** The space's artifacts, read once and again every so often while the page is in view. */
-export function useArtifacts(roomId: string): { artifacts: Artifact[] | null; error: string; reload: () => void } {
+export function useArtifacts(roomId: string): { artifacts: Artifact[] | null; error: string; reload: () => void; pinned: string[]; pin: (id: string, on: boolean) => void } {
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
+  const [pinned, setPinned] = useState<string[]>([]);
   const [error, setError] = useState("");
   const reload = useCallback(() => {
     api.artifacts(roomId).then(
       (l) => {
         setArtifacts(l.artifacts);
+        setPinned(l.pinned ?? []);
         setError("");
       },
       (e: Error) => setError(e.message),
@@ -43,7 +46,18 @@ export function useArtifacts(roomId: string): { artifacts: Artifact[] | null; er
     const t = setInterval(() => document.visibilityState === "visible" && reload(), REFRESH_MS);
     return () => clearInterval(t);
   }, [reload]);
-  return { artifacts, error, reload };
+  // A pin shows at once and saves behind it; if the save fails it goes back.
+  const pin = useCallback(
+    (id: string, on: boolean) => {
+      setPinned((was) => (on ? [id, ...was.filter((x) => x !== id)] : was.filter((x) => x !== id)));
+      api.pinArtifact(roomId, id, on).then(
+        (r) => setPinned(r.pinned),
+        () => reload(),
+      );
+    },
+    [roomId, reload],
+  );
+  return { artifacts, error, reload, pinned, pin };
 }
 
 const dayStart = (ts: number) => new Date(ts).setHours(0, 0, 0, 0);
@@ -73,7 +87,8 @@ function SketchGlyph({ drawn }: { drawn: "map" | "diagram" }) {
 }
 
 /** The small picture of an artifact: its own text, pictures or slides where it has them. */
-function Thumb({ a, small }: { a: Artifact; small?: boolean }) {
+/** small: a row's tiny picture (one slide, no title). bare: no title in the picture, it is right under it. */
+function Thumb({ a, small, bare }: { a: Artifact; small?: boolean; bare?: boolean }) {
   const p = a.preview;
   return (
     <span className={`af-thumb k-${a.kind}`}>
@@ -91,7 +106,7 @@ function Thumb({ a, small }: { a: Artifact; small?: boolean }) {
         </span>
       ) : (
         <span className="af-text">
-          {!small && <span className="af-text-title">{a.title}</span>}
+          {!small && !bare && <span className="af-text-title">{a.title}</span>}
           {p.text && <span className="af-text-body">{p.text}</span>}
         </span>
       )}
@@ -143,8 +158,12 @@ export function ArtifactsView(props: {
   onSelect: (id: string) => void;
   /** A key to keep its filters under, so they are as they were when it shows again. */
   remember?: string;
+  /** What the person looking pinned, newest pin first: those come first. */
+  pinned?: string[];
+  onPin?: (id: string, on: boolean) => void;
 }) {
-  const phone = usePhone() || !!props.meeting;
+  const phone = usePhone();
+  const rows = !!props.meeting;
   const filtersKey = props.remember && `${props.remember}.filters`;
   const saved = useMemo(() => {
     try {
@@ -183,7 +202,13 @@ export function ArtifactsView(props: {
   useEffect(() => {
     if (maker && props.artifacts && !makers.some((m) => m.key === maker)) setMaker("");
   }, [maker, makers, props.artifacts]);
-  const shown = kind ? byMaker.filter((a) => a.kind === kind) : byMaker;
+  // Pinned first, newest pin first, then the rest newest first.
+  const pinOrder = useMemo(() => new Map((props.pinned ?? []).map((id, i) => [id, i])), [props.pinned]);
+  const shown = useMemo(() => {
+    const list = kind ? byMaker.filter((a) => a.kind === kind) : byMaker;
+    if (!pinOrder.size) return list;
+    return [...list.filter((a) => pinOrder.has(a.id)).sort((a, b) => pinOrder.get(a.id)! - pinOrder.get(b.id)!), ...list.filter((a) => !pinOrder.has(a.id))];
+  }, [byMaker, kind, pinOrder]);
   const kinds = ARTIFACT_KINDS.filter((k) => counts.get(k));
   const projectName = (id: string) => props.projects.get(id);
 
@@ -196,13 +221,14 @@ export function ArtifactsView(props: {
       </p>
     );
   const cards = (items: Artifact[]) => (
-      <ul className={phone ? "af-rows" : "af-grid"}>
+      <ul className={rows ? "af-rows" : phone ? "af-grid two" : "af-grid"}>
         {items.map((a) => {
           const meta = metaOf(a);
+          const on = pinOrder.has(a.id);
           return (
-            <li key={a.id}>
+            <li key={a.id} className={on ? "pinned" : undefined}>
               <button type="button" className={props.selected === a.id ? "af-card on" : "af-card"} aria-current={props.selected === a.id ? "true" : undefined} onClick={() => props.onSelect(a.id)}>
-                <Thumb a={a} small={phone} />
+                <Thumb a={a} small={rows} bare={phone} />
                 <span className="af-words">
                   <span className="af-title" dir="auto" title={a.title}>{a.title}</span>
                   <span className="af-meta">
@@ -211,6 +237,11 @@ export function ArtifactsView(props: {
                   </span>
                 </span>
               </button>
+              {props.onPin && !rows && (
+                <button type="button" className={on ? "af-pin on" : "af-pin"} aria-pressed={on} aria-label={on ? `Unpin ${a.title}` : `Pin ${a.title}`} title={on ? "Unpin" : "Pin: keep it first, for you"} onClick={() => props.onPin!(a.id, !on)}>
+                  <PinIcon size={13} />
+                </button>
+              )}
             </li>
           );
         })}
@@ -233,7 +264,7 @@ export function ArtifactsView(props: {
               </button>
             ))}
           </div>
-          {makers.length > 1 && !phone && (
+          {makers.length > 1 && !phone && !rows && (
             <label className="af-by">
               <span className="sr-only">Made by</span>
               <select value={maker} onChange={(e) => setMaker(e.target.value)}>
