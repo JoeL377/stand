@@ -3482,11 +3482,22 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .sh-top.over { box-shadow: 0 6px 10px -8px rgb(0 0 0 / 0.35); }
 .sh-top.over .sh-tabs { border-bottom-color: color-mix(in srgb, var(--text) 22%, var(--line)); }
 .sh-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 18px 24px 48px; box-sizing: border-box; }
+.sh-home { display: none; }
+/* Phones: the window scrolls, and the space's own header is the only one. The app's icon row steps
+   aside (all spaces is the back arrow), and the name row and tabs stick together as one block. */
 @media (max-width: 760px) {
+  .sp-shell:has(.sh-main) > .sp-side { display: none; }
   .sp-surface:has(> .sh-main) { overflow: visible; display: block; }
-  .sh-main { padding: 16px 16px 48px; gap: 18px; }
-  .sh-top, .sh-body { display: contents; overflow: visible; }
-  .sh-tabs { position: sticky; top: 0; z-index: 6; margin: 0 -16px; padding: 4px 16px 0; background: var(--bg); }
+  .sh-main { padding: 0 16px 48px; gap: 14px; }
+  .sh-body { display: contents; overflow: visible; }
+  .sh-top { position: sticky; top: 0; z-index: 6; flex-direction: column; gap: 0; margin: 0 -16px; padding: env(safe-area-inset-top, 0px) 16px 0; background: var(--bg); }
+  .sh-top .sh-head { height: 48px; gap: 4px; }
+  .sh-top .sh-head h1 { font-size: 17px; }
+  .sh-home { display: inline-flex; position: relative; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; margin-left: -8px; border-radius: 8px; color: var(--text); }
+  .sh-home svg { transform: rotate(180deg); }
+  .sh-home-dot { position: absolute; top: 6px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+  .sh-top .sh-people { width: 36px; height: 32px; padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 16px; letter-spacing: 1px; }
+  .sh-tabs { margin: 0 -16px; padding: 0 16px; }
 }
 
 /* A design session's diagram (room/DesignBoard.tsx): boxes and labelled arrows. It shares the

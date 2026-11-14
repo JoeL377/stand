@@ -507,6 +507,17 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // below comes in. Into a project it comes from the right, and back out to all projects from
   // the left; another tab only rises a few pixels. Data arriving never moves anything here.
   const tabsRef = useRef<HTMLDivElement>(null);
+  // On a phone the window scrolls, not the lists, so the header's line comes from the window.
+  const topRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!phone) return;
+    const on = () => topRef.current?.classList.toggle("over", window.scrollY > 2);
+    on();
+    window.addEventListener("scroll", on, { passive: true });
+    return () => window.removeEventListener("scroll", on);
+  }, [phone]);
+  // The way back to all spaces says when another space has something new or a call on.
+  const elsewhere = !!spaces?.some((s) => s.id !== room.id && (s.live || (s.unread ?? 0) > 0));
   const panelRef = useRef<HTMLElement>(null);
   useTabInk(tabsRef, `${tab}|${crumb ?? ""}`);
   const view = tab === "projects" && !mine ? `projects|${pageOf}` : tab;
@@ -530,9 +541,14 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   <PersonColors.Provider value={colorFor}>
     <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread, chatMentions: chat.mentions } : s))}>
       <main className={["sh-main", phone && live && !wrapping && "is-live", tab === "chat" && "on-chat"].filter(Boolean).join(" ")}>
-        {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls and only the tabs stay. */}
-        <div className="sh-top">
+        {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls under it,
+            and this is the only header: a way back to all spaces, the name, the menu, then the tabs. */}
+        <div className="sh-top" ref={topRef}>
         <header className="sh-head">
+          <Link to="/" className="sh-home" aria-label="All spaces" title="All spaces">
+            <ChevronIcon size={16} />
+            {elsewhere && <span className="sh-home-dot" />}
+          </Link>
           <h1 title={room.purpose || undefined}>{room.name}</h1>
           <span className="sh-head-end">
             {/* A call that is on is the one thing here that asks to be acted on, on every tab. */}
