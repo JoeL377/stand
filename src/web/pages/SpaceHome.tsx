@@ -6,7 +6,7 @@ import { PersonColors, useColorRegistry, usePersonColors } from "../PersonColors
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { ArchivedKind, ArchivedRow, DoneDeck, FollowUp, Jot, Note, NoteFrom, QuestionSweep, ReplacedBy, ReviewSummary, ReviewView, Snap, SpaceFeed, SpaceSummary, TaskMention } from "../../shared/protocol.ts";
 import { activeFirst, matchesProject, projectActivity, type Project } from "../../shared/projects.ts";
 import { ProjectPicker } from "../ProjectPicker.tsx";
@@ -460,13 +460,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   const crumb = tab === "projects" && hasProjects && !mine && pageOf ? (pageOf === "none" ? "Unassigned" : (projects.find((x) => x.id === pageOf)?.name ?? null)) : null;
   // Where an artifact's own page leads back to: the tab, or the project, it was opened from.
   const backHere = { to: `${window.location.pathname}${window.location.search}`, label: crumb ?? TABS.find((t) => t.key === tab)?.label ?? room.name };
-  // A sketch is its picture: a card goes straight to it. Specs, docs and decks open the panel first.
-  const navigate = useNavigate();
-  const pickArtifact = (id: string) => {
-    const a = made.artifacts?.find((x) => x.id === id);
-    if (a?.kind === "sketch" && a.href) navigate(a.href, { state: { back: backHere } });
-    else showArtifact(id);
-  };
+  // Every card opens the panel; its Full button goes to the artifact's own page.
+  const pickArtifact = showArtifact;
 
   // Moving around the page: the line under the tabs slides to the one picked, and the panel
   // below comes in. Into a project it comes from the right, and back out to all projects from
