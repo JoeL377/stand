@@ -31,7 +31,8 @@ import { errorToast, toast } from "../Toasts.tsx";
 import { useDismiss } from "../useDismiss.ts";
 import { usePhone } from "../phone.ts";
 import { fmtDate, fmtTime, fmtDay } from "../util.ts";
-import { isShortCall, matchesSearch, periodLabel, wasIn, whenLabel } from "../meetingList.ts";
+import { matchesSearch, whenLabel } from "../meetingList.ts";
+import { MeetingTimeline } from "../MeetingTimeline.tsx";
 import { ModeNote } from "./RoomPage.tsx";
 import { brainstormHref } from "./brainstormHref.ts";
 import { VerdictCounts, designRecordHref, designReviewHref } from "./DesignReviewPage.tsx";
@@ -447,18 +448,8 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
       : e.kind === "jot"
         ? matchesSearch(search, [e.jot.text, e.jot.by])
         : matchesSearch(search, [e.snap.line, e.snap.caption, e.snap.takenBy]);
-  type MeetingEntry = Extract<Entry, { kind: "meeting" }>;
-  const periods: Array<{ label: string; entries: MeetingEntry[]; short: MeetingEntry[] }> = [];
-  for (const e of searching ? entries.filter(found) : entries) {
-    if (e.kind !== "meeting") continue;
-    const label = periodLabel(e.at);
-    if (periods.at(-1)?.label !== label) periods.push({ label, entries: [], short: [] });
-    // A call of a minute or two that left nothing behind is a test: it folds away under its stretch.
-    if (!searching && isShortCall(e.meeting, !!kindOf.get(e.meeting.id), madeIn.get(e.meeting.id) ?? 0)) periods.at(-1)!.short.push(e);
-    else periods.at(-1)!.entries.push(e);
-  }
+  const shownMeetings = searching ? meetings.filter((m) => found({ kind: "meeting", at: m.endedAt, meeting: m })) : meetings;
   const notes = entries.filter((e) => e.kind !== "meeting" && (!searching || found(e)));
-  const [shortOpen, setShortOpen] = useState<ReadonlySet<string>>(new Set());
 
   // The open project's name, shown after "Projects" in the tab row as the way back.
   const crumb = tab === "projects" && hasProjects && !mine && pageOf ? (pageOf === "none" ? "Unassigned" : (projects.find((x) => x.id === pageOf)?.name ?? null)) : null;
@@ -735,7 +726,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                     ))}
                 </ul>
               )}
-              {(kind === "notes" ? !notes.length : !kind && !periods.length) && searching && <p className="mt-none muted">Nothing matches “{search.trim()}”.</p>}
+              {(kind === "notes" ? !notes.length : !kind && !shownMeetings.length) && searching && <p className="mt-none muted">Nothing matches “{search.trim()}”.</p>}
               {kind === "notes" && (
                 <ul className="sh-rows mt-notes">
                   {notes.map((e) =>
@@ -766,46 +757,9 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
                   )}
                 </ul>
               )}
-              {!kind && periods.map((d) => {
-                const open = shortOpen.has(d.label);
-                const cards = open ? [...d.entries, ...d.short].sort((x, y) => y.at - x.at) : d.entries;
-                return (
-                  <section key={d.label} className="mt-sec">
-                    <h3 className="mt-head">
-                      {d.label}
-                      {d.short.length > 0 && (
-                        <button
-                          type="button"
-                          className="mt-short"
-                          aria-expanded={open}
-                          onClick={() =>
-                            setShortOpen((was) => {
-                              const next = new Set(was);
-                              if (open) next.delete(d.label);
-                              else next.add(d.label);
-                              return next;
-                            })
-                          }
-                        >
-                          {open ? "Hide short calls" : `+${d.short.length} short`}
-                        </button>
-                      )}
-                    </h3>
-                    <ul className="mt-grid">
-                      {cards.map((e) => (
-                        <MeetingCard
-                          key={e.meeting.id}
-                          m={e.meeting}
-                          name={e.meeting.title ?? kindOf.get(e.meeting.id)?.name ?? "Meeting"}
-                          missed={!wasIn(e.meeting.people, user.name)}
-                          short={d.short.includes(e)}
-                          onArchive={() => archive(`meeting:${e.meeting.id}`)}
-                        />
-                      ))}
-                    </ul>
-                  </section>
-                );
-              })}
+              {!kind && shownMeetings.length > 0 && (
+                <MeetingTimeline meetings={shownMeetings} kindOf={kindOf} madeIn={madeIn} me={user.name} phone={phone} showShort={searching} onArchive={(id) => archive(`meeting:${id}`)} />
+              )}
             </>
           )}
 
@@ -1178,31 +1132,6 @@ function ItemPill(props: {
         </span>
       )}
     </span>
-  );
-}
-
-/**
- * A meeting as a card, like a project's: its name, two lines of what came out of it, and the day
- * and length in a quiet foot. One you weren't in has a dot before its name.
- */
-function MeetingCard({ m, name, missed, short, onArchive }: { m: SpaceFeed["meetings"][number]; name: string; missed: boolean; short: boolean; onArchive: () => void }) {
-  const minutes = Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
-  const unseen = missed && !short;
-  return (
-    <li className={`mt-card${unseen ? " missed" : ""}${short ? " short" : ""}`}>
-      <Link to={`/meetings/${m.id}`} className="mt-link" title={`${fmtDate(m.endedAt)}, ${fmtTime(m.startedAt)}${m.people.length ? ` · ${m.people.join(", ")}` : ""}`}>
-        <span className="mt-name" dir="auto">
-          {unseen && <span className="mt-dot" title="You weren't in this one" aria-label="You weren't in this one" />}
-          {name}
-        </span>
-        {m.summary && !short && <span className="mt-sum" dir="auto">{m.summary}</span>}
-        <span className="mt-foot">
-          <time dateTime={new Date(m.endedAt).toISOString()}>{whenLabel(m.endedAt)}</time>
-          <span>{minutes} min</span>
-        </span>
-      </Link>
-      <ArchiveButton onClick={onArchive} />
-    </li>
   );
 }
 

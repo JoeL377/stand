@@ -1,19 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isShortCall, matchesSearch, periodLabel, wasIn, whenLabel } from "./meetingList.ts";
+import { dayLabel, isShortCall, matchesSearch, wasIn, whenLabel } from "./meetingList.ts";
 
 // A Saturday afternoon, local time.
 const now = new Date(2026, 10, 14, 15, 0).getTime();
 const at = (month: number, day: number, hour = 10) => new Date(2026, month, day, hour).getTime();
 
-test("groups by this week, last week, then month", () => {
-  assert.equal(periodLabel(at(10, 9), now), "This week"); // Monday
-  assert.equal(periodLabel(at(10, 14), now), "This week");
-  assert.equal(periodLabel(at(10, 8), now), "Last week"); // Sunday before
-  assert.equal(periodLabel(at(10, 2), now), "Last week");
-  assert.match(periodLabel(at(10, 1), now), /November/);
-  assert.match(periodLabel(at(9, 30), now), /October/);
-  assert.match(periodLabel(new Date(2025, 11, 3).getTime(), now), /2025/);
+test("a timeline day is today, yesterday, then the date, with the year when it isn't this one", () => {
+  assert.equal(dayLabel(at(10, 14, 9), now), "Today");
+  assert.equal(dayLabel(at(10, 13, 23), now), "Yesterday");
+  assert.match(dayLabel(at(10, 11), now), /Nov 11/);
+  assert.match(dayLabel(new Date(2025, 11, 3).getTime(), now), /2025/);
 });
 
 test("says today, yesterday, a weekday, then a date", () => {
