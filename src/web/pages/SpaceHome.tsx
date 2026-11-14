@@ -41,7 +41,8 @@ import { ShotZoom } from "../room/ReviewStage.tsx";
 import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { MOD } from "../shortcuts.ts";
-import { SpacesShell } from "./SpacesShell.tsx";
+import { PhoneMenu, SpacesShell } from "./SpacesShell.tsx";
+import { Menu as MenuIcon } from "lucide-react";
 import { TaskDrawer } from "../TaskDrawer.tsx";
 import { RowMore } from "../RowMore.tsx";
 import { ChatNotifyBell, SpaceChat, useSpaceChat } from "../SpaceChat.tsx";
@@ -507,6 +508,20 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // below comes in. Into a project it comes from the right, and back out to all projects from
   // the left; another tab only rises a few pixels. Data arriving never moves anything here.
   const tabsRef = useRef<HTMLDivElement>(null);
+  // On a phone the window scrolls, not the lists, so the header's line comes from the window.
+  const topRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!phone) return;
+    const on = () => topRef.current?.classList.toggle("over", window.scrollY > 2);
+    on();
+    window.addEventListener("scroll", on, { passive: true });
+    return () => window.removeEventListener("scroll", on);
+  }, [phone]);
+  // The way back to all spaces says when another space has something new or a call on.
+  const focused = phone && !!crumb;
+  const [menu, setMenu] = useState(false);
+  const [projectTabs, setProjectTabs] = useState<HTMLDivElement | null>(null);
+  const elsewhere = !!spaces?.some((s) => s.id !== room.id && (s.live || (s.unread ?? 0) > 0));
   const panelRef = useRef<HTMLElement>(null);
   useTabInk(tabsRef, `${tab}|${crumb ?? ""}`);
   const view = tab === "projects" && !mine ? `projects|${pageOf}` : tab;
@@ -529,11 +544,22 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   return (
   <PersonColors.Provider value={colorFor}>
     <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread, chatMentions: chat.mentions } : s))}>
-      <main className={["sh-main", phone && live && !wrapping && "is-live", tab === "chat" && "on-chat"].filter(Boolean).join(" ")}>
-        {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls and only the tabs stay. */}
-        <div className="sh-top">
+      <main className={["sh-main", phone && live && !wrapping && "is-live", tab === "chat" && "on-chat", focused && "focused"].filter(Boolean).join(" ")}>
+        {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls under it,
+            and this is the only header: a way back to all spaces, the name, the menu, then the tabs. */}
+        <div className="sh-top" ref={topRef}>
         <header className="sh-head">
-          <h1 title={room.purpose || undefined}>{room.name}</h1>
+          {focused ? (
+            <button type="button" className="sh-home" aria-label={`Back to ${room.name}`} title={room.name} onClick={() => setProjectFilter("")}>
+              <ChevronIcon size={16} />
+            </button>
+          ) : (
+            <button type="button" className="sh-home menu" aria-label="Menu" aria-expanded={menu} onClick={() => setMenu(true)}>
+              <MenuIcon size={18} aria-hidden />
+              {elsewhere && <span className="sh-home-dot" />}
+            </button>
+          )}
+          <h1 title={focused ? (projects.find((x) => x.id === pageOf)?.goal ?? undefined) : room.purpose || undefined}>{focused ? crumb : room.name}</h1>
           <span className="sh-head-end">
             {/* A call that is on is the one thing here that asks to be acted on, on every tab. */}
             {live && (
@@ -620,6 +646,21 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           </span>
         </header>
 
+        {menu && (
+          <PhoneMenu
+            spaces={spaces}
+            current={{ id: room.id, name: room.name }}
+            projects={projects.filter((p) => !p.archived).sort((a, b) => Number((room.pinnedProjects ?? []).includes(b.id)) - Number((room.pinnedProjects ?? []).includes(a.id)) || a.position - b.position).map((p) => ({ id: p.id, name: p.name, pinned: (room.pinnedProjects ?? []).includes(p.id) }))}
+            openProject={tab === "projects" ? pageOf : null}
+            onProject={(id) => {
+              pickTab("projects");
+              setProjectFilter(id);
+            }}
+            onClose={() => setMenu(false)}
+          />
+        )}
+        {/* On a phone an open project is its own screen: its name above, its own tabs in place of the space's. */}
+        {focused && <div className="sh-tabs sh-pj-tabs" ref={setProjectTabs} />}
         <div className="sh-tabs" role="tablist" aria-label="The space" ref={tabsRef}>
           {TABS.filter((t) => !(wide && t.key === "chat")).map((t) => (
             <button
@@ -833,6 +874,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
               mine={mine}
               onMine={(on) => pickTab(on ? "mine" : "projects")}
               toolsIn={phone ? null : tabTools}
+              viewsIn={focused ? projectTabs : null}
               onArchive={(n) => archive(`${n.kind === "question" ? "question" : "todo"}:${n.id}`)}
               reload={load}
               openId={openTask}
@@ -1259,6 +1301,8 @@ function TasksTab(props: {
   onMine: (on: boolean) => void;
   /** Where its tools go instead of a row above the list: the tab row, on a wide screen. */
   toolsIn?: HTMLElement | null;
+  /** On a phone, where an open project's Tasks / Questions / Decisions / Artifacts go: the header. */
+  viewsIn?: HTMLElement | null;
   roomId: string;
   me: string;
   /** The space's people, by name: who a to-do can be given to. */
@@ -1905,6 +1949,7 @@ function TasksTab(props: {
                     ))}
                   </div>
                 );
+                if (props.viewsIn && !props.solo) return createPortal(pills, props.viewsIn);
                 return !phone && !props.solo && headSlot ? createPortal(pills, headSlot) : pills;
               })()}
               {props.show === "tasks" && (

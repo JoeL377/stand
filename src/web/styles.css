@@ -3482,11 +3482,37 @@ button.review-card-pic { padding: 0; font: inherit; cursor: zoom-in; width: 100%
 .sh-top.over { box-shadow: 0 6px 10px -8px rgb(0 0 0 / 0.35); }
 .sh-top.over .sh-tabs { border-bottom-color: color-mix(in srgb, var(--text) 22%, var(--line)); }
 .sh-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 18px 24px 48px; box-sizing: border-box; }
+.sh-home { display: none; }
+/* Phones: an open project is its own screen. The header names it, the arrow goes back to the space,
+   and its Tasks / Questions / Decisions / Artifacts are the one row of tabs, in the tabs' own style. */
+@media (max-width: 820px) {
+  .sh-home { position: relative; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; min-height: 0; margin-left: -8px; padding: 0; border: 0; border-radius: 8px; background: none; box-shadow: none; color: var(--text); }
+  .sh-home svg { transform: rotate(180deg); }
+  button.sh-home:not(.menu) { display: inline-flex; }
+  .sh-home.menu svg { transform: none; }
+  .sh-main.focused .pj-line.head { display: none; }
+  .sh-main.focused .sh-tabs:not(.sh-pj-tabs) { display: none; }
+  .sh-pj-tabs .pj-view:hover, .sh-pj-tabs .pj-view:focus, .sh-pj-tabs .pj-view:active { background: none; box-shadow: none; }
+  .sh-pj-tabs .pj-views { display: flex; gap: 2px; margin: 0; }
+  .sh-pj-tabs .pj-view { flex: none; display: flex; align-items: center; gap: 6px; height: auto; min-height: 0; margin-bottom: -1px; padding: 8px 10px 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
+  .sh-pj-tabs .pj-view > svg { display: none; }
+  .sh-pj-tabs .pj-view.on { color: var(--text); border-bottom-color: var(--accent); }
+  .sh-pj-tabs .pj-view .count { font-size: 12px; }
+}
+/* Phones: the window scrolls, and the space's own header is the only one. The app's icon row steps
+   aside (all spaces is the back arrow), and the name row and tabs stick together as one block. */
 @media (max-width: 760px) {
+  .sp-shell:has(.sh-main) > .sp-side { display: none; }
   .sp-surface:has(> .sh-main) { overflow: visible; display: block; }
-  .sh-main { padding: 16px 16px 48px; gap: 18px; }
-  .sh-top, .sh-body { display: contents; overflow: visible; }
-  .sh-tabs { position: sticky; top: 0; z-index: 6; margin: 0 -16px; padding: 4px 16px 0; background: var(--bg); }
+  .sh-main { padding: 0 16px 48px; gap: 14px; }
+  .sh-body { display: contents; overflow: visible; }
+  .sh-top { position: sticky; top: 0; z-index: 6; flex-direction: column; gap: 0; margin: 0 -16px; padding: env(safe-area-inset-top, 0px) 16px 0; background: var(--bg); }
+  .sh-top .sh-head { height: 48px; gap: 4px; }
+  .sh-top .sh-head h1 { font-size: 17px; }
+  .sh-home { display: inline-flex; }
+  .sh-home-dot { position: absolute; top: 6px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+  .sh-top .sh-people { width: 36px; height: 32px; padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 16px; letter-spacing: 1px; }
+  .sh-tabs { margin: 0 -16px; padding: 0 16px; }
 }
 
 /* A design session's diagram (room/DesignBoard.tsx): boxes and labelled arrows. It shares the
@@ -5367,3 +5393,29 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
   .af-panel .af-doc h1, .af-panel .af-doc h2, .af-panel .af-doc h3, .af-panel .af-doc h4 { margin: 18px 0 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
   .af-panel .af-doc > :first-child { margin-top: 0; }
 }
+
+/* The phone menu (SpacesShell PhoneMenu): from the left, over the page. This space's projects first,
+   then the other spaces, then the app's own pages and you. */
+.pm-wrap { position: fixed; inset: 0; z-index: 60; background: rgb(0 0 0 / 0.35); animation: pm-fade 160ms ease-out; }
+.pm { position: absolute; top: 0; bottom: 0; left: 0; width: min(300px, 84vw); display: flex; flex-direction: column; gap: 1px; overflow-y: auto; padding: calc(10px + env(safe-area-inset-top, 0px)) 10px calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--panel); box-shadow: var(--shadow); animation: pm-in 200ms var(--ease-out, ease-out); }
+.pm-head { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px 6px; font-size: 16px; }
+.pm-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-label { margin: 12px 0 4px; padding: 0 8px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.pm .pm-row { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; height: auto; padding: 0 8px; border: 0; border-radius: 8px; background: none; box-shadow: none; color: var(--text); font: inherit; font-size: 15px; font-weight: 400; text-align: left; text-decoration: none; cursor: pointer; }
+.pm .pm-row.on { background: var(--panel-2); font-weight: 600; }
+.pm .pm-row > svg { flex: none; color: var(--muted); }
+.pm .sp-space-tile { position: relative; flex: none; width: 24px; height: 24px; border-radius: 6px; font-size: 10px; }
+.pm .sp-side-dot.live { position: absolute; top: -2px; right: -2px; box-shadow: 0 0 0 2px var(--panel); }
+.pm-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-dot { flex: none; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; }
+.pm-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+.pm-dot.pinned::before { background: var(--muted); }
+.pm .sp-profile-btn { justify-content: flex-start; width: 100%; height: 40px; padding: 0 8px; gap: 10px; }
+.pm .sp-profile-btn .sp-side-text { display: inline; font-size: 15px; }
+.pm-new { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.pm-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 1px; }
+.pm-user { padding: 6px 0 0; }
+.pm-user .sp-profile-pop { bottom: calc(100% + 6px); top: auto; left: 0; right: auto; }
+@keyframes pm-in { from { transform: translateX(-24px); opacity: 0; } }
+@keyframes pm-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pm, .pm-wrap { animation: none; } }
