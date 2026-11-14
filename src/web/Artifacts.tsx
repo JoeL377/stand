@@ -5,7 +5,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ARTIFACT_KINDS, ARTIFACT_NAME, type Artifact, type ArtifactDetail, type ArtifactKind, type ArtifactLink, filterArtifacts, makersLine, makersOf } from "../shared/artifacts.ts";
+import { ARTIFACT_KINDS, ARTIFACT_NAME, type Artifact, type ArtifactDetail, type ArtifactKind, type ArtifactLink, filterArtifacts, makersOf } from "../shared/artifacts.ts";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { api } from "./api.ts";
@@ -89,26 +89,39 @@ function Thumb({ a, small }: { a: Artifact; small?: boolean }) {
         </span>
       ) : (
         <span className="af-text">
+          {!small && <span className="af-text-title">{a.title}</span>}
           {p.text && <span className="af-text-body">{p.text}</span>}
         </span>
-      )}
-      {!small && (
-        <>
-          <span className="af-kind"><Dot kind={a.kind} />{ARTIFACT_NAME[a.kind].one}</span>
-          {a.badge && <span className="af-badge">{a.badge}</span>}
-        </>
       )}
     </span>
   );
 }
 
-/** The quiet line under a name: its project, who or what made it, and when. */
-function metaOf(a: Artifact, projectName: (id: string) => string | undefined, inProject: boolean): string[] {
-  const named = a.projects.map(projectName).filter((n): n is string => !!n);
-  const project = inProject ? null : named.length > 1 ? `${named.length} projects` : (named[0] ?? null);
-  const made = a.origin && a.makers.every((m) => m.key === "stand") ? a.origin : makersLine(a.makers) || a.origin || null;
-  return [project, made, whenLabel(a.ts)].filter((x): x is string => !!x);
+/** The quiet line under a name: when, after the dot of its kind. Its project and who made it are in
+ *  the panel, the by-project layout and the "Made by" filter. */
+function metaOf(a: Artifact): string[] {
+  return [whenLabel(a.ts)];
 }
+
+/** How the Artifacts tab is laid out: one plain grid, or the same cards under their projects. */
+const VIEW_KEY = "stand.artifacts.view";
+const savedGrouped = (): boolean => {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "projects";
+  } catch {
+    return false;
+  }
+};
+const GridIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+    <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" /><rect x="9" y="2.5" width="4.5" height="4.5" rx="1" /><rect x="2.5" y="9" width="4.5" height="4.5" rx="1" /><rect x="9" y="9" width="4.5" height="4.5" rx="1" />
+  </svg>
+);
+const GroupedIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+    <path d="M2.5 3h6M2.5 9.5h6" /><rect x="2.5" y="5" width="11" height="2.5" rx="1" /><rect x="2.5" y="11.5" width="11" height="2.5" rx="1" />
+  </svg>
+);
 
 export function ArtifactsView(props: {
   artifacts: Artifact[] | null;
@@ -130,6 +143,13 @@ export function ArtifactsView(props: {
   const phone = usePhone() || !!props.meeting;
   const [kind, setKind] = useState<ArtifactKind | "">("");
   const [maker, setMaker] = useState("");
+  const [grouped, setGrouped] = useState(savedGrouped);
+  const pickGrouped = (on: boolean) => {
+    setGrouped(on);
+    try {
+      localStorage.setItem(VIEW_KEY, on ? "projects" : "grid");
+    } catch {}
+  };
   const scoped = useMemo(() => filterArtifacts(props.artifacts ?? [], { project: props.project, meeting: props.meeting }), [props.artifacts, props.project, props.meeting]);
   const makers = useMemo(() => makersOf(scoped), [scoped]);
   const byMaker = useMemo(() => filterArtifacts(scoped, { maker }), [scoped, maker]);
@@ -157,10 +177,10 @@ export function ArtifactsView(props: {
         {props.project ? "Nothing made in this project yet." : "Nothing here yet. Specs, docs, decks and sketches land here as the space makes them."}
       </p>
     );
-  const cards = (items: Artifact[], inProject: boolean) => (
+  const cards = (items: Artifact[]) => (
       <ul className={phone ? "af-rows" : "af-grid"}>
         {items.map((a) => {
-          const meta = metaOf(a, projectName, inProject);
+          const meta = metaOf(a);
           return (
             <li key={a.id}>
               <button type="button" className={props.selected === a.id ? "af-card on" : "af-card"} aria-current={props.selected === a.id ? "true" : undefined} onClick={() => props.onSelect(a.id)}>
@@ -168,8 +188,8 @@ export function ArtifactsView(props: {
                 <span className="af-words">
                   <span className="af-title" dir="auto" title={a.title}>{a.title}</span>
                   <span className="af-meta">
-                    {phone && <><Dot kind={a.kind} />{ARTIFACT_NAME[a.kind].one} · </>}
-                    {(phone ? meta.filter((_, i) => i !== 1 || meta.length < 3) : meta).join(" · ")}
+                    <Dot kind={a.kind} />
+                    {meta.join(" · ")}
                   </span>
                 </span>
               </button>
@@ -179,12 +199,12 @@ export function ArtifactsView(props: {
       </ul>
   );
   // By project, in the space's order, then what is in none. A project with nothing shown is left out.
-  const groups = props.groups
+  const groups = (grouped ? props.groups : undefined)
     ?.map((g) => ({ ...g, items: shown.filter((x) => (g.id === "none" ? !x.projects.length || !props.groups!.some((o) => o.id === x.projects[0]) : x.projects[0] === g.id)) }))
     .filter((g) => g.items.length > 0);
   return (
     <div className="af">
-      {!props.meeting && (kinds.length > 1 || makers.length > 1) && (
+      {!props.meeting && (kinds.length > 1 || makers.length > 1 || !!props.groups) && (
         <div className="af-bar">
           <div className="sh-kinds af-kinds" role="group" aria-label="Which kind">
             <button type="button" className={kind === "" ? "rp-pill on" : "rp-pill"} aria-pressed={kind === ""} onClick={() => setKind("")}>All</button>
@@ -192,7 +212,6 @@ export function ArtifactsView(props: {
               <button key={k} type="button" className={kind === k ? "rp-pill on" : "rp-pill"} aria-pressed={kind === k} onClick={() => setKind(kind === k ? "" : k)}>
                 <Dot kind={k} />
                 {ARTIFACT_NAME[k].many}
-                {!phone && <span className="muted">{counts.get(k)}</span>}
               </button>
             ))}
           </div>
@@ -207,6 +226,12 @@ export function ArtifactsView(props: {
               </select>
             </label>
           )}
+          {props.groups && (
+            <span className="af-view" role="group" aria-label="Layout">
+              <button type="button" className={grouped ? "" : "on"} aria-pressed={!grouped} aria-label="One grid" title="One grid" onClick={() => pickGrouped(false)}><GridIcon /></button>
+              <button type="button" className={grouped ? "on" : ""} aria-pressed={grouped} aria-label="By project" title="By project" onClick={() => pickGrouped(true)}><GroupedIcon /></button>
+            </span>
+          )}
         </div>
       )}
       {groups
@@ -215,13 +240,12 @@ export function ArtifactsView(props: {
               <h3>
                 <button type="button" className="af-group-name" onClick={() => props.onGroup?.(g.id)}>
                   <span dir="auto">{g.name}</span>
-                  <span className="muted">{g.items.length}</span>
                 </button>
               </h3>
-              {cards(g.items, true)}
+              {cards(g.items)}
             </section>
           ))
-        : cards(shown, !!props.project)}
+        : cards(shown)}
     </div>
   );
 }

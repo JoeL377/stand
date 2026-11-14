@@ -4966,23 +4966,22 @@ a.ac-target:hover { text-decoration: underline; }
 .af-by select { field-sizing: content; width: auto; height: 24px; padding: 0 2px; appearance: auto; border: 0; background: none; box-shadow: none; font: inherit; font-size: 12.5px; color: var(--muted); cursor: pointer; }
 .af-by select:hover, .af-by select:focus-visible { color: var(--text); }
 .af-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 18px 16px; margin: 0; padding: 0; list-style: none; }
-.af-card { display: block; width: 100%; height: auto; min-height: 0; padding: 0; border: 0; border-radius: 10px; background: none; box-shadow: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-.af-card:hover:not(:disabled), .af-card:focus { background: none; }
-.af-thumb { position: relative; display: block; height: 128px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); transition: border-color var(--dur-press) ease; }
-.af-card:hover .af-thumb, .af-card:focus-visible .af-thumb { border-color: color-mix(in srgb, var(--text) 28%, var(--line)); }
-.af-card.on .af-thumb { outline: 2px solid var(--accent); outline-offset: 1px; }
-.af-kind, .af-badge { position: absolute; top: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 6px; background: color-mix(in srgb, var(--panel) 82%, transparent); font-size: 11px; line-height: 1.5; }
-.af-kind { left: 8px; font-weight: 600; }
-.af-badge { right: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.af-words { display: block; padding: 8px 2px 0; min-width: 0; }
+.af-card { display: block; width: 100%; height: auto; min-height: 0; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.af-card:hover:not(:disabled), .af-card:focus { background: var(--panel); }
+.af-card:hover:not(:disabled), .af-card:focus-visible { border-color: color-mix(in srgb, var(--text) 28%, var(--line)); }
+.af-card.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The picture runs to the card's own edges: no frame or colour of ours around it. */
+.af-thumb { position: relative; display: block; height: 148px; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.af-words { display: block; padding: 10px 14px 12px; min-width: 0; }
 .af-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .af-meta { display: block; margin-top: 1px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12.5px; color: var(--muted); }
 /* What each kind's picture holds. */
-.af-text { position: absolute; inset: 36px 14px 0; display: flex; flex-direction: column; gap: 8px; }
-.af-text-body { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; font-size: 11px; line-height: 1.45; color: var(--muted); }
-.af-slide { position: absolute; inset: 36px 22px 12px; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
-.af-slide-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 600; }
-.af-slide-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--muted); }
+.af-text { position: absolute; inset: 18px 18px 0; display: flex; flex-direction: column; gap: 7px; }
+.af-text-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 14px; font-weight: 600; line-height: 1.3; }
+.af-text-body { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; font-size: 11px; line-height: 1.55; color: var(--muted); }
+.af-slide { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 5px; padding: 18px 18px 0; overflow: hidden; }
+.af-slide-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; font-size: 14px; font-weight: 600; }
+.af-slide-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
 .af-glyph { position: absolute; inset: 0; width: 100%; height: 100%; }
 .af-glyph-lines { fill: none; stroke: color-mix(in srgb, var(--text) 26%, transparent); stroke-width: 1.2; }
 .af-glyph-boxes { fill: var(--panel); stroke: color-mix(in srgb, var(--text) 24%, transparent); stroke-width: 1.2; }
@@ -4990,12 +4989,12 @@ a.ac-target:hover { text-decoration: underline; }
 /* A phone: one-line rows, the picture small beside the name. */
 .af-rows { margin: 0; padding: 0; list-style: none; }
 .af-rows li + li { border-top: 1px solid var(--line); }
-.af-rows .af-card { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-radius: 0; }
-.af-rows .af-thumb { flex: none; width: 64px; height: 48px; border-radius: 8px; }
+.af-rows .af-card { display: flex; align-items: center; gap: 12px; padding: 10px 0; overflow: visible; border: 0; border-radius: 0; background: none; outline: 0; }
+.af-rows .af-thumb { flex: none; width: 64px; height: 48px; border: 1px solid var(--line); border-radius: 8px; }
 .af-rows .af-words { flex: 1; padding: 0; }
 .af-rows .af-text { inset: 7px 7px 0; }
 .af-rows .af-text-body { font-size: 6px; line-height: 1.5; -webkit-line-clamp: 3; }
-.af-rows .af-slide { inset: 8px 9px; padding: 5px 6px; border-radius: 4px; }
+.af-rows .af-slide { padding: 7px 7px 0; }
 .af-rows .af-slide-title { font-size: 6px; }
 /* One artifact opened: the task drawer's shell with the artifact in it. */
 .af-panel { width: min(560px, 100vw); }
@@ -5011,8 +5010,7 @@ a.ac-target:hover { text-decoration: underline; }
 .af-doc .md > :last-child { margin-bottom: 0; }
 .af-doc-thumb { padding: 0; border: 0; background: none; }
 .af-doc-thumb .af-thumb { height: 190px; }
-.af-doc-thumb .af-kind, .af-doc-thumb .af-badge { display: none; }
-.af-doc-thumb .af-slide { inset: 16px 28px; }
+.af-doc-thumb .af-thumb { border: 1px solid var(--line); border-radius: 10px; }
 .af-shots { display: grid; gap: 12px; }
 .af-shots a { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); text-decoration: none; }
 .af-shots img { width: 100%; border: 1px solid var(--line); border-radius: 8px; }
@@ -5110,3 +5108,9 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
   .af-group h3 { margin-bottom: 2px; }
   .af-bar + .af-group { margin-top: 12px; }
 }
+
+/* One grid or by project: two quiet marks at the end of the filter row. */
+.af-view { display: inline-flex; flex: none; gap: 2px; }
+.af-view button { display: inline-grid; place-items: center; width: 26px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--muted); cursor: pointer; }
+.af-view button:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.af-view button.on { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
