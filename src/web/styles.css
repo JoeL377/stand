@@ -4969,7 +4969,7 @@ a.ac-target:hover { text-decoration: underline; }
 .af-card { display: block; width: 100%; height: auto; min-height: 0; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .af-card:hover:not(:disabled), .af-card:focus { background: var(--panel); }
 .af-card:hover:not(:disabled), .af-card:focus-visible { border-color: color-mix(in srgb, var(--text) 28%, var(--line)); }
-.af-card.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.af-card.on, .af-card.on:hover:not(:disabled) { border-color: var(--accent); }
 /* The picture runs to the card's own edges: no frame or colour of ours around it. */
 .af-thumb { position: relative; display: block; height: 148px; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .af-words { display: block; padding: 10px 14px 12px; min-width: 0; }
@@ -5191,4 +5191,16 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 }
 @media (min-width: 1360px) {
   [data-chat-dock] .task-drawer { right: 377px; }
+}
+
+/* The artifact panel follows the page's own rules: it sits beside the page, not over it, on the
+   same ground, with the page's padding and its hairline tables. */
+.af-panel { padding: 16px 24px 0; }
+.af-panel .md table { display: table; width: 100%; }
+.af-panel .md th, .af-panel .md td { padding: 7px 12px 7px 0; border: 0; border-bottom: 1px solid var(--line); }
+.af-panel .md th { background: none; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.af-panel .md tr:last-child td { border-bottom: 0; }
+@media (min-width: 1200px) {
+  .af-panel { background: var(--bg); box-shadow: none; animation: none; }
+  html[data-side-panel]:not([data-chat-dock]) .sp-content { padding-right: calc(min(560px, 100vw) + 16px); }
 }

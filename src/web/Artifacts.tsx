@@ -365,6 +365,13 @@ export function ArtifactPanel(props: {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
+  // With room for both, the page makes way for the panel and its grid reflows beside it.
+  useEffect(() => {
+    document.documentElement.dataset.sidePanel = "";
+    return () => {
+      delete document.documentElement.dataset.sidePanel;
+    };
+  }, []);
 
   const a: Artifact | ArtifactDetail | undefined = detail ?? props.known;
   const versions = detail?.versions ?? [];
