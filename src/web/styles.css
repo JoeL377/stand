@@ -5060,6 +5060,22 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
   .pj-ghost .sh-project-form { padding: 14px 16px; }
 }
 
+/* The card's pin is quiet: muted grey, lightly filled once pinned, centred on the name's line and
+   in the corner, with the menu beside it on hover. What is open is a soft pill. */
+.sh-panel .pj-line.card .pj-pin { top: 15px; right: 10px; width: 24px; height: 24px; color: var(--muted); }
+.sh-panel .pj-line.card .pj-pin.on { color: var(--muted); }
+.sh-panel .pj-line.card .pj-pin:hover { color: var(--text); }
+.pj-line.card .pj-pin svg { width: 13px; height: 13px; }
+.pj-line.card .pj-pin.on svg { fill-opacity: 1; }
+.pj-line.card .pj-menu { top: 15px; right: 36px; }
+.pj-line.card { column-gap: 10px; }
+.pj-line.card .pj-moving { gap: 10px; }
+.pj-line.card .pj-open { min-width: 0; padding: 1px 7px; border-radius: 999px; background: var(--hover); color: var(--muted); font-size: 12px; font-weight: 500; line-height: 16px; }
+@media (max-width: 820px) {
+  .sh-panel .pj-line.card .pj-pin { top: 14px; right: 8px; }
+  .pj-line.card .pj-open { padding: 2px 8px; border-radius: 999px; background: var(--hover); font-weight: 500; }
+}
+
 /* What a meeting made: a count on its row, which opens the list in a pop-up. */
 .sh-made { flex: none; width: 40px; display: inline-flex; justify-content: flex-end; }
 .sh-made-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; min-height: 0; padding: 0 6px; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--muted); font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; cursor: pointer; }
