@@ -1,6 +1,8 @@
 import { usePersonColors } from "../PersonColors.tsx";
 import { Avatar } from "../Avatar.tsx";
 import { TaskPicker, TaskPresentation } from "./TaskPresentation.tsx";
+import { StartCards } from "./StartCards.tsx";
+import { unanswered } from "./CheckIn.tsx";
 import { ProjectPresentation } from "./ProjectPresentation.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
@@ -367,6 +369,9 @@ export function Stage(props: {
   };
   const noticeOn = notice.card && !props.ending && !saidOpen ? notice.card : null;
 
+  const steady = !props.offline && !props.ending;
+  // The start cards are built before the sketch's own code below.
+  const startSketchRef = useRef<(topic: string) => Promise<boolean>>(async () => false);
   // The topic card: the board's first view.
   const card = (
     <TopicBoard
@@ -388,6 +393,18 @@ export function Stage(props: {
       onNotYet={props.ending || props.offline ? undefined : (noteId) => send({ type: "list.dismiss", noteId })}
       checkIn={state.checkIn}
       doneDeck={state.doneDeck}
+      start={
+        steady && !runningExperience(state.items) ? (
+          <StartCards
+            roomId={state.roomId}
+            toCheck={unanswered(state.followUps ?? [], state.meetingStartedAt).length}
+            onCheckIn={() => send({ type: "checkin", open: true })}
+            onProject={canSteer ? (projectId) => send({ type: "project.present", projectId }) : undefined}
+            onBrainstorm={props.brainstorm?.status === "live" ? undefined : () => void startSketchRef.current("")}
+            mayStart={() => mayTakeOver(state, props.participantId)}
+          />
+        ) : undefined
+      }
       lastMeetingAt={state.lastMeetingAt ?? null}
       follow={following ? { rewind: hostView?.rewind ?? null, host: host!.name } : null}
       onOwn={() => setOwn(true)}
@@ -406,7 +423,6 @@ export function Stage(props: {
     />
   );
   const live = props.brainstorm?.status === "live" ? props.brainstorm : null;
-  const steady = !props.offline && !props.ending;
   const thread = props.board?.threads.find((t) => t.id === props.board?.currentId);
   // Opening the sketch: Stand draws from the last two minutes on. A topic that was said names its first
   // subject, else the board's topic does, else the talk will. `style` is what the talk sounded like.
@@ -424,6 +440,7 @@ export function Stage(props: {
       return false;
     }
   };
+  startSketchRef.current = startSketch;
   const acts = {
     style: (s: string, style: "map" | "diagram") => void send({ type: "sketch.style", subject: s, style }),
     edit: (s: string, id: string, op: "rename" | "remove" | "move", arg?: { label?: string; to?: string }) => void send({ type: "sketch.edit", subject: s, id, op, ...arg }),
@@ -457,7 +474,7 @@ export function Stage(props: {
 
   const nowRow = (
       <div className={nowSlot ? "now in-bar" : "now"}>
-        {canSteer && <TaskPicker bare={!!nowSlot} roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { if (send({ type: "task.present", taskId: task.id })) pickTab(null); }} onProject={(projectId) => { if (send({ type: "project.present", projectId })) pickTab(null); }} />}
+        {canSteer && <TaskPicker bare={!!nowSlot} roomId={state.roomId} notes={props.notes} disabled={props.offline || props.ending} onPick={(task) => { if (send({ type: "task.present", taskId: task.id })) pickTab(null); }} onProject={nowSlot ? undefined : (projectId) => { if (send({ type: "project.present", projectId })) pickTab(null); }} />}
         <span className="now-title" dir="auto" title={focusItem ? [keyOf(focusItem), focusItem.title].filter(Boolean).join(" · ") : undefined}>
           {keyOf(focusItem) && keyOf(focusItem) !== focusItem?.title && <span className="key">{keyOf(focusItem)}</span>}
           {focusItem ? focusItem.title : "General / off-agenda"}
@@ -625,6 +642,7 @@ export function Stage(props: {
             disabled={props.offline || props.ending}
             onTask={(taskId) => send({ type: "task.present", taskId })}
             onClose={() => send({ type: "project.present", projectId: null })}
+            closeInBar={!props.phone}
           />
         ) : shownTask && !boardOpen && !openSnap ? (
           <TaskPresentation key={shownTask.id} presentation={shownTask} canSteer={canSteer} disabled={props.offline || props.ending} onChange={(next) => (next ? setMyTaskMode(next.mode) : send({ type: "task.present", taskId: null }))} />

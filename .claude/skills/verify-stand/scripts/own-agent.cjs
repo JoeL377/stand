@@ -122,6 +122,8 @@ async function tool(name, args) {
       const show = page.getByRole("button", { name: "Show the agenda" });
       if (await show.count()) await show.click();
       await page.getByRole("button", { name: "Play demo" }).click();
+      // A call with an empty agenda has no agenda column; it comes, folded, with the demo's items.
+      await page.getByRole("button", { name: "Show the agenda" }).click({ timeout: 15000 }).catch(() => {});
       await page.getByText(/DEMO-104 · \d+ remarks?/).waitFor({ timeout: 120_000 });
       // The demo's last step is an agent's report; give it a moment to land.
       await page.waitForTimeout(8_000);

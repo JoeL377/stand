@@ -21,6 +21,7 @@ import { PRESENT_TASK } from "./TaskPresentation.tsx";
 import { MOD, meetingShortcuts } from "../shortcuts.ts";
 import { ExperienceControl, runningExperience } from "./Experiences.tsx";
 import { TaskPicker } from "./TaskPresentation.tsx";
+import { ProjectControl } from "./ProjectPresentation.tsx";
 import { PhoneViewer, usePhone } from "../phone.ts";
 import { mayTakeOver, presentingLine } from "./presenter.ts";
 import { nextAsk } from "./NextCard.tsx";
@@ -336,6 +337,9 @@ export function Meeting(props: {
   useWakeLock(phone);
   useKeyboardRoom(phone);
   const foldAgenda = () => setAgendaFolded((f) => remember(AGENDA_FOLDED_KEY, !f));
+  // A call with nothing on its agenda has no agenda column: the board takes the width. It comes with the
+  // first item (a review's slides, a project, a to-do), or when someone asks to add one from the More menu.
+  const [agendaWanted, setAgendaWanted] = useState(false);
   const foldRef = useRef(foldAgenda);
   foldRef.current = foldAgenda;
   useEffect(() => {
@@ -376,6 +380,7 @@ export function Meeting(props: {
   }
   // The server says so once it's on it; until then, our own click.
   const writingUp = barEnding;
+  const noAgenda = !phone && !agendaWanted && !!state && state.items.length === 0 && !(state.upNext && (state.upNext.suggestions.length || state.upNext.parked.length || state.upNext.total));
   // Mic blocked while transcription is also down: one pill, with the steps in order.
   const micFirst = Boolean(state.transcriptionDown && media.micError && !media.micOn);
   const micLabel = media.micStarting
@@ -504,6 +509,7 @@ export function Meeting(props: {
             canPresent={canSteer && !writingUp && room.connected}
             onInvite={copyInvite}
             onHelp={() => setShowKeys(true)}
+            onAgenda={noAgenda && canSteer && !writingUp ? () => (setAgendaWanted(true), setAgendaFolded(false)) : undefined}
           />
         </div>
       </header>
@@ -533,11 +539,11 @@ export function Meeting(props: {
       )}
 
       <div
-        className={`meeting-grid${agendaFolded && !phone ? " agenda-folded" : ""}${sideFolded && !phone ? " side-folded" : ""}${phone ? ` phone${sheet === "agenda" || sheet === "chat" ? ` sheet-${sheet}` : ""}` : ""}`}
+        className={`meeting-grid${noAgenda ? " no-agenda" : agendaFolded && !phone ? " agenda-folded" : ""}${sideFolded && !phone ? " side-folded" : ""}${phone ? ` phone${sheet === "agenda" || sheet === "chat" ? ` sheet-${sheet}` : ""}` : ""}`}
         // Picking an item from the agenda on a phone closes the sheet to show it.
         onClick={(e) => phone && sheet === "agenda" && (e.target as HTMLElement).closest(".item-main") && setSheet(null)}
       >
-        <AgendaPanel
+        {!noAgenda && <AgendaPanel
           folded={agendaFolded && !phone}
           onFold={foldAgenda}
           foldKeys={`${MOD.cmd} + \\`}
@@ -550,7 +556,7 @@ export function Meeting(props: {
           notes={room.notes}
           segments={room.segments}
           notesBusy={room.notesBusy}
-        />
+        />}
         <Stage
           pilot={pilot}
           state={state}
@@ -770,6 +776,15 @@ export function Meeting(props: {
               <ShareIcon />
               <span>{media.sharePicking ? "Choosing…" : "Share screen"}</span>
             </button>
+          )}
+          {/* Whoever steers the call puts a project on the board, the way a screen or a review goes up. */}
+          {canSteer && state && (
+            <ProjectControl
+              roomId={roomId}
+              shown={focusItem?.showsProject ? (focusItem.projectId ?? null) : null}
+              disabled={writingUp || !room.connected}
+              onOpen={(projectId) => send({ type: "project.present", projectId })}
+            />
           )}
           {/* Anyone in the call can start a review and finish it. */}
           {state && (
@@ -1067,6 +1082,8 @@ function TopMore(props: {
   canPresent: boolean;
   onInvite: () => void;
   onHelp: () => void;
+  /** Set while the call has no agenda column: opens it to add slides, typed items or a PDF deck. */
+  onAgenda?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLSpanElement>(open, () => setOpen(false));
@@ -1093,7 +1110,12 @@ function TopMore(props: {
           </button>
           {props.canPresent && (
             <button role="menuitem" onClick={pick(() => window.dispatchEvent(new Event(PRESENT_TASK)))}>
-              Open a project or task
+              Present a task
+            </button>
+          )}
+          {props.onAgenda && (
+            <button role="menuitem" onClick={pick(props.onAgenda)}>
+              Add an agenda
             </button>
           )}
           {/* The sheet closes on any click outside it, so open it after this click is over. */}

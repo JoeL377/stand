@@ -23,7 +23,7 @@ import { usePersonColors } from "../PersonColors.tsx";
 // short glow and nothing moves; the rest fold into "Earlier". While someone's pointer is on a list, new
 // lines wait behind a "2 new" pill. An answered question folds into its decision and a checked to-do
 // into "Done", each after a moment in place.
-import { type CSSProperties, Fragment, useContext, useEffect, useRef, useState } from "react";
+import { type CSSProperties, Fragment, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { BarSlot } from "./barSlot.ts";
@@ -174,6 +174,8 @@ export function TopicBoard(props: {
   checkIn?: { closed: boolean; answeredAt: number | null; page?: number };
   checkInActs?: OpenerActs | null;
   doneDeck?: DoneDeck | null;
+  /** Before the first topic: the few things to start with (StartCards.tsx). */
+  start?: ReactNode;
   /** When the space's last meeting started: the "Done since" card counts from it. Null: the space's first. */
   lastMeetingAt?: number | null;
   /** Stand's cards (options on open questions, answers to questions asked out loud), and acting on them. */
@@ -574,6 +576,7 @@ export function TopicBoard(props: {
         speaking={speaking && { key: "now", name: speaking.speakerName, id: speaking.speakerId, text: speaking.text, now: true }}
         updating={!!board?.busy}
         item={props.focusItem}
+        start={props.start}
       />
     );
   const toggle = (
@@ -843,6 +846,7 @@ function Waiting(props: {
   speaking: { key: string; name: string; id: string; text: string; now: boolean } | undefined | false;
   updating: boolean;
   item: Item | null;
+  start?: ReactNode;
 }) {
   if (props.remarks.length || props.speaking) return <Warmup remarks={props.remarks} speaking={props.speaking} updating={props.updating} />;
   const item = props.item;
@@ -860,6 +864,7 @@ function Waiting(props: {
           )}
         </div>
       )}
+      {props.start}
       <p className={props.updating ? "topic-hint updating" : "topic-hint"}>
         The topic shows up here as people talk
       </p>
