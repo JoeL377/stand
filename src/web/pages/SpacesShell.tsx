@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { LayoutGrid, Mic, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { ChevronDown, LayoutGrid, Mic, User, PanelLeftClose, PanelLeftOpen, Plug, Plus, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import type { SpaceSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { ConxtLogo } from "../ConxtLogo.tsx";
@@ -268,6 +268,8 @@ export function PhoneMenu(props: {
   current: { id: string; name: string };
   projects: Array<{ id: string; name: string; pinned: boolean }>;
   openProject: string | null;
+  /** Your own open work in this space, across its projects. */
+  mine: { on: boolean; count: number; open: () => void };
   onProject: (id: string) => void;
   onClose: () => void;
 }) {
@@ -275,8 +277,19 @@ export function PhoneMenu(props: {
   const others = [...(props.spaces ?? [])]
     .filter((s) => s.id !== props.current.id)
     .sort((a, b) => Number(!!b.live) - Number(!!a.live) || a.name.localeCompare(b.name));
+  const [switching, setSwitching] = useState(false);
+  // Out the way it came: the panel slides back left and the shade fades, then it unmounts.
+  const [closing, setClosing] = useState(false);
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const close = () => {
+    if (closing) return;
+    if (reduced) return props.onClose();
+    setClosing(true);
+    window.setTimeout(props.onClose, 180);
+  };
+  const elsewhere = others.some((s) => s.live || (s.unread ?? 0) > 0);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     window.addEventListener("keydown", onKey);
     const was = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -286,19 +299,49 @@ export function PhoneMenu(props: {
     };
   }, []);
   const go = (fn: () => void) => () => {
-    props.onClose();
+    close();
     fn();
   };
   return (
-    <div className="pm-wrap" onClick={props.onClose}>
+    <div className={closing ? "pm-wrap closing" : "pm-wrap"} onClick={close}>
       <nav className="pm" aria-label="Menu" onClick={(e) => e.stopPropagation()}>
-        <div className="pm-head">
+        {/* The space's name is the switcher: tap it for your other spaces. */}
+        <button type="button" className="pm-head" aria-expanded={switching} onClick={() => setSwitching((v) => !v)}>
           <span className="sp-space-tile" style={{ background: colorFor(props.current.id) }} aria-hidden>
             {initials(props.current.name)}
           </span>
           <strong>{props.current.name}</strong>
-        </div>
+          {elsewhere && !switching && <span className="pm-new" aria-label="Something new in another space" />}
+          <ChevronDown size={16} aria-hidden className={switching ? "pm-caret open" : "pm-caret"} />
+        </button>
+        {switching && (
+          <div className="pm-switch">
+            {others.map((s) => (
+              <Link key={s.id} to={spaceHref(s.id)} className="pm-row" onClick={close}>
+                <span className="sp-space-tile" style={{ background: colorFor(s.id) }} aria-hidden>
+                  {initials(s.name)}
+                  {s.live && <span className="sp-side-dot live" />}
+                </span>
+                <span className="pm-text">{s.name}</span>
+                {(s.unread ?? 0) > 0 && <span className="pm-new" aria-label="New messages" />}
+              </Link>
+            ))}
+            <Link to="/" className="pm-row" onClick={close}>
+              <LayoutGrid size={16} aria-hidden />
+              <span className="pm-text">All spaces</span>
+            </Link>
+            <button type="button" className="pm-row" onClick={go(() => newSpace(""))}>
+              <Plus size={16} aria-hidden />
+              <span className="pm-text">New space</span>
+            </button>
+          </div>
+        )}
         <p className="pm-label">Projects</p>
+        <button type="button" className={props.mine.on ? "pm-row on" : "pm-row"} onClick={go(props.mine.open)}>
+          <User size={16} aria-hidden />
+          <span className="pm-text">Mine</span>
+          {props.mine.count > 0 && <span className="pm-count">{props.mine.count}</span>}
+        </button>
         <button type="button" className={props.openProject === "" ? "pm-row on" : "pm-row"} onClick={go(() => props.onProject(""))}>
           <LayoutGrid size={16} aria-hidden />
           <span className="pm-text">All projects</span>
@@ -309,28 +352,9 @@ export function PhoneMenu(props: {
             <span className="pm-text">{p.name}</span>
           </button>
         ))}
-        {others.length > 0 && <p className="pm-label">Spaces</p>}
-        {others.map((s) => (
-          <Link key={s.id} to={spaceHref(s.id)} className="pm-row" onClick={props.onClose}>
-            <span className="sp-space-tile" style={{ background: colorFor(s.id) }} aria-hidden>
-              {initials(s.name)}
-              {s.live && <span className="sp-side-dot live" />}
-            </span>
-            <span className="pm-text">{s.name}</span>
-            {(s.unread ?? 0) > 0 && <span className="pm-new" aria-label="New messages" />}
-          </Link>
-        ))}
         <div className="pm-foot">
-          <Link to="/" className="pm-row" onClick={props.onClose}>
-            <LayoutGrid size={16} aria-hidden />
-            <span className="pm-text">All spaces</span>
-          </Link>
-          <button type="button" className="pm-row" onClick={go(() => newSpace(""))}>
-            <Plus size={16} aria-hidden />
-            <span className="pm-text">New space</span>
-          </button>
           {FOOT_ROWS.map(({ label, icon: Icon, to }) => (
-            <Link key={to} to={to} className="pm-row" onClick={props.onClose}>
+            <Link key={to} to={to} className="pm-row" onClick={close}>
               <Icon size={16} aria-hidden />
               <span className="pm-text">{label}</span>
             </Link>
