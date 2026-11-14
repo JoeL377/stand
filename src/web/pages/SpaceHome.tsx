@@ -355,13 +355,6 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   };
 
   const made = useArtifacts(room.id);
-  // A sketch is its picture: a card goes straight to it. Specs, docs and decks open the panel first.
-  const navigate = useNavigate();
-  const pickArtifact = useCallback((id: string) => {
-    const a = made.artifacts?.find((x) => x.id === id);
-    if (a?.kind === "sketch" && a.href) navigate(a.href);
-    else showArtifact(id);
-  }, [made.artifacts, navigate, showArtifact]);
   const todos = room.followUps.filter((f) => !gone.has(`todo:${f.id}`));
   const questions = (feed?.open ?? []).filter((n) => !gone.has(`question:${n.id}`));
   const decisions = (feed?.decided ?? []).filter((n) => !gone.has(`decision:${n.id}`));
@@ -465,6 +458,15 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
 
   // The open project's name, shown after "Projects" in the tab row as the way back.
   const crumb = tab === "projects" && hasProjects && !mine && pageOf ? (pageOf === "none" ? "Unassigned" : (projects.find((x) => x.id === pageOf)?.name ?? null)) : null;
+  // Where an artifact's own page leads back to: the tab, or the project, it was opened from.
+  const backHere = { to: `${window.location.pathname}${window.location.search}`, label: crumb ?? TABS.find((t) => t.key === tab)?.label ?? room.name };
+  // A sketch is its picture: a card goes straight to it. Specs, docs and decks open the panel first.
+  const navigate = useNavigate();
+  const pickArtifact = (id: string) => {
+    const a = made.artifacts?.find((x) => x.id === id);
+    if (a?.kind === "sketch" && a.href) navigate(a.href, { state: { back: backHere } });
+    else showArtifact(id);
+  };
 
   // Moving around the page: the line under the tabs slides to the one picked, and the panel
   // below comes in. Into a project it comes from the right, and back out to all projects from
@@ -827,6 +829,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
             projects={projectNames}
             onClose={closeArtifact}
             onOpenTask={showTask}
+            back={backHere}
             onOpenSpec={(id) => setParams((prev) => {
               const next = new URLSearchParams(prev);
               next.delete("artifact"); next.set("task", id); next.set("view", "plan");

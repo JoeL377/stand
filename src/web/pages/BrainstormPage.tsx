@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useBack } from "../backLink.ts";
 import { usePhone } from "../phone.ts";
 import type { BrainstormSummary, BrainstormView } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
@@ -23,6 +24,7 @@ export const brainCount = (b: { directions: number; ideas: number }) => `${b.ide
 export const designCount = (d: { boxes: number; arrows: number }) => `${d.boxes} part${d.boxes === 1 ? "" : "s"}, ${d.arrows} arrow${d.arrows === 1 ? "" : "s"}`;
 
 export function BrainstormPage() {
+  const back = useBack();
   const { roomId = "", brainstormId = "" } = useParams();
   const [data, setData] = useState<{ roomName: string; brainstorm: BrainstormView; brainstorms: BrainstormSummary[] } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -71,8 +73,8 @@ export function BrainstormPage() {
   return (
     <div className="rp bp">
       <header className="rp-head">
-        <Link className="rp-back" to={spaceHref(roomId)}>
-          ← {data.roomName}
+        <Link className="rp-back" to={back?.to ?? spaceHref(roomId)}>
+          ← {back?.label ?? data.roomName}
         </Link>
         <strong>Sketch</strong>
         <BrainstormPicker roomId={roomId} current={b} all={data.brainstorms} />

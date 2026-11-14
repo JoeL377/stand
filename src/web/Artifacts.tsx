@@ -328,6 +328,8 @@ export function ArtifactPanel(props: {
   projects: Map<string, string>;
   onClose: () => void;
   onOpenTask: (id: string) => void;
+  /** Where the page Open leads to should lead back to. */
+  back?: { to: string; label: string };
   /** Open a spec where it lives: its to-do, on the spec. */
   onOpenSpec: (taskId: string) => void;
   onProject: (id: string) => void;
@@ -437,7 +439,7 @@ export function ArtifactPanel(props: {
             </p>
             <div className="af-actions">
               {a.href ? (
-                <Link className="af-btn primary" to={a.href}>Open</Link>
+                <Link className="af-btn primary" to={a.href} state={props.back ? { back: props.back } : undefined}>Open</Link>
               ) : (
                 taskId && <button type="button" className="af-btn primary" onClick={() => props.onOpenSpec(taskId)}>Open</button>
               )}

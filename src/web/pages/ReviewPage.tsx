@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useBack } from "../backLink.ts";
 import { IDEA_OUTCOMES, REVIEW_OUTCOMES, type IdeaOutcome, type ReviewCaught, type ReviewOutcome, type ReviewSummary, type ReviewView } from "../../shared/protocol.ts";
 import { IdeaCard } from "../room/IdeaCard.tsx";
 import { brainstormHref } from "./brainstormHref.ts";
@@ -49,6 +50,7 @@ export function OutcomeCounts({ outcomes }: { outcomes: ReviewSummary["outcomes"
 }
 
 export function ReviewPage() {
+  const back = useBack();
   const { roomId = "", reviewId = "next" } = useParams();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
@@ -111,8 +113,8 @@ export function ReviewPage() {
   return (
     <div className="rp">
       <header className={ideas ? "rp-head ideas" : "rp-head"}>
-        <Link className="rp-back" to={spaceHref(roomId)}>
-          ← <span className="rp-back-name">{data.roomName}</span>
+        <Link className="rp-back" to={back?.to ?? spaceHref(roomId)}>
+          ← <span className="rp-back-name">{back?.label ?? data.roomName}</span>
         </Link>
         <strong>{ran ? "Deck" : ideas ? "Idea review" : "Product review"}</strong>
         {ideas ? (
