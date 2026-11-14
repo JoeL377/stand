@@ -5139,10 +5139,12 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
 .tl-row a { position: relative; display: flex; align-items: center; gap: 14px; padding: 3px 0; color: inherit; text-decoration: none; }
 .tl-card { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 40px; box-sizing: border-box; padding: 0 12px 0 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); transition: border-color 0.12s ease, background 0.12s ease; }
 .tl-row a:hover { text-decoration: none; }
-.tl-row.on .tl-card, .tl-row a:focus-visible .tl-card { border-color: color-mix(in srgb, var(--text) 35%, var(--line)); background: var(--panel-2); }
+.tl-row.on .tl-card, .tl-row a:focus-visible .tl-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel)); box-shadow: 0 0 0 1px var(--accent); }
+.tl-row.on .tl-name { font-weight: 650; }
+.tl-row.on .tl-len { color: var(--text); }
 .tl-row.short .tl-card { min-height: 32px; border-style: dashed; background: none; }
 .tl-dot { flex: none; box-sizing: border-box; width: 9px; height: 9px; margin-left: 0; border-radius: 999px; border: 1.5px solid var(--muted); background: var(--bg, var(--panel)); position: relative; z-index: 1; }
-.tl-row.on .tl-dot { border-color: var(--text); background: var(--text); }
+.tl-row.on .tl-dot { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent); }
 .tl-row.missed .tl-dot { border-color: var(--accent); background: var(--accent); }
 .tl-row.short .tl-dot { width: 5px; height: 5px; margin: 0 2px; border: 0; background: var(--muted); }
 .tl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
@@ -5182,7 +5184,7 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
   .tl-card { min-height: 44px; padding-top: 10px; padding-bottom: 10px; align-items: flex-start; }
   .tl-name { white-space: normal; font-size: 15px; line-height: 21px; }
   .tl-len { opacity: 1; padding-top: 3px; }
-  .tl-row.on .tl-card { border-color: var(--line); background: var(--panel); }
+  .tl-row.on .tl-card { border-color: var(--line); background: var(--panel); box-shadow: none; }
   .mt-notes > .sh-row > .sh-time { display: inline; width: auto; }
   .mt-notes > .sh-row :is(.sh-pill-wrap, .sh-row-del) { display: none; }
 }
