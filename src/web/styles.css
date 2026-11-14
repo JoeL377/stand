@@ -5432,3 +5432,28 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 @keyframes pm-fade-out { to { background: rgb(0 0 0 / 0); } }
 @keyframes pm-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .pm, .pm-wrap { animation: none; } }
+
+/* Inside a space the nav is about that space: its name (a switcher for your other spaces), then your
+   own work and its projects. Folded to a rail, the nav keeps the row of space tiles. */
+.sp-switch { position: relative; flex: none; margin-bottom: 10px; }
+.sp-switch .sp-switch-btn { font-weight: 600; color: var(--side-strong); }
+.sp-switch-btn .sp-side-text { flex: 1 1 auto; text-align: left; }
+.sp-switch-btn .sp-chat-mark { margin-left: 0; }
+.sp-switch-caret { flex: none; margin-left: auto; color: var(--muted); transition: transform 160ms ease; }
+.sp-switch-caret.open { transform: rotate(180deg); }
+.sp-switch-pop { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); }
+.sp-switch-pop .sp-navrow { color: var(--text); }
+.sp-switch-pop .sp-navrow:hover { background: var(--hover); color: var(--text); }
+.sp-switch-pop .sp-space-tile .sp-side-dot { box-shadow: 0 0 0 2px var(--panel); }
+.sp-switch-rule { height: 1px; margin: 4px 6px; background: var(--line); }
+.sp-side-projects { margin-top: 0; }
+.sp-side-projects .sp-side-label { padding-top: 12px; }
+.sp-side-n { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sp-pj-dot { flex: none; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; }
+.sp-pj-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.sp-pj-dot.pinned::before { background: var(--muted); }
+.sp-navrow.active .sp-pj-dot::before { background: var(--side-strong); }
+/* Mine is in the nav while it is open; folded, it is a tab again. */
+@media (min-width: 761px) {
+  .sp-shell:not(.collapsed) .sh-tab.mine { display: none; }
+}

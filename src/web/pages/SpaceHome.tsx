@@ -41,7 +41,7 @@ import { ShotZoom } from "../room/ReviewStage.tsx";
 import type { DesignReviewRan, DesignReviewSummary } from "../../shared/designReview.ts";
 import { CopyForAgent } from "../CopyForAgent.tsx";
 import { MOD } from "../shortcuts.ts";
-import { PhoneMenu, SpacesShell } from "./SpacesShell.tsx";
+import { PhoneMenu, SpacesShell, type SpaceNav } from "./SpacesShell.tsx";
 import { Menu as MenuIcon } from "lucide-react";
 import { TaskDrawer } from "../TaskDrawer.tsx";
 import { RowMore } from "../RowMore.tsx";
@@ -520,6 +520,22 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
   // The way back to all spaces says when another space has something new or a call on.
   const focused = phone && !!crumb;
   const [menu, setMenu] = useState(false);
+  // This space in the nav (the sidebar, or the menu on a phone): your work, then its projects.
+  const pinnedIds = room.pinnedProjects ?? [];
+  const nav: SpaceNav = {
+    id: room.id,
+    name: room.name,
+    projects: projects
+      .filter((p) => !p.archived)
+      .sort((a, b) => Number(pinnedIds.includes(b.id)) - Number(pinnedIds.includes(a.id)) || a.position - b.position)
+      .map((p) => ({ id: p.id, name: p.name, pinned: pinnedIds.includes(p.id) })),
+    openProject: tab === "projects" ? pageOf : null,
+    mine: { on: mine, count: counts.mine, open: () => pickTab("mine") },
+    onProject: (id) => {
+      pickTab("projects");
+      setProjectFilter(id);
+    },
+  };
   // Where the chat button goes back to.
   const beforeChat = useRef<TabKey>("projects");
   if (tab !== "chat") beforeChat.current = tab;
@@ -546,7 +562,7 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
 
   return (
   <PersonColors.Provider value={colorFor}>
-    <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread, chatMentions: chat.mentions } : s))}>
+    <SpacesShell spaces={spaces && spaces.map((s) => (s.id === room.id ? { ...s, unread: chat.unread, chatMentions: chat.mentions } : s))} here={nav}>
       <main className={["sh-main", phone && live && !wrapping && "is-live", tab === "chat" && "on-chat", focused && "focused"].filter(Boolean).join(" ")}>
         {/* A fixed top of the page: only the lists under it scroll. On a phone the page scrolls under it,
             and this is the only header: a way back to all spaces, the name, the menu, then the tabs. */}
@@ -669,13 +685,10 @@ export function SpaceHome(props: { room: RoomInfo; onJoin: (opts?: { muted?: boo
           <PhoneMenu
             spaces={spaces}
             current={{ id: room.id, name: room.name }}
-            projects={projects.filter((p) => !p.archived).sort((a, b) => Number((room.pinnedProjects ?? []).includes(b.id)) - Number((room.pinnedProjects ?? []).includes(a.id)) || a.position - b.position).map((p) => ({ id: p.id, name: p.name, pinned: (room.pinnedProjects ?? []).includes(p.id) }))}
-            openProject={tab === "projects" ? pageOf : null}
-            mine={{ on: mine, count: counts.mine, open: () => pickTab("mine") }}
-            onProject={(id) => {
-              pickTab("projects");
-              setProjectFilter(id);
-            }}
+            projects={nav.projects}
+            openProject={nav.openProject}
+            mine={nav.mine}
+            onProject={nav.onProject}
             onClose={() => setMenu(false)}
           />
         )}

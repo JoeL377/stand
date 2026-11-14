@@ -7,6 +7,18 @@ import { ConxtLogo } from "../ConxtLogo.tsx";
 import { ProfileMenu } from "../ProfileMenu.tsx";
 import { SelectedTabWeld } from "../SideNavWeld.tsx";
 import { colorFor, initials } from "../util.ts";
+import { useDismiss } from "../useDismiss.ts";
+
+/** The space that is open, for the nav: its projects and your own work in it. */
+export interface SpaceNav {
+  id: string;
+  name: string;
+  projects: Array<{ id: string; name: string; pinned: boolean }>;
+  /** The project open on the Projects tab ("" for all of them), or null when another tab is. */
+  openProject: string | null;
+  mine: { on: boolean; count: number; open: () => void };
+  onProject: (id: string) => void;
+}
 
 export const spaceHref = (id: string) => `/s/${id}`;
 /** Straight into talking in the space, past its overview page. */
@@ -131,7 +143,7 @@ function SpaceRow(props: { space: SpaceSummary; collapsed: boolean }) {
 /** The frame around the spaces pages, after Conxt's: the nav on a darker ground, and the page on
  *  an inset panel that lifts off it. The selected row welds to that panel. Conxt keeps its projects
  *  behind a switcher; here spaces are the main thing in the nav, so they're listed. */
-export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: React.ReactNode }) {
+export function SpacesShell(props: { spaces: SpaceSummary[] | null; here?: SpaceNav; children: React.ReactNode }) {
   const [creating, setCreating] = useState<string | null>(null);
   const [collapsed, toggle] = useCollapsed();
   // Folded, each item says what it is on hover.
@@ -167,17 +179,26 @@ export function SpacesShell(props: { spaces: SpaceSummary[] | null; children: Re
               {collapsed ? <PanelLeftOpen size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}
             </button>
           </div>
-          <nav className="sp-side-nav">{row({ label: "All spaces", icon: LayoutGrid, to: "/" })}</nav>
-          <div className="sp-side-spaces">
-            {spaces.length > 0 && <p className="sp-side-label">Spaces</p>}
-            {spaces.map((s) => (
-              <SpaceRow key={s.id} space={s} collapsed={collapsed} />
-            ))}
-            <button className="sp-navrow" onClick={() => setCreating("")} title={tip("New space")} aria-label="New space">
-              <Plus size={16} aria-hidden />
-              <span className="sp-side-text">New space</span>
-            </button>
-          </div>
+          {props.here && !collapsed ? (
+            <>
+              <SpaceSwitch here={props.here} spaces={spaces} />
+              <SpaceProjects here={props.here} />
+            </>
+          ) : (
+            <>
+            <nav className="sp-side-nav">{row({ label: "All spaces", icon: LayoutGrid, to: "/" })}</nav>
+            <div className="sp-side-spaces">
+              {spaces.length > 0 && <p className="sp-side-label">Spaces</p>}
+              {spaces.map((s) => (
+                <SpaceRow key={s.id} space={s} collapsed={collapsed} />
+              ))}
+              <button className="sp-navrow" onClick={() => setCreating("")} title={tip("New space")} aria-label="New space">
+                <Plus size={16} aria-hidden />
+                <span className="sp-side-text">New space</span>
+              </button>
+            </div>
+            </>
+          )}
           <nav className="sp-side-nav sp-side-foot">{FOOT_ROWS.map(row)}</nav>
           <div className="sp-side-user">
             <ProfileMenu collapsed={collapsed} />
@@ -364,6 +385,74 @@ export function PhoneMenu(props: {
           </div>
         </div>
       </nav>
+    </div>
+  );
+}
+
+/** At the top of the nav inside a space: the space's name, which opens your other spaces. */
+function SpaceSwitch(props: { here: SpaceNav; spaces: SpaceSummary[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const newSpace = useNewSpace();
+  const others = props.spaces.filter((s) => s.id !== props.here.id);
+  const news = others.some((s) => s.live || (s.unread ?? 0) > 0 || (s.waiting ?? 0) + (s.mentions ?? 0) > 0);
+  return (
+    <div className="sp-switch" ref={ref}>
+      <button type="button" className="sp-navrow sp-switch-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="Switch space">
+        <span className="sp-space-tile" style={{ background: colorFor(props.here.id) }} aria-hidden>
+          {initials(props.here.name)}
+        </span>
+        <span className="sp-side-text">{props.here.name}</span>
+        {news && !open && <span className="sp-chat-mark" aria-label="Something new in another space" />}
+        <ChevronDown size={15} aria-hidden className={open ? "sp-switch-caret open" : "sp-switch-caret"} />
+      </button>
+      {open && (
+        <div className="sp-switch-pop" role="menu">
+          {others.map((s) => (
+            <Link key={s.id} to={spaceHref(s.id)} role="menuitem" className="sp-navrow" onClick={() => setOpen(false)} onPointerEnter={() => api.warm(s.id)}>
+              <span className="sp-space-tile" style={{ background: colorFor(s.id) }} aria-hidden>
+                {initials(s.name)}
+                {s.live && <span className="sp-side-dot live" />}
+              </span>
+              <span className={s.unread ? "sp-side-text unread" : "sp-side-text"}>{s.name}</span>
+              <ChatMark unread={s.unread ?? 0} mentions={s.chatMentions ?? 0} collapsed={false} />
+              <WaitingCount count={(s.waiting ?? 0) + (s.mentions ?? 0)} collapsed={false} />
+            </Link>
+          ))}
+          {others.length > 0 && <div className="sp-switch-rule" />}
+          <Link to="/" role="menuitem" className="sp-navrow" onClick={() => setOpen(false)}>
+            <LayoutGrid size={16} aria-hidden />
+            <span className="sp-side-text">All spaces</span>
+          </Link>
+          <button type="button" role="menuitem" className="sp-navrow" onClick={() => { setOpen(false); newSpace(""); }}>
+            <Plus size={16} aria-hidden />
+            <span className="sp-side-text">New space</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Under the space's name: your own work in it, then its projects, each one click away. */
+function SpaceProjects(props: { here: SpaceNav }) {
+  const { here } = props;
+  const item = (key: string, on: boolean, label: string, icon: React.ReactNode, go: () => void, count?: number) => (
+    <button key={key} type="button" className={on ? "sp-navrow active" : "sp-navrow"} aria-current={on ? "page" : undefined} onClick={go} title={label}>
+      {on && <SelectedTabWeld />}
+      {icon}
+      <span className="sp-side-text">{label}</span>
+      {!!count && <span className="sp-side-n">{count}</span>}
+    </button>
+  );
+  return (
+    <div className="sp-side-spaces sp-side-projects">
+      {item("mine", here.mine.on, "Mine", <User size={16} aria-hidden />, here.mine.open, here.mine.count)}
+      <p className="sp-side-label">Projects</p>
+      {item("all", here.openProject === "", "All projects", <LayoutGrid size={16} aria-hidden />, () => here.onProject(""))}
+      {here.projects.map((p) =>
+        item(p.id, here.openProject === p.id, p.name, <span className={p.pinned ? "sp-pj-dot pinned" : "sp-pj-dot"} aria-hidden />, () => here.onProject(p.id)),
+      )}
     </div>
   );
 }
