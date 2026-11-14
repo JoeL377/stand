@@ -228,6 +228,9 @@ export interface Agent {
   /** Which project each to-do and open question is clearly part of (projectSuggest.ts): a project's
    *  key or "none" for each candidate's key. Null when the call failed. */
   suggestProjects(input: ProjectSuggestInput): Promise<Array<{ note: string; project: string }> | null>;
+  /** Where a project stands (projectStatus.ts): two to four sentences from what is in it. today is
+   *  YYYY-MM-DD. Left out without a model. */
+  projectStatus?(prompt: string, today: string): Promise<string | null>;
   /** What a design review shows of a spec (planBrief.ts): a summary, a few lines for each of its
    *  sections, and questions that each quote the spec. Left out without a model. */
   taskBrief?(prompt: string): Promise<z.infer<typeof TaskBriefSchema> | null>;
@@ -289,6 +292,17 @@ export function projectSuggestPrompt(input: ProjectSuggestInput): string {
   );
   return `Projects, each with to-dos that are in it:\n${projects.join("\n")}\n\nTo file:\n${lines.join("\n")}`;
 }
+
+const ProjectStatusSchema = z.object({ status: z.string() });
+
+export const PROJECT_STATUS_SYSTEM = `You write the short paragraph at the top of a project's page in Stand, a team's meeting and task tool. Someone opening the project reads it to learn where the project stands right now, before they look at its lists.
+Write two to four plain sentences, at most 80 words in all:
+- Lead with where it stands: what is moving, what just shipped or is ready to ship, and what it is waiting on.
+- Then what is blocked, undecided or still open that matters most, if anything.
+- Name people by first name when it helps ("Huy is on the sync fix"). Refer to PRs by number ("#212") only when one is the news.
+- Go by the facts given. Never invent progress, dates or owners. Say "this week" or "yesterday" rather than dates when you can, measured from today.
+- No headings, lists, bold, emoji or quotes. Don't restate the project's name or goal, and don't open with "This project" or "The project".
+- If little has happened, say so plainly in one sentence.`;
 
 export const PROJECT_SUGGEST_SYSTEM = `You file a team's to-dos and open questions into its projects. A project is a feature or a workstream the team named; the to-dos under each show what belongs in it. For each line under "To file", answer with the key of the one project it is clearly part of, or none.
 - Go by what the work is: the feature it builds, fixes or decides about.
@@ -1028,6 +1042,16 @@ When a capture fits the slide it is already under, answer with that slide. When 
       maxTokens: 6000,
     });
     return out?.filed ?? null;
+  }
+
+  async projectStatus(prompt: string, today: string): Promise<string | null> {
+    const out = await this.parse(ProjectStatusSchema, `Today is ${today}.\n\n${prompt}`, PROJECT_STATUS_SYSTEM, "low", config.projectStatusModel, {
+      timeout: 45_000,
+      maxTokens: 800,
+      thinking: false,
+    });
+    const text = out?.status.replace(/\s+/g, " ").trim();
+    return text ? text.slice(0, 700) : null;
   }
 
   async boardCard(context: string, talk: string): Promise<BoardAnswer | null> {

@@ -58,6 +58,8 @@ export const config = {
   /** Small, frequent calls: captions for snaps and Mac bar captures, filing a bar note under an
    *  item, and matching a shared screen to the agenda. Haiku is about 40x cheaper than Opus. */
   quickModel: env("QUICK_MODEL") ?? "claude-haiku-5-5",
+  /** Where a project stands (projectStatus.ts): a short paragraph, written only when a project changed. */
+  projectStatusModel: env("PROJECT_STATUS_MODEL") ?? "claude-sonnet-5-5",
   /** A product review deck drafted from a brief: mostly reshaping, so Sonnet. */
   deckModel: env("DECK_MODEL") ?? "claude-sonnet-5-5",
   /** Live notes experiments, for trying on a recorded meeting with scripts/replay-notes.ts; all
