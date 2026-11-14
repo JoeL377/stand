@@ -225,10 +225,20 @@ export function BrainMap(props: {
   // A phone never goes smaller than the whole map; a wider screen can shrink it a little and grow it more.
   const minK = narrow ? fit : 0.6;
   const maxK = narrow ? 1.5 : 2.5;
+  // The map drags freely, at any size, as far as a third of the screen past its edges; at the fitted
+  // size and place it is the fitted view again.
   const clampView = (k: number, x: number, y: number) => {
-    const kk = Math.min(maxK, Math.max(minK, k));
-    const lim = (pos: number, screen: number, canvas: number) => (canvas * kk <= screen ? (screen - canvas * kk) / 2 : Math.min(0, Math.max(screen - canvas * kk, pos)));
-    return Math.abs(kk - fit) <= fit * 0.02 ? null : { k: kk, x: lim(x, size.w, cw), y: lim(y, size.h, ch) };
+    let kk = Math.min(maxK, Math.max(minK, k));
+    if (Math.abs(kk - fit) <= fit * 0.02) kk = fit;
+    const lim = (pos: number, screen: number, canvas: number) => {
+      const slack = screen / 3;
+      const lo = Math.min(0, screen - canvas * kk) - slack;
+      const hi = Math.max(0, screen - canvas * kk) + slack;
+      return Math.min(hi, Math.max(lo, pos));
+    };
+    const nx = lim(x, size.w, cw);
+    const ny = lim(y, size.h, ch);
+    return kk === fit && Math.abs(nx) < 1 && Math.abs(ny) < 1 ? null : { k: kk, x: nx, y: ny };
   };
   /** Zooms by `by` keeping the point (px, py) of the screen where it is. */
   const zoomAt = (from: { k: number; x: number; y: number }, by: number, px: number, py: number, dx = 0, dy = 0) => {

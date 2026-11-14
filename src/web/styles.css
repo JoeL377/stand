@@ -5350,3 +5350,7 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 .af-bleed .af-links { padding-bottom: 16px; }
 /* On a phone the panel is the whole screen, on the same ground as the wide-screen panel. */
 @media (max-width: 760px) { .td-panel { background: var(--bg); } }
+/* A map drags to move around it. */
+.brain { cursor: grab; touch-action: none; }
+.brain:active { cursor: grabbing; }
+.brain .brain-node, .brain button { cursor: pointer; }
