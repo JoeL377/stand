@@ -71,6 +71,8 @@ export interface Artifact {
   href?: string;
   /** The to-do it is on (a spec, its screenshots): Open shows that to-do. */
   taskId?: string;
+  /** The meeting it came out of: its recap, the deck or sketch of a call, the snaps taken in it. */
+  meetingId?: string;
   /** A doc's reference, for agents. */
   ref?: string;
   preview: ArtifactPreview;
@@ -104,10 +106,11 @@ export function makersOf(artifacts: Artifact[]): Array<ArtifactMaker & { n: numb
 }
 
 /** The artifacts a filter lets through. project "" is everything, "none" is Unassigned. */
-export function filterArtifacts(artifacts: Artifact[], f: { kind?: ArtifactKind | ""; maker?: string; project?: string }): Artifact[] {
+export function filterArtifacts(artifacts: Artifact[], f: { kind?: ArtifactKind | ""; maker?: string; project?: string; meeting?: string }): Artifact[] {
   return artifacts.filter(
     (a) =>
       (!f.kind || a.kind === f.kind) &&
+      (!f.meeting || a.meetingId === f.meeting) &&
       (!f.maker || a.makers.some((m) => m.key === f.maker)) &&
       (!f.project || (f.project === "none" ? a.projects.length === 0 : a.projects.includes(f.project))),
   );

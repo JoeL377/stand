@@ -148,3 +148,10 @@ test("names and previews", () => {
   assert.equal(parseDocRef("https://stand.test/s/room?artifact=doc%3Aabc123xyz"), "abc123xyz");
   assert.equal(parseDocRef("stand:action/abc123xyz"), null);
 });
+
+test("filterArtifacts keeps only what one meeting made", () => {
+  const a = (id: string, meetingId?: string) => ({ id, kind: "deck" as const, title: id, ts: 1, projects: [], makers: [], meetingId, preview: {} });
+  const list = [a("deck:1", "m1"), a("deck:2", "m2"), a("deck:3")];
+  assert.deepEqual(filterArtifacts(list, { meeting: "m1" }).map((x) => x.id), ["deck:1"]);
+  assert.equal(filterArtifacts(list, {}).length, 3);
+});
