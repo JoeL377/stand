@@ -33,7 +33,7 @@ export interface ActivityTarget {
 export type ActivityKind =
   | "working" | "progress" | "blocked" | "needs_decision" | "ready" | "done" | "shipped" | "added" | "note" | "plan" | "linked"
   | "comment" | "review_asked" | "dropped" | "answered_question" | "slide" | "design" | "idea_review" | "project" | "renamed" | "caught"
-  | "answer" | "options" | "sweep" | "settled";
+  | "answer" | "options" | "sweep" | "settled" | "doc";
 
 export interface ActivityEvent {
   id: string;

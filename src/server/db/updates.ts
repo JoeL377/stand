@@ -6,7 +6,7 @@ import type { ItemUpdate, WorkShot } from "../../shared/protocol.ts";
 import { newId } from "../ids.ts";
 import { actorOfUpdate, type Row, toUpdate, toWorkShot } from "./rows.ts";
 
-export type AgentEventKind = "renamed" | "design" | "idea_review" | "project";
+export type AgentEventKind = "renamed" | "design" | "idea_review" | "project" | "doc";
 /** What the Activity tab shows of it: the thing it is about, and what it folds (the meetings a rename named). */
 export interface AgentEventBody {
   target: ActivityTarget | null;

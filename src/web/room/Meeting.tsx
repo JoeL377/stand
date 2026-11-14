@@ -277,7 +277,7 @@ export function Meeting(props: {
   const popLevel = useCallback((v: number) => popLevels.current?.(v), []);
   const stageSnap = useRef<(() => Promise<boolean>) | null>(null);
   const openPopOut = useCallback(
-    () => void popOut.open().catch(() => toast({ tone: "error", text: "Your browser didn't let Stand pop out the bar. Try the Pop out button." })),
+    () => void popOut.open().catch(() => toast({ tone: "error", text: "Your browser didn't let Stand pop out the bar." })),
     [popOut.open],
   );
   const offerPopOut = !macApp && canPopOut();
@@ -777,16 +777,6 @@ export function Meeting(props: {
               <span>{media.sharePicking ? "Choosing…" : "Share screen"}</span>
             </button>
           )}
-          {offerPopOut && (
-            <button
-              className={popOut.win ? "control popout on" : "control popout"}
-              onClick={openPopOut}
-              title="A small bar that stays over your other apps, with your mic, Snap and the space's to-dos"
-            >
-              <PopOutIcon />
-              <span>Pop out</span>
-            </button>
-          )}
           {/* Whoever steers the call puts a project on the board, the way a screen or a review goes up. */}
           {canSteer && state && (
             <ProjectControl
@@ -962,13 +952,6 @@ function useWakeLock(on: boolean) {
     };
   }, [on]);
 }
-
-const PopOutIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <rect x="3" y="5" width="18" height="14" rx="2" />
-    <rect x="12" y="11" width="7" height="6" rx="1" />
-  </svg>
-);
 
 /** What didn't happen, when a click needed the connection and it was down. */
 const REFUSED: Partial<Record<string, string>> = {

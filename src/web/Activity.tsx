@@ -2,7 +2,8 @@
 // a line and a time; what the agent wrote, and what a burst folds, open under the row. Rows come a
 // page at a time as the list is scrolled, and a row that hasn't changed isn't drawn again.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { enter } from "./motion.ts";
 import { Link } from "react-router-dom";
 import { type ActivityEvent, type ActivityPage, type ActivityRow, type ActivityTarget, type ActivityWho, burstTarget, dayStart, groupActivity } from "../shared/activity.ts";
 import { Avatar } from "./Avatar.tsx";
@@ -270,6 +271,15 @@ export function ActivityTab({ roomId, onOpenTask }: { roomId: string; onOpenTask
     }
     return out;
   }, [events]);
+  // Another agent's pill: its list fades in once it has come back. Not on the first list, and not when
+  // newer or older activity joins the one on screen.
+  const list = useRef<HTMLDivElement>(null);
+  const drawnFor = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!events || drawnFor.current === who) return;
+    if (drawnFor.current !== null) enter(list.current, {}, 160);
+    drawnFor.current = who;
+  }, [events, who]);
   const today = dayStart(Date.now());
   // Two people's agents can share a name: then the pill says whose.
   const shared = new Set(agents.map((a) => a.short).filter((s, i, all) => all.indexOf(s) !== i));
@@ -288,6 +298,7 @@ export function ActivityTab({ roomId, onOpenTask }: { roomId: string; onOpenTask
         </div>
       )}
       {error && !events && <p className="error">{error}</p>}
+      <div className="ac-list" ref={list}>
       {events && !days.length && <p className="sh-card-empty">{who ? "Nothing from this agent yet." : "Nothing yet. What agents do in this space shows here."}</p>}
       {days.map((d) => (
         <section key={d.start} className={d.start === today ? "ac-day today" : "ac-day"}>
@@ -302,6 +313,7 @@ export function ActivityTab({ roomId, onOpenTask }: { roomId: string; onOpenTask
           </ul>
         </section>
       ))}
+      </div>
       {events && next !== null && (
         <p className="ac-end" ref={setEnd}>
           <button type="button" className="link" onClick={more} disabled={busy}>{busy ? "Loading…" : "Show older"}</button>

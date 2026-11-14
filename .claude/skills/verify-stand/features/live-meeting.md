@@ -1,6 +1,6 @@
 # Live meeting and notes
 
-The meeting screen (`/s/<id>` after Start talking): agenda on the left (rows show the title; the row in focus also shows `N remarks · N to-dos`), "Now discussing" with the topic card in the middle (server/board.ts: a fixed title, a paragraph Sonnet rewrites every 30 s, details, and the point being made now; a share or deck shrinks it to one line over the screen) and a chapter bar of topics under it, the right panel with Chat / Transcript (Transcript opens first; chat is one conversation for the meeting with a message box), and the bottom controls (Mute, Share screen, Pop out, Play demo, Leave, Leave). Live notes run on Claude Haiku a few seconds after each pause.
+The meeting screen (`/s/<id>` after Start talking): agenda on the left (rows show the title; the row in focus also shows `N remarks · N to-dos`), "Now discussing" with the topic card in the middle (server/board.ts: a fixed title, a paragraph Sonnet rewrites every 30 s, details, and the point being made now; a share or deck shrinks it to one line over the screen) and a chapter bar of topics under it, the right panel with Chat / Transcript (Transcript opens first; chat is one conversation for the meeting with a message box), and the bottom controls (Mute, Share screen, Start review, Play demo, Leave). Live notes run on Claude Haiku a few seconds after each pause.
 
 ## Sub-features
 - Host-driven focus: clicking an agenda item pins talk to it.
