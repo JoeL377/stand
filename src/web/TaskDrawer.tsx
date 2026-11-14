@@ -1,4 +1,4 @@
-// One to-do or open question opened beside the space's task list: what it is, where it came from,
+// One to-do or open question opened beside the space's task list, in the same panel as an artifact: what it is, where it came from,
 // its spec, the to-do it is a part of and its parts, what it waits on and what waits on it, and what's been reported on it. The page's
 // ?task=<id> opens it, so a link can land on it.
 
@@ -9,12 +9,12 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { DesignReviewState } from "../shared/designReview.ts";
 import type { Note } from "../shared/protocol.ts";
 import { TASK_COMMENT_MAX, type TaskDetail, type TaskLink, type TaskMention } from "../shared/protocol.ts";
-import { STATE_LABEL, VERB_LABEL, stateOf, verbOf } from "../shared/tasks.ts";
+import { STATE_LABEL, stateOf } from "../shared/tasks.ts";
 import { api } from "./api.ts";
 import { useAuth } from "./auth.tsx";
 import { CopyForAgent } from "./CopyForAgent.tsx";
 import { usePhoneViewer } from "./phone.ts";
-import { CloseIcon } from "./icons.tsx";
+import { CloseIcon, SendIcon } from "./icons.tsx";
 import { MentionTextarea } from "./MentionTextarea.tsx";
 import { LastReview, designReviewHref } from "./pages/DesignReviewPage.tsx";
 import { PlanReviewBody } from "./PlanReview.tsx";
@@ -25,10 +25,16 @@ import { OwnerPicker } from "./OwnerPicker.tsx";
 import { useDismiss } from "./useDismiss.ts";
 import { fmtAgo, fmtDate } from "./util.ts";
 import { WorkCard } from "./WorkLog.tsx";
+import { PanelResizer, useSidePanel } from "./panelWidth.tsx";
+import { RowMore } from "./RowMore.tsx";
 
-export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, onListChange, acts }: {
-  /** What a phone's row no longer shows (topic, drop, archive); the drawer shows it on phones only. */
-  acts?: (note: Note) => React.ReactNode;
+const first = (name: string) => name.split(" via ")[0].split("’s ")[0].split(" ")[0];
+
+export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, onListChange, project, menu }: {
+  /** Its project, as a pill that moves it. */
+  project?: (note: Note) => React.ReactNode;
+  /** What can be done to it (drop, archive), as items in its ⋯ menu. */
+  menu?: (note: Note) => React.ReactNode;
   id: string;
   onOpen: (id: string) => void;
   onClose: () => void;
@@ -64,6 +70,8 @@ export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, on
   const request = useRef(0);
 
   const [task, setTask] = useState<TaskDetail | null>(null);
+  const [picking, setPicking] = useState(false);
+  const swapped = useSidePanel();
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -125,14 +133,30 @@ export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, on
   const mine = usePhoneViewer();
   const read = Boolean(mine && n && n.owner?.split(" ")[0] !== mine);
   // On the body, so the page panel's own layering can't put the page over it.
+  // What the to-do is a part of, what it waits on and what waits on it, each said once.
+  const partIds = new Set(task?.parts.map((l) => l.id));
+  const waitsOn = task?.waitsOn.filter((l) => !partIds.has(l.id)) ?? [];
+  const blocking = task?.blocking.filter((l) => !partIds.has(l.id)) ?? [];
+  // The spec has its own row above, so the log doesn't say it was attached.
+  const log = task ? task.work.log.filter((e) => !(task.work.plan && e.status === "plan")) : [];
+  const from = task?.meeting
+    ? { to: `/meetings/${task.meeting.id}`, text: `${task.meeting.chat ? "Chat" : "Call"}, ${fmtDate(task.meeting.startedAt)}`, title: task.meeting.title ?? undefined }
+    : null;
+  // On the body, so the page panel's own layering can't put the page over it.
   return createPortal(
     <>
-      <aside ref={drawerRef} className={read ? "task-drawer read" : "task-drawer"} role="complementary" aria-label="Task">
+      <aside ref={drawerRef} className={`task-drawer td-panel${read ? " read" : ""}${swapped ? " td-swap" : ""}`} role="complementary" aria-label={n?.kind === "question" ? "Question" : "To-do"}>
+        <PanelResizer />
         <div className="td-head">
-          {n && state && (
-            <span className="td-kind">
-              {VERB_LABEL[verbOf(n.kind)]} · <span className={`td-state ${state}`}>{STATE_LABEL[state]}</span>
-            </span>
+          <h2 className="td-title">{n?.text ?? ""}</h2>
+          {n && !read && (
+            <RowMore className="td-more">
+              {menu?.(n)}
+              {!task.parts.length && (task.parent || task.parentChoices.length > 0) && (
+                <button type="button" role="menuitem" onClick={() => setPicking(true)}>{task.parent ? "Change what it's part of" : "Make it a part of…"}</button>
+              )}
+              <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} label />
+            </RowMore>
           )}
           <button className="icon-btn td-close" aria-label="Close" title="Close (Esc)" onClick={onClose}>
             <CloseIcon />
@@ -142,8 +166,27 @@ export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, on
         {!task && !error && <p className="muted">Loading…</p>}
         {task && n && (
           <div className="td-body">
-            <h2 className="td-title">{n.text}</h2>
-            {acts && <div className="td-phone-acts">{acts(n)}</div>}
+            <p className="td-meta">
+              {n.kind === "action" ? (
+                <OwnerPicker
+                  note={n}
+                  roomId={task.roomId}
+                  people={task.people.map((p) => p.name)}
+                  me={user.name}
+                  onSaved={() => {
+                    void load();
+                    onListChange?.();
+                  }}
+                >
+                  <span className={n.owner ? undefined : "muted"}>{n.owner ? first(n.owner) : "Unassigned"}</span>
+                </OwnerPicker>
+              ) : (
+                n.owner && <span>{first(n.owner)}</span>
+              )}
+              {state === "doing" || state === "done" || state === "dropped" ? <span className={`td-state ${state}`}>{n.doneBy && state !== "doing" ? `${STATE_LABEL[state]} by ${first(n.doneBy)}` : STATE_LABEL[state]}</span> : null}
+              {project?.(n)}
+              {from ? <Link to={from.to} title={from.title}>{from.text}</Link> : <span>Added {fmtDate(n.ts)}</span>}
+            </p>
             {task.mentionsYou.length > 0 && (
               <MentionNotice
                 mentions={task.mentionsYou}
@@ -158,36 +201,6 @@ export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, on
                 }}
               />
             )}
-            <p className="td-meta">
-              {n.kind === "action" ? (
-                <OwnerPicker
-                  note={n}
-                  roomId={task.roomId}
-                  people={task.people.map((p) => p.name)}
-                  me={user.name}
-                  onSaved={() => {
-                    void load();
-                    onListChange?.();
-                  }}
-                >
-                  <span className={n.owner ? undefined : "muted"}>{n.owner ?? "Unassigned"}</span>
-                </OwnerPicker>
-              ) : (
-                <span className={n.owner ? undefined : "muted"}>{n.owner ?? "Anyone"}</span>
-              )}
-              {task.meeting ? (
-                <Link to={`/meetings/${task.meeting.id}`}>
-                  {task.meeting.title ? `From ${task.meeting.title} on ${fmtDate(task.meeting.startedAt)}` : `From the ${task.meeting.chat ? "chat" : "meeting"} on ${fmtDate(task.meeting.startedAt)}`}
-                </Link>
-              ) : (
-                <span>Added{n.editedBy ? ` by ${n.editedBy}` : ""}</span>
-              )}
-              {n.doneAt && n.doneBy && (
-                <span>
-                  {state === "dropped" ? "Dropped" : "Done"} by {n.doneBy}
-                </span>
-              )}
-            </p>
             {n.doneWhen && (
               <p className="td-done-when">
                 <strong>Done when</strong> {n.doneWhen}
@@ -199,67 +212,58 @@ export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, on
               </p>
             )}
 
-            {n.kind === "question" && (task.answer || state === "open" || state === "doing") && (
+            {n.kind === "question" && (task.answer ? (
               <section className="td-section">
                 <h3>Answer</h3>
-                {task.answer ? (
-                  <p className="td-answer">{task.answer.text}</p>
-                ) : (
-                  <AnswerForm
-                    roomId={task.roomId}
-                    note={n}
-                    onDone={(done) => {
-                      void load();
-                      onListChange?.();
-                      answeredToast(task.roomId, done, () => {
-                        void load();
-                        onListChange?.();
-                      });
-                    }}
-                  />
-                )}
+                <p className="td-answer">{task.answer.text}</p>
               </section>
-            )}
-
-            <section className="td-section">
-              <h3>Spec</h3>
-              {task.work.plan ? (
-                <button type="button" className="td-plan-card" onClick={() => setPlanOpen(true)}>
-                  <strong>Open spec</strong>
-                  <span className="muted">{task.work.plan.by} · {fmtAgo(task.work.plan.ts)}</span>
-                </button>
-              ) : <p className="muted">No spec yet.</p>}
-            </section>
-
-            {!task.parts.length && (task.parent || task.parentChoices.length > 0) && <PartOf
-                task={task}
-                onOpen={onOpen}
-                onSaved={() => {
+            ) : (state === "open" || state === "doing") && !read && (
+              <AnswerForm
+                roomId={task.roomId}
+                note={n}
+                onDone={(done) => {
                   void load();
                   onListChange?.();
+                  answeredToast(task.roomId, done, () => {
+                    void load();
+                    onListChange?.();
+                  });
                 }}
-              />}
+              />
+            ))}
+
+            {task.work.plan && (
+              <button type="button" className="td-plan-card" onClick={() => setPlanOpen(true)}>
+                <strong>Spec</strong>
+                <span className="muted">{first(task.work.plan.by)} · {fmtAgo(task.work.plan.ts)}</span>
+              </button>
+            )}
+
+            {(task.parent || picking) && (
+              <PartOf task={task} onOpen={onOpen} picking={picking} onPicking={setPicking} onSaved={() => {
+                void load();
+                onListChange?.();
+              }} />
+            )}
             <Links title="Parts" links={task.parts} onOpen={onOpen} />
-            <Links title="Waits on" links={task.waitsOn} onOpen={onOpen} />
-            <Links title="Blocking" links={task.blocking} onOpen={onOpen} />
+            <Links title="Waits on" links={waitsOn} onOpen={onOpen} />
+            <Links title="Blocking" links={blocking} onOpen={onOpen} />
 
-            <section className="td-section td-activity" ref={activity}>
-              <h3>Activity</h3>
-              {task.work.log.length ? <WorkCard work={task.work} noPlan /> : <p className="muted">Nothing reported yet.</p>}
-            </section>
-
-            <div className="td-foot">
-              <CopyForAgent kind={n.kind === "question" ? "question" : "action"} id={n.id} label />
-            </div>
+            {log.length > 0 && (
+              <section className="td-section td-activity" ref={activity}>
+                <h3>Activity</h3>
+                <WorkCard work={{ ...task.work, log }} noPlan />
+              </section>
+            )}
           </div>
         )}
         {task && (
           <form className="td-compose" onSubmit={(e) => { e.preventDefault(); void postComment(); }}>
             <MentionTextarea
               aria-label="Write a comment"
-              placeholder="Write a comment… Type @ to tag someone"
+              placeholder="Comment… @ to tag"
               value={draft}
-              rows={2}
+              rows={1}
               maxLength={TASK_COMMENT_MAX}
               readOnly={posting}
               people={task.people.filter((p) => p.id !== user.id)}
@@ -274,8 +278,10 @@ export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, on
                 }
               }}
             />
+            <button type="submit" className="td-send" aria-label="Post comment" title="Post comment (Command + Enter)" disabled={posting || !draft.trim()}>
+              <SendIcon />
+            </button>
             {commentError && <p className="error" role="alert">{commentError}</p>}
-            <button type="submit" disabled={posting || !draft.trim()}>{posting ? "Posting…" : "Post comment"}</button>
           </form>
         )}
       </aside>
@@ -287,7 +293,6 @@ export function TaskDrawer({ id, onOpen, onClose: closeNow, onMentionsChange, on
 
 function PlanViewer({ task, onClose }: { task: TaskDetail | null; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [expanded, setExpanded] = useState(true);
   const [copyStatus, setCopyStatus] = useState("");
   const plan = task?.work.plan;
   useLayoutEffect(() => {
@@ -318,25 +323,22 @@ function PlanViewer({ task, onClose }: { task: TaskDetail | null; onClose: () =>
   return (
     <dialog
       ref={dialog}
-      className={`td-plan-dialog${expanded ? " expanded" : ""}`}
+      className="td-plan-dialog expanded"
       role="dialog"
       aria-modal="true"
       aria-labelledby="td-plan-title"
       onCancel={(e) => { e.preventDefault(); onClose(); }}
     >
       <header className="td-plan-head">
-        <div>
-          <h2 id="td-plan-title">Spec</h2>
-          {task && <p>{task.note.text}</p>}
-        </div>
-        <button type="button" onClick={onClose}>Back to task</button>
+        <button type="button" className="td-plan-back" onClick={onClose}>
+          ← <span id="td-plan-title">{task?.note.text ?? "Back"}</span>
+        </button>
       </header>
       {plan && task ? <PlanReviewBody key={task.note.id} task={task.note.id} /> :
         <div className="td-plan-content"><p className="muted">{task ? "No spec yet." : "This task couldn’t be loaded."}</p></div>}
       {plan && (
         <footer className="td-plan-actions">
           <button type="button" onClick={() => void copyLink()}>Copy link</button>
-          <button type="button" onClick={() => setExpanded(!expanded)}>{expanded ? "Restore size" : "Expand"}</button>
           <span role="status">{copyStatus}</span>
           {task && <RequestReview taskId={task.note.id} roomId={task.roomId} />}
         </footer>
@@ -402,7 +404,6 @@ function MentionNotice({ mentions, onDismiss }: { mentions: TaskMention[]; onDis
         <button type="button" onClick={onDismiss} title="Take this task out of Mentions you">Dismiss</button>
       </p>
       <p className="td-mention-text"><MentionText text={latest.text} /></p>
-      <p className="muted small">Reply below, or dismiss it. Until then the task shows first in your task list.</p>
     </section>
   );
 }
@@ -418,9 +419,9 @@ function Links({ title, links, onOpen }: { title: string; links: TaskLink[]; onO
         {links.map((l) => (
           <li key={l.id}>
             <button type="button" onClick={() => onOpen(l.id)}>
-              <span className={`td-state ${l.state}`}>{STATE_LABEL[l.state]}</span>
+              <span className={`td-dot ${l.state}`} title={STATE_LABEL[l.state]} />
               <span className="td-link-text">{l.text}</span>
-              {l.owner && <span className="muted">{l.owner}</span>}
+              {l.owner && <span className="muted">{first(l.owner)}</span>}
             </button>
           </li>
         ))}
@@ -430,8 +431,7 @@ function Links({ title, links, onOpen }: { title: string; links: TaskLink[]; onO
 }
 
 /** "Part of": the to-do this one is a part of, and a small popup to pick one of the space's open to-dos or take it off. */
-function PartOf({ task, onOpen, onSaved }: { task: TaskDetail; onOpen: (id: string) => void; onSaved: () => void }) {
-  const [open, setOpen] = useState(false);
+function PartOf({ task, onOpen, onSaved, picking: open, onPicking: setOpen }: { task: TaskDetail; onOpen: (id: string) => void; onSaved: () => void; picking: boolean; onPicking: (open: boolean) => void }) {
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -461,31 +461,18 @@ function PartOf({ task, onOpen, onSaved }: { task: TaskDetail; onOpen: (id: stri
   return (
     <section className="td-section">
       <h3>Part of</h3>
-      {parent ? (
+      {parent && (
         <ul className="td-links">
           <li>
             <button type="button" onClick={() => onOpen(parent.id)}>
-              <span className={`td-state ${parent.state}`}>{STATE_LABEL[parent.state]}</span>
+              <span className={`td-dot ${parent.state}`} title={STATE_LABEL[parent.state]} />
               <span className="td-link-text">{parent.text}</span>
-              {parent.owner && <span className="muted">{parent.owner}</span>}
+              {parent.owner && <span className="muted">{first(parent.owner)}</span>}
             </button>
           </li>
         </ul>
-      ) : (
-        <p className="muted">Not a part of another to-do.</p>
       )}
       <span className="project-picker td-parent" ref={ref}>
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => {
-            setValue("");
-            setError("");
-            setOpen(!open);
-          }}
-        >
-          {parent ? "Change" : "Make it a part of a to-do"}
-        </button>
         {open && (
           <span
             className="project-pop"

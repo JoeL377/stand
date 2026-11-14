@@ -56,7 +56,8 @@ export function AnswerForm(props: { roomId: string; note: Pick<Note, "id" | "tex
       <input
         autoFocus={!!props.onCancel}
         aria-label="The answer"
-        placeholder="The answer, in a line. Kept as a decision."
+        placeholder="Answer…"
+        title="Kept as a decision"
         maxLength={ANSWER_MAX}
         value={text}
         disabled={saving}

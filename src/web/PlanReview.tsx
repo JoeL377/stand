@@ -163,7 +163,8 @@ export function PlanReviewBody({ task, initial }: { task: string; initial?: { th
 
   if (!review || !plan) return <p className="td-plan-content" role="status">{error || "Loading plan…"}</p>;
   return (
-    <div className={`td-review mobile-${mobilePanel}`}>
+    // With no comments yet the spec has the whole width; selecting text brings the column back.
+    <div className={`td-review mobile-${mobilePanel}${!review.threads.length && !selection && !composing && review.latest === plan.id ? " quiet" : ""}`}>
       <div className="td-review-mobile-nav" role="group" aria-label="Spec view">
         <button type="button" aria-pressed={mobilePanel === "plan"} onClick={() => setMobilePanel("plan")}>Spec</button>
         <button type="button" aria-pressed={mobilePanel === "comments"} onClick={() => setMobilePanel("comments")}>
@@ -185,7 +186,6 @@ export function PlanReviewBody({ task, initial }: { task: string; initial?: { th
       <aside className="td-review-comments" aria-label="Spec comments">
         <header className="td-review-heading">
           <h3><MessageSquare size={16} aria-hidden="true" /> Comments</h3>
-          <p>Select text in the spec to leave a comment.</p>
         </header>
         {review.latest !== plan.id && <button className="small" type="button" disabled={busy} onClick={() => showVersion(review.latest)}>View latest version</button>}
         <div className="td-review-filters" role="group" aria-label="Filter comments">

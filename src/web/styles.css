@@ -2219,7 +2219,6 @@ a.sh-pill:hover { text-decoration: none; }
 .td-plan-actions { border-top: 1px solid var(--line); align-items: center; flex-wrap: wrap; }
 @media (max-width: 600px) {
   .td-plan-dialog, .td-plan-dialog.expanded { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
-  .td-plan-actions button:nth-child(2) { display: none; }
 }
 .td-section .fu-log { margin: 0; }
 .td-state { font-weight: 600; }
@@ -4996,7 +4995,7 @@ a.ac-target:hover { text-decoration: underline; }
 .af-rows .af-slide { padding: 7px 7px 0; }
 .af-rows .af-slide-title { font-size: 6px; }
 /* One artifact opened: the task drawer's shell with the artifact in it. */
-.af-panel { width: min(var(--af-w, 560px), 100vw); }
+.af-panel { width: min(var(--panel-w, 560px), 100vw); }
 .af-panel-kind { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .af-panel .af-panel-kind select { font-size: 12px; }
 .af-panel-kind select { field-sizing: content; width: auto; height: 20px; padding: 0; appearance: auto; border: 0; background: none; box-shadow: none; font: inherit; color: inherit; cursor: pointer; }
@@ -5150,7 +5149,7 @@ a.af-link:hover .af-link-text { color: var(--accent-text); text-decoration: unde
   .af-panel { background: var(--bg); box-shadow: none; }
   .sp-content { transition: padding-right 260ms var(--ease-out); }
   html[data-resizing] .sp-content { transition: none; }
-  html[data-side-panel]:not([data-chat-dock]) .sp-content { padding-right: calc(min(var(--af-w, 560px), 100vw) + 16px); }
+  html[data-side-panel]:not([data-chat-dock]) .sp-content { padding-right: calc(min(var(--panel-w, 560px), 100vw) + 16px); }
 }
 
 /* ── Meetings tab: a timeline and a preview ───────────────────────────────────────────────
@@ -5269,3 +5268,71 @@ html[data-resizing], html[data-resizing] * { cursor: col-resize !important; user
 @keyframes af-in-sheet { from { transform: translateX(100%); } }
 @media (max-width: 720px) { .af-panel { animation-name: af-in-sheet; } }
 @media (prefers-reduced-motion: reduce) { .af-panel { animation: none; } .sp-content { transition: none !important; } }
+
+/* ── Every right-hand panel, one pattern ─────────────────────────────────────────────────
+   Title, ⋯ and close on one line; one quiet line of facts under it; then what's there, in
+   sections with quiet sentence-case headings. Nothing says it's empty: an empty section isn't shown.
+   A to-do sits beside the page like an artifact: same ground, edge, padding, width and slide. */
+.task-drawer { width: min(var(--panel-w, 560px), 100vw); animation: af-in 260ms var(--ease-out); }
+.task-drawer.td-swap { animation: none; }
+@media (min-width: 761px) { .td-panel { padding: 16px 24px 0; } }
+@media (min-width: 1200px) { .td-panel { background: var(--bg); box-shadow: none; } }
+.td-panel .td-head { align-items: flex-start; gap: 4px; }
+.td-panel .td-title { flex: 1; min-width: 0; margin: 0 0 6px; }
+.td-panel .td-more { display: inline-flex; margin-top: 2px; }
+.td-panel .td-more .rp-menu { left: auto; right: 0; min-width: 200px; }
+.td-panel .td-close { margin-top: -2px; }
+.td-panel .td-meta { align-items: center; gap: 0; margin: 0 0 14px; }
+.td-panel .td-meta > * + *::before { content: "·"; margin: 0 7px; color: var(--muted); }
+.td-panel .td-meta > .project-picker { margin-left: 0; }
+.td-panel .td-meta a { color: inherit; }
+.td-panel .td-meta a:hover { color: var(--text); }
+.td-panel .td-meta .td-state { font-weight: 500; }
+.td-panel .td-section { margin-top: 20px; }
+.td-panel .td-section h3 { margin: 0 0 4px; font-size: 12.5px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.td-panel .td-plan-card { margin-top: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: none; box-shadow: none; font-size: 13.5px; }
+.td-panel .td-plan-card:hover { background: var(--hover); }
+.td-panel .td-links button { padding: 6px 0; border-radius: 0; align-items: center; }
+.td-panel .td-links li + li button { border-top: 1px solid var(--line); }
+.td-panel .td-links button:hover .td-link-text { text-decoration: underline; }
+.td-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.td-dot.doing { border-color: var(--accent-text); background: var(--accent-text); }
+.td-dot.done { border-color: var(--ok-text); background: var(--ok-text); }
+.td-dot.dropped { opacity: 0.5; }
+/* What's been reported reads as a list, not a box inside the panel. */
+.td-panel .td-activity .fu-log { margin: 0; padding: 0; border: 0; background: none; }
+.td-panel .answer-form { margin: 4px 0 0; }
+/* The comment box is one line that grows as you write, with its send button inside it. */
+.td-panel .td-compose { position: relative; display: block; padding: 12px 0 14px; }
+.td-panel .td-compose textarea { field-sizing: content; min-height: 38px; max-height: 25dvh; padding: 9px 40px 9px 12px; resize: none; border-radius: 10px; }
+.td-panel .td-send { position: absolute; right: 6px; bottom: 19px; display: grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: 7px; background: var(--accent); color: #fff; box-shadow: none; }
+.td-panel .td-send:disabled { background: none; color: var(--muted); opacity: 1; }
+.td-panel .td-compose .error { margin: 6px 0 0; }
+/* The full spec: a back link to its to-do, then the spec under its own title. Comments take a column only once there are some. */
+.td-plan-head { align-items: center; padding: 10px 16px; }
+.td-plan-back { height: auto; min-height: 0; padding: 4px 6px; border: 0; background: none; box-shadow: none; font-size: 13px; color: var(--muted); text-align: left; overflow-wrap: anywhere; }
+.td-plan-back:hover { color: var(--text); }
+.td-review.quiet { grid-template-columns: minmax(0, 1fr); }
+.td-review.quiet .td-review-comments { display: none; }
+.td-plan-actions { padding: 10px 16px; }
+.td-review.quiet .td-review-mobile-nav > button:not(.primary) { display: none; }
+/* An artifact's project is a pill, like a to-do's. */
+.af-line .af-move select, .af-line .af-line-link { height: 20px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); font-size: 12px; appearance: none; cursor: pointer; }
+.af-line .af-move select:hover, .af-line .af-line-link:hover { color: var(--text); }
+.row-menu > .af-btn { display: flex; width: 100%; height: auto; min-height: 0; padding: 7px 10px; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--text); font-size: 13px; text-align: left; }
+.row-menu > .af-btn:hover { background: var(--panel-2); }
+/* A deck's slides, each with how the review ended it. */
+.af-slides .af-link-note { color: var(--text); }
+/* A sketch in its panel is the picture: no second title row, and it takes the height the panel has. */
+.af-sketch-open .sk-bar { display: none; }
+.af-panel .af-sketch-open { height: min(56vh, 480px); }
+.af-panel .af-line a.af-line-link { border: 0; padding: 0; height: auto; }
+/* A sketch runs to the panel's sides and foot: the picture is the panel. */
+.af-bleed { --pad-x: 20px; }
+@media (min-width: 761px) { .af-bleed { --pad-x: 24px; } }
+.af-bleed .td-body { display: flex; flex-direction: column; margin: 0 calc(-1 * var(--pad-x)); padding: 0 var(--pad-x); }
+.af-bleed .td-body > * { flex: none; }
+.af-panel.af-bleed .af-sketch-open { flex: 1 0 320px; height: auto; margin: 14px calc(-1 * var(--pad-x)) 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.af-bleed .af-links { padding-bottom: 16px; }
+/* On a phone the panel is the whole screen, on the same ground as the wide-screen panel. */
+@media (max-width: 760px) { .td-panel { background: var(--bg); } }

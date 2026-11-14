@@ -281,18 +281,18 @@ export function artifactDetail(db: DB, roomId: string, id: string): ArtifactDeta
   const r = reading(db, roomId);
   const key = id.slice(id.indexOf(":") + 1);
   const links: ArtifactLink[] = [];
-  const todo = (noteId: string | null | undefined, note: string) => {
+  const todo = (noteId: string | null | undefined) => {
     const n = noteId ? db.notesByIds([noteId])[0] : undefined;
-    if (n && !r.gone.has(`todo:${n.id}`)) links.push({ text: clip(n.text, 160), note, taskId: n.id, href: `/ref/action/${n.id}` });
+    if (n && !r.gone.has(`todo:${n.id}`)) links.push({ text: clip(n.text, 160), taskId: n.id, href: `/ref/action/${n.id}` });
     return n ?? null;
   };
-  const meeting = (meetingId: string | null | undefined, note: string) => {
-    if (meetingId && !r.gone.has(`meeting:${meetingId}`)) links.push({ text: r.meetingName(meetingId), note, href: `/meetings/${meetingId}` });
+  const meeting = (meetingId: string | null | undefined) => {
+    if (meetingId && !r.gone.has(`meeting:${meetingId}`)) links.push({ text: r.meetingName(meetingId), href: `/meetings/${meetingId}` });
   };
 
   if (a.kind === "spec") {
     const versions = db.planVersions(key);
-    const note = todo(key, "the to-do it is on");
+    const note = todo(key);
     // The design reviews that went through it, with the version each saw.
     const reviewed = db.raw
       .prepare(
@@ -309,7 +309,7 @@ export function artifactDetail(db: DB, roomId: string, id: string): ArtifactDeta
     }
     // The sketch its draft was written from.
     for (const b of db.brainstorms(roomId, 100))
-      if (b.taskId === key || b.sketch?.subjects?.some((s) => s.taskId === key)) links.push({ text: clip(b.prompt, 160), note: "the sketch it came from", href: `/s/${roomId}/brainstorm/${b.id}` });
+      if (b.taskId === key || b.sketch?.subjects?.some((s) => s.taskId === key)) links.push({ text: clip(b.prompt, 160), href: `/s/${roomId}/brainstorm/${b.id}` });
     const pr = note ? prLink(db, note) : null;
     if (pr) links.push(pr);
     const images = todoShots(db, roomId, key);
@@ -319,27 +319,27 @@ export function artifactDetail(db: DB, roomId: string, id: string): ArtifactDeta
   if (a.kind === "doc") {
     const d = db.getDoc(key);
     if (!d) return null;
-    todo(d.noteId, "the to-do it was written for");
+    todo(d.noteId);
     return { ...a, body: d.text, links };
   }
 
   if (a.kind === "deck") {
     if (key.startsWith("u-")) return { ...a, links };
     const v = db.getReview(key);
-    meeting(v?.meetingId, "the call it ran in");
+    meeting(v?.meetingId);
     const outcome: Record<string, string> = { ship: "ship it", fixes: "needs fixes", not_yet: "not yet", pursue: "pursue", park: "park", drop: "drop" };
     for (const s of db.reviewSlides(key).slice(0, 12)) {
       const n = s.noteId ? db.notesByIds([s.noteId])[0] : undefined;
-      links.push({ text: (s.name || s.title).trim(), note: s.outcome ? (outcome[s.outcome] ?? s.outcome) : undefined, ...(n && !r.gone.has(`todo:${n.id}`) ? { taskId: n.id, href: `/ref/action/${n.id}` } : {}) });
+      links.push({ slide: true, text: (s.name || s.title).trim(), note: s.outcome ? (outcome[s.outcome] ?? s.outcome) : undefined, ...(n && !r.gone.has(`todo:${n.id}`) ? { taskId: n.id, href: `/ref/action/${n.id}` } : {}) });
     }
     return { ...a, links };
   }
 
   if (a.kind === "sketch") {
     const b = db.getBrainstorm(key);
-    meeting(b?.meetingId, "the call it was drawn in");
-    for (const taskId of new Set([b?.taskId, ...(b?.sketch?.subjects ?? []).map((s) => s.taskId)])) todo(taskId, "its draft spec");
-    for (const v of db.ideaReviewsOf(key)) if (v.status === "done") links.push({ text: v.title?.trim() || "Idea review", note: "went through its ideas", href: `/s/${roomId}/review/${v.id}` });
+    meeting(b?.meetingId);
+    for (const taskId of new Set([b?.taskId, ...(b?.sketch?.subjects ?? []).map((s) => s.taskId)])) todo(taskId);
+    for (const v of db.ideaReviewsOf(key)) if (v.status === "done") links.push({ text: v.title?.trim() || "Idea review", href: `/s/${roomId}/review/${v.id}` });
     return { ...a, links };
   }
 

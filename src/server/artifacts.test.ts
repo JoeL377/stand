@@ -49,7 +49,7 @@ test("a to-do's plan is a spec: named by its heading, with its versions, its pro
   const detail = artifactDetail(db, room.id, spec.id)!;
   assert.equal(detail.versions?.length, 2);
   assert.match(detail.body ?? "", /Drop the browser path/);
-  assert.deepEqual(detail.links.map((l) => [l.text, l.note]), [["Move transcript capture to the server", "the to-do it is on"], ["PR #12", "the work so far"]]);
+  assert.deepEqual(detail.links.map((l) => [l.text, l.note]), [["Move transcript capture to the server", undefined], ["PR #12", "the work so far"]]);
 });
 
 test("a meeting's recap is the meeting, not an artifact", () => {
